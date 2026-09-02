@@ -258,6 +258,8 @@ test.skipIf(!enabled)(title, async ({ evidence }) => {
       railWidth: railRect.width,
       panelWidth: panel.getBoundingClientRect().width,
       railSearchVisible: q('input[aria-label="Search coworkers"]') instanceof HTMLElement,
+      railLogoVisible: Boolean(rail.querySelector('svg.coworker-mark')),
+      railSearchIcon: q('[data-testid="coworker-rail-search"]')?.getAttribute("aria-label"),
       avatarCount: document.querySelectorAll('[data-testid="coworker-rail-avatar"]').length,
       avatarLabel: avatar?.getAttribute("aria-label"),
       avatarCurrent: avatar?.getAttribute("aria-current"),
@@ -286,9 +288,10 @@ test.skipIf(!enabled)(title, async ({ evidence }) => {
     };
     const draggedOpen = await dragRail(300);
     const draggedClosed = await dragRail(40);
-    q('[data-testid="coworker-rail-expand"]')?.click();
+    q('[data-testid="coworker-rail-search"]')?.click();
     await wait(400);
     const reopened = rail.getBoundingClientRect().width;
+    const searchFocused = document.activeElement === q('input[aria-label="Search coworkers"]');
     // Back to the Activity overview so the rest of the journey sees the default panel.
     q('[aria-label="Back to activity"]')?.click();
     await wait(200);
@@ -300,6 +303,7 @@ test.skipIf(!enabled)(title, async ({ evidence }) => {
       draggedOpen,
       draggedClosed,
       reopened,
+      searchFocused,
       finalView: panel.dataset.view,
       settingsButtonBack: Boolean(q('[data-testid="coworker-settings-button"]')),
     };
@@ -308,8 +312,10 @@ test.skipIf(!enabled)(title, async ({ evidence }) => {
   expect(foldedPanels.expandedRailWidth).toBeGreaterThanOrEqual(220);
   expect(foldedPanels.expandedPanelWidth).toBeGreaterThanOrEqual(320);
   expect(foldedPanels.collapsed).toMatchObject({
-    railWidth: 72,
+    railWidth: 88,
     panelWidth: 56,
+    railLogoVisible: false,
+    railSearchIcon: "Search coworkers",
     railSearchVisible: false,
     avatarCount: 1,
     avatarLabel: "Scout",
@@ -325,13 +331,14 @@ test.skipIf(!enabled)(title, async ({ evidence }) => {
   expect(foldedPanels.afterIcon).toMatchObject({ view: "memory", collapsed: "false" });
   expect(foldedPanels.afterIcon.panelWidth).toBeGreaterThanOrEqual(320);
   expect(foldedPanels.draggedOpen).toBeGreaterThanOrEqual(220);
-  expect(foldedPanels.draggedClosed).toBe(72);
+  expect(foldedPanels.draggedClosed).toBe(88);
   expect(foldedPanels.reopened).toBeGreaterThanOrEqual(220);
+  expect(foldedPanels.searchFocused).toBe(true);
   expect(foldedPanels.finalView).toBe("overview");
   expect(foldedPanels.settingsButtonBack).toBe(true);
   evidence.recordAssertionEvidence(
     "Both side panels fold to icon rails and unfold from them",
-    "Folding the team rail left a 72px rail with Scout's avatar marked current, a bottom status dot, and a hover card beside the rail naming Scout and Ready; folding the context panel left a 56px strip with Activity, Apps & tools, Memory, and Coworker settings icons and no words, and choosing Memory unfolded the panel on that view. Dragging the rail edge past the fold threshold closed it and the expand control reopened it.",
+    "Folding the team rail left an 88px rail clear of the window controls, without the logo, with a search icon, Scout's avatar marked current, a bottom status dot, and a hover card beside the rail naming Scout and Ready; folding the context panel left a 56px strip with Activity, Apps & tools, Memory, and Coworker settings icons and no words, and choosing Memory unfolded the panel on that view. Dragging the rail edge past the fold threshold closed it and the search icon reopened it with the cursor in the search box.",
     true,
   );
 
