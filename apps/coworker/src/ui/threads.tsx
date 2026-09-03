@@ -643,6 +643,7 @@ export function ThreadsPanel({
         onCreateAssignment={createAssignment}
         onAssignmentDraftHandled={() => setPendingAssignment(null)}
         discussionDraft={discussionDraft}
+        proposerName={team?.coworkers.find((member) => member.slug === coworker.suggestedBy?.slug)?.name ?? ""}
       />
     );
   }
@@ -695,6 +696,7 @@ function DiscussionWelcome({
   onAssignmentDraftHandled,
   discussionDraft,
   headerSlots,
+  proposerName = "",
 }: {
   coworker: CoworkerSummary;
   problem: WorkspaceProblem | null;
@@ -704,6 +706,8 @@ function DiscussionWelcome({
   assignmentDraft?: AssignmentDraft;
   discussionDraft?: AssignmentDraft;
   headerSlots: HeaderSlots;
+  /** The teammate who proposed this coworker, when one did: its empty conversation says so. */
+  proposerName?: string;
   onStartDiscussion: (text: string) => Promise<void>;
   onCreateAssignment: (outcome: string, messages: ReadonlyArray<DiscussionMessage>) => Promise<void>;
   onShowAssignments: () => void;
@@ -768,7 +772,7 @@ function DiscussionWelcome({
       />
       <div className="min-h-0 flex-1 overflow-y-auto px-6 py-8">
         {problem ? <WorkspaceProblemNote problem={problem} onRetry={onRetry} /> : null}
-        {!problem ? <QuietEmptyConversation coworker={coworker} warmingUp={warmingUp} /> : null}
+        {!problem ? <QuietEmptyConversation coworker={coworker} warmingUp={warmingUp} proposerName={proposerName} /> : null}
       </div>
       <DiscussionComposer
         message={message}
