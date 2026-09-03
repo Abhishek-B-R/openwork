@@ -411,6 +411,7 @@
         "evals/specs/open-coworker-mcp-apps.e2e.test.ts",
         "evals/specs/open-coworker-openwork-account.e2e.test.ts",
         "evals/specs/open-coworker-self-memory.e2e.test.ts",
+        "evals/specs/open-coworker-workers-view.e2e.test.ts",
         "evals/specs/open-coworker-workers.e2e.test.ts"
       ]
     },
