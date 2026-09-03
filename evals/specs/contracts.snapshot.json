@@ -387,6 +387,7 @@
         "evals/specs/open-coworker-openwork-account.e2e.test.ts",
         "evals/specs/open-coworker-self-memory.e2e.test.ts",
         "evals/specs/open-coworker-team.e2e.test.ts",
+        "evals/specs/open-coworker-turn-recovery.e2e.test.ts",
         "evals/specs/open-coworker-workers-view.e2e.test.ts",
         "evals/specs/open-coworker-workers.e2e.test.ts"
       ]
