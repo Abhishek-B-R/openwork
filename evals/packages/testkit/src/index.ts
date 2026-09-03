@@ -1,7 +1,12 @@
 export { createDesktopHandoffGrant, signInDesktopAs } from "@openwork/behaviors";
-export { coworker } from "@openwork/hosts";
+// The packaged Open Coworker journeys drive the app through these; specs import them from
+// the testkit only, so the lower layers stay behind one door.
+export { clickButton, evalIn, fill, waitFor, waitForText } from "@openwork/behaviors";
+export { coworker, resolveHost } from "@openwork/hosts";
 export type { CoworkerHandle, DesktopHandle } from "@openwork/hosts";
+export { connect, debuggerUrlFor, evaluate, listTargets } from "@openwork/cdp";
 export type { Surface } from "@openwork/cdp";
+export { screenshot, validate } from "@openwork/test-evidence";
 export { renderPrMarkdown } from "@openwork/test-artifacts";
 export type { TestRunRecord } from "@openwork/test-artifacts";
 export type { StepRecord, TestOutcome, TraceEntry } from "@openwork/test-evidence";
