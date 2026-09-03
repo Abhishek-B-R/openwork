@@ -1,6 +1,10 @@
 export { createDesktopHandoffGrant, signInDesktopAs } from "@openwork/behaviors";
 export { coworker } from "@openwork/hosts";
 export type { CoworkerHandle, DesktopHandle } from "@openwork/hosts";
+export type { Surface } from "@openwork/cdp";
+export { renderPrMarkdown } from "@openwork/test-artifacts";
+export type { TestRunRecord } from "@openwork/test-artifacts";
+export type { StepRecord, TestOutcome, TraceEntry } from "@openwork/test-evidence";
 export { test } from "./fixture.ts";
 export * from "@openwork/env";
 export * from "./brief.ts";
