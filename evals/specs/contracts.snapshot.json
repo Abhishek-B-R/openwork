@@ -394,7 +394,7 @@
     },
     {
       "id": "desktop.open-coworker",
-      "description": "Open Coworker onboarding, account-backed models, persistent discussions, documents beside the conversation, group chats, assignments, responsibilities, Workers, MCP Apps, artifacts, and full-window settings",
+      "description": "Open Coworker onboarding, account-backed models, persistent discussions, documents beside the conversation, group chats, assignments, responsibilities and schedules from the chat, the coworker's own memory and soul tools, Workers, MCP Apps, artifacts, and full-window settings",
       "implementation": [
         "apps/coworker/electron/**",
         "apps/coworker/scripts/**",
@@ -410,6 +410,7 @@
         "evals/specs/open-coworker-local-first.e2e.test.ts",
         "evals/specs/open-coworker-mcp-apps.e2e.test.ts",
         "evals/specs/open-coworker-openwork-account.e2e.test.ts",
+        "evals/specs/open-coworker-self-memory.e2e.test.ts",
         "evals/specs/open-coworker-workers.e2e.test.ts"
       ]
     },
