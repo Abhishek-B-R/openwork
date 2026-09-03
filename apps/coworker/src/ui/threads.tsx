@@ -1364,7 +1364,20 @@ function ThreadView({
         window.requestAnimationFrame(() => window.requestAnimationFrame(() => resolvePaint()));
       });
 
-      if (result.outcome === "settled") {
+      // A stop or a budget that ran out after the reply had already landed changes nothing: the turn replied.
+      const landed = result.outcome !== "settled" && replyStateFor(result.snapshot.messages.map((message) => ({
+        id: message.id,
+        role: message.role,
+        parentId: message.parentId,
+        text: "",
+        createdAt: message.createdAt,
+        completedAt: message.completedAt,
+        error: message.error,
+        reasoning: "",
+        model: null,
+        toolCalls: [],
+      })), messageId).state === "complete" && !isRunning(result.snapshot.status);
+      if (result.outcome === "settled" || landed) {
         if (send.mode === "retry" && send.switchedTo) setResolution({ messageId, note: `Retried with ${send.switchedTo}` });
         commitTurnState(clearPending);
       } else if (result.outcome === "failed") {
@@ -1382,8 +1395,9 @@ function ThreadView({
         if (stall && turnStateRef.current.pending?.stoppedAt === null) await settleFailure(stall.reason, false, false);
       }
     } catch (cause) {
-      const message = cause instanceof Error ? cause.message : String(cause);
-      await settleFailure(message, null, false);
+      // A stop by the person may surface as the wait's own abort: the record already says Stopped.
+      const stopped = turnStateRef.current.pending?.messageId === messageId && turnStateRef.current.pending.stoppedAt !== null;
+      if (!stopped) await settleFailure(cause instanceof Error ? cause.message : String(cause), null, false);
     } finally {
       if (refreshTimer !== undefined) window.clearInterval(refreshTimer);
       waitControllerRef.current = null;
@@ -1453,12 +1467,24 @@ function ThreadView({
     return () => { cancelled = true; };
   }, [coworker.model, needsModelFallback, threads]);
 
+  /** The moment the turn this view is driving lets go (its wait has ended and its record is settled). */
+  const untilTurnReleased = useCallback(() => new Promise<void>((resolve) => {
+    const startedAt = Date.now();
+    const check = () => {
+      if (!activeTurnRef.current || Date.now() - startedAt > 10_000) resolve();
+      else window.setTimeout(check, 100);
+    };
+    check();
+  }), []);
+
   /** Run the unresolved turn again under its own message id, on another model when one was chosen. */
-  const retryPending = useCallback((switched?: { model: HeadlessThreadModel; label: string }) => {
+  const retryPending = useCallback(async (switched?: { model: HeadlessThreadModel; label: string }) => {
+    // A Retry pressed the moment after Stop waits for the stopped turn to let go rather than being lost.
+    await untilTurnReleased();
     const turn = turnStateRef.current.pending;
     if (!turn) return;
     void submitTurn(turn.prompt, turn.messageId, { mode: "retry", attempt: 0, ...(switched ? { switchedTo: switched.label } : {}) }, switched?.model);
-  }, [submitTurn]);
+  }, [submitTurn, untilTurnReleased]);
 
   /** Switch this coworker to the recommended model and retry the failed message. */
   async function useRecommendedModel() {
@@ -1472,7 +1498,7 @@ function ThreadView({
       setError(cause instanceof Error ? cause.message : String(cause));
       return;
     }
-    retryPending({ model, label: pick.modelLabel });
+    void retryPending({ model, label: pick.modelLabel });
   }
 
   useEffect(() => {
@@ -1528,6 +1554,7 @@ function ThreadView({
     commitTurnState(() => state);
     if (activeTurnRef.current || appRetry || engineRunning) {
       await stop();
+      await untilTurnReleased();
       await threads.client.waitUntilIdle(threadId, { timeoutMs: 15_000, pollIntervalMs: 300 }).catch(() => undefined);
     }
     // The stopped turn keeps its line in the transcript; the record moves on to this message.
@@ -1554,7 +1581,7 @@ function ThreadView({
         return;
       }
       setProviderRefreshNote("");
-      retryPending();
+      void retryPending();
     } catch (cause) {
       setProviderRefreshNote(cause instanceof Error ? cause.message : String(cause));
     }
@@ -1587,7 +1614,7 @@ function ThreadView({
     switch (choice.id) {
       case "retry":
       case "continue":
-        retryPending();
+        void retryPending();
         return;
       case "use-model":
         void useRecommendedModel();
@@ -1640,7 +1667,9 @@ function ThreadView({
     now,
     turn: pendingTurn ? { ...pendingTurn, recovered } : null,
     engine: engineStatus,
-    reply: pendingTurn ? replyStateFor(messages, pendingTurn.messageId) : NO_REPLY,
+    // While this view is still driving the turn it has not concluded anything yet: a reply the
+    // transcript already shows as failed may be about to be retried, so only the engine speaks.
+    reply: pendingTurn && !activeTurn ? replyStateFor(messages, pendingTurn.messageId) : NO_REPLY,
     needsYou,
     failure,
     appRetry,
