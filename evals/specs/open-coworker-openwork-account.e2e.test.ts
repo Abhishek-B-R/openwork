@@ -985,10 +985,14 @@ test.skipIf(!enabled)(title, { timeout: 900_000 }, async ({ evidence }) => {
     true,
   );
 
-  // --- Reload: account, providers, and selection all persist; settings explain the source of every provider.
+  // --- Reload: unsent work, account, providers, and selection persist.
+  await fill(app, 'textarea[aria-label="Message Scout"]', "Keep this unfinished request for my return.");
   await evalIn(app, "location.reload(); true");
   await waitFor(app, `Boolean(document.querySelector('[data-testid="coworker-discussion-view"]')) && [...document.querySelectorAll("h1")].some((heading) => heading.textContent?.trim() === "Scout")`, { timeoutMs: 120_000, label: "Scout discussion view" });
   await waitForText(app, REPLY, { timeoutMs: 60_000 });
+  expect(await evalIn(app, `document.querySelector('textarea[aria-label="Message Scout"]')?.value`)).toBe("Keep this unfinished request for my return.");
+  expect(String(await evalIn(app, `[...document.querySelectorAll('[data-message-role="user"]')].map((element) => element.textContent).join("\\n")`))).not.toContain("Keep this unfinished request for my return.");
+  await fill(app, 'textarea[aria-label="Message Scout"]', "");
   await clickButtonContaining(app, ORG_NAME);
   await waitForText(app, "OpenWork settings", { timeoutMs: 30_000 });
   await clickButton(app, "Account");

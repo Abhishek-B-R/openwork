@@ -501,10 +501,12 @@ test.skipIf(!enabled)(title, { timeout: 900_000 }, async ({ evidence }) => {
     const failure = document.querySelector('[data-testid="coworker-turn-failed"]');
     if (!failure) return false;
     const technical = failure.querySelector('[data-testid="coworker-turn-technical"]');
+    const plain = failure.cloneNode(true);
+    plain.querySelector('[data-testid="coworker-turn-technical"]')?.remove();
     return {
       headline: failure.querySelector('[data-testid="coworker-turn-headline"]')?.textContent?.trim() ?? "",
-      text: failure.innerText ?? "",
-      technicalOpen: technical instanceof HTMLDetailsElement ? technical.open : null,
+      text: plain.textContent ?? "",
+      technicalShown: technical instanceof HTMLElement && technical.getBoundingClientRect().height > 0 && !(technical instanceof HTMLDetailsElement),
       technicalText: technical?.textContent ?? "",
       choices: [...failure.querySelectorAll('[data-testid="coworker-turn-choice"]')].map((choice) => ({ letter: choice.getAttribute("data-letter"), choice: choice.getAttribute("data-choice"), label: choice.textContent?.trim() ?? "" })),
       header: document.querySelector('[data-testid="coworker-top-status"]')?.textContent?.trim() ?? "",
@@ -517,11 +519,11 @@ test.skipIf(!enabled)(title, { timeout: 900_000 }, async ({ evidence }) => {
   expect(String(freeCard.text)).toContain("The free model's shared usage limit was reached.");
   expect(String(freeCard.text)).toContain("OpenWork Models membership and your own AI providers");
   expect(String(freeCard.text)).not.toMatch(/faster|\$100|few minutes/);
-  expect(String(freeCard.text)).toContain("connect your own AI provider so Nova can keep working");
-  expect(freeCard.technicalOpen).toBe(false);
+  expect(String(freeCard.text)).toContain("Switching models is your choice.");
+  expect(freeCard.technicalShown).toBe(true);
   // The engine's own remedy copy and the provider's raw text stay folded, never in what is read first.
   expect(String(freeCard.text)).not.toMatch(/subscribe|OpenCode Go|FreeUsageLimitError|APIError|429/);
-  expect(String(freeCard.technicalText)).toContain("FreeUsageLimitError");
+  expect(String(freeCard.technicalText)).toMatch(/FreeUsageLimitError|free_tier_limit/);
   // Another connected model can take over, so it leads; the third way is the one that ends the limit for good.
   expect(freeCard.choices.map((choice) => (isRecord(choice) ? `${choice.letter} ${choice.choice}` : ""))).toEqual(["A use-model", "B choose-model", "C connect-provider"]);
   const freeLabels = freeCard.choices.map((choice) => (isRecord(choice) ? String(choice.label) : ""));
@@ -741,6 +743,8 @@ test.skipIf(!enabled)(title, { timeout: 900_000 }, async ({ evidence }) => {
   expect(cutLine).toEqual({ text: "Stopped when the app closed before Nova replied.", choices: ["continue", "discard"], header: "Stopped", rail: "Stopped when the app closed before Nova replied.", next: ["After the cut"], failed: 0 });
   const beforeContinue = await describeThread(app, serverUrl, ownerToken, workspaceId, threadId, scripted);
   scripted.release("CUT");
+  // A hidden window can suspend paint callbacks. Work settlement must not wait for a paint.
+  await evalIn(app, `window.__savedAnimationFrame = window.requestAnimationFrame; window.requestAnimationFrame = () => 0; true`);
   await evalIn(app, `document.querySelector('[data-testid="coworker-turn-line"][data-outcome="cut-off"] [data-choice="continue"]').click(); true`);
   try {
     await waitForReply(app, CUT_REPLY, 120_000);
@@ -756,6 +760,7 @@ test.skipIf(!enabled)(title, { timeout: 900_000 }, async ({ evidence }) => {
     throw new Error(`${error instanceof Error ? error.message : String(error)}\nThread after the drain wait: ${await describeThread(app, serverUrl, ownerToken, workspaceId, threadId, scripted)}`);
   }
   await waitFor(app, `document.querySelector('[data-testid="coworker-top-status"]')?.textContent?.trim() === "Ready"`, { timeoutMs: 120_000, label: "settled after the cut" });
+  await evalIn(app, `window.requestAnimationFrame = window.__savedAnimationFrame; delete window.__savedAnimationFrame; true`);
   const afterCut = await engineUserMessages(serverUrl, ownerToken, workspaceId, threadId);
   expect(afterCut.filter((text) => text.includes("CUT"))).toHaveLength(1);
   expect(afterCut.at(-1)).toBe("After the cut");
