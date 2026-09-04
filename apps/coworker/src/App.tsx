@@ -781,8 +781,7 @@ export default function App() {
               }}
               onNewCoworker={() => setCreating(true)}
               onOpenOpenWork={() => openGlobalSettings()}
-              groups={liveGroups.filter((group) => group.id !== allHandsSettings?.groupId)}
-              allHands={allHandsSettings?.enabled ? { selected: selectedGroupId === allHandsGroup?.id, onOpen: () => { if (allHandsGroup) setSelectedGroupId(allHandsGroup.id); else openGlobalSettings("all-hands"); } } : undefined}
+              groups={liveGroups.filter((group) => allHandsSettings?.enabled || group.id !== allHandsSettings?.groupId)}
               groupLines={groupLines}
               selectedGroupId={selectedGroup?.id ?? ""}
               onSelectGroup={setSelectedGroupId}

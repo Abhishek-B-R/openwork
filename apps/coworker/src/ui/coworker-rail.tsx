@@ -88,9 +88,7 @@ export function CoworkerRail({
   selectedGroupId = "",
   onSelectGroup,
   onNewGroup,
-  allHands,
 }: {
-  allHands?: { selected: boolean; onOpen: () => void };
   coworkers: CoworkerSummary[];
   runtime: RuntimeInfo;
   session: DenSession | null;
@@ -159,7 +157,6 @@ export function CoworkerRail({
             </IconButton>
           </div>
           <nav aria-label="Coworkers" className="flex flex-1 flex-col items-center gap-1.5 overflow-y-auto px-3 pb-4 pt-3">
-            {allHands ? <button aria-label="All Hands" aria-current={allHands.selected ? "page" : undefined} title="All Hands" onClick={allHands.onOpen} className="flex size-10 items-center justify-center rounded-xl border border-spark/30 bg-spark/10 text-spark">✳</button> : null}
             {coworkers.map((coworker) => {
               const activity = activityBySlug[coworker.slug];
               const active = coworker.slug === selectedSlug;
@@ -273,7 +270,6 @@ export function CoworkerRail({
           </div>
           <p className="px-4 pb-1 pt-3 text-[10px] font-semibold uppercase tracking-[0.14em] text-mist">Coworkers</p>
           <nav aria-label="Coworkers" className="flex-1 space-y-1 overflow-y-auto px-2 pb-5">
-            {allHands ? <button aria-label="All Hands" aria-current={allHands.selected ? "page" : undefined} onClick={allHands.onOpen} className={`mb-3 flex w-full items-center gap-3 rounded-xl border border-spark/20 px-3 py-3 text-left ${allHands.selected ? "bg-spark/15 text-snow" : "bg-spark/5 text-mist hover:bg-spark/10"}`}><span className="text-xl text-spark">✳</span><span><span className="block text-sm font-semibold">All Hands</span><span className="text-xs text-mist">Your team, together</span></span></button> : null}
             {visibleCoworkers.map((coworker) => {
               const activity = activityBySlug[coworker.slug];
               const active = coworker.slug === selectedSlug;
@@ -330,6 +326,7 @@ export function CoworkerRail({
                   return (
                     <button
                       key={group.id}
+                      aria-label={group.name}
                       aria-current={active ? "true" : undefined}
                       data-testid="group-rail-row"
                       data-group-id={group.id}

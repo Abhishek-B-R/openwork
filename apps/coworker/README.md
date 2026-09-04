@@ -1167,7 +1167,7 @@ application resources.
 ## All Hands (optional)
 
 Enable **Settings → All Hands** to gather your coworkers in one persistent group
-conversation. Add at least two coworkers first. The space shows current team
+conversation, created automatically under **Group chats**. Add at least two coworkers first. The space shows current team
 activity with links to its source conversations. **Gather the team** requests a
 briefing; **Find our next move** asks for a recommendation. Normal chat,
 @mentions, follow-up questions, and assignments use the existing group-chat

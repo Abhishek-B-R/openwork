@@ -37,7 +37,7 @@ test.skipIf(!enabled)("All Hands is optional, chats with coworkers, remembers fo
   await evalIn(app, "location.reload(); true");
   await waitFor(app, `Boolean(document.querySelector('[data-testid="coworker-rail"]'))`, { timeoutMs: 240_000, label: "team ready" });
   expect(await setting(app, "enabled")).toBe(false);
-  expect(await evalIn(app, `document.querySelectorAll('[aria-label="All Hands"]').length`)).toBe(0);
+  expect(await evalIn(app, `document.querySelectorAll('[data-testid="group-rail-row"][aria-label="All Hands"]').length`)).toBe(0);
   expect(model.prompts).toHaveLength(0);
   await openSettings(app);
   await evalIn(app, `document.querySelector('[aria-label="Enable All Hands"]').click(); true`);
@@ -45,8 +45,8 @@ test.skipIf(!enabled)("All Hands is optional, chats with coworkers, remembers fo
   await fill(app, '[aria-label="All Hands focus"]', "Launch readiness");
   await clickButton(app, "Save focus");
   await evalIn(app, `document.querySelector('[aria-label="Close settings"]').click(); true`);
-  await waitFor(app, `Boolean(document.querySelector('[aria-label="All Hands"]'))`, { label: "All Hands navigation" });
-  await evalIn(app, `document.querySelector('[aria-label="All Hands"]').click(); true`);
+  await waitFor(app, `Boolean(document.querySelector('[data-testid="group-rail-row"][aria-label="All Hands"]'))`, { label: "All Hands navigation" });
+  await evalIn(app, `document.querySelector('[data-testid="group-rail-row"][aria-label="All Hands"]').click(); true`);
   await waitFor(app, `document.querySelector('[data-testid="all-hands-space"]')?.getAttribute("data-active") === "true"`, { label: "team space" });
   expect(await evalIn(app, `document.querySelector('[data-testid="all-hands-current-focus"]')?.textContent`)).toBe("Launch readiness");
   await fill(app, '[data-testid="group-composer"]', "@Scout What should we review first?");
@@ -61,10 +61,10 @@ test.skipIf(!enabled)("All Hands is optional, chats with coworkers, remembers fo
   await waitFor(app, `document.querySelectorAll('[data-message-role="user"]').length >= 2 && document.querySelector('[data-testid="group-chat"]')?.getAttribute("data-live") === "false"`, { timeoutMs: 240_000, label: "focus discussion settled" });
   const groupId = await setting(app, "groupId");
   await evalIn(app, "location.reload(); true");
-  await waitFor(app, `Boolean(document.querySelector('[aria-label="All Hands"]'))`, { timeoutMs: 120_000, label: "saved All Hands" });
+  await waitFor(app, `Boolean(document.querySelector('[data-testid="group-rail-row"][aria-label="All Hands"]'))`, { timeoutMs: 120_000, label: "saved All Hands" });
   expect(await setting(app, "groupId")).toBe(groupId);
   expect(await setting(app, "focus")).toBe("customer blockers");
-  await evalIn(app, `document.querySelector('[aria-label="All Hands"]').click(); true`);
+  await evalIn(app, `document.querySelector('[data-testid="group-rail-row"][aria-label="All Hands"]').click(); true`);
   await waitFor(app, `document.querySelector('[data-testid="group-chat"]')?.textContent?.includes("What should we review first?")`, { label: "conversation survives reload" });
   await screenshot(app);
   await clickButton(app, "Gather the team");
@@ -81,7 +81,7 @@ test.skipIf(!enabled)("All Hands is optional, chats with coworkers, remembers fo
   const occurrence = await setting(app, "lastOccurrence");
   expect(occurrence).not.toBe("");
   await evalIn(app, "location.reload(); true");
-  await waitFor(app, `Boolean(document.querySelector('[aria-label="All Hands"]'))`, { timeoutMs: 120_000, label: "reopened after scheduled briefing" });
+  await waitFor(app, `Boolean(document.querySelector('[data-testid="group-rail-row"][aria-label="All Hands"]'))`, { timeoutMs: 120_000, label: "reopened after scheduled briefing" });
   expect(await invoke(app, "allHands.claim")).toBe(null);
   expect(await setting(app, "lastOccurrence")).toBe(occurrence);
   await invoke(app, "allHands.update", { frequency: "manual" });
@@ -89,7 +89,7 @@ test.skipIf(!enabled)("All Hands is optional, chats with coworkers, remembers fo
   evidence.recordAssertionEvidence("Manual and automatic briefings share one conversation", "Gather the team produced a saved turn. A real future local-time slot completed while the person was in another conversation without stealing navigation, and reopening did not claim that slot again. Manual mode returned no scheduled work.", true);
   await openSettings(app);
   await evalIn(app, `document.querySelector('[aria-label="Enable All Hands"]').click(); true`);
-  await waitFor(app, `!document.querySelector('[aria-label="All Hands"]')`, { label: "disabled space hidden" });
+  await waitFor(app, `!document.querySelector('[data-testid="group-rail-row"][aria-label="All Hands"]')`, { label: "disabled space hidden" });
   expect(await setting(app, "enabled")).toBe(false);
   expect(await setting(app, "groupId")).toBe(groupId);
   expect(await invoke(app, "allHands.claim")).toBe(null);
