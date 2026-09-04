@@ -1,3 +1,4 @@
+import { readAllHands, updateAllHands, prepareAllHands, claimAllHands } from "./all-hands.mjs";
 /**
  * Open Coworker desktop shell.
  *
@@ -2087,6 +2088,10 @@ const commands = {
   "workers.pause": async ({ slug, id }) => pauseWorker(slug, id),
   "workers.resume": async ({ slug, id }) => resumeWorker(slug, id),
   "workers.findings": async ({ slug, id, limit }) => readWorkerEvents(coworkersDir, slug, id, Number.isFinite(limit) ? { limit } : {}),
+  "allHands.get": async () => readAllHands(coworkersDir),
+  "allHands.update": async (patch) => updateAllHands(coworkersDir, patch),
+  "allHands.prepare": async () => prepareAllHands(coworkersDir, await listCoworkers(coworkersDir)),
+  "allHands.claim": async () => claimAllHands(coworkersDir),
   "settings.get": async () => readSettings(settingsPath),
   "settings.update": async (patch) => {
     const next = await updateSettings(settingsPath, patch);

@@ -1,3 +1,5 @@
+import { AllHandsOverview, allHandsContext } from "@/ui/all-hands";
+import type { AllHandsSettings } from "@/lib/bridge";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { coworkerBridge, type CoworkerGroupSummary, type CoworkerGroupTurn, type CoworkerSummary, type ProviderSyncRun, type RuntimeInfo } from "@/lib/bridge";
 import { subscribeGroupRuns } from "@/lib/group-runs";
@@ -63,6 +65,22 @@ export default function App() {
   /** Group chats: several coworkers in one conversation. Selecting one takes the main column. */
   const [groups, setGroups] = useState<CoworkerGroupSummary[]>([]);
   const [selectedGroupId, setSelectedGroupId] = useState("");
+  const [allHandsSettings, setAllHandsSettings] = useState<AllHandsSettings | null>(null);
+  const [briefingRequest, setBriefingRequest] = useState<{ id: string; text: string } | null>(null);
+  const [allHandsError, setAllHandsError] = useState("");
+  useEffect(() => { void coworkerBridge.allHands.get().then(setAllHandsSettings).catch((cause) => setAllHandsError(String(cause))); }, []);
+  useEffect(() => {
+    if (!allHandsSettings?.enabled) return;
+    let cancelled = false;
+    void coworkerBridge.allHands.prepare().then(async (group) => {
+      if (cancelled) return;
+      if (group) replaceGroup(group);
+      const settings = await coworkerBridge.allHands.get();
+      if (!cancelled) setAllHandsSettings(settings);
+    }).catch((cause) => { if (!cancelled) setAllHandsError(String(cause)); });
+    return () => { cancelled = true; };
+  }, [allHandsSettings?.enabled, coworkers.length]);
+
   const [creatingGroup, setCreatingGroup] = useState(false);
   const [groupLines, setGroupLines] = useState<Record<string, string>>({});
   const setGroupLine = useCallback((id: string, line: string) => {
@@ -668,6 +686,7 @@ export default function App() {
 
   const selected = coworkers.find((coworker) => coworker.slug === selectedSlug) ?? null;
   const liveGroups = groups.filter((group) => !group.archivedAt);
+  const allHandsGroup = allHandsSettings?.enabled ? liveGroups.find((group) => group.id === allHandsSettings.groupId) : undefined;
   const selectedGroup = liveGroups.find((group) => group.id === selectedGroupId) ?? null;
   const visibleActivityBySlug: Record<string, CoworkerActivity> = {};
   for (const coworker of coworkers) {
@@ -762,7 +781,8 @@ export default function App() {
               }}
               onNewCoworker={() => setCreating(true)}
               onOpenOpenWork={() => openGlobalSettings()}
-              groups={liveGroups}
+              groups={liveGroups.filter((group) => group.id !== allHandsSettings?.groupId)}
+              allHands={allHandsSettings?.enabled ? { selected: selectedGroupId === allHandsGroup?.id, onOpen: () => { if (allHandsGroup) setSelectedGroupId(allHandsGroup.id); else openGlobalSettings("all-hands"); } } : undefined}
               groupLines={groupLines}
               selectedGroupId={selectedGroup?.id ?? ""}
               onSelectGroup={setSelectedGroupId}
@@ -782,6 +802,7 @@ export default function App() {
             {selectedGroup && groupDetailsOpen ? (
               <GroupDetailsSheet
                 group={selectedGroup}
+                managed={selectedGroup.id === allHandsSettings?.groupId}
                 coworkers={coworkers}
                 runtime={runtime}
                 onClose={() => setGroupDetailsOpen(false)}
@@ -793,7 +814,28 @@ export default function App() {
                 }}
               />
             ) : null}
-            {selectedGroup ? (
+            {allHandsGroup && allHandsSettings ? (
+              <div className={selectedGroupId === allHandsGroup.id ? "flex min-w-0 flex-1" : "hidden"} data-testid="all-hands-space" data-active={selectedGroupId === allHandsGroup.id}>
+                <GroupChat
+                  key={allHandsGroup.id}
+                  group={allHandsGroup}
+                  coworkers={coworkers}
+                  runtime={runtime}
+                  active={selectedGroupId === allHandsGroup.id && !globalSettings}
+                  briefing={{ enabled: allHandsSettings.enabled, context: allHandsContext(allHandsSettings, coworkers, visibleActivityBySlug), request: briefingRequest }}
+                  onRememberFocus={async (focus) => { setAllHandsSettings(await coworkerBridge.allHands.update({ focus })); }}
+                  introduction={<AllHandsOverview settings={allHandsSettings} coworkers={coworkers.filter((coworker) => allHandsGroup.participantSlugs.includes(coworker.slug))} activity={visibleActivityBySlug} onSettings={() => openGlobalSettings("all-hands")} onRequest={(text) => setBriefingRequest({ id: `all-hands-manual:${Date.now()}`, text })} onOpenCoworker={(slug, threadId) => { setSelectedGroupId(""); setSelectedSlug(slug); if (threadId) setHomeRequest({ id: Date.now(), slug, kind: "thread", threadId }); }} />}
+                  onGroupChanged={replaceGroup}
+                  onGroupArchived={replaceGroup}
+                  onActivityLine={setGroupLine}
+                  onChooseModel={(slug) => { setSelectedGroupId(""); setSelectedSlug(slug); setHomeRequest({ id: Date.now(), slug, kind: "settings", section: "model" }); }}
+                  onOpenAssignment={(slug, threadId) => { setSelectedGroupId(""); setSelectedSlug(slug); setHomeRequest({ id: Date.now(), slug, kind: "thread", threadId }); }}
+                  onOpenDetails={() => setGroupDetailsOpen(true)}
+                />
+              </div>
+            ) : null}
+            {allHandsError ? <div role="alert" className="p-4 text-sm text-rose">All Hands: {allHandsError}</div> : null}
+            {selectedGroup && selectedGroup.id !== allHandsGroup?.id ? (
               <GroupChat
                 key={selectedGroup.id}
                 group={selectedGroup}
@@ -818,7 +860,7 @@ export default function App() {
                 onOpenDetails={() => setGroupDetailsOpen(true)}
               />
             ) : (
-            <CoworkerHome
+            selectedGroupId === allHandsGroup?.id ? null : <CoworkerHome
               key={selected.slug}
               runtime={runtime}
               session={session}
@@ -852,6 +894,7 @@ export default function App() {
           data-active={globalSettings ? "true" : "false"}
         >
           <OpenWorkSettings
+            onAllHandsChanged={(settings) => { setAllHandsSettings(settings); if (!settings.enabled && selectedGroupId === settings.groupId) setSelectedGroupId(""); }}
             active={Boolean(globalSettings)}
             runtime={runtime}
             session={session}

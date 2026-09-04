@@ -1163,3 +1163,26 @@ target-specific OpenCode sidecar, or `opencode` on PATH, in that order. The
 Electron build mirrors the embedded server's runtime dependencies, prepares
 the same versioned sidecar used by OpenWork Desktop, and includes both as
 application resources.
+
+## All Hands (optional)
+
+Enable **Settings → All Hands** to gather your coworkers in one persistent group
+conversation. Add at least two coworkers first. The space shows current team
+activity with links to its source conversations. **Gather the team** requests a
+briefing; **Find our next move** asks for a recommendation. Normal chat,
+@mentions, follow-up questions, and assignments use the existing group-chat
+engine and each coworker's chosen model.
+
+Set a focus in Settings, or write **Focus on …** in the conversation to remember
+it. Group details lets you choose the participating coworkers and facilitator
+model. Briefings ask for evidence, timestamps, missing information, and proposed
+next steps; a scheduled briefing does not authorize executing those proposals.
+
+All Hands is off by default. Once enabled, its default rhythm is 09:00 in this
+computer's timezone. Choose morning and afternoon, or only when asked. Automatic
+briefings require the app to be open; returning later runs today's latest eligible
+slot once, without replaying previous days. A slot is reserved before requesting
+inference to avoid repeating a billed request after a crash. Interrupted or failed
+replies use the conversation's existing recovery controls. Normal model usage
+applies. Disabling the feature stops future automatic briefings and hides its
+navigation, retaining history, focus, and unsent drafts for re-enabling.
