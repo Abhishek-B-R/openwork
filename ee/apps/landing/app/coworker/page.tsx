@@ -1,13 +1,14 @@
 import type { Metadata } from "next";
 import "./coworker.css";
 import { CoworkerAvatar, CoworkerMark } from "../../components/coworker-brand";
-import { CoworkerVignette, TEAM } from "../../components/coworker-vignette";
+import { CoworkerVignette } from "../../components/coworker-vignette";
+import { TEAM } from "../../lib/coworker-demo";
 import { CoworkerAction, CoworkerAnnouncementView } from "../../components/coworker-announcement-actions";
 import { StructuredData } from "../../components/structured-data";
 import { BENEFITS, COWORKER, FAQ, GET_STARTED, HERO, MODELS, NOTIFY, POWERED_BY, STEPS } from "../../lib/coworker-content";
 
 const SITE_URL = "https://openworklabs.com";
-const NAV = [{ href: "#how", label: "How it works" }, { href: "#models", label: "Models" }];
+const NAV = [{ href: "#how", label: "Demo" }, { href: "#models", label: "Models" }];
 const SHARED_LINKS = [{ href: "/docs", label: "Docs" }, { href: "/pricing", label: "Team pricing" }, { href: "/enterprise", label: "Enterprise" }, { href: "/", label: "OpenWork" }];
 
 export const metadata: Metadata = {
@@ -77,12 +78,13 @@ export default function CoworkerPage() {
             </div>
           </section>
 
-          <section id="how" className="scroll-mt-24 px-5 pb-16 pt-10 md:px-8 md:pb-20">
-            <div className="mx-auto max-w-[860px]">
+          <section id="how" className="scroll-mt-6 px-5 pb-16 pt-10 md:px-8 md:pb-20">
+            <div className="mx-auto max-w-[1040px]">
               <h2 className="mb-5 text-center text-sm font-normal text-[var(--cw-muted)]">Pick up the conversation.</h2>
-              <figure aria-label="An illustrative Open Coworker conversation">
+              <figure aria-label="Interactive Open Coworker walkthrough">
                 <CoworkerVignette />
-                <figcaption className="mt-4 text-center text-[11px] text-[var(--cw-muted)]">Illustrative conversation.</figcaption>
+                <figcaption id="coworker-demo-disclosure" className="mt-4 text-center text-[11px] text-[var(--cw-muted)]">Sample data and scripted replies. No sign-in needed.</figcaption>
+                <noscript><p className="mt-3 text-center text-sm text-[var(--cw-muted)]">Enable JavaScript to explore the interactive demo.</p></noscript>
               </figure>
               <ol className="mt-12 grid gap-8 md:grid-cols-3">
                 {STEPS.map((step, index) => <li key={step.title} className="border-t border-[var(--cw-border)] pt-5">

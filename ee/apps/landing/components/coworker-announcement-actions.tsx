@@ -15,7 +15,7 @@ export function CoworkerAnnouncementView() {
 /** Native links keep working without analytics, hydration, or an account. */
 export function CoworkerAction({ action, placement, ...props }: AnchorHTMLAttributes<HTMLAnchorElement> & {
   action: Action;
-  placement: "homepage" | "nav" | "hero" | "models" | "footer";
+  placement: "homepage" | "nav" | "hero" | "models" | "footer" | "demo";
 }) {
   return <a {...props} data-coworker-action={action} data-placement={placement} onClick={() => {
     // Deliberately bounded properties: no email, prompt, query string, or destination URL.

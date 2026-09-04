@@ -54,7 +54,7 @@ describe("/coworker announcement", () => {
     expect(html).toContain("while Open Coworker is open");
     expect(html).toContain("cannot read your coworker&#x27;s local files or memory today");
     expect(html).toContain("optional paid membership");
-    expect(html).toContain("Illustrative conversation.");
+    expect(html).toContain("Sample data and scripted replies.");
     expect(html).toContain("How’s the launch brief coming along?");
     expect(html).toContain("Launch brief");
     expect(html).not.toContain("1 Worker running");

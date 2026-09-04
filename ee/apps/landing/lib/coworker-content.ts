@@ -19,7 +19,7 @@ export const HERO = {
   title: "Your work. Better together.",
   lead: "Meet your AI coworkers. A little help with the research, the first draft, and whatever comes next.",
   primary: { label: "Get early access", href: "#get-started" },
-  secondary: { label: "See how it works", href: "#how" },
+  secondary: { label: "Try the demo", href: "#how" },
   strip: ["Free and open source", "Your choice of models", "Powered by OpenWork"],
 } as const;
 
