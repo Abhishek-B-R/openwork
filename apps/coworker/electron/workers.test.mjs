@@ -37,6 +37,7 @@ import {
   workerThreadTitle,
   workerToolCatalog,
   workerTurnPrompt,
+  workerTurnOutcome,
 } from "./workers.mjs";
 
 const roots = [];
@@ -179,6 +180,16 @@ test("a worker's reply is read back as a finding, a decision, or done — and ne
   // A reply that skipped the contract still counts as a finding.
   assert.deepEqual(parseWorkerReport("Just some prose without a heading."), { kind: "finding", text: "Just some prose without a heading." });
   assert.deepEqual(parseWorkerReport("Needs a decision"), { kind: "decision", text: "Needs a decision." });
+});
+
+test("an interrupted step cannot reuse an older finding or continue from an incomplete reply", () => {
+  const result = { outcome: "settled", terminalError: null };
+  const old = { role: "assistant", parentId: "msg_old", completedAt: 1, text: "## Done\nEarlier goal met." };
+  const partial = { role: "assistant", parentId: "msg_current", completedAt: null, text: "Still looking" };
+  assert.equal(workerTurnOutcome(result, { messages: [old, partial] }, "msg_current").kind, "failed");
+  assert.equal(workerTurnOutcome(result, { messages: [old] }, "msg_current").kind, "failed");
+  const complete = { ...partial, completedAt: 2, text: "## Finding\nCompared two sources." };
+  assert.deepEqual(workerTurnOutcome(result, { messages: [old, partial, complete] }, "msg_current"), { kind: "settled", report: { kind: "finding", text: "Compared two sources." } });
 });
 
 test("the worker prompt frame names the goal, the lifespan, and the reporting contract", () => {

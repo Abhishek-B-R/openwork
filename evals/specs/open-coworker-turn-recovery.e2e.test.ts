@@ -795,6 +795,38 @@ test.skipIf(!enabled)(title, { timeout: 900_000 }, async ({ evidence }) => {
     true,
   );
 
+});
+
+test.skipIf(!enabled)("Open Coworker background work survives cancellation and restart", { timeout: 360_000 }, async ({ evidence }) => {
+  needs({ optIn: ["OPENWORK_EVAL_E2E_TESTS"], commands: ["opencode"] });
+  const scripted = await startScriptedModel();
+  const profileDir = await mkdtemp(path.join(os.tmpdir(), "open-coworker-background-recovery-profile-"));
+  onTestFinished(() => rm(profileDir, { recursive: true, force: true }));
+  await using app = await coworker({ name: "background-recovery", profileDir });
+  const created = resultRecord(await invokeCoworker(app, "coworkers.create", {
+    name: "Nova", role: "Research partner", mission: "Keep research work moving.", avatarColor: "mint", avatarGlasses: "round",
+  }));
+  const workspaceId = String(created.workspaceId);
+  const runtime = resultRecord(await invokeCoworker(app, "runtime.info", {}));
+  const providerPatch = await fetch(`${runtime.serverUrl}/workspace/${encodeURIComponent(workspaceId)}/config`, {
+    method: "PATCH", headers: { "Content-Type": "application/json", Authorization: `Bearer ${runtime.ownerToken}` },
+    body: JSON.stringify({ opencode: { provider: { [SCRIPTED_PROVIDER]: {
+      npm: "@ai-sdk/openai-compatible", name: "Scripted models",
+      options: { baseURL: scripted.baseUrl, apiKey: "eval-scripted-key" },
+      models: { [FIRST_MODEL]: { name: "Scripted one", tool_call: true } },
+    } } } }),
+  });
+  expect(providerPatch.status).toBe(200);
+  const reload = await fetch(`${runtime.serverUrl}/workspace/${encodeURIComponent(workspaceId)}/engine/reload`, {
+    method: "POST", headers: { Authorization: `Bearer ${runtime.ownerToken}` },
+  });
+  expect(reload.status).toBe(200);
+  await invokeCoworker(app, "coworkers.update", { slug: "nova", patch: { model: `${SCRIPTED_PROVIDER}/${FIRST_MODEL}`, modelVariant: "" } });
+  await evalIn(app, "location.reload(); true");
+  await waitForNovaReady(app);
+  await type(app, "Ready for background work.");
+  await waitForReply(app, DEFAULT_REPLY);
+  await waitForSettled(app);
   // Background work uses the same interruption contract, including a real
   // process restart. The controlled model witnesses tool permissions and
   // prompt delivery without contacting an external inference provider.
@@ -833,10 +865,16 @@ test.skipIf(!enabled)(title, { timeout: 900_000 }, async ({ evidence }) => {
     const messages = await response.json();
     return messages.some(m => m.info.role === "assistant");
   })`, { awaitPromise: true, timeoutMs: 90_000, label: "interrupted turn reached the model" });
+  await expect.poll(() => scripted.requests.filter((request) => request.prompt.startsWith("You are a Worker") && request.prompt.includes("BACKGROUND_INTERRUPTED")).length, { timeout: 30_000 }).toBe(1);
   await app.stop();
   await using restarted = await coworker({ name: "background-recovery", profileDir });
   expect(resultRecord(await invokeCoworker(restarted, "workers.get", { slug: "nova", id: workerId }))).toMatchObject({ status: "paused", steerCount: 1 });
-  await waitFor(restarted, `window.__COWORKER__.invoke("workers.get", { slug: "nova", id: ${json(interrupted.id)} }).then(r => ["failed", "finished"].includes(r.result?.status))`, { awaitPromise: true, timeoutMs: 120_000, label: "interrupted work reconciled without another run" });
+  try {
+    await waitFor(restarted, `window.__COWORKER__.invoke("workers.get", { slug: "nova", id: ${json(interrupted.id)} }).then(r => ["failed", "finished"].includes(r.result?.status))`, { awaitPromise: true, timeoutMs: 120_000, label: "interrupted work reconciled without another run" });
+  } catch (error) {
+    const state = resultRecord(await invokeCoworker(restarted, "workers.get", { slug: "nova", id: interrupted.id }));
+    throw new Error(`${String(error)} Worker: ${JSON.stringify(state)}. Native requests: ${scripted.countFor("BACKGROUND_INTERRUPTED")}`);
+  }
   expect(scripted.requests.filter((request) => request.prompt.startsWith("You are a Worker") && request.prompt.includes("BACKGROUND_INTERRUPTED"))).toHaveLength(1);
   await type(restarted, "Resume the background check.");
   await waitForReply(restarted, "The background check is resumed.");

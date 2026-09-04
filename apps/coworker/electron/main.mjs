@@ -108,7 +108,6 @@ import {
   lifespanSpent,
   listWorkers,
   nextWorkerState,
-  parseWorkerReport,
   prepareWorkerTurn,
   queueWorkerSteer,
   readWorkerEvents,
@@ -119,6 +118,7 @@ import {
   workerThreadTitle,
   workerToolCatalog,
   workerTurnTools,
+  workerTurnOutcome,
 } from "./workers.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -656,12 +656,13 @@ async function executeLocalResponsibility(
         ...(acceptance ? { since: acceptance } : {}),
       });
       if (result.outcome === "timeout") await client.abortThread(threadId);
-      const succeeded = result.outcome === "settled" && !result.terminalError;
+      const reply = toTranscript(result.snapshot).messages.filter((message) => message.role === "assistant").at(-1);
+      const succeeded = result.outcome === "settled" && !result.terminalError && typeof reply?.completedAt === "number";
       await finishLocalResponsibilityRun(coworkersDir, slug, id, activeRunId, {
         status: succeeded ? "succeeded" : "failed",
         error: succeeded
           ? ""
-          : result.terminalError?.message || (result.outcome === "timeout" ? "Run timed out after one hour" : `Run ${result.outcome}`),
+          : result.terminalError?.message || (result.outcome === "timeout" ? "Run timed out after one hour" : "The run stopped before its reply finished. Review its work before resuming."),
         summary: await readRunSummary(client, threadId),
       });
     } catch (error) {
@@ -931,16 +932,9 @@ async function executeWorkerTurn(slug, id, { onStarted }) {
       // Stopped while it ran: the stop already recorded itself.
       if (controller.signal.aborted) return;
       if (result.outcome === "timeout") await client.abortThread(threadId);
-      const settled = result.outcome === "settled" && !result.terminalError;
-      const outcome = settled
-        ? { kind: "settled", report: parseWorkerReport(toTranscript(result.snapshot).finalAssistantText) }
-        : result.outcome === "timeout" && lifespanSpent(worker.lifespan)
+      const outcome = result.outcome === "timeout" && lifespanSpent(worker.lifespan)
           ? { kind: "settled", report: { kind: "none", text: "" } }
-        : {
-            kind: "failed",
-            error: result.terminalError?.message
-              || (result.outcome === "timeout" ? "The turn timed out after one hour" : `The turn ${result.outcome}`),
-          };
+          : workerTurnOutcome(result, toTranscript(result.snapshot), worker.pendingTurn.messageId);
       continueAfter = await settleWorkerTurn(slug, id, outcome);
     } catch (error) {
       if (!controller.signal.aborted) {

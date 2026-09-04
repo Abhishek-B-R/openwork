@@ -558,6 +558,19 @@ export function parseWorkerReport(text) {
   return { kind: last.kind, text: textOf(last) || (last.kind === "decision" ? "Needs a decision." : source.slice(0, MAX_FINDING_TEXT)) };
 }
 
+/** Only a completed reply to this admitted turn is a finding. An idle
+ * engine can still hold the partial message left by a crash or interruption. */
+export function workerTurnOutcome(result, transcript, messageId) {
+  if (result.outcome !== "settled" || result.terminalError) {
+    return { kind: "failed", error: result.terminalError?.message || (result.outcome === "timeout" ? "The turn timed out after one hour" : `The turn ${result.outcome}`) };
+  }
+  const reply = transcript.messages.filter((message) => message.role === "assistant" && message.parentId === messageId).at(-1);
+  if (!reply || reply.completedAt === null) {
+    return { kind: "failed", error: "The step was interrupted before it finished. Review its work before starting again." };
+  }
+  return { kind: "settled", report: parseWorkerReport(reply.text) };
+}
+
 /**
  * What one settled (or failed) turn means for the Worker: the record patch,
  * the events to append, and whether to continue, hold, or stop. The record is
