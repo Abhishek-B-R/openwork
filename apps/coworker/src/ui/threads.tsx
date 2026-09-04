@@ -88,6 +88,7 @@ import {
   type TurnReplyState,
 } from "@/lib/turn-outcome";
 import { describeTurnFailure, failureText } from "@/lib/turn-failure";
+import { useComposerDraft } from "@/ui/use-composer-draft";
 import { classifyFailure, retryDelayMs } from "@/lib/turn-retry";
 import { applyStreamEvent, type LiveStream } from "@/lib/live-stream";
 import { useAutoGrow } from "@/ui/use-auto-grow";
@@ -718,8 +719,8 @@ function DiscussionWelcome({
   summary?: CoworkerSummaryLine | null;
   onOpenSummary?: (kind: SummaryKind) => void;
 }) {
-  const [message, setMessage] = useState("");
-  const [assignmentText, setAssignmentText] = useState("");
+  const [message, setMessage] = useComposerDraft(`${coworker.slug}:${coworker.createdAt}:new`);
+  const [assignmentText, setAssignmentText] = useComposerDraft(`${coworker.slug}:${coworker.createdAt}:new-assignment`);
   const [assignmentMode, setAssignmentMode] = useState(false);
   const [busy, setBusy] = useState(false);
   const [composerError, setComposerError] = useState("");
@@ -1005,9 +1006,9 @@ function ThreadView({
   /** What the engine reports for this thread: idle, busy, or retrying (with its next attempt). */
   const [engineStatus, setEngineStatus] = useState<TurnEngineStatus>({ type: "unknown" });
   const [pending, setPending] = useState<PendingInteractions>({ permissions: [], questions: [] });
-  const [reply, setReply] = useState("");
+  const [reply, setReply] = useComposerDraft(`${coworker.slug}:${coworker.createdAt}:${threadId}`);
   const [assignmentMode, setAssignmentMode] = useState(false);
-  const [assignmentText, setAssignmentText] = useState("");
+  const [assignmentText, setAssignmentText] = useComposerDraft(`${coworker.slug}:${coworker.createdAt}:${threadId}:assignment`);
   const [error, setError] = useState("");
   const [assignmentBusy, setAssignmentBusy] = useState(false);
   /** The turn in flight or left unresolved, and the messages waiting as Next — the record turns.json keeps. */
@@ -1083,7 +1084,7 @@ function ThreadView({
       // now, and tell the person why in the provider's words with a way to choose another model.
       const status = transcript.status;
       const retryStatus = status.type === "retry" ? status : null;
-      const stall = retryStatus ? stalledRetry({ next: retryStatus.next, message: retryStatus.message }) : null;
+      const stall = retryStatus ? stalledRetry(retryStatus) : null;
       if (stall && retryStatus && stallRef.current?.next !== retryStatus.next) {
         stallRef.current = { next: retryStatus.next, reason: stall };
         void threads.client.abortThread(threadId).catch(() => undefined);
@@ -1427,7 +1428,13 @@ function ThreadView({
       // this paint boundary, the header can briefly return to Ready before the
       // completed assistant message becomes visible.
       await new Promise<void>((resolvePaint) => {
-        window.requestAnimationFrame(() => window.requestAnimationFrame(() => resolvePaint()));
+        // Hidden or minimized windows may suspend animation frames. Settling a
+        // turn and draining Next must still complete while the app is behind.
+        const timer = window.setTimeout(resolvePaint, 150);
+        window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
+          window.clearTimeout(timer);
+          resolvePaint();
+        }));
       });
 
       // A stop or a budget that ran out after the reply had already landed changes nothing: the turn replied.
