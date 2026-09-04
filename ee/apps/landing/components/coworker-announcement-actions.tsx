@@ -3,7 +3,7 @@
 import { useEffect, type AnchorHTMLAttributes } from "react";
 import { capturePosthogEvent } from "../lib/posthog-client";
 
-type Action = "early_access" | "how_it_works" | "models" | "member_sign_in" | "email_early_access" | "source" | "releases";
+type Action = "announcement" | "early_access" | "how_it_works" | "models" | "member_sign_in" | "email_early_access" | "source" | "releases";
 
 export function CoworkerAnnouncementView() {
   useEffect(() => {
@@ -15,7 +15,7 @@ export function CoworkerAnnouncementView() {
 /** Native links keep working without analytics, hydration, or an account. */
 export function CoworkerAction({ action, placement, ...props }: AnchorHTMLAttributes<HTMLAnchorElement> & {
   action: Action;
-  placement: "nav" | "hero" | "models" | "footer";
+  placement: "homepage" | "nav" | "hero" | "models" | "footer";
 }) {
   return <a {...props} data-coworker-action={action} data-placement={placement} onClick={() => {
     // Deliberately bounded properties: no email, prompt, query string, or destination URL.

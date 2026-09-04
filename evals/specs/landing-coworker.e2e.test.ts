@@ -36,7 +36,7 @@ for (const width of [1280, 375]) {
       expect(await probe.hash()).toBe("#how");
       await user.see({ text: "Give it something real." });
       await user.click({ text: "Does it work while my computer is off?" });
-      await user.see({ text: /Those Cloud runs cannot read your coworker's local files or memory today\./ });
+      await probe.eventually(() => probe.has("Those Cloud runs cannot read your coworker's local files or memory today."), { within: 5_000, label: "the expanded execution answer" });
       expect(await probe.text()).toContain("Those Cloud runs cannot read your coworker's local files or memory today.");
       evidence.recordAssertionEvidence("Visitors can follow the product explanation and expand the local-versus-Cloud answer", "The native explanation link reaches #how and the FAQ opens to explain execution limits.", true);
     });
@@ -61,6 +61,13 @@ for (const width of [1280, 375]) {
       }
       expect(html).toContain("It does not grant early access to Open Coworker.");
       evidence.recordAssertionEvidence("Early access and Models have separate, truthful destinations", "Email opens a real early-access request; signup and member sign-in links preserve Models intent and campaign attribution without tokens. Membership explicitly does not grant early access.", true);
+    });
+    await step("Discover the announcement from the main homepage", async () => {
+      await user.navigate(world.origin + "/");
+      await user.click({ role: "link", text: /Meet Open Coworker/ });
+      await user.see({ text: "Introducing Open Coworker" });
+      expect(await probe.text()).toContain("Signed downloads are in preparation.");
+      evidence.recordAssertionEvidence("Homepage visitors can discover the Coworker announcement", "The homepage announcement link opens the real Coworker page with the same accurate early-access availability.", true);
     });
   });
 }
