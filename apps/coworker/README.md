@@ -271,6 +271,17 @@ read more.
   for existing coworkers without touching `soul.md` or anything under
   `memory/`; the repair also adds `documents/index.md` to `opencode.json`'s
   instructions and creates the index when it is missing.
+- **How it decides** is its own contract section (`## How I decide`), so the
+  coworker moves like a good colleague rather than a cautious form: act when
+  the request is clear and reversible (no "shall I?" for work already asked
+  for); ask **once**, with two or three concrete options through the question
+  tool, only when the answer changes the outcome — never a list of questions,
+  never a trailing "let me know if…"; say small assumptions in one clause and
+  go; always confirm first what cannot be undone (sending, posting, paying,
+  deleting, changing anything outside the workspace, contacting someone); say
+  how sure it is in plain words and never invent a number, a name, or a date;
+  deliver the first useful piece of large work instead of disappearing; when
+  it can't, say what it can in one sentence; one voice in a group.
 
 Prove it with the packaged app:
 
@@ -290,12 +301,19 @@ it holds for that message, and the wait budget. The header status, the rail
 line, Activity's Now card, and the journeys read the same value.
 
 - **Working** is the live row: a small avatar, three dots, and one phrase that
-  changes only with the phase ("Nova is thinking…"). Tap the phrase when you
-  get impatient and one discreet gray line below shows the end of what is
-  streaming right now — the words being written, the thinking, or the tool
-  step — live from the engine's events (the thread itself only carries a text
-  or reasoning part once it has ended); it hides itself after twelve seconds,
-  or on a second tap.
+  changes only with the phase ("Nova is thinking…"). Once the engine starts
+  streaming the *answer itself* (a `text` part with a few words in it), one
+  discreet gray line below shows its tail as it is written, without a tap —
+  the reply taking shape (`answerStreaming` in `lib/live-stream.ts`;
+  `data-live` on the row, `coworker-working-live`). Thinking and tool steps
+  stay behind a tap: tap the phrase and the same line shows the end of
+  whatever is streaming — words, thinking, or the tool step — live from the
+  engine's events (the thread itself only carries a text or reasoning part
+  once it has ended); the tapped glimpse (`data-peek`, `coworker-working-peek`)
+  takes the line over and hides itself after twelve seconds, or on a second
+  tap, exactly as before. In Automatic mode the row also says which lane and
+  model the turn runs on when it is not the standard one
+  (`· quick reply on GPT-5 mini`).
 - **Still working** is not a failure. When two minutes pass while the engine
   is still busy, the phrase softens to "Nova is still working on it…" and gains
   one inline *Stop*; the header and rail say *Still working*. Only the engine
@@ -522,6 +540,39 @@ When nobody chose a model, `recommendModel` prefers the OpenWork account, then
 a subscription or key on this Mac, then a local model server, then the free
 model; a model chosen on the local mode screen before the first coworker
 existed becomes that coworker's model. Existing coworkers keep their choice.
+
+### Automatic: the right brain for each message
+
+A coworker's AI model has a mode (`coworker.md` `modelMode`): **Automatic**
+(new coworkers) or **fixed** (one model, every time — what a chosen model meant
+before the field existed). In Automatic the coworker reads each message and
+picks a lane (`lib/model-choice.ts`): `classifyRequest` — the person's own
+words win ("quickly", "briefly", "tl;dr" → quick; "think carefully",
+"thorough", "step by step" → deep), then the shape of the ask (a greeting or a
+one-line question that needs no work → quick; research, plans, comparisons,
+drafts, code, a stack trace, three questions, a numbered list, or more than
+120 words → deep; anything that asks the coworker to *do* something — check,
+find, write, schedule, explain — is at least standard). `chooseModelForLane`
+anchors on the coworker's standard model (the saved one, or the recommendation
+that is then saved) and looks **only among that provider's models**, so one
+account is billed and nothing surprising appears: quick takes the newest fast,
+non-reasoning sibling (`mini`, `flash`, `haiku`, `nano`…), deep the most
+capable reasoning sibling (`opus`, `pro`, `max`, `o-series`…), and each lane
+falls back to the standard model when nothing better exists there. A standard
+model that is already fast stays for quick; one that is already the most
+capable stays for deep. The thinking-effort variant applies to the standard
+model only.
+
+The choice is never hidden: the live row says `· quick reply on GPT-5 mini`,
+the rail says "Working on a deep think on GPT-5 pro", every reply bubble's
+title says which model answered, and the picker's Automatic row previews all
+three lanes ("Quick GPT-5 mini · Standard GPT-5 · Deep GPT-5 pro"). To change
+the standard model while staying Automatic, pick a model (that fixes it) and
+tap Automatic again. Assignments, responsibilities, and Workers always use the
+standard model (`localRunModel` in `main.mjs`). When a lane's model cannot
+answer, the app steps back towards the standard model and retries the same
+message once or twice, saying so; only the standard model failing changes what
+is saved. A model the person fixed is never swapped.
 
 Sign-ins and keys go through the AI service's own credential store
 (`~/.local/share/opencode/auth.json`, shared with OpenWork Desktop and the
