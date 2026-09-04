@@ -21,8 +21,8 @@ export type TeamMember = {
 
 /** Three coworkers from the app's own role catalog (`apps/coworker/electron/team.mjs`). */
 export const TEAM: TeamMember[] = [
-  { name: "Scout", role: "Research", color: "blue", glasses: "round", state: "working", label: "Working", line: "Working on compare the three onboarding flows", when: "now" },
-  { name: "Editor", role: "Writing", color: "rose", glasses: "square", state: "attention", label: "Needs you", line: "Wants to run a command: pnpm test", when: "now" },
+  { name: "Scout", role: "Research", color: "blue", glasses: "round", state: "ready", label: "Ready", line: "Finished your options brief", when: "now" },
+  { name: "Editor", role: "Writing", color: "rose", glasses: "square", state: "attention", label: "Needs you", line: "Which tone would you like for the draft?", when: "now" },
   { name: "Ops", role: "Operations", color: "mint", glasses: "none", state: "ready", label: "Ready", line: "Next: Weekly digest · tomorrow 9:00 AM", when: "3h" },
 ];
 
@@ -78,7 +78,7 @@ function Thread() {
     <div className="flex flex-col gap-3 text-[13px]">
       <div className="flex justify-end">
         <p className="max-w-[82%] rounded-2xl rounded-br-md px-3.5 py-2.5 leading-relaxed" style={{ background: SNOW, color: INK }}>
-          Compare the three onboarding flows you flagged against ours and write a one-page brief.
+          Compare these three options and recommend one. We care most about a simple setup.
         </p>
       </div>
       {/* One small centered line between bubbles: what the coworker thought through and did. */}
@@ -92,10 +92,10 @@ function Thread() {
       <div className="flex items-end gap-2">
         <CoworkerAvatar name={scout.name} color={scout.color} glasses={scout.glasses} size={24} />
         <div className="max-w-[82%] rounded-2xl rounded-bl-md px-3.5 py-2.5 leading-relaxed" style={{ background: PANEL_2, color: SNOW }}>
-          Ours asks for the most up front; the other three defer the model choice. The brief has the three differences that matter and one recommendation.
+          Option two is the best fit for a simple setup. Here are the tradeoffs and the questions worth checking before you decide.
           <div className="mt-2.5 flex items-center justify-between gap-3 rounded-xl px-3 py-2" style={{ background: INK, boxShadow: `inset 0 0 0 1px ${LINE}` }}>
             <span className="min-w-0">
-              <span className="block truncate text-[12px] font-semibold" style={{ color: SNOW }}>Onboarding compare</span>
+              <span className="block truncate text-[12px] font-semibold" style={{ color: SNOW }}>Your options brief</span>
               <span className="block truncate text-[11px]" style={{ color: MIST }}>Three differences, one recommendation.</span>
             </span>
             <span className="shrink-0 text-[11px] font-medium" style={{ color: SNOW }}>Open</span>
@@ -109,7 +109,7 @@ function Thread() {
           <span className="h-1 w-1 rounded-full" style={{ background: MIST, opacity: 0.7 }} />
           <span className="h-1 w-1 rounded-full" style={{ background: MIST, opacity: 0.45 }} />
         </span>
-        Scout is putting it together…
+        Saved a working note: simple setup matters most.
       </div>
     </div>
   );
@@ -152,16 +152,16 @@ export function CoworkerVignette() {
         <CoworkerAvatar name="Scout" color="blue" glasses="round" size={26} />
         <span className="min-w-0 flex-1">
           <span className="block truncate text-[13px] font-semibold" style={{ color: SNOW }}>Scout</span>
-          <span className="block truncate text-[11px]" style={{ color: MIST }}>Compare the three onboarding flows against ours · 3</span>
+          <span className="block truncate text-[11px]" style={{ color: MIST }}>A decision worth getting right</span>
         </span>
-        <span className="shrink-0 text-[12px]" style={{ color: TONE.working.text }}>Working</span>
+        <span className="shrink-0 text-[12px]" style={{ color: TONE.ready.text }}>Ready</span>
       </div>
       <div className="grid grid-cols-1 md:grid-cols-[232px_minmax(0,1fr)] xl:grid-cols-[232px_minmax(0,1fr)_280px]">
         <aside className="hidden border-r p-3 md:block" style={{ borderColor: LINE, background: PANEL }}>
           <p className="mb-2 px-2 pt-1 text-[10px] font-semibold uppercase tracking-[0.14em]" style={{ color: MIST }}>Coworkers</p>
           <TeamRail selected="Scout" />
         </aside>
-        <main className="min-w-0 p-5">
+        <div className="min-w-0 p-5">
           <Thread />
           <div className="mt-5 flex items-center gap-2 rounded-[20px] border px-4 py-2" style={{ borderColor: LINE, background: "rgba(20,25,36,0.6)" }}>
             <span className="flex-1 text-[13px]" style={{ color: "rgba(154,163,178,0.65)" }}>Message Scout</span>
@@ -170,7 +170,7 @@ export function CoworkerVignette() {
             </span>
           </div>
           <p className="mt-1.5 px-4 text-[10px]" style={{ color: "rgba(154,163,178,0.7)" }}>Enter sends it next · 2 assignments · 1 Worker · 1 document</p>
-        </main>
+        </div>
         <aside className="hidden border-l p-3 xl:block" style={{ borderColor: LINE, background: PANEL }}>
           <p className="mb-2 px-1 pt-1 text-[10px] font-semibold uppercase tracking-[0.14em]" style={{ color: MIST }}>Activity</p>
           <Activity />
