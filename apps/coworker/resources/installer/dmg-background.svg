@@ -1,17 +1,11 @@
 <svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="760" height="600" viewBox="0 0 760 600">
   <rect width="760" height="600" fill="#f3f4f6"/>
+  <!-- A quiet architectural backdrop rewards a closer look. -->
+  <image data-decoration="office-activity" x="0" y="61" width="760" height="507" opacity=".12" xlink:href="office-activity-outline.png"/>
   <g font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Helvetica Neue', Arial, sans-serif">
     <image data-brand="white-coworker" x="30" y="20" width="48" height="48" xlink:href="../../public/open-coworker.svg"/>
     <text x="80" y="48" font-size="14" font-weight="600" letter-spacing="-.2" fill="#303744">Open Coworker</text>
     <text x="720" y="48" text-anchor="end" font-size="11.5" font-weight="450" fill="#737c8b">Local by default</text>
-
-    <!-- Two overhead office pods frame the welcome at a quiet opacity. -->
-    <svg data-decoration="tiny-office-left" x="12" y="79" width="140" height="100" viewBox="0 60 670 600" opacity=".46">
-      <image width="2172" height="724" xlink:href="office-coworkers-3d.png"/>
-    </svg>
-    <svg data-decoration="tiny-office-right" x="608" y="79" width="140" height="100" viewBox="1502 60 670 600" opacity=".46">
-      <image width="2172" height="724" xlink:href="office-coworkers-3d.png"/>
-    </svg>
 
     <text x="380" y="118" text-anchor="middle" font-size="30" font-weight="650" letter-spacing="-.9" fill="#171c26">Welcome to your new team</text>
     <text x="380" y="148" text-anchor="middle" font-size="14" font-weight="450" fill="#687181">Drag Open Coworker into Applications.</text>
