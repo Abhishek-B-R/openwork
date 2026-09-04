@@ -994,7 +994,7 @@ test.skipIf(!enabled)(title, { timeout: 900_000 }, async ({ evidence }) => {
   // A failed discovery stays recoverable and cannot be cached as an empty account.
   await openAppsAndTools(app);
   gatewaySearchUnavailable = true;
-  await clickButton(app, "Refresh");
+  await waitFor(app, `(() => { const button = document.querySelector('button[aria-label="Refresh"]'); if (!(button instanceof HTMLButtonElement) || button.disabled) return false; button.click(); return true; })()`, { timeoutMs: 30_000, label: "refresh connected apps" });
   await waitForText(app, "Some connected apps and skills couldn't be loaded", { timeoutMs: 60_000 });
   expect(String(await evalIn(app, `document.querySelector('[data-testid="coworker-capabilities"]')?.textContent ?? ""`))).not.toContain("Your organization has not connected any services");
   gatewaySearchUnavailable = false;

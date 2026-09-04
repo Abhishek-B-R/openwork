@@ -924,11 +924,26 @@ function ConnectedScreen({
   const [pitch, setPitch] = useState<"full" | "compact">(() => readConnectPitchPreference(typeof window === "undefined" ? null : window.localStorage));
   const [hidePitchNextTime, setHidePitchNextTime] = useState(false);
   const [openError, setOpenError] = useState("");
+  const refreshAfterManageRef = useRef(false);
+  useEffect(() => {
+    const onReturn = () => {
+      if (!refreshAfterManageRef.current) return;
+      refreshAfterManageRef.current = false;
+      void data.refresh();
+    };
+    window.addEventListener("focus", onReturn);
+    return () => window.removeEventListener("focus", onReturn);
+  }, [data.refresh]);
   async function manageApps() {
     if (!session) return;
     setOpenError("");
-    try { await coworkerBridge.openExternal(buildDenAccountUrl(session.baseUrl, "connections")); }
-    catch { setOpenError("Couldn't open your connected apps. Please try again."); }
+    try {
+      refreshAfterManageRef.current = true;
+      await coworkerBridge.openExternal(buildDenAccountUrl(session.baseUrl, "connections"));
+    } catch {
+      refreshAfterManageRef.current = false;
+      setOpenError("Couldn't open your connected apps. Please try again.");
+    }
   }
   function skipPitch(): void {
     setPitch("compact");
@@ -1003,18 +1018,16 @@ function ConnectedScreen({
   return (
     <>
       <section className="px-1 pb-3" data-testid="coworker-connect-card" data-status={connect?.status ?? "connecting"}>
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
+        <div className="flex flex-wrap items-center justify-between gap-2">
             <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-mist">OpenWork Connect</p>
-            <h3 className="mt-1.5 text-sm font-semibold leading-snug text-snow">
-              {connected ? `Tell ${coworker.name} what you want to get done.` : !connect || connect.status === "connecting" ? "Getting your connected apps ready." : "Let's reconnect your apps."}
-            </h3>
-          </div>
-          <span className={`flex shrink-0 items-center gap-1.5 text-[11px] font-medium ${toneClass}`} data-testid="coworker-connect-status">
+          <span className={`flex min-w-0 items-center gap-1.5 text-[11px] font-medium ${toneClass}`} data-testid="coworker-connect-status">
             <StatusDot tone={status.tone} />
             {status.label}
           </span>
         </div>
+        <h3 className="mt-2 text-sm font-semibold leading-snug text-snow">
+          {connected ? `Tell ${coworker.name} what you want to get done.` : !connect || connect.status === "connecting" ? "Getting your connected apps ready." : "Let's reconnect your apps."}
+        </h3>
         {connected ? <p className="mt-2 text-xs leading-relaxed text-mist">Your coworker finds the right app from those available to you in {session.orgName || "your workspace"}. Just describe the result.</p> : null}
         {status.detail ? <p className="mt-2 text-xs leading-relaxed text-mist" data-testid="coworker-connect-detail">{status.detail}</p> : null}
         {connect?.status === "attention" || connect?.status === "unavailable" ? <TechnicalDetails entries={[{ label: "Connection details", value: connect.message }]} /> : null}
