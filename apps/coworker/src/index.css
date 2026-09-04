@@ -113,8 +113,7 @@ body.is-resizing-panel * {
     --rail-surface: #090c12 !important;
   }
 
-  .creation-card,
-  .onboarding-launcher {
+  :root :is(.creation-card, .onboarding-launcher) {
     background: var(--color-panel);
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
