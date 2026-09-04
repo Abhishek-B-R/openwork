@@ -510,6 +510,7 @@ test.skipIf(!enabled)(title, { timeout: 900_000 }, async ({ evidence }) => {
     },
     models: [{ id: MODEL_ID, name: MODEL_NAME, config: { tool_call: false, reasoning: false } }],
   };
+  let membershipResponse: "active" | "unavailable" | "admin" = "active";
   const den = createServer((request, response) => {
     const url = new URL(request.url ?? "/", "http://den.local");
     // Self-hosted Den is addressed through its /api/den proxy path.
@@ -601,6 +602,18 @@ test.skipIf(!enabled)(title, { timeout: 900_000 }, async ({ evidence }) => {
     }
     if (request.method === "GET" && path === "/v1/me/orgs") {
       respondJson(response, 200, { orgs: [{ id: ORG_ID, name: ORG_NAME }], activeOrgId: ORG_ID });
+      return;
+    }
+    if (request.method === "GET" && path === "/v1/inference") {
+      if (org !== ORG_ID) { respondJson(response, 403, { error: "wrong_organization" }); return; }
+      if (membershipResponse !== "active") { respondJson(response, membershipResponse === "admin" ? 403 : 503, { error: "unavailable" }); return; }
+      respondJson(response, 200, { inference: {
+        subscribed: true, enabled: true, upstreamProviderConfigured: true,
+        buckets: [
+          { windowType: "five_hour", windowStartAt: new Date(Date.now() - 60_000).toISOString(), windowEndAt: new Date(Date.now() + 60_000).toISOString(), limitAmount: 100, usedAmount: 25 },
+          { windowType: "weekly", windowStartAt: "2020-01-01T00:00:00Z", windowEndAt: "2020-01-08T00:00:00Z", limitAmount: 100, usedAmount: 0 },
+        ],
+      } });
       return;
     }
     if (request.method === "GET" && path === "/v1/llm-providers") {
@@ -740,6 +753,13 @@ test.skipIf(!enabled)(title, { timeout: 900_000 }, async ({ evidence }) => {
   });
   expect(isRecord(scout) && scout.model).toBe(`${PROVIDER_RECORD_ID}/${MODEL_ID}`);
   await backToActivity(app);
+
+  await clickButton(app, "Turn a goal into a plan");
+  const starter = await evalIn(app, `document.querySelector('textarea[aria-label="Message Scout"]')?.value ?? ""`);
+  expect(String(starter)).toContain("Ask what I want to achieve");
+  expect(await evalIn(app, `document.querySelectorAll('[data-message-role="user"]').length`)).toBe(0);
+  await fill(app, 'textarea[aria-label="Message Scout"]', "");
+  evidence.recordAssertionEvidence("A new conversation offers a useful starting point as an editable draft", "Choosing Turn a goal into a plan filled the composer with a practical request. It sent no message and created no work until the person chose Send.", true);
 
   evidence.recordAssertionEvidence(
     "The organization's model reaches Coworker settings labelled by source, without a model step in creation",
@@ -989,6 +1009,26 @@ test.skipIf(!enabled)(title, { timeout: 900_000 }, async ({ evidence }) => {
   expect(modelsText).toContain(PROVIDER_RECORD_ID);
   expect(modelsText).not.toContain(PROVIDER_API_KEY);
 
+  await waitForText(app, "Membership active", { timeoutMs: 30_000 });
+  const membershipText = String(await evalIn(app, `document.querySelector('[data-testid="models-membership"]')?.textContent ?? ""`));
+  expect(membershipText).toContain("75% left");
+  expect(membershipText).toContain("Waiting for refreshed usage");
+  expect(membershipText).toContain("Manage membership");
+  expect(membershipText).not.toMatch(/\$100|24 hours|first 50|Astra/);
+  expect(denRequests.filter((entry) => entry.path === "/v1/inference").every((entry) => entry.authorization === `Bearer ${SESSION_TOKEN}` && entry.org === ORG_ID)).toBe(true);
+  membershipResponse = "unavailable";
+  await clickButton(app, "Refresh membership & models");
+  await waitForText(app, "Membership status is unavailable", { timeoutMs: 30_000 });
+  expect(String(await evalIn(app, `document.querySelector('[data-testid="models-membership"]')?.textContent ?? ""`))).not.toContain("No active Models membership");
+  membershipResponse = "admin";
+  await clickButton(app, "Refresh membership & models");
+  await waitForText(app, "Your workspace admin manages the membership", { timeoutMs: 30_000 });
+  expect(denRequests.some((entry) => entry.method === "POST" && /billing|checkout/.test(entry.path))).toBe(false);
+  evidence.recordAssertionEvidence(
+    "Models membership shows authenticated workspace usage; errors and member permissions never masquerade as an unpaid subscription",
+    "The account-scoped read showed 75% remaining and a management action, refused to present an expired bucket as fresh usage, and explained 503 and 403 without an unpaid claim. No checkout was created and no proposed promotion was advertised.", true,
+  );
+
   evidence.recordAssertionEvidence(
     "Account and provider state survive reload and are explained without exposing secrets",
     "After reload the discussion and reply were still present, Account showed OpenWork connected with the organization and member, and AI models listed the organization provider under OpenWork Cloud. Neither the session token nor the provider key appeared on screen.",
@@ -1005,6 +1045,8 @@ test.skipIf(!enabled)(title, { timeout: 900_000 }, async ({ evidence }) => {
   expect(await evalIn(app, `window.localStorage.getItem("coworker.den.session.v1")`)).toBeNull();
   await clickButton(app, "AI models");
   // The sweep reloads the engine asynchronously; re-read the catalog until the account group is gone.
+  await waitFor(app, `document.querySelector('[data-testid="models-membership"]')?.getAttribute("data-state") === "signed-out"`, { timeoutMs: 30_000, label: "membership clears on sign-out" });
+  expect(String(await evalIn(app, `document.querySelector('[data-testid="models-membership"]')?.textContent ?? ""`))).not.toMatch(/Membership active|75% left/);
   const sweepDeadline = Date.now() + 180_000;
   for (;;) {
     const swept = await evalIn(app, `(() => {
