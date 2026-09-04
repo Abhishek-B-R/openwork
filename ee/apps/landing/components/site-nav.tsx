@@ -24,6 +24,8 @@ type Props = {
   mobilePrimaryHref?: string;
   mobilePrimaryLabel?: string;
   active?: ActivePage;
+  /** `dark` sits on a product-dark page such as /coworker; the default is the site's light chrome. */
+  tone?: "light" | "dark";
 };
 
 type NavItem = {
@@ -64,13 +66,19 @@ export function SiteNav(props: Props) {
   const opensInNewTab = (item: NavItem) =>
     item.newTab || /^(?:https?:\/\/)/.test(item.href);
 
+  const dark = props.tone === "dark";
   const navLink = (isActive: boolean) =>
-    isActive
-      ? "text-[#011627]"
-      : "text-gray-600 transition-colors hover:text-[#011627]";
+    dark
+      ? isActive
+        ? "text-white"
+        : "text-gray-400 transition-colors hover:text-white"
+      : isActive
+        ? "text-[#011627]"
+        : "text-gray-600 transition-colors hover:text-[#011627]";
+  const scrolledBar = dark ? "bg-[#0b0e14]/80 shadow-[0_1px_0_rgba(255,255,255,0.08)] backdrop-blur-md" : "bg-white/80 shadow-sm backdrop-blur-md";
 
   return (
-    <header className={`sticky top-0 z-20 w-full transition-all duration-300 ${scrolled ? "bg-white/80 shadow-sm backdrop-blur-md" : ""}`}>
+    <header className={`sticky top-0 z-20 w-full transition-all duration-300 ${scrolled ? scrolledBar : ""}`} data-tone={dark ? "dark" : "light"}>
       <div className="mx-auto flex w-full max-w-[1176px] flex-col px-6">
         <div className="grid grid-cols-[auto_1fr_auto] items-center py-4">
           <Link
@@ -78,8 +86,8 @@ export function SiteNav(props: Props) {
             className="group inline-flex items-center gap-1.5"
             onClick={() => setMobileOpen(false)}
           >
-            <OpenWorkMark className="h-[30px] w-[38px] transition-opacity group-hover:opacity-80" />
-            <span className="text-[1.2rem] font-semibold tracking-tight text-[#011627] md:text-[1.3rem]">
+            <OpenWorkMark className={`h-[30px] w-[38px] transition-opacity group-hover:opacity-80 ${dark ? "brightness-0 invert" : ""}`} />
+            <span className={`text-[1.2rem] font-semibold tracking-tight md:text-[1.3rem] ${dark ? "text-white" : "text-[#011627]"}`}>
               OpenWork
             </span>
           </Link>
@@ -100,7 +108,7 @@ export function SiteNav(props: Props) {
           <div className="col-start-3 flex items-center gap-4">
             <a
               href="https://github.com/different-ai/openwork"
-              className="hidden h-9 items-center gap-2 rounded-full border border-[var(--lp-border)] bg-white px-3.5 text-sm font-normal text-[var(--lp-muted)] transition-colors hover:text-[var(--lp-ink)] sm:flex"
+              className={`hidden h-9 items-center gap-2 rounded-full border border-[var(--lp-border)] px-3.5 text-sm font-normal text-[var(--lp-muted)] transition-colors hover:text-[var(--lp-ink)] sm:flex ${dark ? "bg-transparent" : "bg-white"}`}
               rel="noreferrer"
               target="_blank"
               aria-label="OpenWork GitHub stars"
@@ -125,7 +133,7 @@ export function SiteNav(props: Props) {
             </a>
             <button
               type="button"
-              className="rounded-full p-2 text-[#011627] transition-colors hover:bg-white/70 lg:hidden"
+              className={`rounded-full p-2 transition-colors lg:hidden ${dark ? "text-white hover:bg-white/10" : "text-[#011627] hover:bg-white/70"}`}
               onClick={() => setMobileOpen(current => !current)}
               aria-expanded={mobileOpen}
               aria-label={
@@ -138,8 +146,8 @@ export function SiteNav(props: Props) {
         </div>
 
         {mobileOpen ? (
-          <div className="mb-8 rounded-xl bg-white p-4 shadow-[0_1px_3px_rgba(1,22,39,0.08)] lg:hidden">
-            <div className="flex flex-col gap-1 text-[15px] font-medium text-gray-700">
+          <div className={`mb-8 rounded-xl p-4 lg:hidden ${dark ? "bg-[#141924] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08)]" : "bg-white shadow-[0_1px_3px_rgba(1,22,39,0.08)]"}`}>
+            <div className={`flex flex-col gap-1 text-[15px] font-medium ${dark ? "text-gray-200" : "text-gray-700"}`}>
               {navItems.map(item => (
                 <Link
                   key={item.key}
@@ -175,7 +183,9 @@ export function SiteNav(props: Props) {
               </a>
               <a
                 href="https://github.com/different-ai/openwork"
-                className="inline-flex items-center justify-center gap-2 rounded-lg border border-gray-100 bg-white px-4 py-2 text-sm font-medium text-gray-500 shadow-[0_1px_2px_rgba(17,24,39,0.06)] transition-colors hover:text-[#011627]"
+                className={dark
+                  ? "inline-flex items-center justify-center gap-2 rounded-lg border border-white/10 bg-transparent px-4 py-2 text-sm font-medium text-gray-300 transition-colors hover:text-white"
+                  : "inline-flex items-center justify-center gap-2 rounded-lg border border-gray-100 bg-white px-4 py-2 text-sm font-medium text-gray-500 shadow-[0_1px_2px_rgba(17,24,39,0.06)] transition-colors hover:text-[#011627]"}
                 rel="noreferrer"
                 target="_blank"
               >

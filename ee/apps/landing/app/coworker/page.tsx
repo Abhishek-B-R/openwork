@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 
 import { CoworkerAvatar, CoworkerMark } from "../../components/coworker-brand";
+import { CoworkerSettingsVignette } from "../../components/coworker-settings-vignette";
 import { CoworkerVignette, TEAM } from "../../components/coworker-vignette";
 import { LpCopyBar } from "../../components/lp-copy-bar";
 import { LpCta } from "../../components/lp-cta";
@@ -12,6 +13,7 @@ import {
   AGENT,
   CLOUD,
   COWORKER,
+  CUSTOMIZE,
   GET_STARTED,
   HERO,
   MEMORY,
@@ -65,7 +67,9 @@ export default async function CoworkerPage() {
   const agentPrompt = AGENT.promptTemplate(`${SITE_URL}/coworker/start.md`);
 
   return (
-    <div className="relative min-h-screen overflow-x-hidden bg-[var(--lp-page)] text-[var(--lp-ink)]">
+    // Open Coworker is dark-only; the page takes the app's palette (`.lp-dark` in globals.css) so it looks like the product, not a light landing.
+    <div className="lp-dark relative min-h-screen overflow-x-hidden bg-[var(--lp-page)] text-[var(--lp-ink)]" data-testid="coworker-page">
+      <style>{`html, body { background-color: #0b0e14; }`}</style>
       <StructuredData data={softwareSchema} />
       <div className="relative z-10">
         <SiteNav
@@ -75,6 +79,7 @@ export default async function CoworkerPage() {
           mobilePrimaryHref={CLOUD_SIGNUP_URL}
           mobilePrimaryLabel="Get started for free"
           active="coworker"
+          tone="dark"
         />
 
         <main className="mx-auto w-full max-w-[1176px] px-6 pb-8">
@@ -162,13 +167,33 @@ export default async function CoworkerPage() {
             </div>
           </section>
 
+          {/* Make it yours */}
+          <section id="customize" className="mt-24 scroll-mt-24 md:mt-32" aria-label="Make it yours">
+            <LpSectionHeader label="Make it yours" heading={CUSTOMIZE.title} headingLines={[...CUSTOMIZE.headingLines]} />
+            <p className="mt-6 max-w-[760px] text-[16px] leading-[25px] text-[var(--lp-body)]" data-testid="coworker-customize-lead">{CUSTOMIZE.lead.text}</p>
+            <div className="mt-10 grid grid-cols-1 gap-10 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.25fr)] lg:gap-12">
+              <ul className="space-y-5 lg:pt-1" data-testid="coworker-customize-list">
+                {CUSTOMIZE.items.map((item) => (
+                  <li key={item.label} className="grid grid-cols-[112px_1fr] gap-4 border-t border-[var(--lp-border)] pt-4 first:border-t-0 first:pt-0" data-testid="coworker-customize-item">
+                    <span className="text-[13.5px] font-medium text-[var(--lp-ink)]">{item.label}</span>
+                    <span className="text-[14px] leading-[22px] text-[var(--lp-body)]">{item.text}</span>
+                  </li>
+                ))}
+              </ul>
+              <div className="lg:sticky lg:top-24 lg:self-start">
+                <CoworkerSettingsVignette />
+                <p className="mt-3 text-[12.5px] text-[var(--lp-muted)]">Coworker settings and the Memory view, drawn from the app. Every label is one it uses.</p>
+              </div>
+            </div>
+          </section>
+
           {/* Memory + team */}
           <section id="memory" className="mt-24 scroll-mt-24 md:mt-32">
             <div className="grid grid-cols-1 gap-12 lg:grid-cols-2 lg:gap-16">
               <div>
                 <LpSectionHeader label="Memory" heading={MEMORY.title} size="small" />
                 <p className="mt-6 text-[15.5px] leading-[25px] text-[var(--lp-body)]">{MEMORY.lead.text}</p>
-                <div className="mt-8 rounded-[16px] bg-[var(--lp-terminal)] px-5 py-5">
+                <div className="mt-8 rounded-[16px] bg-[var(--lp-terminal)] px-5 py-5 ring-1 ring-[var(--lp-border)]">
                   <div className="mono text-[12px] text-[#94a3b8]">~/.config/openwork/coworkers/scout/</div>
                   <ul className="mt-3 space-y-2">
                     {MEMORY.files.map((file) => (
@@ -242,7 +267,7 @@ export default async function CoworkerPage() {
               <LpTonalCard className="p-7">
                 <div className="flex items-center justify-between gap-3">
                   <h3 className="text-[22px] font-light leading-[28px] tracking-[-0.01em]">{CLOUD.cloud.name}</h3>
-                  <span className="rounded-full bg-white px-2.5 py-1 text-[11.5px] font-medium text-[var(--lp-blue)]">{CLOUD.cloud.badge}</span>
+                  <span className="rounded-full bg-[var(--lp-page)] px-2.5 py-1 text-[11.5px] font-medium text-[var(--lp-blue)]">{CLOUD.cloud.badge}</span>
                 </div>
                 <p className="mt-2 text-[13.5px] text-[var(--lp-muted)]">{CLOUD.cloud.price.text}</p>
                 <ul className="mt-5 space-y-3">
@@ -275,7 +300,7 @@ export default async function CoworkerPage() {
                 <LpSectionHeader label="Get started" heading={GET_STARTED.title} size="small" />
                 <p className="mt-6 text-[15.5px] leading-[25px] text-[var(--lp-body)]">{GET_STARTED.lead.text}</p>
                 <p className="mt-4 text-[13px] text-[var(--lp-muted)]">{GET_STARTED.status}</p>
-                <div className="mt-6 rounded-[12px] bg-[var(--lp-terminal)] px-5 py-[18px]">
+                <div className="mt-6 rounded-[12px] bg-[var(--lp-terminal)] px-5 py-[18px] ring-1 ring-[var(--lp-border)]">
                   <ol className="space-y-1.5">
                     {GET_STARTED.commands.map((command) => (
                       <li key={command} className="mono flex gap-3 text-[13.5px] text-[#e2e8f0]">
@@ -294,7 +319,7 @@ export default async function CoworkerPage() {
               <div>
                 <LpSectionHeader label="For your agent" heading={AGENT.title} size="small" />
                 <p className="mt-6 text-[15.5px] leading-[25px] text-[var(--lp-body)]">{AGENT.text}</p>
-                <div className="mt-6">
+                <div className="mt-6 rounded-[12px] ring-1 ring-[var(--lp-border)]">
                   <LpCopyBar value={agentPrompt} />
                 </div>
                 <ul className="mt-5 flex flex-wrap gap-x-6 gap-y-2 text-[14px] text-[var(--lp-body)]">
@@ -332,7 +357,7 @@ export default async function CoworkerPage() {
             </ul>
           </details>
 
-          <SiteFooter />
+          <SiteFooter tone="dark" />
         </main>
       </div>
     </div>

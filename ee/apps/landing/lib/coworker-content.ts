@@ -99,6 +99,57 @@ export const STEPS: Array<Claim & { title: string }> = [
   },
 ];
 
+/**
+ * What is yours to shape. A coworker is a folder of plain files the app edits
+ * with you; nothing about it is locked behind a prompt you cannot read.
+ */
+export const CUSTOMIZE: { title: string; headingLines: [string, string]; lead: Claim; items: Array<Claim & { label: string }> } = {
+  title: "Every coworker is yours to shape.",
+  headingLines: ["Every coworker", "is yours to shape."],
+  lead: {
+    text:
+      "A coworker is a folder of plain files on your Mac, and the app edits them with you. Its name, role, and mission. A soul with its principles and how it speaks. A voice for the working state, a face, the AI model it thinks with — or Automatic, and it chooses per message. Memory you can read and undo. A team you grow, rename, and retire. Nothing about it hides behind a prompt you cannot open.",
+    source: "apps/coworker/electron/coworkers.mjs (soul.md, coworker.md); apps/coworker/src/ui/coworker-home.tsx (Coworker settings)",
+  },
+  items: [
+    {
+      label: "Name, role, mission",
+      text: "Rename a coworker or change what it is for at any time; every teammate's roster is rewritten so the team keeps describing itself truthfully.",
+      source: "apps/coworker/electron/coworkers.mjs (updateCoworker, refreshTeamRosters); apps/coworker/electron/team.mjs",
+    },
+    {
+      label: "Soul",
+      text: "Role, Mission, Principles, Communication — four sections of Markdown. Edit them in the Memory view, or set a standing rule in the conversation and the coworker updates its own soul, one section at a time, saying so.",
+      source: "apps/coworker/electron/self-memory.mjs (soul_update); apps/coworker/src/ui/memory.tsx",
+    },
+    {
+      label: "Voice",
+      text: "Twelve personalities for the working state — neutral, warm, dry, playful, detective… — that change only what the interface says while it works, never how it works or writes.",
+      source: "apps/coworker/src/lib/personalities.ts; apps/coworker/src/ui/personality-picker.tsx",
+    },
+    {
+      label: "Face",
+      text: "Six avatar colors and three pairs of glasses on the same speech bubble, so a team reads at a glance in the rail.",
+      source: "apps/coworker/electron/coworkers.mjs (avatarColor, avatarGlasses); apps/coworker/src/ui/coworker-avatar.tsx",
+    },
+    {
+      label: "AI model",
+      text: "Pick one model and a thinking effort, or leave it on Automatic: a fast model for a quick question, the standard one for ordinary work, a reasoning model for research, plans, and code — from the same provider, and named in the conversation as it happens.",
+      source: "apps/coworker/src/lib/model-choice.ts (classifyRequest, chooseModelForLane); apps/coworker/src/ui/model-picker.tsx",
+    },
+    {
+      label: "Memory",
+      text: "Working memory and long-term notes as Markdown you can read and edit; every change the coworker or you makes is listed with what it replaced, and any of them can be undone.",
+      source: "apps/coworker/electron/self-memory.mjs (memory/changes.jsonl, undoChange); apps/coworker/src/ui/memory.tsx (Recent changes)",
+    },
+    {
+      label: "Team",
+      text: "Add a coworker from six roles or shape one by hand; retire one and restore it later with everything intact. When work nobody covers keeps coming, a teammate proposes a new one — and only your tap creates it.",
+      source: "apps/coworker/electron/team.mjs (roles, recommendTeam); apps/coworker/src/ui/new-coworker.tsx; apps/coworker/src/ui/retired-coworkers.tsx; apps/coworker/electron/team-tools.mjs (team_suggest)",
+    },
+  ],
+};
+
 export const MEMORY: { title: string; lead: Claim; files: Array<{ path: string; note: string }> } = {
   title: "Memory you can read.",
   lead: {
@@ -279,6 +330,8 @@ export function allClaims(): Claim[] {
   return [
     ...WITH_OPENWORK.rows.map((row) => ({ text: `${row.openwork} ${row.coworker}`, source: row.source })),
     ...STEPS,
+    CUSTOMIZE.lead,
+    ...CUSTOMIZE.items.map((item) => ({ text: `${item.label}: ${item.text}`, source: item.source })),
     MEMORY.lead,
     TEAM.lead,
     ...TEAM.points,

@@ -46,6 +46,54 @@ body {
   color: #fff;
 }
 
+/*
+ * A product-dark page. Open Coworker is dark-only, so /coworker takes the
+ * app's own palette (apps/coworker/src/index.css: ink, panel, snow, mist)
+ * instead of the site's light tokens. Everything on the page already reads
+ * the --lp-* variables, so one scope flips it; the pills and buttons that
+ * hardcode white are corrected here. Other pages are untouched.
+ */
+.lp-dark {
+  color-scheme: dark;
+  --lp-ink: #f4f6fa;
+  --lp-page: #0b0e14;
+  --lp-tonal: #141924;
+  --lp-body: #b4bcc8;
+  --lp-muted: #9aa3b2;
+  --lp-faint: #5f6877;
+  --lp-border: rgba(255, 255, 255, 0.09);
+  --lp-blue: #8fb0ff;
+  --lp-status: #5fb59a;
+  --lp-status-dot: #3ed5a6;
+  --lp-terminal: #05070b;
+}
+
+.lp-dark ::selection {
+  background: var(--lp-ink);
+  color: #0b0e14;
+}
+
+.lp-dark .lp-pill-primary,
+.lp-dark .doc-button {
+  color: #0b0e14;
+}
+
+.lp-dark .doc-button:hover {
+  background-color: #dfe4ec;
+}
+
+.lp-dark .lp-pill-secondary,
+.lp-dark .secondary-button {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  color: var(--lp-ink);
+}
+
+.lp-dark .lp-pill-secondary:hover,
+.lp-dark .secondary-button:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
 .lp-pill-primary,
 .lp-pill-secondary,
 .lp-pill-sm {
