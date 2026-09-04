@@ -93,7 +93,11 @@ for (const width of [1280, 375]) {
     });
     await step("Preview the membership path and reset the sample workspace", async () => {
       await user.click({ testId: "demo-view-chat" });
-      await user.click({ testId: "demo-model-source" });
+      // Enter the native selector through keyboard focus. On macOS the
+      // first Down opens its menu; the next selects the second option.
+      await user.click({ role: "textbox", label: "Example message" });
+      await user.press("Tab");
+      await user.press("ArrowDown");
       await user.press("ArrowDown");
       await user.press("Enter");
       await user.see({ testId: "demo-model-source" }, { value: "models" });
