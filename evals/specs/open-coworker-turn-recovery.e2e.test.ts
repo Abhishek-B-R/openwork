@@ -499,7 +499,7 @@ test.skipIf(!enabled)(title, { timeout: 900_000 }, async ({ evidence }) => {
   // Once the engine gives up: one coworker-side message that names the free model and offers C Connect an AI provider.
   const freeCard = await waitFor(app, `(() => {
     const failure = document.querySelector('[data-testid="coworker-turn-failed"]');
-    if (!failure) return false;
+    if (!failure || !failure.querySelector('[data-choice="use-model"]')) return false;
     const technical = failure.querySelector('[data-testid="coworker-turn-technical"]');
     const plain = failure.cloneNode(true);
     plain.querySelector('[data-testid="coworker-turn-technical"]')?.remove();
