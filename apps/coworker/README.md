@@ -60,7 +60,9 @@ The coworker directory is registered as an ordinary OpenWork workspace, so:
   after an interruption · since 7:40 AM"). An empty conversation shows only a small
   avatar, the coworker's name and role, one line ("What should we work
   through?", or, for a coworker a teammate proposed, "Nova suggested me — …"),
-  and the focused composer. Three optional starting requests help turn a goal
+  and the focused composer, with no starter cards in the canvas. A discreet
+  **Starting points** control beside the composer offers three editable requests
+  to turn a goal
   into a plan, work through a document, or prepare recurring work. Choosing one
   fills an editable draft; nothing is sent until the person sends it. Unsent
   conversation and assignment drafts are saved locally per coworker and thread,

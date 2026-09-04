@@ -754,12 +754,15 @@ test.skipIf(!enabled)(title, { timeout: 900_000 }, async ({ evidence }) => {
   expect(isRecord(scout) && scout.model).toBe(`${PROVIDER_RECORD_ID}/${MODEL_ID}`);
   await backToActivity(app);
 
+  expect(await evalIn(app, `document.querySelector('[data-testid="coworker-discussion-empty"]')?.querySelectorAll("button").length`)).toBe(0);
+  await clickButton(app, "Starting points");
+  expect(await evalIn(app, `(() => { const panel = document.querySelector('[aria-label="A useful first step"]'); if (!panel) return false; const rect = panel.getBoundingClientRect(); return rect.left >= 0 && rect.right <= innerWidth && rect.top >= 0 && rect.bottom <= innerHeight; })()`)).toBe(true);
   await clickButton(app, "Turn a goal into a plan");
   const starter = await evalIn(app, `document.querySelector('textarea[aria-label="Message Scout"]')?.value ?? ""`);
   expect(String(starter)).toContain("Ask what I want to achieve");
   expect(await evalIn(app, `document.querySelectorAll('[data-message-role="user"]').length`)).toBe(0);
   await fill(app, 'textarea[aria-label="Message Scout"]', "");
-  evidence.recordAssertionEvidence("A new conversation offers a useful starting point as an editable draft", "Choosing Turn a goal into a plan filled the composer with a practical request. It sent no message and created no work until the person chose Send.", true);
+  evidence.recordAssertionEvidence("A new conversation offers a useful starting point as an editable draft", "The quiet empty canvas retained its avatar and had no action cards. Opening Starting points beside the composer and choosing Turn a goal into a plan filled the composer with a practical request. It sent no message and created no work until the person chose Send.", true);
 
   evidence.recordAssertionEvidence(
     "The organization's model reaches Coworker settings labelled by source, without a model step in creation",
