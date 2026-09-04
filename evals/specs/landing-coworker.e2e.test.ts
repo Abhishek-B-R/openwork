@@ -1,6 +1,6 @@
 import { expect } from "vitest";
 import { chrome } from "@openwork/hosts";
-import { freezeMotion, setViewport } from "@openwork/cdp";
+import { freezeMotion, reload, setViewport } from "@openwork/cdp";
 import { spec } from "@openwork/testkit";
 
 // A new visitor journey: an actual announcement page, its native links, and
@@ -12,6 +12,9 @@ for (const width of [1280, 375]) {
     const web = await chrome({ name: "coworker-announcement-" + width, startUrl: origin + "/coworker", headless: true });
     try {
       await setViewport(web, { width, height: 900, deviceScaleFactor: 1 });
+      // Wait for a complete document before adding the motion fixture;
+      // streaming hydration would otherwise replace its head style.
+      await reload(web);
       // Use the standard motion fixture so pointer targeting cannot race an
       // in-flight smooth scroll and click a neighboring FAQ.
       await freezeMotion(web);
@@ -35,7 +38,8 @@ for (const width of [1280, 375]) {
       await user.click({ role: "link", text: "See how it works" });
       expect(await probe.hash()).toBe("#how");
       await user.see({ text: "Give it something real." });
-      await user.click({ text: "Does it work while my computer is off?" });
+      await user.see({ testId: "coworker-question-1" });
+      await user.click({ testId: "coworker-question-1" });
       await probe.eventually(() => probe.has("Those Cloud runs cannot read your coworker's local files or memory today."), { within: 5_000, label: "the expanded execution answer" });
       expect(await probe.text()).toContain("Those Cloud runs cannot read your coworker's local files or memory today.");
       evidence.recordAssertionEvidence("Visitors can follow the product explanation and expand the local-versus-Cloud answer", "The native explanation link reaches #how and the FAQ opens to explain execution limits.", true);
@@ -64,7 +68,7 @@ for (const width of [1280, 375]) {
     });
     await step("Discover the announcement from the main homepage", async () => {
       await user.navigate(world.origin + "/");
-      await user.click({ role: "link", text: /Meet Open Coworker/ });
+      await user.click({ role: "link", label: /Meet Open Coworker/ });
       await user.see({ text: "Introducing Open Coworker" });
       expect(await probe.text()).toContain("Signed downloads are in preparation.");
       evidence.recordAssertionEvidence("Homepage visitors can discover the Coworker announcement", "The homepage announcement link opens the real Coworker page with the same accurate early-access availability.", true);

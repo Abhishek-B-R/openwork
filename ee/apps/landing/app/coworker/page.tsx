@@ -132,8 +132,8 @@ export default function CoworkerPage() {
             <div className="mx-auto max-w-[720px]">
               <h2 className="cw-display mb-8 text-3xl">A few things to know.</h2>
               <div className="divide-y divide-[var(--cw-rule)] border-y border-[var(--cw-rule)]">
-                {FAQ.map((item) => <details key={item.question} className="group py-5">
-                  <summary className="cursor-pointer text-base font-medium">{item.question}</summary>
+                {FAQ.map((item, index) => <details key={item.question} className="group py-5">
+                  <summary data-testid={`coworker-question-${index}`} className="cursor-pointer text-base font-medium">{item.question}</summary>
                   <p className="mt-3 pr-4 text-sm leading-7 text-[var(--cw-ink-700)]">{item.text}</p>
                 </details>)}
               </div>
