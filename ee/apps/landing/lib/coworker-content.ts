@@ -16,9 +16,8 @@ export const COWORKER = {
 
 export const HERO = {
   eyebrow: "Introducing Open Coworker",
-  title: "A coworker who remembers.",
-  lead: "Give your coworker a role and something meaningful to work on. Research, write, and organize your next steps—with useful notes and documents ready when you return.",
-  aside: "Start with one coworker. Build your team as your work grows.",
+  title: "Your work. Better together.",
+  lead: "Meet your AI coworkers. A little help with the research, the first draft, and whatever comes next.",
   primary: { label: "Get early access", href: "#get-started" },
   secondary: { label: "See how it works", href: "#how" },
   strip: ["Free and open source", "Your choice of models", "Powered by OpenWork"],
@@ -26,32 +25,32 @@ export const HERO = {
 
 export const BENEFITS: Array<Claim & { title: string; name: string; role: string; example: string }> = [
   {
-    title: "Pick up where you left off.",
-    text: "Your coworker keeps useful context, working notes, and documents together. Review what it remembers and make it your own.",
+    title: "Think it through together.",
+    text: "Explore an idea, compare your options, and get another perspective when you need one.",
     name: "Scout", role: "Research",
     example: "Compare these three options and recommend one.",
-    source: "apps/coworker/electron/self-memory.mjs; apps/coworker/src/ui/memory.tsx",
+    source: "apps/coworker/src/ui/threads.tsx; apps/coworker/src/lib/documents.ts",
   },
   {
-    title: "Give it work with an outcome.",
-    text: "Turn a question into a research brief, an idea into a draft, or a recurring task into a responsibility.",
+    title: "Start from something.",
+    text: "Hand over your notes. Get a first draft back. Find the right words together.",
     name: "Editor", role: "Writing",
     example: "Turn these notes into a clear first draft.",
     source: "apps/coworker/src/ui/assignments.tsx; apps/coworker/src/lib/documents.ts; apps/coworker/src/lib/local-schedule.ts",
   },
   {
-    title: "Bring your work together.",
-    text: "Connect the apps you use through OpenWork Connect, and choose the AI models that fit your work.",
+    title: "Make room for what’s next.",
+    text: "Give a recurring task to your coworker, connect the tools it needs, and review the work as it takes shape.",
     name: "Ops", role: "Operations",
     example: "Help me turn this weekly task into a routine.",
-    source: "apps/coworker/src/lib/connect.ts; apps/coworker/src/ui/model-picker.tsx",
+    source: "apps/coworker/src/lib/connect.ts; apps/coworker/src/ui/assignments.tsx; apps/coworker/src/lib/local-schedule.ts",
   },
 ];
 
 export const STEPS: Array<Claim & { title: string }> = [
-  { title: "Choose a role.", text: "Start with research, writing, or operations. Give your coworker a name and something to help with.", source: "apps/coworker/src/ui/onboarding-team.tsx; apps/coworker/electron/team.mjs" },
-  { title: "Make something useful.", text: "Ask a question, shape a draft, or hand over an assignment. Follow the work and review the result.", source: "apps/coworker/src/ui/threads.tsx; apps/coworker/src/ui/assignments.tsx" },
-  { title: "Come back to your work.", text: "Your coworker's notes and documents are there for the next step. Keep going from what you built together.", source: "apps/coworker/electron/self-memory.mjs; apps/coworker/electron/documents.mjs" },
+  { title: "Meet your team.", text: "Start with one coworker. Give it a name, a role, and a place in your day.", source: "apps/coworker/src/ui/onboarding-team.tsx; apps/coworker/electron/team.mjs" },
+  { title: "Give it a starting point.", text: "An idea, a few notes, or a task you want help with. Start the conversation.", source: "apps/coworker/src/ui/threads.tsx; apps/coworker/src/ui/assignments.tsx" },
+  { title: "Keep things moving.", text: "Review a draft, add a thought, or set the next task. You shape what happens next.", source: "apps/coworker/src/ui/threads.tsx; apps/coworker/electron/documents.mjs" },
 ];
 
 export const MODELS = {

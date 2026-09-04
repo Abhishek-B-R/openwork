@@ -29,15 +29,19 @@ for (const width of [1280, 375]) {
     await step("Understand the product and its availability", async () => {
       await user.see({ text: "Introducing Open Coworker" });
       const text = await probe.text();
-      expect(text).toContain("remembers.");
+      expect(text).toContain("Better together.");
+      expect(text).not.toContain("A coworker who remembers");
       expect(text).toContain("Public download coming soon.");
       expect(text).not.toMatch(/\$100|first 50|24 hours|unlimited/i);
-      evidence.recordAssertionEvidence("The announcement leads with memory and accurately labels early access", "The browser shows the coworker value and upcoming public download, with no unapproved offer or unlimited usage claim.", true);
+      evidence.recordAssertionEvidence("The announcement introduces coworkers and accurately labels early access", "The browser leads with Your work. Better together. and the upcoming public download, with no unapproved offer or unlimited usage claim.", true);
     });
     await step("Follow the explanation and read the execution limits", async () => {
       await user.click({ role: "link", text: "See how it works" });
       expect(await probe.hash()).toBe("#how");
-      await user.see({ text: "Give it something real." });
+      await user.see({ text: "Pick up the conversation." });
+      expect(await probe.text()).toContain("How’s the launch brief coming along?");
+      expect(await probe.text()).toContain("Draft · Ready to review");
+      expect(await probe.text()).not.toContain("1 Worker running");
       await user.see({ testId: "coworker-question-1" });
       await user.click({ testId: "coworker-question-1" });
       await probe.eventually(() => probe.has("Those Cloud runs cannot read your coworker's local files or memory today."), { within: 5_000, label: "the expanded execution answer" });
@@ -64,6 +68,10 @@ for (const width of [1280, 375]) {
         expect(url.searchParams.has("token")).toBe(false);
       }
       expect(html).toContain("It does not grant early access to Open Coworker.");
+      expect(html).toContain("/coworker/opengraph-image");
+      const socialImage = await fetch(world.origin + "/coworker/opengraph-image", { signal: AbortSignal.timeout(30_000) });
+      expect(socialImage.status).toBe(200);
+      expect(socialImage.headers.get("content-type")).toContain("image/png");
       evidence.recordAssertionEvidence("Early access and Models have separate, truthful destinations", "Email opens a real early-access request; signup and member sign-in links preserve Models intent and campaign attribution without tokens. Membership explicitly does not grant early access.", true);
     });
     await step("Discover the announcement from the main homepage", async () => {

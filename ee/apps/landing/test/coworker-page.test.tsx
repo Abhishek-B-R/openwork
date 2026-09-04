@@ -9,8 +9,9 @@ import { BENEFITS, COWORKER, FAQ, FORBIDDEN_PHRASES, GET_STARTED, HERO, MODELS, 
 const html = renderToStaticMarkup(createElement(CoworkerPage));
 describe("/coworker announcement", () => {
   test("leads with customer value and a truthful early-access action", () => {
-    expect(html).toContain("A coworker");
-    expect(html).toContain("remembers.");
+    expect(html).toContain("Your work.");
+    expect(html).toContain("Better together.");
+    expect(html).not.toContain("A coworker who remembers");
     expect(html).toContain(HERO.lead);
     expect(html).toContain("Get early access");
     expect(html).toContain(GET_STARTED.status);
@@ -54,6 +55,10 @@ describe("/coworker announcement", () => {
     expect(html).toContain("cannot read your coworker&#x27;s local files or memory today");
     expect(html).toContain("optional paid membership");
     expect(html).toContain("Illustrative conversation.");
+    expect(html).toContain("How’s the launch brief coming along?");
+    expect(html).toContain("Launch brief");
+    expect(html).not.toContain("1 Worker running");
+    expect(html).not.toContain("Saved a working note");
   });
   test("keeps the page accessible and uses existing OpenWork identity", () => {
     expect(html).toContain("Skip to content");
