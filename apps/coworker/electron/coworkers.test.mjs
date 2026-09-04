@@ -139,6 +139,33 @@ test("the coworker contract says how to talk: short replies, depth in a document
   assert.match(agents, /documents\/index\.md/);
 });
 
+test("the coworker contract says to note where work stands before starting it and to hand long work to a Worker so it stays in the conversation", () => {
+  const agents = agentsTemplate({ name: "Nova" });
+  assert.match(agents, /## Keeping track of what I'm doing/);
+  // The note comes first, is refreshed after meaningful steps (not every tool call), and is cleared when the work ends.
+  assert.match(agents, /Before I start anything longer than a quick answer/);
+  assert.match(agents, /I first call\s+`coworker_memory_note`/);
+  assert.match(agents, /Only then do I\s+start/);
+  assert.match(agents, /After each meaningful step, finding, or\s+change of plan — not after every tool call/);
+  assert.match(agents, /never a log/);
+  assert.match(agents, /I clear its note in that same\s+turn/);
+  // A note it does not remember writing is its own, from before an interruption.
+  assert.match(agents, /my own note from\s+before an interruption/);
+  assert.match(agents, /continue from there instead of starting over/);
+  // Long work goes to a Worker so the coworker keeps answering; the app keeps the Worker's own line.
+  const workers = agents.slice(agents.indexOf("## Workers"), agents.indexOf("## My team"));
+  assert.match(workers, /so that I stay in the conversation/);
+  assert.match(workers, /more than a couple of minutes or a handful of tool steps/);
+  assert.match(workers, /anything the person may want to discuss while it runs/);
+  assert.match(workers, /Open Coworker keeps the\s+`## Now` line for each Worker itself/);
+  assert.match(workers, /so I do not write a second one/);
+  // The self-tools list points at the note tool for progress only.
+  assert.match(agents, /`coworker_memory_note` only for where a piece of work stands/);
+  // The new section sits between the talk examples and Workers, so the two rules read together.
+  assert.ok(agents.indexOf("## Keeping track of what I'm doing") > agents.indexOf("**Quick factual question.**"));
+  assert.ok(agents.indexOf("## Keeping track of what I'm doing") < agents.indexOf("## Workers"));
+});
+
 test("the coworker contract says how to work with the team: refer before doing a teammate's job, suggest sparingly, never create", () => {
   const agents = agentsTemplate({ name: "Nova" });
   assert.match(agents, /## My team/);
