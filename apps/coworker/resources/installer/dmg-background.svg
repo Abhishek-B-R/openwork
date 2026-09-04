@@ -1,24 +1,61 @@
 <svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="760" height="600" viewBox="0 0 760 600">
   <rect width="760" height="600" fill="#f3f4f6"/>
+  <defs>
+    <!-- The same glasses and silhouette as the white mark, in quiet office colors. -->
+    <symbol id="office-coworker" viewBox="0 0 128 128">
+      <path d="M26 8h65c15 0 23 10 23 26v46c0 15-8 24-23 24H57l-15 9c-5 3-10 0-10-6v-3h-5C12 104 5 95 5 80V34C5 18 12 8 26 8Z" fill="currentColor" opacity=".15" transform="translate(4 3)"/>
+      <path d="M26 8h65c15 0 23 10 23 26v46c0 15-8 24-23 24H57l-15 9c-5 3-10 0-10-6v-3h-5C12 104 5 95 5 80V34C5 18 12 8 26 8Z" fill="inherit"/>
+      <g fill="#354052">
+        <rect x="34.5" y="50" width="6" height="14" rx="3"/>
+        <rect x="79.5" y="50" width="6" height="14" rx="3"/>
+      </g>
+      <g fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="4.6">
+        <circle cx="37.5" cy="57" r="17.5"/><circle cx="82.5" cy="57" r="17.5"/>
+        <path d="M57.5 57c1.25-4 3.75-4 5 0M15 57h4.5M100.5 57h4.5"/>
+      </g>
+    </symbol>
+    <g id="office-cubicle">
+      <rect x="1" y="8" width="53" height="49" rx="3" fill="#e8edf3" stroke="#c3cddb" stroke-width=".8"/>
+      <path d="M1 8V59M54 8V59" stroke="#b5c2d3" stroke-width="1.2"/>
+      <path d="M28 45v-5m-5 5h10" fill="none" stroke="#aabbd0" stroke-width="1"/>
+      <rect x="20" y="25" width="23" height="16" rx="2" fill="#f8fafc" stroke="#b1c1d5" stroke-width=".8"/>
+      <path d="M24 30h10m-10 4h15" stroke="#d0d9e6" stroke-width="1" stroke-linecap="round"/>
+    </g>
+    <g id="office-desk">
+      <path d="M1 47h53v4H1Z" fill="#fcfdff" stroke="#c3cddb" stroke-width=".7"/>
+      <path d="M5 51v8m45-8v8" stroke="#c3cddb" stroke-width="1"/>
+      <path d="M24 44h14" stroke="#bdcadd" stroke-width="1.5" stroke-linecap="round"/>
+    </g>
+  </defs>
   <g font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Helvetica Neue', Arial, sans-serif">
     <image data-brand="white-coworker" x="30" y="20" width="48" height="48" xlink:href="../../public/open-coworker.svg"/>
     <text x="80" y="48" font-size="14" font-weight="600" letter-spacing="-.2" fill="#303744">Open Coworker</text>
     <text x="720" y="48" text-anchor="end" font-size="11.5" font-weight="450" fill="#737c8b">Local by default</text>
 
-    <!-- Quiet background cameos: coworkers already getting the desktop ready. -->
-    <g data-decoration="coworker-window" opacity=".25" transform="rotate(-7 78 131)">
-      <rect x="51" y="104" width="61" height="42" rx="6" fill="#ffffff" stroke="#a9b5c6"/>
-      <path d="M51 116h61m-47 12h22m-22 6h15" fill="none" stroke="#a9b5c6" stroke-linecap="round"/>
-      <circle cx="58" cy="110" r="1.5" fill="#a9b5c6"/>
-      <circle cx="63" cy="110" r="1.5" fill="#a9b5c6"/>
-      <image x="22" y="124" width="44" height="44" xlink:href="../../public/open-coworker.svg"/>
-      <path d="m93 129 1 16 4-5 4 7 3-2-4-7 6-1Z" fill="#a4b4cb" stroke="#f7f8fa" stroke-width="1.5" stroke-linejoin="round"/>
+    <!-- A miniature office sits quietly either side of the welcome. -->
+    <g data-decoration="tiny-office-left" opacity=".48" transform="translate(24 94) rotate(-6 55 35)">
+      <g transform="translate(0 7)">
+        <use xlink:href="#office-cubicle"/>
+        <use xlink:href="#office-coworker" x="3" y="18" width="29" height="29" fill="#bdd0ea" color="#617faa"/>
+        <use xlink:href="#office-desk"/>
+      </g>
+      <g transform="translate(56 0)">
+        <use xlink:href="#office-cubicle"/>
+        <use xlink:href="#office-coworker" x="3" y="18" width="29" height="29" fill="#d6cae7" color="#9072ad"/>
+        <use xlink:href="#office-desk"/>
+      </g>
     </g>
-    <g data-decoration="coworker-cursor" opacity=".22" transform="rotate(8 684 128)">
-      <rect x="647" y="119" width="57" height="37" rx="6" fill="#ffffff" stroke="#a9b5c6"/>
-      <path d="M647 130h57m-44 9h16m-16 6h26" fill="none" stroke="#a9b5c6" stroke-linecap="round"/>
-      <image x="681" y="89" width="42" height="42" xlink:href="../../public/open-coworker.svg"/>
-      <path d="m695 145 1 16 4-5 4 7 3-2-4-7 6-1Z" fill="#a4b4cb" stroke="#f7f8fa" stroke-width="1.5" stroke-linejoin="round"/>
+    <g data-decoration="tiny-office-right" opacity=".48" transform="translate(626 94) rotate(6 55 35)">
+      <g>
+        <use xlink:href="#office-cubicle"/>
+        <use xlink:href="#office-coworker" x="3" y="18" width="29" height="29" fill="#c1dccf" color="#548f7c"/>
+        <use xlink:href="#office-desk"/>
+      </g>
+      <g transform="translate(56 7)">
+        <use xlink:href="#office-cubicle"/>
+        <use xlink:href="#office-coworker" x="3" y="18" width="29" height="29" fill="#ecd0bc" color="#ab7f64"/>
+        <use xlink:href="#office-desk"/>
+      </g>
     </g>
 
     <text x="380" y="118" text-anchor="middle" font-size="30" font-weight="650" letter-spacing="-.9" fill="#171c26">Welcome to your new team</text>
