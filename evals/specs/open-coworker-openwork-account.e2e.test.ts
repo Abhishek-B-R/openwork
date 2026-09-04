@@ -465,6 +465,7 @@ test.skipIf(!enabled)(title, { timeout: 900_000 }, async ({ evidence }) => {
 
   // --- Mock organization model: an OpenAI-compatible endpoint that answers deterministically.
   const completionAuthorizations: string[] = [];
+  let connectedInstructionsSeen = false;
   let gatewaySearchUnavailable = false;
   const model = createServer((request, response) => {
     const url = request.url ?? "";
@@ -477,6 +478,14 @@ test.skipIf(!enabled)(title, { timeout: 900_000 }, async ({ evidence }) => {
         completionAuthorizations.push(request.headers.authorization ?? "");
         let body: unknown = null;
         try { body = JSON.parse(raw); } catch { body = null; }
+        if (isRecord(body) && Array.isArray(body.messages)) {
+          connectedInstructionsSeen ||= body.messages.some((message: unknown) => isRecord(message)
+            && message.role === "system"
+            && typeof message.content === "string"
+            && message.content.includes("## Working with connected apps")
+            && message.content.includes("search_capabilities")
+            && message.content.includes("An app being connected is not consent to every action."));
+        }
         const prompt = lastUserText(body);
         const reply = prompt.includes("SECOND") ? `SECOND ${REPLY}` : REPLY;
         const chunks = [
@@ -998,13 +1007,14 @@ test.skipIf(!enabled)(title, { timeout: 900_000 }, async ({ evidence }) => {
   await waitForText(app, "Some connected apps and skills couldn't be loaded", { timeoutMs: 60_000 });
   expect(String(await evalIn(app, `document.querySelector('[data-testid="coworker-capabilities"]')?.textContent ?? ""`))).not.toContain("Your organization has not connected any services");
   gatewaySearchUnavailable = false;
-  await clickButton(app, "Try again");
+  await new Promise((resolve) => setTimeout(resolve, 15_100));
+  await evalIn(app, `window.dispatchEvent(new Event("online")); true`);
   await waitFor(app, `!document.querySelector('[data-testid="apps-tools-connect-problem"]') && document.querySelector('button[aria-label="Refresh"]')?.disabled === false`, { timeoutMs: 60_000, label: "catalog refreshed after the outage" });
   await clickTestId(app, "apps-tools-row-connected");
   await clickTestId(app, "apps-tools-row-connections");
   await waitForText(app, "Notion", { timeoutMs: 30_000 });
   await backToActivity(app);
-  evidence.recordAssertionEvidence("Connected work starts with a task and discovery errors recover without configuration", "Task and app actions filled ordinary editable discussion drafts without a model request or app execution. An app requiring input showed no JSON editor by default; its advanced path still opened with validated input. A catalog failure showed a retry message and recovered the connection list when the service returned.", true);
+  evidence.recordAssertionEvidence("Connected work starts with a task and discovery errors recover without configuration", "Task and app actions filled ordinary editable discussion drafts without a model request or app execution. An app requiring input showed no JSON editor by default; its advanced path still opened with validated input. A catalog failure showed a retry message and going back online refreshed the connection list without a manual configuration step.", true);
 
   // --- A real discussion turn on that model, with the credential delivered by the server, not the UI.
   const prompt = `Reply with exactly ${REPLY}.`;
@@ -1023,6 +1033,7 @@ test.skipIf(!enabled)(title, { timeout: 900_000 }, async ({ evidence }) => {
   expect(String(replyModel)).toContain(MODEL_ID);
   expect(completionAuthorizations.length).toBeGreaterThanOrEqual(1);
   expect(completionAuthorizations.every((value) => value === `Bearer ${PROVIDER_API_KEY}`)).toBe(true);
+  expect(connectedInstructionsSeen).toBe(true);
   await waitFor(app, `document.querySelector('[data-testid="coworker-top-status"]')?.textContent?.trim() === "Ready"`, {
     timeoutMs: 60_000,
     label: "coworker settles to Ready after a matched reply",

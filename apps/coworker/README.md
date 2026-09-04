@@ -908,13 +908,16 @@ panel's fourth level (root → level → group → item). Its root is three flat
 rows, each with an icon, a title, one status line, a count, and a chevron:
 
 - **Connected with OpenWork** — *Connected as <org>*, *Not connected*, *Needs
-  sign-in*, *Needs setup by an admin*, *Needs attention*, or *Unavailable*,
+  sign-in*, *Needs setup by an admin*, *Needs attention*, or *Temporarily unavailable*,
   mapped from the gateway's own health (a lapsed token is a sign-in; revoked
   membership, disabled agent access, or the wrong organization needs an admin;
-  anything else offers Repair). Signed out, its screen is the OpenWork Connect
+  other failures offer **Try reconnecting** with the raw reason under Technical
+  details). Signed out, its screen is the OpenWork Connect
   explanation as a first step (Continue, Skip, "don't show this again"), then
-  the short card. Signed in, the screen leads with *Ask <coworker>* and *Create
-  a skill*, then four rows: **Apps** (gateway Apps that render inline),
+  the short card. Signed in, **Start with a task** and **Create a skill** prepare
+  plain-language discussion drafts for the person to complete and send.
+  **Manage apps** opens their Connections page; returning refreshes the catalog.
+  Four rows follow: **Apps** (gateway Apps that render inline),
   **Skills** (built in and from marketplaces, read from the gateway's skill
   index through `GET /experimental/connect/skills`), **Plugins & marketplaces**
   (each plugin lists its skills and the services it uses with their readiness in
@@ -924,14 +927,18 @@ rows, each with an icon, a title, one status line, a count, and a chevron:
   provider's own console — from the gateway's connection-status results). The
   gateway has no "list everything" call, so plugin readiness and connection
   statuses come from its search with four keyword variants, merged and cached
-  once per session and coworker; Refresh reads again. The live status always
+  per session and coworker. Refresh, returning to the app, and coming back online
+  re-read it; automatic background refreshes are throttled. Partial failures show
+  a retry message and are never cached as a complete or empty account. The live status always
   wins: a connection the catalog reached but the gateway says needs a person
   reads as the gateway says.
 - **Apps** — everything that renders inline, from any source, with a source line
-  (*OpenWork Connect* or *<tool> on this Mac*). A detail offers **Open** (the
-  App mounts in the panel through the standard MCP App host), **Open beside**
-  when the window has room, **Ask <coworker>** (a prefilled assignment), and a
-  *Technical details* fold with the source, tool, and resource.
+  (*OpenWork Connect* or *<tool> on this Mac*). An App that needs input leads
+  with **Ask <coworker> to use it**, preparing an editable discussion draft.
+  Its manual JSON editor and direct launch controls live under **Advanced input**.
+  Apps needing no input retain **Open** and **Open beside** when there is room.
+  Existing approval controls still apply. Technical details hold the source,
+  tool, and resource.
 - **Tools on this Mac** — the servers the person set up (the gateway and the
   app's own document tools are not listed), each with its state in plain words
   — *Connected*, *Not connected*, *Needs sign-in*, *Needs setup*, *Connecting*,
@@ -949,6 +956,13 @@ a level it scopes to that level with one tap to *Search everywhere*; a result
 opens its item with the trail built as if navigated. Empty levels are quiet
 lines ("Nothing set up on this Mac yet."), loading lists are skeleton rows, and
 only the root's refresh icon ever spins.
+
+A search with no match offers **Ask <coworker> to find a way**, carrying the
+person's words into a discussion draft without executing a tool. The coworker
+contract discovers relevant existing access before asking for setup, chooses
+the clear available match, asks only for material missing details, and names
+one useful recovery step when access fails. Browsing is discovery, and a
+connection never grants consent to send, publish, purchase, or change records.
 
 **Open beside** puts an App or skill detail in a column of at least 480 px next
 to the conversation while the panel returns to its list. It is offered from
