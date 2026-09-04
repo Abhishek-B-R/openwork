@@ -112,7 +112,7 @@ test("Open Coworker presents a custom, legible drag-to-Applications installer", 
   assert.equal(config.dmg.icon, "resources/icons/icon.icns");
   assert.equal(config.dmg.iconSize, 118);
   assert.equal(config.dmg.iconTextSize, 13);
-  assert.deepEqual(config.dmg.window, { width: 760, height: 500 });
+  assert.deepEqual(config.dmg.window, { width: 760, height: 600 });
   assert.deepEqual(config.dmg.contents, [
     { x: 180, y: 285 },
     { x: 580, y: 285, type: "link", path: "/Applications" },
@@ -123,10 +123,12 @@ test("Open Coworker presents a custom, legible drag-to-Applications installer", 
   assert.doesNotMatch(backgroundSvg, /(?:linear|radial)Gradient|<filter/);
   assert.equal(backgroundPng.subarray(1, 4).toString("ascii"), "PNG");
   assert.equal(backgroundPng.readUInt32BE(16), 760);
-  assert.equal(backgroundPng.readUInt32BE(20), 500);
+  assert.equal(backgroundPng.readUInt32BE(20), 600);
   const retina = await readFile(path.join(coworkerRoot, "resources", "installer", "dmg-background@2x.png"));
   assert.equal(retina.readUInt32BE(16), 1520);
-  assert.equal(retina.readUInt32BE(20), 1000);
+  assert.equal(retina.readUInt32BE(20), 1200);
+  assert.match(backgroundSvg, /data-brand="white-coworker"/);
+  assert.match(backgroundSvg, /xlink:href="\.\.\/\.\.\/public\/open-coworker\.svg"/);
   assert.match(backgroundSvg, /Launch Open Coworker from Applications/);
   assert.match(backgroundSvg, /you can eject this installer/);
   assert.equal(config.nsis.oneClick, true);

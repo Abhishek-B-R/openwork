@@ -16,15 +16,20 @@ if (process.platform !== "darwin") {
 
 const scratch = await mkdtemp(path.join(tmpdir(), "coworker-installer-"));
 try {
-  const svg = await readFile(source, "utf8");
+  const whiteMark = await readFile(path.join(coworkerRoot, "public", "open-coworker.svg"));
+  // Keep one canonical white mark. Embed it for sips, whose temporary SVG has no
+  // access to the source file's relative image paths.
+  const svg = (await readFile(source, "utf8")).replaceAll(
+    "../../public/open-coworker.svg", `data:image/svg+xml;base64,${whiteMark.toString("base64")}`,
+  );
   // Render both densities from vector source; enlarging the PNG blurs small text.
   // electron-builder combines these siblings into a multi-resolution TIFF.
   for (const scale of [1, 2]) {
     const width = 760 * scale;
-    const height = 500 * scale;
+    const height = 600 * scale;
     const scaledSource = path.join(scratch, `background-${scale}.svg`);
     const output = path.join(coworkerRoot, "resources", "installer", `dmg-background${scale === 2 ? "@2x" : ""}.png`);
-    await writeFile(scaledSource, svg.replace('width="760" height="500"', `width="${width}" height="${height}"`));
+    await writeFile(scaledSource, svg.replace('width="760" height="600"', `width="${width}" height="${height}"`));
     await execFileAsync("sips", ["-s", "format", "png", scaledSource, "--out", output]);
     const { stdout } = await execFileAsync("sips", ["-g", "pixelWidth", "-g", "pixelHeight", output]);
     if (!stdout.includes(`pixelWidth: ${width}`) || !stdout.includes(`pixelHeight: ${height}`)) {

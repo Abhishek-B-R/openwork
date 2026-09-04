@@ -58,7 +58,8 @@ dmg:
   iconTextSize: 13
   window:
     width: 760
-    height: 500
+    # Keep the final launch step visible even when Finder shows tabs/path/status bars.
+    height: 600
   contents:
     - x: 180
       y: 285
