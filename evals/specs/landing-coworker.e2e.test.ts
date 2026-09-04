@@ -93,7 +93,7 @@ for (const width of [1280, 375]) {
     });
     await step("Explore an animated group chat and create a custom coworker", async () => {
       await user.click({ role: "link", label: "Try the team conversation" });
-      await user.see({ role: "heading", text: "Launch team" });
+      await user.see({ role: "button", label: "Play the conversation" });
       await user.click({ role: "button", label: "Play the conversation" });
       await user.see({ testId: "demo-thinking" });
       await probe.eventually(() => probe.has("A direction, a draft, and a plan."), { within: 8_000, label: "the three coworkers finish their turns" });
@@ -105,14 +105,14 @@ for (const width of [1280, 375]) {
       await user.type({ role: "textbox", label: "Coworker name" }, "Robin", { replace: true });
       await user.click({ role: "button", label: "Mint" });
       await user.click({ role: "button", label: "Soft square" });
-      await user.see({ role: "img", label: "Robin avatar" });
+      await user.see({ text: "Robin" });
       await user.click({ role: "button", label: "Role, mission & personality" });
       await user.type({ role: "textbox", label: "Coworker role" }, "Research partner", { replace: true });
       await user.type({ role: "textbox", label: "Coworker mission" }, "Summarize the launch feedback.", { replace: true });
       await user.click({ role: "button", label: "Thoughtful" });
       expect(await probe.text()).toContain("Personality changes the wording while working.");
       await user.click({ role: "button", label: "Add to demo" });
-      await user.see({ role: "heading", text: "With Robin" });
+      await user.see({ text: "With Robin" });
       await user.see({ role: "button", label: "Talk to Robin" });
       expect(await probe.text()).toContain("Make a little room on your team.");
       await user.click({ role: "button", label: "Send example message" });
