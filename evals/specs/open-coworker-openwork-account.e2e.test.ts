@@ -1021,7 +1021,7 @@ test.skipIf(!enabled)(title, { timeout: 900_000 }, async ({ evidence }) => {
   expect(membershipText).toContain("75% left");
   expect(membershipText).toContain("Waiting for refreshed usage");
   expect(membershipText).toContain("Manage membership");
-  expect(membershipText).not.toMatch(/\$100|24 hours|first 50|Astra/);
+  expect(membershipText).not.toMatch(/free credits|launch offer|limited offer|guaranteed faster/);
   expect(denRequests.filter((entry) => entry.path === "/v1/inference").every((entry) => entry.authorization === `Bearer ${SESSION_TOKEN}` && entry.org === ORG_ID)).toBe(true);
   membershipResponse = "unavailable";
   await clickButton(app, "Refresh membership & models");

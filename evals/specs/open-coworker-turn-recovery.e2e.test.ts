@@ -522,7 +522,7 @@ test.skipIf(!enabled)(title, { timeout: 900_000 }, async ({ evidence }) => {
   expect(freeCard.headline).toBe("The free model is busy right now.");
   expect(String(freeCard.text)).toContain("The free model's shared usage limit was reached.");
   expect(String(freeCard.text)).toContain("OpenWork Models membership and your own AI providers");
-  expect(String(freeCard.text)).not.toMatch(/faster|\$100|few minutes/);
+  expect(String(freeCard.text)).not.toMatch(/faster|free credits|few minutes/);
   expect(String(freeCard.text)).toContain("Switching models is your choice.");
   expect(freeCard.technicalShown).toBe(true);
   // The plain explanation is separate from the bounded technical reason.
