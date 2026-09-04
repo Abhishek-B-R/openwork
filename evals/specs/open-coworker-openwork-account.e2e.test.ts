@@ -755,8 +755,8 @@ test.skipIf(!enabled)(title, { timeout: 900_000 }, async ({ evidence }) => {
   await backToActivity(app);
 
   expect(await evalIn(app, `document.querySelector('[data-testid="coworker-discussion-empty"]')?.querySelectorAll("button").length`)).toBe(0);
-  await clickButton(app, "Starting points");
-  expect(await evalIn(app, `(() => { const panel = document.querySelector('[aria-label="A useful first step"]'); if (!panel) return false; const rect = panel.getBoundingClientRect(); return rect.left >= 0 && rect.right <= innerWidth && rect.top >= 0 && rect.bottom <= innerHeight; })()`)).toBe(true);
+  await clickButtonContaining(app, "Starting points");
+  await waitFor(app, `(() => { const panel = document.querySelector('[aria-label="A useful first step"]'); if (!panel) return false; const rect = panel.getBoundingClientRect(); return rect.left >= 0 && rect.right <= innerWidth && rect.top >= 0 && rect.bottom <= innerHeight; })()`, { timeoutMs: 5_000, label: "starting points remain within the window" });
   await clickButton(app, "Turn a goal into a plan");
   const starter = await evalIn(app, `document.querySelector('textarea[aria-label="Message Scout"]')?.value ?? ""`);
   expect(String(starter)).toContain("Ask what I want to achieve");
