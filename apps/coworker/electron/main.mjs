@@ -15,7 +15,8 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { BrowserWindow, Menu, app, dialog, ipcMain, shell } from "electron";
+import { BrowserWindow, Menu, app, dialog, ipcMain, nativeTheme, shell } from "electron";
+import { bindWindowAppearance } from "./window-appearance.mjs";
 import { openworkConfigDir } from "@openwork/paths";
 import { createHeadlessThreadClient, toTranscript } from "@openwork/headless-threads";
 import { cloudModelOptions, resolveCloudModel } from "../src/lib/cloud-responsibilities.ts";
@@ -2172,16 +2173,15 @@ function rendererUrl() {
 async function createMainWindow() {
   const macWindowChrome = process.platform === "darwin"
     ? {
-        backgroundColor: "#00000000",
         hasShadow: true,
         titleBarStyle: "hiddenInset",
         trafficLightPosition: { x: 18, y: 18 },
-        transparent: true,
-        vibrancy: "under-window",
-        visualEffectState: "active",
+        visualEffectState: "followWindow",
       }
     : { backgroundColor: "#090c12" };
   const window = new BrowserWindow({
+    show: false,
+    backgroundColor: "#090c12",
     width: 1280,
     height: 860,
     minWidth: 960,
@@ -2197,6 +2197,8 @@ async function createMainWindow() {
       backgroundThrottling: false,
     },
   });
+  bindWindowAppearance(window, nativeTheme);
+  window.once("ready-to-show", () => window.show());
   window.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https?:\/\//i.test(url)) void confirmAndOpenExternal(url);
     return { action: "deny" };
@@ -2240,6 +2242,8 @@ if (!singleInstanceLock) {
   });
 
   app.whenReady().then(async () => {
+    // Coworker's dark palette also applies to OS-drawn menus and window materials.
+    nativeTheme.themeSource = "dark";
     if (process.platform === "darwin" && existsSync(APP_ICON_PATH)) app.dock.setIcon(APP_ICON_PATH);
     installApplicationMenu();
     registerIpc();

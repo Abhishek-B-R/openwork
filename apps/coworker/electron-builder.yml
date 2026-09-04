@@ -77,3 +77,14 @@ win:
   icon: resources/icons/icon.ico
   target:
     - nsis
+nsis:
+  oneClick: true
+  perMachine: false
+  installerIcon: resources/icons/icon.ico
+  uninstallerIcon: resources/icons/icon.ico
+  installerHeaderIcon: resources/icons/icon.ico
+  shortcutName: Open Coworker
+  uninstallDisplayName: Open Coworker
+  createDesktopShortcut: false
+  runAfterFinish: true
+  deleteAppDataOnUninstall: false
