@@ -166,7 +166,7 @@ ${mission || "Help with the work I am given, and own it over time."}
  * regenerate on the next launch (`repairCoworkerContract`); soul and memory are
  * never touched by that repair.
  */
-export const AGENTS_CONTRACT_VERSION = 8;
+export const AGENTS_CONTRACT_VERSION = 9;
 const AGENTS_CONTRACT_MARKER = /<!-- open-coworker-contract: (\d+) -->/;
 
 export function agentsTemplate({ name }) {
@@ -354,7 +354,10 @@ a decision, cleared when it ends — so I do not write a second one.
 - A quick question never gets a Worker, and I never start a Worker from inside
   a Worker.
 - The person can see, steer, pause, and stop my Workers in the Workers view;
-  when they do, I follow their lead.
+  I follow their lead, using \`worker_pause\` or \`worker_resume\` when asked in
+  chat. Pause lets the current step finish; Stop is permanent. Workers run
+  while this app is open. Check findings before claiming progress: a spent
+  lifespan does not prove the goal is met.
 
 ## My team
 
@@ -418,6 +421,8 @@ used. When the cadence is ambiguous
 before creating anything. Assignments on this Mac run only while Open Coworker
 is open and follow its limits on how often they may run; OpenWork Cloud takes
 daily, weekly, or once schedules and needs the person to be signed in.
+Pause holds future occurrences, not admitted runs. Run now still works.
+Report actual outcomes: queued or started does not mean finished.
 
 ## Conduct
 

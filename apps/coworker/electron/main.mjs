@@ -98,8 +98,6 @@ import { resolveBundledOpencodeBinary, resolveUserDataDir } from "./runtime-path
 import { noteProgress, readChanges, trackChange, undoChange, writeTrackedFile } from "./self-memory.mjs";
 import { SETTINGS_FILE, readSettings, scheduleGuardrails, updateSettings } from "./settings.mjs";
 import {
-  BEGIN_BODY,
-  CONTINUE_BODY,
   RECOVERED_STATUS,
   appendWorkerEvent,
   createReviewScheduler,
@@ -111,15 +109,16 @@ import {
   listWorkers,
   nextWorkerState,
   parseWorkerReport,
+  prepareWorkerTurn,
+  queueWorkerSteer,
   readWorkerEvents,
   registerWorkerThread,
   reviewPrompt,
-  steerBody,
   updateWorker,
   workerProgressNote,
   workerThreadTitle,
   workerToolCatalog,
-  workerTurnPrompt,
+  workerTurnTools,
 } from "./workers.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -631,29 +630,32 @@ async function executeLocalResponsibility(
     // The run record is on disk: admission can answer, and the UI can read a consistent state.
     onStarted();
     const activeRunId = started.latestRun.id;
+    let client;
+    let threadId = resumeThreadId;
     try {
       const handle = await ensurePlatformServer();
       if (!handle.managedOpencode) throw new Error(engineError || "AI is unavailable on this Mac");
-      const client = createHeadlessThreadClient({
+      client = createHeadlessThreadClient({
         baseUrl: handle.url,
         workspaceId: coworker.workspaceId,
         token: ownerToken,
         defaultModel: await localRunModel(coworker, "assignment-run"),
       });
-      let threadId = resumeThreadId;
       let acceptance;
       if (threadId) {
         acceptance = await client.sendTurn(threadId, { prompt: RESUME_PROMPT(started.name, resumeReason) });
       } else {
-        const thread = await client.createThread({ title: started.name, prompt: started.instructions });
+        const thread = await client.createThread({ title: started.name });
         threadId = thread.id;
         await attachLocalResponsibilityThread(coworkersDir, slug, id, activeRunId, threadId);
+        acceptance = await client.sendTurn(threadId, { prompt: started.instructions });
       }
       const result = await client.waitForThread(threadId, {
         timeoutMs: 60 * 60_000,
         pollIntervalMs: 1_000,
         ...(acceptance ? { since: acceptance } : {}),
       });
+      if (result.outcome === "timeout") await client.abortThread(threadId);
       const succeeded = result.outcome === "settled" && !result.terminalError;
       await finishLocalResponsibilityRun(coworkersDir, slug, id, activeRunId, {
         status: succeeded ? "succeeded" : "failed",
@@ -663,6 +665,7 @@ async function executeLocalResponsibility(
         summary: await readRunSummary(client, threadId),
       });
     } catch (error) {
+      if (client && threadId) await client.abortThread(threadId).catch(() => undefined);
       await finishLocalResponsibilityRun(coworkersDir, slug, id, activeRunId, {
         status: "failed",
         error: error instanceof Error ? error.message : String(error),
@@ -707,6 +710,12 @@ function startLocalResponsibilityRun(slug, id, trigger) {
     const key = `${slug}:${id}`;
     if (activeLocalRuns.has(key)) return { accepted: false, queued: false, reason: "running" };
     if (isQueued(key)) return { accepted: false, queued: true, reason: "queued" };
+    if (trigger === "scheduled" || trigger === "recovery") {
+      const current = (await listLocalResponsibilities(coworkersDir, slug)).find((item) => item.id === id);
+      if (!current || current.state !== "active" || !current.nextDueAt || current.nextDueAt > Date.now()) {
+        return { accepted: false, queued: false, reason: "not due" };
+      }
+    }
     const limit = await parallelRunLimit();
     if (activeLocalRuns.size >= limit) {
       const queued = await queueLocalResponsibilityRun(coworkersDir, slug, id, { trigger });
@@ -736,13 +745,15 @@ function resumeLocalResponsibilityRun(slug, id) {
   });
 }
 
-async function cancelQueuedLocalResponsibilityRun(slug, id) {
-  const entry = removeQueuedRun(`${slug}:${id}`);
-  const items = await listLocalResponsibilities(coworkersDir, slug);
-  const record = items.find((item) => item.id === id);
-  const queuedRun = entry?.runId ?? record?.runs.find((run) => run.status === "queued")?.id ?? "";
-  if (queuedRun) await cancelQueuedLocalRun(coworkersDir, slug, id, queuedRun);
-  return { ok: true };
+function cancelQueuedLocalResponsibilityRun(slug, id) {
+  return admitLocalRun(async () => {
+    const entry = removeQueuedRun(`${slug}:${id}`);
+    const items = await listLocalResponsibilities(coworkersDir, slug);
+    const record = items.find((item) => item.id === id);
+    const queuedRun = entry?.runId ?? record?.runs.find((run) => run.status === "queued")?.id ?? "";
+    if (queuedRun) await cancelQueuedLocalRun(coworkersDir, slug, id, queuedRun);
+    return { ok: true };
+  });
 }
 
 /** Start queued runs, oldest first, while slots are free. */
@@ -775,8 +786,6 @@ function localRunStatus(limit) {
 
 /** Worker turns in flight in this process: `slug:wrk_…` → controller that cancels the wait. */
 const liveWorkerTurns = new Map();
-/** Steering that arrived while a turn ran or the Worker waited; delivered as its next turn. */
-const pendingWorkerSteers = new Map();
 let workersRecovered = false;
 const REVIEW_IDLE_WAIT_MS = 5 * 60_000;
 const REVIEW_TURN_TIMEOUT_MS = 15 * 60_000;
@@ -843,11 +852,12 @@ function admitWorkerTurn(slug, id) {
     const key = workerKey(slug, id);
     if (activeLocalRuns.has(key) || isQueued(key)) return;
     const worker = await getWorker(coworkersDir, slug, id).catch(() => null);
-    if (!worker || isWorkerFinished(worker) || worker.status === "paused") return;
+    if (!worker || isWorkerFinished(worker) || worker.status === "paused" || (worker.waitingFor === "decision" && worker.pendingSteers.length === 0)) return;
     const limit = await parallelRunLimit();
     if (activeLocalRuns.size >= limit) {
       queuedLocalRuns.push({ key, slug, id, runId: "", launch: () => launchWorkerTurn(slug, id) });
-      await updateWorker(coworkersDir, slug, id, { status: "waiting", waitingFor: "turn" }).catch(() => undefined);
+      const queued = await updateWorker(coworkersDir, slug, id, (current) => isWorkerFinished(current) || current.status === "paused" ? null : { status: "waiting", waitingFor: "turn" });
+      if (isWorkerFinished(queued) || queued.status === "paused") removeQueuedRun(key);
       return;
     }
     activeLocalRuns.add(key);
@@ -882,7 +892,11 @@ async function executeWorkerTurn(slug, id, { onStarted }) {
         onStarted();
         return;
       }
-      worker = await updateWorker(coworkersDir, slug, id, { status: "running", waitingFor: "" });
+      worker = await prepareWorkerTurn(coworkersDir, slug, id, coworker.name);
+      if (worker.status !== "running") {
+        onStarted();
+        return;
+      }
     } catch (error) {
       console.warn(`[open-coworker] Worker ${key} did not start a turn`, error);
       onStarted();
@@ -891,33 +905,37 @@ async function executeWorkerTurn(slug, id, { onStarted }) {
     onStarted();
     const controller = new AbortController();
     liveWorkerTurns.set(key, controller);
+    let client;
+    let threadId = worker.threadId;
     try {
-      const client = await readyWorkerClient(coworker);
-      const steers = pendingWorkerSteers.get(key) ?? [];
-      pendingWorkerSteers.delete(key);
-      const body = steers.length > 0 ? steerBody(steers, coworker.name) : worker.threadId ? CONTINUE_BODY : BEGIN_BODY;
-      const prompt = workerTurnPrompt({ worker, coworkerName: coworker.name, body });
-      let threadId = worker.threadId;
-      let acceptance;
-      if (threadId) {
-        acceptance = await client.sendTurn(threadId, { prompt, signal: controller.signal });
-      } else {
-        const thread = await client.createThread({ title: workerThreadTitle(worker.name), prompt, signal: controller.signal });
+      client = await readyWorkerClient(coworker);
+      if (!threadId) {
+        // Link an empty thread before admitting work. A quit or stop during
+        // creation cannot leave an executing thread without a Worker record.
+        const thread = await client.createThread({ title: workerThreadTitle(worker.name), signal: controller.signal });
         threadId = thread.id;
         await registerWorkerThread(coworkersDir, slug, threadId);
         await updateWorker(coworkersDir, slug, id, { threadId });
       }
+      if (isWorkerFinished(await getWorker(coworkersDir, slug, id))) {
+        controller.abort();
+        return;
+      }
+      const acceptance = await client.sendTurn(threadId, { ...worker.pendingTurn, tools: workerTurnTools(), signal: controller.signal });
       const result = await client.waitForThread(threadId, {
-        timeoutMs: WORKER_TURN_TIMEOUT_MS,
+        timeoutMs: worker.lifespan.kind === "until" ? Math.max(1, Math.min(WORKER_TURN_TIMEOUT_MS, worker.lifespan.at - Date.now())) : WORKER_TURN_TIMEOUT_MS,
         pollIntervalMs: 1_000,
         signal: controller.signal,
-        ...(acceptance ? { since: acceptance } : {}),
+        since: acceptance,
       });
       // Stopped while it ran: the stop already recorded itself.
       if (controller.signal.aborted) return;
+      if (result.outcome === "timeout") await client.abortThread(threadId);
       const settled = result.outcome === "settled" && !result.terminalError;
       const outcome = settled
         ? { kind: "settled", report: parseWorkerReport(toTranscript(result.snapshot).finalAssistantText) }
+        : result.outcome === "timeout" && lifespanSpent(worker.lifespan)
+          ? { kind: "settled", report: { kind: "none", text: "" } }
         : {
             kind: "failed",
             error: result.terminalError?.message
@@ -926,9 +944,13 @@ async function executeWorkerTurn(slug, id, { onStarted }) {
       continueAfter = await settleWorkerTurn(slug, id, outcome);
     } catch (error) {
       if (!controller.signal.aborted) {
+        if (client && threadId) await client.abortThread(threadId).catch(() => undefined);
         continueAfter = await settleWorkerTurn(slug, id, { kind: "failed", error: error instanceof Error ? error.message : String(error) });
       }
     } finally {
+      // Cancelling the HTTP wait alone does not stop native execution. This
+      // also covers Stop arriving while the first thread was being created.
+      if (controller.signal.aborted && client && threadId) await client.abortThread(threadId).catch(() => undefined);
       liveWorkerTurns.delete(key);
     }
   } finally {
@@ -941,18 +963,17 @@ async function executeWorkerTurn(slug, id, { onStarted }) {
 
 /** Record what a settled turn meant and wake the coworker for anything it reported; returns whether to take another turn. */
 async function settleWorkerTurn(slug, id, outcome) {
-  const key = workerKey(slug, id);
   const now = Date.now();
-  let current;
+  let step;
+  let updated;
   try {
-    current = await getWorker(coworkersDir, slug, id);
+    updated = await updateWorker(coworkersDir, slug, id, (current) => {
+      step = nextWorkerState(current, outcome, { now, hasPendingSteer: current.pendingSteers.length > 0 });
+      return { ...step.patch, pendingTurn: null };
+    }, { now });
   } catch {
     return false;
   }
-  const step = nextWorkerState(current, outcome, { now, hasPendingSteer: (pendingWorkerSteers.get(key) ?? []).length > 0 });
-  const updated = Object.keys(step.patch).length > 0
-    ? await updateWorker(coworkersDir, slug, id, step.patch, { now }).catch(() => current)
-    : current;
   let latestFinding = null;
   for (const event of step.events) {
     const recorded = await appendWorkerEvent(coworkersDir, slug, id, event, { now }).catch(() => null);
@@ -970,21 +991,9 @@ async function settleWorkerTurn(slug, id, outcome) {
 }
 
 async function steerWorker(slug, id, text, by) {
-  const message = String(text ?? "").trim();
-  if (!message) throw new Error("Say what the Worker should do differently.");
-  const key = workerKey(slug, id);
-  const worker = await getWorker(coworkersDir, slug, id);
-  if (isWorkerFinished(worker)) throw new Error("This Worker has already stopped.");
-  await appendWorkerEvent(coworkersDir, slug, id, { kind: "steer", text: message, by });
-  const steers = pendingWorkerSteers.get(key) ?? [];
-  steers.push({ by, text: message });
-  pendingWorkerSteers.set(key, steers);
-  const updated = await updateWorker(coworkersDir, slug, id, {
-    steerCount: worker.steerCount + 1,
-    ...(worker.status === "waiting" ? { waitingFor: "turn" } : {}),
-  });
+  const updated = await queueWorkerSteer(coworkersDir, slug, id, text, by);
   // A waiting Worker takes the steer as its next turn now; a running one when its turn settles; a paused one when resumed.
-  if (worker.status === "waiting" || worker.status === "starting") void admitWorkerTurn(slug, id);
+  if (updated.status === "waiting" || updated.status === "starting") void admitWorkerTurn(slug, id);
   return updated;
 }
 
@@ -993,8 +1002,7 @@ async function cancelWorker(slug, id, reason, by) {
   const worker = await getWorker(coworkersDir, slug, id);
   if (isWorkerFinished(worker)) return worker;
   removeQueuedRun(key);
-  pendingWorkerSteers.delete(key);
-  const updated = await updateWorker(coworkersDir, slug, id, { status: "cancelled" });
+  const updated = await updateWorker(coworkersDir, slug, id, { status: "cancelled", pendingSteers: [], pendingTurn: null });
   const why = String(reason ?? "").trim();
   await appendWorkerEvent(coworkersDir, slug, id, { kind: "status", text: why ? `Stopped: ${why}` : "Stopped", by });
   await syncWorkerNote(slug, updated);
@@ -1009,7 +1017,7 @@ async function cancelWorker(slug, id, reason, by) {
   return updated;
 }
 
-async function pauseWorker(slug, id) {
+async function pauseWorker(slug, id, by = "person") {
   const worker = await getWorker(coworkersDir, slug, id);
   if (isWorkerFinished(worker)) throw new Error("This Worker has already stopped.");
   if (worker.status === "paused") return worker;
@@ -1018,16 +1026,17 @@ async function pauseWorker(slug, id) {
   await appendWorkerEvent(coworkersDir, slug, id, {
     kind: "status",
     text: worker.status === "running" ? "Paused; it finishes its current step first." : "Paused",
+    by,
   });
   await syncWorkerNote(slug, updated);
   return updated;
 }
 
-async function resumeWorker(slug, id) {
+async function resumeWorker(slug, id, by = "person") {
   const worker = await getWorker(coworkersDir, slug, id);
   if (worker.status !== "paused") return worker;
   const updated = await updateWorker(coworkersDir, slug, id, { status: "waiting", waitingFor: "turn" });
-  await appendWorkerEvent(coworkersDir, slug, id, { kind: "status", text: "Resumed" });
+  await appendWorkerEvent(coworkersDir, slug, id, { kind: "status", text: "Resumed", by });
   await syncWorkerNote(slug, updated);
   void admitWorkerTurn(slug, id);
   return updated;
@@ -1112,17 +1121,21 @@ async function runDueLocalResponsibilities() {
   });
   const coworkers = await listCoworkers(coworkersDir);
   for (const coworker of coworkers) {
-    const responsibilities = await reconcileInterruptedLocalRuns(coworkersDir, coworker.slug, {
-      activeRunIds: activeLocalRunIds(coworker.slug),
-      now,
+    const responsibilities = await admitLocalRun(async () => {
+      const items = await reconcileInterruptedLocalRuns(coworkersDir, coworker.slug, {
+        activeRunIds: activeLocalRunIds(coworker.slug),
+        now,
+      });
+      for (const item of items) {
+        const key = `${coworker.slug}:${item.id}`;
+        const persistedQueue = item.runs.find((run) => run.status === "queued");
+        if (persistedQueue && !activeLocalRuns.has(key) && !isQueued(key)) {
+          queuedLocalRuns.push(queuedResponsibilityRun(coworker.slug, item.id, persistedQueue.id));
+        }
+      }
+      return items;
     }).catch(() => []);
     for (const responsibility of responsibilities) {
-      const key = `${coworker.slug}:${responsibility.id}`;
-      // A run queued in an earlier process (quit before its turn) waits in line again.
-      const persistedQueue = responsibility.runs.find((run) => run.status === "queued");
-      if (persistedQueue && !activeLocalRuns.has(key) && !isQueued(key)) {
-        queuedLocalRuns.push(queuedResponsibilityRun(coworker.slug, responsibility.id, persistedQueue.id));
-      }
       if (responsibility.state !== "active" || !responsibility.nextDueAt || responsibility.nextDueAt > now) continue;
       const trigger = now - responsibility.nextDueAt > 30_000 ? "recovery" : "scheduled";
       await startLocalResponsibilityRun(coworker.slug, responsibility.id, trigger);
@@ -1261,6 +1274,8 @@ async function ensureToolsServer() {
         spawn: (slug, input) => spawnWorker(slug, input, "coworker"),
         steer: (slug, id, text) => steerWorker(slug, id, text, "coworker"),
         cancel: (slug, id, reason) => cancelWorker(slug, id, reason, "coworker"),
+        pause: (slug, id) => pauseWorker(slug, id, "coworker"),
+        resume: (slug, id) => resumeWorker(slug, id, "coworker"),
       }),
       ...createAssignmentToolHandlers({
         coworkersDir,

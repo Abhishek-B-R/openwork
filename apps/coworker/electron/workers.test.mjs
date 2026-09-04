@@ -24,6 +24,8 @@ import {
   normalizeLifespan,
   parseEvents,
   parseWorkerReport,
+  prepareWorkerTurn,
+  queueWorkerSteer,
   readWorkerEvents,
   readWorkerRegistry,
   registerWorkerThread,
@@ -240,6 +242,44 @@ test("a settled turn decides whether the worker continues, holds, or stops", () 
   assert.deepEqual(nextWorkerState({ ...base, status: "cancelled" }, { kind: "settled", report: { kind: "done", text: "x" } }, { now: NOW }), { patch: {}, events: [], schedule: "stop" });
 });
 
+test("steering and an admitted turn survive rereads, while pause and stop win settlement", async () => {
+  const coworkersDir = await fixture();
+  const worker = await createWorker(coworkersDir, "scout", { name: "Scan", goal: "Compare sources.", spawnedBy: "person" });
+  await updateWorker(coworkersDir, "scout", worker.id, { status: "paused" });
+  await Promise.all([
+    queueWorkerSteer(coworkersDir, "scout", worker.id, "Use source A.", "person"),
+    queueWorkerSteer(coworkersDir, "scout", worker.id, "Skip source B.", "coworker"),
+  ]);
+  const paused = await getWorker(coworkersDir, "scout", worker.id);
+  assert.equal(paused.steerCount, 2);
+  assert.equal(paused.pendingSteers.length, 2);
+  assert.equal((await prepareWorkerTurn(coworkersDir, "scout", worker.id, "Scout")).pendingTurn, null);
+  await updateWorker(coworkersDir, "scout", worker.id, { status: "waiting", waitingFor: "turn" });
+  const admitted = await prepareWorkerTurn(coworkersDir, "scout", worker.id, "Scout");
+  assert.match(admitted.pendingTurn.prompt, /Use source A/);
+  assert.match(admitted.pendingTurn.prompt, /Skip source B/);
+  assert.equal(admitted.pendingSteers.length, 0);
+  await queueWorkerSteer(coworkersDir, "scout", worker.id, "Include source C next.", "person");
+  const recovered = await prepareWorkerTurn(coworkersDir, "scout", worker.id, "Scout");
+  assert.deepEqual(recovered.pendingTurn, admitted.pendingTurn, "recovery observes the same admitted message");
+  assert.equal(recovered.pendingSteers.length, 1, "later steering belongs to the next step");
+  let step;
+  const [, settled] = await Promise.all([
+    updateWorker(coworkersDir, "scout", worker.id, { status: "paused" }),
+    updateWorker(coworkersDir, "scout", worker.id, (current) => {
+      step = nextWorkerState(current, { kind: "settled", report: { kind: "finding", text: "Sources compared." } });
+      return { ...step.patch, pendingTurn: null };
+    }),
+  ]);
+  assert.equal(settled.status, "paused");
+  assert.equal(step.schedule, "hold");
+  assert.equal(settled.lifespan.used, 1);
+  assert.equal(settled.pendingSteers.length, 1);
+  await updateWorker(coworkersDir, "scout", worker.id, { status: "cancelled", pendingSteers: [] });
+  assert.equal((await prepareWorkerTurn(coworkersDir, "scout", worker.id, "Scout")).status, "cancelled");
+  await assert.rejects(queueWorkerSteer(coworkersDir, "scout", worker.id, "One more.", "person"), /already stopped/);
+});
+
 test("the working-memory line for a Worker follows it from start to finding to decision and clears when it ends", () => {
   const base = { id: "wrk_a", name: "Market scan", goal: "Watch the three competitors' pricing pages and report any change.", status: "starting", waitingFor: "", lifespan: { kind: "turns", max: 10, used: 0 } };
   // Keyed by the Worker's name so it never collides with the coworker's own notes.
@@ -369,7 +409,7 @@ test("reviews run at once for the first finding, batch inside the window, and re
 
 test("the worker tool catalog sits beside the document tools with strict schemas and plain descriptions", () => {
   const names = workerToolCatalog().map((tool) => tool.name);
-  assert.deepEqual(names, ["workers_list", "worker_spawn", "worker_steer", "worker_cancel", "worker_findings"]);
+  assert.deepEqual(names, ["workers_list", "worker_spawn", "worker_steer", "worker_pause", "worker_resume", "worker_cancel", "worker_findings"]);
   const all = [...toolCatalog(), ...workerToolCatalog()];
   assert.equal(new Set(all.map((tool) => tool.name)).size, all.length);
   for (const tool of workerToolCatalog()) {
@@ -405,6 +445,8 @@ test("the coworker starts, lists, steers, reads, and stops Workers through its o
       await appendWorkerEvent(coworkersDir, slug, id, { kind: "status", text: `Stopped: ${reason}`, by: "coworker" }, { now: NOW + 2 });
       return updateWorker(coworkersDir, slug, id, { status: "cancelled" }, { now: NOW + 2 });
     },
+    pause: (slug, id) => updateWorker(coworkersDir, slug, id, { status: "paused" }),
+    resume: (slug, id) => updateWorker(coworkersDir, slug, id, { status: "waiting", waitingFor: "turn" }),
     now: () => NOW,
   });
   const server = await createCoworkerToolsServer({
@@ -445,6 +487,13 @@ test("the coworker starts, lists, steers, reads, and stops Workers through its o
     const steered = await call("worker_steer", { id, text: "Skip vendor C." });
     assert.match(steered.content[0].text, /^Steered "Market scan"; it takes that as its next step once its current step settles\./);
     assert.deepEqual(calls[1], ["steer", "scout", id, "Skip vendor C."]);
+
+    const paused = await call("worker_pause", { id });
+    assert.equal(paused.structuredContent.worker.status, "paused");
+    assert.match(paused.content[0].text, /current step can finish/);
+    const resumed = await call("worker_resume", { id });
+    assert.equal(resumed.structuredContent.worker.status, "waiting");
+    await updateWorker(coworkersDir, "scout", id, { status: "running", waitingFor: "" });
 
     await appendWorkerEvent(coworkersDir, "scout", id, { kind: "finding", report: "finding", text: "Prices rose 3%." }, { now: NOW + 3 });
     const findings = await call("worker_findings", { id, limit: 5 });

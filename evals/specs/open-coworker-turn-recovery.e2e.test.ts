@@ -52,7 +52,7 @@ const CUT_PROMPT = "CUT: hold until the app closes.";
 const CUT_REPLY = "Continued after the cut.";
 const DEFAULT_REPLY = "Okay.";
 
-type Recorded = { model: string; prompt: string; at: number };
+type Recorded = { model: string; prompt: string; at: number; tools: string[] };
 
 function json(value: unknown): string {
   const serialized = JSON.stringify(value);
@@ -148,8 +148,9 @@ function refuse(response: ServerResponse, status: number, message: string, type:
 /** Prompts whose reply is being held on purpose right now; the journey holds and releases them around a stop. */
 const holding = new Set<string>();
 
-async function startScriptedModel(): Promise<{ baseUrl: string; requests: Recorded[]; countFor: (prompt: string) => number; hold: (key: string) => void; release: (key: string) => void }> {
+async function startScriptedModel(): Promise<{ baseUrl: string; requests: Recorded[]; countFor: (prompt: string) => number; hold: (key: string) => void; release: (key: string) => void; controlWorker: (id: string) => void }> {
   const requests: Recorded[] = [];
+  let controlledWorker = "";
   const seen = new Map<string, number>();
   const countFor = (prompt: string) => requests.filter((request) => request.prompt.includes(prompt)).length;
   const server = createServer((request, response) => {
@@ -165,10 +166,28 @@ async function startScriptedModel(): Promise<{ baseUrl: string; requests: Record
         try { body = JSON.parse(raw); } catch { body = null; }
         const model = isRecord(body) && typeof body.model === "string" ? body.model : FIRST_MODEL;
         const prompt = lastUserText(body);
-        requests.push({ model, prompt, at: Date.now() });
+        const tools = isRecord(body) && Array.isArray(body.tools) ? body.tools.flatMap((tool) => isRecord(tool) && isRecord(tool.function) && typeof tool.function.name === "string" ? [tool.function.name] : []) : [];
+        requests.push({ model, prompt, at: Date.now(), tools });
         const key = prompt.split(":")[0] ?? prompt;
         const nth = (seen.get(key) ?? 0) + 1;
         seen.set(key, nth);
+        if (prompt === "Pause the background check for now." || prompt === "Resume the background check.") {
+          const pause = prompt.startsWith("Pause");
+          const last = isRecord(body) && Array.isArray(body.messages) ? body.messages.at(-1) : null;
+          if (isRecord(last) && last.role === "tool") return streamReply(response, model, pause ? "The background check is paused." : "The background check is resumed.");
+          response.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache" });
+          response.write(chunk(model, { role: "assistant", tool_calls: [{ index: 0, id: pause ? "pause-background" : "resume-background", type: "function", function: { name: pause ? "coworker_worker_pause" : "coworker_worker_resume", arguments: JSON.stringify({ id: controlledWorker }) } }] }, null));
+          response.write(chunk(model, {}, "tool_calls"));
+          response.end("data: [DONE]\n\n");
+          return;
+        }
+        if (prompt.startsWith("You are a Worker") && prompt.includes("BACKGROUND_RELIABILITY")) {
+          if (prompt.includes("KEEP THIS STEERING")) return streamReply(response, model, "## Done\nKept the steering after restart.");
+          return holdThenReply(response, model, "## Finding\nFirst bounded step complete.", 30_000);
+        }
+        if (prompt.startsWith("You are a Worker") && prompt.includes("BACKGROUND_INTERRUPTED")) {
+          return holdThenReply(response, model, "## Finding\nThis interrupted reply should not be replayed.", 180_000);
+        }
         if (model === SECOND_MODEL) return streamReply(response, model, SECOND_MODEL_REPLY);
         if (prompt.includes("TRANSIENT")) {
           if (nth <= TRANSIENT_REFUSALS) return refuse(response, 429, "Rate limit exceeded, try again later", "rate_limit_error", { "retry-after": "1" });
@@ -199,7 +218,7 @@ async function startScriptedModel(): Promise<{ baseUrl: string; requests: Record
   });
   const address = server.address();
   if (!address || typeof address === "string") throw new Error("Scripted model did not bind a TCP port.");
-  return { baseUrl: `http://127.0.0.1:${address.port}/v1`, requests, countFor, hold: (key) => holding.add(key), release: (key) => holding.delete(key) };
+  return { baseUrl: `http://127.0.0.1:${address.port}/v1`, requests, countFor, hold: (key) => holding.add(key), release: (key) => holding.delete(key), controlWorker: (id) => { controlledWorker = id; } };
 }
 
 type App = Awaited<ReturnType<typeof coworker>>;
@@ -773,6 +792,60 @@ test.skipIf(!enabled)(title, { timeout: 900_000 }, async ({ evidence }) => {
   evidence.recordAssertionEvidence(
     "A turn cut off before it finished reads as such after a reload, Continue finishes it under the same message id, and Next drains after",
     "With the reply held and one message waiting as Next, the window reloaded while the engine's turn was interrupted. The returning window read the record beside the coworker and showed one quiet line — Stopped when the app closed before Nova replied. · Continue · Discard — with the header saying Stopped and the rail the same line, the Next row still there, and no failure card. Continue re-ran the message under its own id and its reply landed even with animation frames suspended; the waiting message then went by itself, and the engine holds one user message for the cut turn.",
+    true,
+  );
+
+  // Background work uses the same interruption contract, including a real
+  // process restart. The controlled model witnesses tool permissions and
+  // prompt delivery without contacting an external inference provider.
+  await invokeCoworker(app, "settings.update", { maxParallelLocalRuns: 1 });
+  const worker = resultRecord(await invokeCoworker(app, "workers.spawn", {
+    slug: "nova", name: "Background check", goal: "BACKGROUND_RELIABILITY: compare the sources in bounded steps.", lifespan: { kind: "turns", max: 3 },
+  }));
+  const workerId = String(worker.id);
+  scripted.controlWorker(workerId);
+  await waitFor(app, `window.__COWORKER__.invoke("workers.get", { slug: "nova", id: ${json(workerId)} }).then(r => r.result?.threadId || false)`, { awaitPromise: true, timeoutMs: 90_000, label: "background native thread" });
+  const assignment = resultRecord(await invokeCoworker(app, "localResponsibilities.create", {
+    slug: "nova", name: "Cancelled queued check", instructions: "BACKGROUND_CANCELLED: this must not execute.", schedule: { kind: "once", timezone: "UTC", at: Date.now() + 86_400_000 },
+  }));
+  expect(resultRecord(await invokeCoworker(app, "localResponsibilities.runNow", { slug: "nova", id: assignment.id }))).toMatchObject({ accepted: true, queued: true });
+  await invokeCoworker(app, "localResponsibilities.cancelQueued", { slug: "nova", id: assignment.id });
+  await type(app, "Pause the background check for now.");
+  await waitForReply(app, "The background check is paused.");
+  await waitFor(app, `window.__COWORKER__.invoke("workers.get", { slug: "nova", id: ${json(workerId)} }).then(r => r.result?.status === "paused" && r.result?.lifespan?.used === 1)`, { awaitPromise: true, timeoutMs: 120_000, label: "pause holds after the current step" });
+  await waitFor(app, `window.__COWORKER__.invoke("localResponsibilities.status", {}).then(r => r.result?.active === 0 && r.result?.queued === 0)`, { awaitPromise: true, timeoutMs: 30_000, label: "cancelled queue remains empty" });
+  expect(scripted.countFor("BACKGROUND_CANCELLED")).toBe(0);
+  const workerRequest = scripted.requests.find((request) => request.prompt.startsWith("You are a Worker") && request.prompt.includes("BACKGROUND_RELIABILITY"));
+  expect(workerRequest?.tools).toContain("coworker_document_create");
+  for (const forbidden of ["task", "coworker_worker_spawn", "coworker_worker_pause", "coworker_worker_resume", "coworker_assignment_create", "coworker_memory_note", "coworker_team_refer"]) {
+    expect(workerRequest?.tools).not.toContain(forbidden);
+  }
+  expect(scripted.requests.find((request) => request.prompt === "Pause the background check for now.")?.tools).toContain("coworker_worker_pause");
+  expect(await evalIn(app, `(document.body?.innerText ?? "").includes("Paused Background check")`)).toBe(true);
+  await invokeCoworker(app, "workers.steer", { slug: "nova", id: workerId, text: "KEEP THIS STEERING: include source C.", });
+  const interrupted = resultRecord(await invokeCoworker(app, "workers.spawn", {
+    slug: "nova", name: "Interrupted check", goal: "BACKGROUND_INTERRUPTED: inspect the sources once.", lifespan: { kind: "turns", max: 2 },
+  }));
+  await waitFor(app, `window.__COWORKER__.invoke("workers.get", { slug: "nova", id: ${json(interrupted.id)} }).then(r => r.result?.threadId || false)`, { awaitPromise: true, timeoutMs: 90_000, label: "interrupted worker admitted" });
+  await waitFor(app, `window.__COWORKER__.invoke("workers.get", { slug: "nova", id: ${json(interrupted.id)} }).then(async r => {
+    const runtime = (await window.__COWORKER__.invoke("runtime.info")).result;
+    const response = await fetch(runtime.serverUrl + "/workspace/" + ${json(workspaceId)} + "/opencode/session/" + r.result.threadId + "/message", { headers: { Authorization: "Bearer " + runtime.ownerToken } });
+    const messages = await response.json();
+    return messages.some(m => m.info.role === "assistant");
+  })`, { awaitPromise: true, timeoutMs: 90_000, label: "interrupted turn reached the model" });
+  await app.stop();
+  await using restarted = await coworker({ name: "background-recovery", profileDir });
+  expect(resultRecord(await invokeCoworker(restarted, "workers.get", { slug: "nova", id: workerId }))).toMatchObject({ status: "paused", steerCount: 1 });
+  await waitFor(restarted, `window.__COWORKER__.invoke("workers.get", { slug: "nova", id: ${json(interrupted.id)} }).then(r => ["failed", "finished"].includes(r.result?.status))`, { awaitPromise: true, timeoutMs: 120_000, label: "interrupted work reconciled without another run" });
+  expect(scripted.requests.filter((request) => request.prompt.startsWith("You are a Worker") && request.prompt.includes("BACKGROUND_INTERRUPTED"))).toHaveLength(1);
+  await type(restarted, "Resume the background check.");
+  await waitForReply(restarted, "The background check is resumed.");
+  await waitFor(restarted, `window.__COWORKER__.invoke("workers.get", { slug: "nova", id: ${json(workerId)} }).then(r => r.result?.status === "finished" && r.result?.lifespan?.used === 2)`, { awaitPromise: true, timeoutMs: 120_000, label: "persisted steering delivered after restart" });
+  expect(scripted.requests.filter((request) => request.prompt.startsWith("You are a Worker") && request.prompt.includes("KEEP THIS STEERING"))).toHaveLength(1);
+  expect(scripted.countFor("BACKGROUND_CANCELLED")).toBe(0);
+  evidence.recordAssertionEvidence(
+    "Background pause, queued cancellation, steering, and interrupted work survive a full app restart",
+    "Chat invoked worker_pause and worker_resume through the native tools. Pause let exactly one step finish, the cancelled assignment never reached the model, and its queue stayed empty. A paused Worker's steering survived a process restart and was delivered once on Resume. Another Worker's accepted interrupted turn was not sent to the model again. Worker requests retained document tools but excluded direct Worker, assignment, memory, team management, and task delegation; coworker chat retained management tools.",
     true,
   );
 });
