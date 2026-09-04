@@ -66,6 +66,8 @@ test.skipIf(!enabled)("All Hands is optional, chats with coworkers, remembers fo
   expect(await setting(app, "focus")).toBe("customer blockers");
   await evalIn(app, `document.querySelector('[data-testid="group-rail-row"][aria-label="All Hands"]').click(); true`);
   await waitFor(app, `document.querySelector('[data-testid="group-chat"]')?.textContent?.includes("What should we review first?")`, { label: "conversation survives reload" });
+  await waitFor(app, `document.querySelector('[data-testid="group-rail-row"][aria-label="All Hands"]')?.getAttribute("data-active") === "true" && document.querySelector('[data-testid="all-hands-space"]')?.getAttribute("data-active") === "true"`, { label: "All Hands selected in group chats" });
+  await evalIn(app, "new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve(true))))", { awaitPromise: true });
   await screenshot(app);
   await clickButton(app, "Gather the team");
   await waitFor(app, `document.querySelectorAll('[data-message-role="user"]').length >= 3 && document.querySelector('[data-testid="group-chat"]')?.getAttribute("data-live") === "false"`, { timeoutMs: 240_000, label: "manual briefing settled" });
