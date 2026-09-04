@@ -1,6 +1,6 @@
 import { expect } from "vitest";
 import { chrome } from "@openwork/hosts";
-import { setViewport } from "@openwork/cdp";
+import { freezeMotion, setViewport } from "@openwork/cdp";
 import { spec } from "@openwork/testkit";
 
 // A new visitor journey: an actual announcement page, its native links, and
@@ -12,6 +12,9 @@ for (const width of [1280, 375]) {
     const web = await chrome({ name: "coworker-announcement-" + width, startUrl: origin + "/coworker", headless: true });
     try {
       await setViewport(web, { width, height: 900, deviceScaleFactor: 1 });
+      // Use the standard motion fixture so pointer targeting cannot race an
+      // in-flight smooth scroll and click a neighboring FAQ.
+      await freezeMotion(web);
       return { web, origin, async [Symbol.asyncDispose]() { await web.stop(); } };
     } catch (error) {
       await web.stop();
@@ -33,6 +36,7 @@ for (const width of [1280, 375]) {
       expect(await probe.hash()).toBe("#how");
       await user.see({ text: "Give it something real." });
       await user.click({ text: "Does it work while my computer is off?" });
+      await user.see({ text: /Those Cloud runs cannot read your coworker's local files or memory today\./ });
       expect(await probe.text()).toContain("Those Cloud runs cannot read your coworker's local files or memory today.");
       evidence.recordAssertionEvidence("Visitors can follow the product explanation and expand the local-versus-Cloud answer", "The native explanation link reaches #how and the FAQ opens to explain execution limits.", true);
     });
