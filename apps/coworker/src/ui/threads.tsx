@@ -230,7 +230,7 @@ function WorkspaceProblemNote({ problem, onRetry }: { problem: WorkspaceProblem;
 }
 
 /** An empty conversation says who is here and one quiet line; the composer does the rest. A newcomer a teammate proposed says why it is here. */
-function QuietEmptyConversation({ coworker, warmingUp = false, proposerName = "" }: { coworker: CoworkerSummary; warmingUp?: boolean; proposerName?: string }) {
+function QuietEmptyConversation({ coworker, warmingUp = false, proposerName = "", onPrepare }: { coworker: CoworkerSummary; warmingUp?: boolean; proposerName?: string; onPrepare?: (prompt: string) => void }) {
   const fromTeammate = newcomerLine(coworker, proposerName);
   return (
     <div className="mx-auto flex h-full max-w-md flex-col items-center justify-center py-10 text-center" data-testid="coworker-discussion-empty">
@@ -238,6 +238,14 @@ function QuietEmptyConversation({ coworker, warmingUp = false, proposerName = ""
       <p className="mt-3 text-sm font-semibold text-snow">{coworker.name}</p>
       {coworker.role ? <p className="mt-0.5 text-xs text-mist">{coworker.role}</p> : null}
       <p className="mt-4 text-sm text-mist" data-testid="coworker-discussion-empty-line">{fromTeammate || "What should we work through?"}</p>
+      {onPrepare && !warmingUp ? <div className="mt-5 w-full space-y-2" data-testid="coworker-starting-points">
+        {[
+          { label: "Turn a goal into a plan", prompt: "Help me turn a goal into a practical plan. Ask what I want to achieve and when I need it, then help me create a short working document with next steps." },
+          { label: "Work through a document", prompt: "Help me improve a document. Ask me to share it and tell you who it is for, then identify the most useful changes before drafting a revision." },
+          { label: "Take recurring work off my plate", prompt: "Help me choose one recurring task you can take off my plate. Ask about the task, the apps it needs, and when I want the result. Propose a responsibility for me to review before scheduling it." },
+        ].map((starter) => <button key={starter.label} type="button" className="block w-full rounded-xl border border-line px-4 py-2.5 text-left text-xs text-snow hover:bg-white/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-spark/45" onClick={() => onPrepare(starter.prompt)}>{starter.label}</button>)}
+        <p className="pt-1 text-[11px] text-mist">Choose a starting point, edit it, then send.</p>
+      </div> : null}
       {warmingUp ? (
         <div className="mt-3 text-xs text-mist" data-testid="coworker-workspace-warming">
           <InlineLoader label={`Getting ${coworker.name} ready`} />
@@ -768,7 +776,7 @@ function DiscussionWelcome({
       />
       <div className="min-h-0 flex-1 overflow-y-auto px-6 py-8">
         {problem ? <WorkspaceProblemNote problem={problem} onRetry={onRetry} /> : null}
-        {!problem ? <QuietEmptyConversation coworker={coworker} warmingUp={warmingUp} proposerName={proposerName} /> : null}
+        {!problem ? <QuietEmptyConversation coworker={coworker} warmingUp={warmingUp} proposerName={proposerName} onPrepare={!message.trim() && !busy ? (prompt) => { setAssignmentMode(false); setMessage(prompt); } : undefined} /> : null}
       </div>
       <DiscussionComposer
         message={message}
@@ -1900,7 +1908,7 @@ function ThreadView({
         }}
       >
         <div className="mx-auto max-w-3xl space-y-3">
-          {freshDiscussion ? <QuietEmptyConversation coworker={coworker} proposerName={team?.coworkers.find((member) => member.slug === coworker.suggestedBy?.slug)?.name ?? ""} /> : null}
+          {freshDiscussion ? <QuietEmptyConversation coworker={coworker} proposerName={team?.coworkers.find((member) => member.slug === coworker.suggestedBy?.slug)?.name ?? ""} onPrepare={!reply.trim() && !activeTurn ? (prompt) => { setAssignmentMode(false); setReply(prompt); } : undefined} /> : null}
           {conversationBlocks(visibleMessages, (message, index) => working && message.role === "assistant" && index === lastAssistantIndex).map((block) => {
             if (block.kind === "actions") {
               return <ActionLine key={block.id} review={block.review} reasoning={block.reasoning} calls={block.calls} client={mcpClient} />;

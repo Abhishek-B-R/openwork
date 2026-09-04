@@ -514,7 +514,9 @@ test.skipIf(!enabled)(title, { timeout: 900_000 }, async ({ evidence }) => {
   if (!isRecord(freeCard) || !Array.isArray(freeCard.choices)) throw new Error("Free-limit card facts were unavailable.");
   const engineAttempts = scripted.countFor("FREE");
   expect(freeCard.headline).toBe("The free model is busy right now.");
-  expect(String(freeCard.text)).toContain("Too many people are using the free model at once.");
+  expect(String(freeCard.text)).toContain("The free model's shared usage limit was reached.");
+  expect(String(freeCard.text)).toContain("OpenWork Models membership and your own AI providers");
+  expect(String(freeCard.text)).not.toMatch(/faster|\$100|few minutes/);
   expect(String(freeCard.text)).toContain("connect your own AI provider so Nova can keep working");
   expect(freeCard.technicalOpen).toBe(false);
   // The engine's own remedy copy and the provider's raw text stay folded, never in what is read first.
