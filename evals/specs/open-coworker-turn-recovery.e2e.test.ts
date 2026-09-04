@@ -111,7 +111,7 @@ const KEEP_ALIVE_MS = 2_000;
  * closed connection (a stop, an abort) cancels the wait. The engine can only act on an abort
  * when the provider stream yields something, so a held reply must not fall wholly silent.
  */
-function holdThenReply(response: ServerResponse, model: string, text: string, holdMs: number, opening = ""): void {
+function holdThenReply(response: ServerResponse, model: string, text: string, holdMs: number, opening = ""): () => void {
   response.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "close" });
   response.write(chunk(model, { role: "assistant" }, null));
   if (opening) response.write(chunk(model, { content: `${opening} ` }, null));
@@ -122,7 +122,7 @@ function holdThenReply(response: ServerResponse, model: string, text: string, ho
     if (response.writableEnded || response.destroyed) return;
     response.write(chunk(model, { content: " " }, null));
   }, KEEP_ALIVE_MS);
-  const timer = setTimeout(() => {
+  const finish = () => {
     held.delete(response);
     clearInterval(keepAlive);
     if (response.writableEnded || response.destroyed) return;
@@ -131,13 +131,15 @@ function holdThenReply(response: ServerResponse, model: string, text: string, ho
     response.write(chunk(model, {}, "stop"));
     response.write("data: [DONE]\n\n");
     response.end();
-  }, holdMs);
+  };
+  const timer = setTimeout(finish, holdMs);
   response.on("close", () => {
     heldLog.push(`${text.slice(0, 12)} connection closed after ${Date.now() - openedAt} ms`);
     held.delete(response);
     clearInterval(keepAlive);
     clearTimeout(timer);
   });
+  return () => { clearTimeout(timer); finish(); };
 }
 
 function refuse(response: ServerResponse, status: number, message: string, type: string, headers: Record<string, string> = {}): void {
@@ -151,6 +153,7 @@ const holding = new Set<string>();
 async function startScriptedModel(): Promise<{ baseUrl: string; requests: Recorded[]; countFor: (prompt: string) => number; hold: (key: string) => void; release: (key: string) => void; controlWorker: (id: string) => void }> {
   const requests: Recorded[] = [];
   let controlledWorker = "";
+  let releaseBackground = () => undefined;
   const seen = new Map<string, number>();
   const countFor = (prompt: string) => requests.filter((request) => request.prompt.includes(prompt)).length;
   const server = createServer((request, response) => {
@@ -183,7 +186,8 @@ async function startScriptedModel(): Promise<{ baseUrl: string; requests: Record
         }
         if (prompt.startsWith("You are a Worker") && prompt.includes("BACKGROUND_RELIABILITY")) {
           if (prompt.includes("KEEP THIS STEERING")) return streamReply(response, model, "## Done\nKept the steering after restart.");
-          return holdThenReply(response, model, "## Finding\nFirst bounded step complete.", 30_000);
+          releaseBackground = holdThenReply(response, model, "## Finding\nFirst bounded step complete.", 180_000);
+          return;
         }
         if (prompt.startsWith("You are a Worker") && prompt.includes("BACKGROUND_INTERRUPTED")) {
           return holdThenReply(response, model, "## Finding\nThis interrupted reply should not be replayed.", 180_000);
@@ -218,7 +222,7 @@ async function startScriptedModel(): Promise<{ baseUrl: string; requests: Record
   });
   const address = server.address();
   if (!address || typeof address === "string") throw new Error("Scripted model did not bind a TCP port.");
-  return { baseUrl: `http://127.0.0.1:${address.port}/v1`, requests, countFor, hold: (key) => holding.add(key), release: (key) => holding.delete(key), controlWorker: (id) => { controlledWorker = id; } };
+  return { baseUrl: `http://127.0.0.1:${address.port}/v1`, requests, countFor, hold: (key) => holding.add(key), release: (key) => { holding.delete(key); if (key === "BACKGROUND") releaseBackground(); }, controlWorker: (id) => { controlledWorker = id; } };
 }
 
 type App = Awaited<ReturnType<typeof coworker>>;
@@ -837,6 +841,7 @@ test.skipIf(!enabled)("Open Coworker background work survives cancellation and r
   const workerId = String(worker.id);
   scripted.controlWorker(workerId);
   await waitFor(app, `window.__COWORKER__.invoke("workers.get", { slug: "nova", id: ${json(workerId)} }).then(r => r.result?.threadId || false)`, { awaitPromise: true, timeoutMs: 90_000, label: "background native thread" });
+  await expect.poll(() => scripted.requests.filter((request) => request.prompt.startsWith("You are a Worker") && request.prompt.includes("BACKGROUND_RELIABILITY")).length, { timeout: 30_000 }).toBe(1);
   const assignment = resultRecord(await invokeCoworker(app, "localResponsibilities.create", {
     slug: "nova", name: "Cancelled queued check", instructions: "BACKGROUND_CANCELLED: this must not execute.", schedule: { kind: "once", timezone: "UTC", at: Date.now() + 86_400_000 },
   }));
@@ -844,6 +849,7 @@ test.skipIf(!enabled)("Open Coworker background work survives cancellation and r
   await invokeCoworker(app, "localResponsibilities.cancelQueued", { slug: "nova", id: assignment.id });
   await type(app, "Pause the background check for now.");
   await waitForReply(app, "The background check is paused.");
+  scripted.release("BACKGROUND");
   await waitFor(app, `window.__COWORKER__.invoke("workers.get", { slug: "nova", id: ${json(workerId)} }).then(r => r.result?.status === "paused" && r.result?.lifespan?.used === 1)`, { awaitPromise: true, timeoutMs: 120_000, label: "pause holds after the current step" });
   await waitFor(app, `window.__COWORKER__.invoke("localResponsibilities.status", {}).then(r => r.result?.active === 0 && r.result?.queued === 0)`, { awaitPromise: true, timeoutMs: 30_000, label: "cancelled queue remains empty" });
   expect(scripted.countFor("BACKGROUND_CANCELLED")).toBe(0);
@@ -881,9 +887,15 @@ test.skipIf(!enabled)("Open Coworker background work survives cancellation and r
   await waitFor(restarted, `window.__COWORKER__.invoke("workers.get", { slug: "nova", id: ${json(workerId)} }).then(r => r.result?.status === "finished" && r.result?.lifespan?.used === 2)`, { awaitPromise: true, timeoutMs: 120_000, label: "persisted steering delivered after restart" });
   expect(scripted.requests.filter((request) => request.prompt.startsWith("You are a Worker") && request.prompt.includes("KEEP THIS STEERING"))).toHaveLength(1);
   expect(scripted.countFor("BACKGROUND_CANCELLED")).toBe(0);
+  const scheduled = resultRecord(await invokeCoworker(restarted, "localResponsibilities.create", {
+    slug: "nova", name: "Scheduled completion", instructions: "BACKGROUND_SCHEDULED: report the completed check.",
+    schedule: { kind: "once", timezone: "UTC", at: Date.now() + 10_000 },
+  }));
+  await waitFor(restarted, `window.__COWORKER__.invoke("localResponsibilities.list", { slug: "nova" }).then(r => r.result?.some(item => item.id === ${json(scheduled.id)} && item.latestRun?.status === "succeeded" && item.state === "paused" && item.runs.length === 1))`, { awaitPromise: true, timeoutMs: 90_000, label: "one scheduled occurrence completes once" });
+  expect(scripted.countFor("BACKGROUND_SCHEDULED")).toBe(1);
   evidence.recordAssertionEvidence(
     "Background pause, queued cancellation, steering, and interrupted work survive a full app restart",
-    "Chat invoked worker_pause and worker_resume through the native tools. Pause let exactly one step finish, the cancelled assignment never reached the model, and its queue stayed empty. A paused Worker's steering survived a process restart and was delivered once on Resume. Another Worker's accepted interrupted turn was not sent to the model again. Worker requests retained document tools but excluded direct Worker, assignment, memory, team management, and task delegation; coworker chat retained management tools.",
+    "Chat invoked worker_pause and worker_resume through the native tools. Pause let exactly one step finish, the cancelled assignment never reached the model, and its queue stayed empty. A paused Worker's steering survived a process restart and was delivered once on Resume. Another Worker's accepted interrupted turn was not sent to the model again. Worker requests retained document tools but excluded direct Worker, assignment, memory, team management, and task delegation; coworker chat retained management tools. A one-time scheduled assignment then ran automatically, reached the model exactly once, succeeded, and paused its completed schedule.",
     true,
   );
 });
