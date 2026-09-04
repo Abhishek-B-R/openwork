@@ -71,7 +71,7 @@ export default function CoworkerPage() {
                 <CoworkerAction href={HERO.primary.href} action="early_access" placement="hero" className="cw-btn cw-btn--primary">{HERO.primary.label}<span aria-hidden="true">↗</span></CoworkerAction>
                 <CoworkerAction href={HERO.secondary.href} action="how_it_works" placement="hero" className="cw-btn cw-btn--ghost">{HERO.secondary.label}<span aria-hidden="true">↓</span></CoworkerAction>
               </div>
-              <p className="mt-4 text-xs leading-5 text-[var(--cw-ink-500)]">Early access for macOS. Signed downloads are in preparation.</p>
+              <p className="mt-4 text-xs leading-5 text-[var(--cw-ink-500)]">Early access for macOS. Public download coming soon.</p>
               <div className="mt-12 flex flex-wrap gap-x-6 gap-y-2 border-t border-[var(--cw-rule)] pt-5 text-xs text-[var(--cw-ink-500)]">
                 {HERO.strip.map((phrase) => <span key={phrase}>{phrase}</span>)}
               </div>

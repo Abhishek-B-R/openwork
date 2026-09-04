@@ -72,7 +72,7 @@ export const FAQ: Array<Claim & { question: string }> = [
 
 export const GET_STARTED = {
   title: "Meet your next coworker.",
-  status: "Early access · macOS · no signed download yet",
+  status: "Early access · macOS",
   lead: "Ask us about early access. If you prefer to build it yourself, Open Coworker is available from source.",
 } as const;
 

@@ -30,9 +30,9 @@ for (const width of [1280, 375]) {
       await user.see({ text: "Introducing Open Coworker" });
       const text = await probe.text();
       expect(text).toContain("remembers.");
-      expect(text).toContain("Signed downloads are in preparation.");
+      expect(text).toContain("Public download coming soon.");
       expect(text).not.toMatch(/\$100|first 50|24 hours|unlimited/i);
-      evidence.recordAssertionEvidence("The announcement leads with memory and accurately labels early access", "The browser shows the coworker value and pending signed downloads, with no unapproved offer or unlimited usage claim.", true);
+      evidence.recordAssertionEvidence("The announcement leads with memory and accurately labels early access", "The browser shows the coworker value and upcoming public download, with no unapproved offer or unlimited usage claim.", true);
     });
     await step("Follow the explanation and read the execution limits", async () => {
       await user.click({ role: "link", text: "See how it works" });
@@ -70,7 +70,7 @@ for (const width of [1280, 375]) {
       await user.navigate(world.origin + "/");
       await user.click({ role: "link", label: /Meet Open Coworker/ });
       await user.see({ text: "Introducing Open Coworker" });
-      expect(await probe.text()).toContain("Signed downloads are in preparation.");
+      expect(await probe.text()).toContain("Public download coming soon.");
       evidence.recordAssertionEvidence("Homepage visitors can discover the Coworker announcement", "The homepage announcement link opens the real Coworker page with the same accurate early-access availability.", true);
     });
   });
