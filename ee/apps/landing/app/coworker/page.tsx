@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import "./coworker.css";
 import { CoworkerAvatar, CoworkerMark } from "../../components/coworker-brand";
-import { CoworkerVignette } from "../../components/coworker-vignette";
+import { CoworkerVignette, CoworkerDemoShortcut } from "../../components/coworker-vignette";
 import { TEAM } from "../../lib/coworker-demo";
 import { CoworkerAction, CoworkerAnnouncementView } from "../../components/coworker-announcement-actions";
 import { StructuredData } from "../../components/structured-data";
@@ -86,6 +86,11 @@ export default function CoworkerPage() {
                 <figcaption id="coworker-demo-disclosure" className="mt-4 text-center text-[11px] text-[var(--cw-muted)]">Sample data and scripted replies. No sign-in needed.</figcaption>
                 <noscript><p className="mt-3 text-center text-sm text-[var(--cw-muted)]">Enable JavaScript to explore the interactive demo.</p></noscript>
               </figure>
+              <div className="cw-collaboration-story">
+                <div><p className="cw-eyebrow">Group chats</p><h2>Good work is<br />a team effort.</h2><p>Bring research, writing, and planning into one conversation. Your coworkers contribute their strengths. You shape the direction.</p><CoworkerDemoShortcut view="group">Try the team conversation</CoworkerDemoShortcut></div>
+                <div className="cw-collaboration-example"><div className="flex items-center gap-3">{TEAM.map((person) => <CoworkerAvatar key={person.id} {...person} size={40} />)}<span className="text-xs text-[var(--cw-muted)]">+ you</span></div><p className="cw-collaboration-quote">“Scout, find the angle. Editor, make it clear. Ops, help us get it out the door.”</p><p>One shared conversation. A clear part for everyone.</p></div>
+              </div>
+              <div className="cw-custom-story"><div><p className="cw-eyebrow">Your team, your way</p><h2>A role you need.<br />A coworker you make.</h2></div><div><p>A research partner. A writing companion. Someone to help with the weekly follow-through. Choose a name and a look, give it a role and mission, and start with one task.</p><CoworkerDemoShortcut view="create">Make a coworker in the demo</CoworkerDemoShortcut></div></div>
               <ol className="mt-12 grid gap-8 md:grid-cols-3">
                 {STEPS.map((step, index) => <li key={step.title} className="border-t border-[var(--cw-border)] pt-5">
                   <span className="cw-eyebrow">0{index + 1}</span>

@@ -1,11 +1,12 @@
 import type { AvatarColor, AvatarGlasses } from "../components/coworker-brand";
 
-export type CoworkerId = "scout" | "editor" | "ops";
-export type DemoView = "chat" | "documents" | "assignments" | "connections";
+export type StockCoworkerId = "scout" | "editor" | "ops";
+export type CoworkerId = StockCoworkerId | "custom";
+export type DemoView = "chat" | "documents" | "assignments" | "connections" | "group" | "create";
 
 /** Fictional, deterministic examples of the app's conversations, documents,
  * assignments, and OpenWork Connect. No providers or customer data are used. */
-export const TEAM: Array<{ id: CoworkerId; name: string; role: string; color: AvatarColor; glasses: AvatarGlasses }> = [
+export const TEAM: Array<{ id: StockCoworkerId; name: string; role: string; color: AvatarColor; glasses: AvatarGlasses }> = [
   { id: "scout", name: "Scout", role: "Research", color: "blue", glasses: "round" },
   { id: "editor", name: "Editor", role: "Writing", color: "rose", glasses: "square" },
   { id: "ops", name: "Ops", role: "Operations", color: "mint", glasses: "none" },
@@ -21,7 +22,7 @@ type Example = {
   routine: string;
 };
 
-export const EXAMPLES: Record<CoworkerId, Example> = {
+export const EXAMPLES: Record<StockCoworkerId, Example> = {
   scout: {
     question: "How’s the launch brief coming along?",
     answer: "First draft’s ready. I pulled the key points into a short brief. Take a look when you have a moment.",
