@@ -153,7 +153,7 @@ const holding = new Set<string>();
 async function startScriptedModel(): Promise<{ baseUrl: string; requests: Recorded[]; countFor: (prompt: string) => number; hold: (key: string) => void; release: (key: string) => void; controlWorker: (id: string) => void }> {
   const requests: Recorded[] = [];
   let controlledWorker = "";
-  let releaseBackground = () => undefined;
+  let releaseBackground = (): void => undefined;
   const seen = new Map<string, number>();
   const countFor = (prompt: string) => requests.filter((request) => request.prompt.includes(prompt)).length;
   const server = createServer((request, response) => {
@@ -842,6 +842,8 @@ test.skipIf(!enabled)("Open Coworker background work survives cancellation and r
   scripted.controlWorker(workerId);
   await waitFor(app, `window.__COWORKER__.invoke("workers.get", { slug: "nova", id: ${json(workerId)} }).then(r => r.result?.threadId || false)`, { awaitPromise: true, timeoutMs: 90_000, label: "background native thread" });
   await expect.poll(() => scripted.requests.filter((request) => request.prompt.startsWith("You are a Worker") && request.prompt.includes("BACKGROUND_RELIABILITY")).length, { timeout: 30_000 }).toBe(1);
+  const heldWorker = resultRecord(await invokeCoworker(app, "workers.get", { slug: "nova", id: workerId }));
+  expect(heldWorker.status, String(heldWorker.error)).toBe("running");
   const assignment = resultRecord(await invokeCoworker(app, "localResponsibilities.create", {
     slug: "nova", name: "Cancelled queued check", instructions: "BACKGROUND_CANCELLED: this must not execute.", schedule: { kind: "once", timezone: "UTC", at: Date.now() + 86_400_000 },
   }));
