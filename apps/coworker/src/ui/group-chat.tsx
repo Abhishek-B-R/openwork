@@ -595,8 +595,8 @@ export function GroupChat({
   const replyingMember = replying ? coworkers.find((coworker) => coworker.slug === replying.slug) : null;
 
   return (
+    <div className="relative flex h-full min-w-0 flex-1">
     <div className="glass-main relative flex h-full min-w-0 flex-1 flex-col" data-testid="group-chat" data-group-id={group.id} data-live={live ? "true" : "false"}>
-      {sharedDocument !== null ? <GroupDocuments key={group.id} groupId={group.id} openId={sharedDocument} onClose={() => setSharedDocument(null)} /> : null}
       <header className="glass-header window-drag flex h-[78px] items-center gap-3 border-b border-line px-6 pt-2" data-testid="conversation-header">
         <GroupAvatars members={members} size={30} />
         <div className="min-w-0 flex-1">
@@ -880,6 +880,11 @@ export function GroupChat({
           </div>
         </div>
       </div>
+    </div>
+    {sharedDocument !== null ? <>
+      <button type="button" aria-label="Close shared documents" className="absolute inset-0 z-20 bg-black/40 lg:hidden" onClick={() => setSharedDocument(null)} />
+      <GroupDocuments key={group.id} groupId={group.id} openId={sharedDocument} onClose={() => setSharedDocument(null)} />
+    </> : null}
     </div>
   );
 }

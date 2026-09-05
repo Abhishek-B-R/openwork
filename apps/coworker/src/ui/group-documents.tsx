@@ -37,7 +37,7 @@ export function GroupDocuments({ groupId, openId, onClose }: { groupId: string; 
     finally { setBusy(false); }
   }
   return (
-    <aside className="absolute inset-y-0 right-0 z-30 flex w-[min(520px,100%)] flex-col border-l border-line bg-ink shadow-2xl" aria-label="Shared documents" data-testid="group-documents">
+    <aside className="absolute inset-y-0 right-0 z-30 flex w-[min(520px,100%)] flex-col lg:static lg:w-[42%] lg:max-w-[520px] lg:shrink-0 border-l border-line bg-ink shadow-2xl" aria-label="Shared documents" data-testid="group-documents">
       <header className="flex items-center justify-between border-b border-line p-4">
         <h2 className="text-sm font-semibold text-snow">Shared documents</h2>
         <Button variant="ghost" onClick={onClose}>Close</Button>

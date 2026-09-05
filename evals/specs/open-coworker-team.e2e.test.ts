@@ -757,6 +757,7 @@ test.skipIf(!enabled)(title, { timeout: 1_200_000 }, async ({ evidence }) => {
   await waitForText(app, "Audience brief");
   await evalIn(app, `document.querySelector('[data-testid="group-document-item"]').click(); true`);
   await waitForText(app, "Nova · revision 1");
+  expect(await evalIn(app, `(() => { const chat = document.querySelector('[data-testid="group-chat"]').getBoundingClientRect(); const docs = document.querySelector('[data-testid="group-documents"]').getBoundingClientRect(); return innerWidth < 1024 || chat.right <= docs.left + 1; })()`)).toBe(true);
   await screenshot(app);
   const shared = resultList(await invokeCoworker(app, "groups.documents.list", { id: scripted.groupId }))[0];
   expect(shared).toMatchObject({ title: "Audience brief", author: "Nova", revision: 1 });
