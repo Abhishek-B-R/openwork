@@ -14,6 +14,7 @@ import { assignmentToolCatalog, selfToolCatalog } from "./assignment-tools.mjs";
 import { DEFAULT_INSTRUCTIONS, toolCatalog } from "./coworker-tools.mjs";
 import { COWORKER_INSTRUCTIONS, createCoworker, createLongTermMemory } from "./coworkers.mjs";
 import { createDocument } from "./documents.mjs";
+import { groupToolCatalog } from "./group-collaboration.mjs";
 import { teamToolCatalog } from "./team-tools.mjs";
 import { workerToolCatalog } from "./workers.mjs";
 
@@ -22,11 +23,12 @@ import { workerToolCatalog } from "./workers.mjs";
  * (about four characters per token). 30,000 held the shape rule; the working
  * notes ("Keeping track of what I'm doing", the memory_note tool) and "How I
  * decide" together added about 5,500 — the two sections are the first place to
- * tighten when the budget is next revisited.
+ * tighten when the budget is next revisited. Group collaboration adds six
+ * scoped tools (about 3,000 characters) and a short contract section.
  */
-export const FIXED_STACK_BUDGET_CHARS = 34_000;
+export const FIXED_STACK_BUDGET_CHARS = 38_000;
 /** The same coworker with five documents in play and ten long-term memories. */
-export const BUSY_STACK_BUDGET_CHARS = 36_000;
+export const BUSY_STACK_BUDGET_CHARS = 40_000;
 
 const roots = [];
 after(async () => {
@@ -34,7 +36,7 @@ after(async () => {
 });
 
 function fullCatalog() {
-  return [...toolCatalog(), ...workerToolCatalog(), ...assignmentToolCatalog(), ...selfToolCatalog(), ...teamToolCatalog()];
+  return [...toolCatalog(), ...workerToolCatalog(), ...assignmentToolCatalog(), ...selfToolCatalog(), ...teamToolCatalog(), ...groupToolCatalog()];
 }
 
 async function layers(coworker) {
@@ -65,9 +67,9 @@ test("the fixed instruction stack stays within its budget, and the variable part
   assert.ok(freshTotal <= FIXED_STACK_BUDGET_CHARS, `the fixed stack is ${freshTotal} chars; the budget is ${FIXED_STACK_BUDGET_CHARS}`);
   // The tool catalog is the largest fixed cost; the contract is the second. Both are known quantities.
   const catalog = fresh.find(([name]) => name === "tool catalog")[1];
-  assert.equal(fullCatalog().length, 24);
-  assert.ok(catalog.length < 18_000, `the tool catalog is ${catalog.length} chars`);
-  assert.ok(fresh.find(([name]) => name === "AGENTS.md")[1].length < 15_000);
+  assert.equal(fullCatalog().length, 30);
+  assert.ok(catalog.length < 21_000, `the tool catalog is ${catalog.length} chars`);
+  assert.ok(fresh.find(([name]) => name === "AGENTS.md")[1].length < 16_000);
 
   for (let index = 1; index <= 5; index += 1) {
     await createDocument(dir, nova.slug, {

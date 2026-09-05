@@ -41,6 +41,10 @@ const WRITER_REPLY = "Editor already covers writing — want me to pass this to 
 const SALES_PROMPT = "Who could handle our sales leads?";
 const SALES_REPLY = "A sales coworker could own that — want me to add one?";
 const SALES_AGAIN_PROMPT = "Anyone for the sales leads, then?";
+const GROUP_PROMPT = "Prepare our shared launch brief using a teammate's input.";
+const GROUP_QUESTION = "Which audience should the shared brief target?";
+const GROUP_ANSWER = "Small agency owners are the priority. I added the findings to Audience brief.";
+const GROUP_REPLY = "Nova helped in Launch team: small agency owners are the priority. The Audience brief is ready.";
 const SALES_AGAIN_REPLY = "Understood, I'll leave that be for now.";
 
 type ScriptedCall = { name: string; arguments: Record<string, unknown> };
@@ -171,8 +175,8 @@ function streamChunks(response: ServerResponse, deltas: Array<Record<string, unk
   response.end();
 }
 
-async function startScriptedModel(): Promise<{ baseUrl: string; seenToolResults: string[]; prompts: string[]; facts: PromptFacts[] }> {
-  const state = { baseUrl: "", seenToolResults: [] as string[], prompts: [] as string[], facts: [] as PromptFacts[] };
+async function startScriptedModel(): Promise<{ baseUrl: string; seenToolResults: string[]; prompts: string[]; facts: PromptFacts[]; groupId: string }> {
+  const state = { baseUrl: "", groupId: "", seenToolResults: [] as string[], prompts: [] as string[], facts: [] as PromptFacts[] };
   const server = createServer((request, response) => {
     const url = request.url ?? "";
     if (request.method === "GET" && url.startsWith("/v1/models")) {
@@ -185,7 +189,11 @@ async function startScriptedModel(): Promise<{ baseUrl: string; seenToolResults:
         let body: unknown = null;
         try { body = JSON.parse(raw); } catch { body = null; }
         const prompt = lastUserText(body);
-        const scripted = SCRIPT.find((entry) => prompt.includes(entry.match));
+        const scripted = prompt.includes(GROUP_QUESTION)
+          ? { turn: { call: { name: "coworker_group_document_save", arguments: { groupId: state.groupId, title: "Audience brief", body: "Small agency owners are the priority. Start with agencies of five to twenty people." } }, reply: GROUP_ANSWER } }
+          : prompt.includes(GROUP_PROMPT)
+            ? { turn: { call: { name: "coworker_group_request", arguments: { groupId: state.groupId, to: "nova", question: GROUP_QUESTION } }, reply: GROUP_REPLY } }
+            : SCRIPT.find((entry) => prompt.includes(entry.match));
         const results = toolResults(body);
         state.seenToolResults.push(...results);
         if (results.length === 0) {
@@ -201,7 +209,13 @@ async function startScriptedModel(): Promise<{ baseUrl: string; seenToolResults:
           }], "tool_calls");
           return;
         }
-        streamChunks(response, [{ role: "assistant" }, { content: scripted?.turn.reply ?? "Okay." }], "stop");
+        // The requester can finish only after the recipient's actual answer arrives.
+        const reply = prompt.includes(GROUP_PROMPT) && !results.some((result) => result.includes(GROUP_ANSWER))
+          ? "The teammate request did not return the expected answer."
+          : prompt.includes(GROUP_QUESTION) && !results.some((result) => result.includes("Audience brief") && result.includes("Nova"))
+            ? "The shared document was not saved by Nova."
+            : scripted?.turn.reply ?? "Okay.";
+        streamChunks(response, [{ role: "assistant" }, { content: reply }], "stop");
       });
       return;
     }
@@ -459,7 +473,7 @@ test.skipIf(!enabled)(title, { timeout: 1_200_000 }, async ({ evidence }) => {
   expect(novaRoster).toContain("- Editor (`editor`) — Writing and content — I turn the campaign brief into consistent posts");
   expect(resultText(await invokeCoworker(app, "coworkers.files.read", { slug: "editor", path: "team/roster.md" }))).toContain("- Nova (`nova`) — Research and synthesis");
   const agents = resultText(await invokeCoworker(app, "coworkers.files.read", { slug: "nova", path: "AGENTS.md" }));
-  expect(agents).toContain("<!-- open-coworker-contract: 8 -->");
+  expect(agents).toContain("<!-- open-coworker-contract: 9 -->");
   expect(agents).toContain("## My team");
   // The shape rule is one section with an example per shape; the roster carries facts only, the rule is not said twice.
   expect(agents).toContain("### Which shape an answer takes");
@@ -720,5 +734,63 @@ test.skipIf(!enabled)(title, { timeout: 1_200_000 }, async ({ evidence }) => {
   await waitFor(app, `Boolean(document.querySelector('[data-testid="coworker-rail"]'))`, { timeoutMs: 60_000, label: "custom avatar after reload" });
   expect(resultList(await invokeCoworker(app, "coworkers.list", {})).find((member) => member.slug === "willow")).toMatchObject({ avatarColor: "sand", avatarGlasses: "oval" });
   evidence.recordAssertionEvidence("Sand and oval frames persist without changing the avatar's established shape", "The creation form preview showed two oval lenses. Creating Willow stored sand and oval, and the same look returned after reloading the app.", true);
+
+  // --- 6. A real private-conversation request reaches a teammate and produces shared work.
+  await evalIn(app, `document.querySelector('[data-testid="new-group-chat"]').click(); true`);
+  await waitFor(app, `Boolean(document.querySelector('[data-testid="new-group-collaboration"]'))`, { label: "group collaboration choice" });
+  expect(await evalIn(app, `document.querySelector('[data-testid="new-group-collaboration"]').checked`)).toBe(false);
+  await evalIn(app, `(() => { for (const row of document.querySelectorAll('[data-testid="new-group-member"]')) { const wanted = ["editor", "nova"].includes(row.dataset.slug); if ((row.getAttribute("aria-checked") === "true") !== wanted) row.click(); } document.querySelector('[data-testid="new-group-collaboration"]').click(); return true; })()`);
+  await fill(app, '[data-testid="new-group-name"]', "Launch team");
+  await clickButton(app, "Create group chat");
+  scripted.groupId = String(await waitFor(app, `document.querySelector('[data-testid="group-chat"]')?.dataset.groupId`, { label: "created collaboration group" }));
+  await openCoworker(app, "editor", "Editor");
+  await converse(app, "Editor", GROUP_PROMPT, GROUP_REPLY);
+  expect(scripted.prompts.some((prompt) => prompt.includes("You are Nova, answering Editor publicly") && prompt.includes(GROUP_QUESTION))).toBe(true);
+  expect(scripted.seenToolResults.some((result) => result.includes(GROUP_ANSWER))).toBe(true);
+  const groupEvents = resultList(await invokeCoworker(app, "groups.readTimeline", { id: scripted.groupId }));
+  const requestEvent = groupEvents.find((event) => event.status === "requested");
+  expect(requestEvent).toMatchObject({ slug: "editor", toSlug: "nova", text: GROUP_QUESTION });
+  expect(groupEvents.find((event) => event.status === "answered")).toMatchObject({ slug: "nova", toSlug: "editor", requestId: requestEvent?.requestId, text: GROUP_ANSWER });
+  await evalIn(app, `document.querySelector('[data-testid="group-request-reference"]').click(); true`);
+  await waitForText(app, GROUP_ANSWER);
+  await clickButton(app, "Shared documents");
+  await waitForText(app, "Audience brief");
+  await evalIn(app, `document.querySelector('[data-testid="group-document-item"]').click(); true`);
+  await waitForText(app, "Nova · revision 1");
+  await screenshot(app);
+  const shared = resultList(await invokeCoworker(app, "groups.documents.list", { id: scripted.groupId }))[0];
+  expect(shared).toMatchObject({ title: "Audience brief", author: "Nova", revision: 1 });
+  // Another writer saves while the person has an older draft open. Neither edit is silently lost.
+  await clickButton(app, "Edit");
+  await fill(app, 'textarea[aria-label="Shared document body"]', "My draft keeps agencies and adds a customer interview.");
+  resultRecord(await invokeCoworker(app, "groups.documents.save", { id: scripted.groupId, input: { id: shared.id, expectedRevision: 1, title: "Audience brief", body: "New evidence: agencies with five to twenty people." } }));
+  await clickButton(app, "Save shared document");
+  await waitForText(app, "This document changed.");
+  expect(await evalIn(app, `document.querySelector('textarea[aria-label="Shared document body"]').value`)).toBe("My draft keeps agencies and adds a customer interview.");
+  await clickButton(app, "Compare with latest");
+  await waitForText(app, "New evidence: agencies with five to twenty people.");
+  await fill(app, 'textarea[aria-label="Shared document body"]', "Agencies with five to twenty people, plus a customer interview.");
+  await clickButton(app, "I've reconciled my draft with this revision");
+  await clickButton(app, "Save shared document");
+  await waitForText(app, "You · revision 3");
+  await clickButton(app, "History");
+  await waitForText(app, "Revision 1 · Nova");
+  await evalIn(app, `(() => { const revision = [...document.querySelectorAll('[data-testid="group-documents"] details')].find((item) => item.querySelector('summary')?.textContent.includes("Revision 1")); revision.open = true; revision.querySelector('button').click(); return true; })()`);
+  await waitForText(app, "You · revision 4");
+  expect(resultRecord(await invokeCoworker(app, "groups.documents.read", { id: scripted.groupId, documentId: shared.id })).body).toBe("Small agency owners are the priority. Start with agencies of five to twenty people.\n");
+  await clickButton(app, "Close");
+  await evalIn(app, `document.querySelector('[data-testid="group-collaboration-pause"]').click(); true`);
+  await waitFor(app, `!document.querySelector('[data-testid="group-collaboration-pause"]')`, { label: "collaboration paused" });
+  expect(resultRecord(await invokeCoworker(app, "groups.get", { id: scripted.groupId })).collaborationEnabled).toBe(false);
+  await screenshot(app);
+  const recipientRuns = scripted.prompts.filter((prompt) => prompt.includes("You are Nova, answering Editor publicly")).length;
+  await openCoworker(app, "editor", "Editor");
+  await fill(app, 'textarea[aria-label="Message Editor"]', GROUP_PROMPT + " Try once while collaboration is paused.");
+  await clickButton(app, "Send");
+  await waitForText(app, "The teammate request did not return the expected answer.");
+  expect(scripted.seenToolResults.some((result) => result.includes("Collaboration is paused"))).toBe(true);
+  expect(scripted.prompts.filter((prompt) => prompt.includes("You are Nova, answering Editor publicly"))).toHaveLength(recipientRuns);
+  expect(resultList(await invokeCoworker(app, "groups.readTimeline", { id: scripted.groupId })).filter((event) => event.status === "requested")).toHaveLength(1);
+  evidence.recordAssertionEvidence("Enabled groups deliver real teammate answers and shared documents with revision protection", "Editor requested help from Nova while in its own conversation. Nova ran a separate turn, saved Audience brief under its actual identity, and returned its answer before Editor completed. The group displayed the linked request and answer. An outdated UI save preserved the draft, reconciliation saved revision 3, and restoring Nova's original created revision 4. Pause rejected a subsequent real tool request before Nova ran and preserved the shared work.", true);
 
 });

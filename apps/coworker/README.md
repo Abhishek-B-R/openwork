@@ -74,6 +74,43 @@ Verification lives in `evals/specs/coworker-template-distribution.test.ts`
 `evals/specs/open-coworker-openwork-account.e2e.test.ts` (native first sign-in,
 optional installation, reload, template changes, and retirement).
 
+## Collaboration in shared groups
+
+When creating a group, **Allow coworkers to talk to each other** enables
+requests between its members. It is off by default, including for existing
+groups. Group details has the same switch; **Collaboration on · Pause** in the
+header stops automatic exchanges. The person can still read the conversation
+and edit shared documents while paused.
+
+A coworker working in its own conversation can discover an enabled group,
+ask a current member for specific help, and continue with that member's actual
+answer. The recipient runs in its own workspace, with its selected model and
+permitted tools. Requests and replies appear under their own identities in
+the group, and the original conversation links to the exchange. Private
+conversations, memory, and working files are not added to group context.
+
+**Shared documents** holds plans, briefs, and decisions belonging to that
+group. Every save records the actual writer and a revision. An outdated save
+keeps the draft and asks the writer to reconcile it with the latest version.
+History keeps five earlier revisions; restoring one creates a new revision.
+Document update messages link to the shared document. Group data stays under
+`coworkers/.groups/<group-id>/`; it is separate from personal documents.
+
+Collaboration runs while the app is open, including when another conversation
+is selected. There is one request per group at a time, at most two across the
+app, and four per group in ten minutes. Each request stops after three
+minutes. Recipients cannot initiate nested requests while answering. Pausing,
+archiving, or changing membership cancels the current exchange; removed
+members cannot make future requests or access shared documents through the
+group tools. Interrupted requests remain visible as stopped after relaunch.
+Cloud continuation after closing the app is outside this first version.
+
+The team journey in `evals/specs/open-coworker-team.e2e.test.ts` covers a real
+request, recipient-authored shared work, the answer returning to the original
+conversation, the group link, conflicting edits, restore, and pause. The group
+store checks also cover membership revocation, cancellation, nested requests,
+and the persistent exchange limit.
+
 ## What a coworker is
 
 ```

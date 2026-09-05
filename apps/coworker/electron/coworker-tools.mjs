@@ -428,6 +428,8 @@ export async function createCoworkerToolsServer({ resolveSlug, handlers, tools =
       url: `${baseUrl}/mcp`,
       headers: { Authorization: `Bearer ${token}` },
       oauth: false,
+      // A bounded group request may wait for another coworker to finish.
+      timeout: 240_000,
     }),
     stop: () => new Promise((resolve) => {
       server.closeAllConnections?.();

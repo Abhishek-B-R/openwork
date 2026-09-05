@@ -3,6 +3,8 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { createCoworker } from "./coworkers.mjs";
+import { createGroupCollaboration } from "./group-collaboration.mjs";
 import {
   INTERRUPTED_TURN_MESSAGE,
   MAX_TURNS,
@@ -216,5 +218,83 @@ test("an action line names its coworker and what it links to", async () => {
     await assert.rejects(appendGroupEvent(home, group.id, { kind: "action", text: "no owner" }), /names its coworker/);
     // Older readers skip a kind they do not know instead of failing the whole timeline.
     assert.equal(parseTimeline('{"id":"evt_a","kind":"user","text":"a"}\n{"id":"evt_b","kind":"later-kind","text":"b"}\n').length, 1);
+  });
+});
+
+
+test("collaboration uses real members, preserves authors and rejects stale shared revisions", async () => {
+  await withHome(async (home) => {
+    for (const name of ["Scout", "Editor", "Ops"]) await createCoworker(home, { name });
+    const group = await createGroup(home, { name: "Launch", participantSlugs: ["scout", "editor"] });
+    assert.equal(group.collaborationEnabled, false);
+    let calls = 0;
+    const api = createGroupCollaboration({ coworkersDir: home, ask: async ({ sender, target }) => {
+      calls++;
+      assert.equal(sender.slug, "editor"); assert.equal(target.slug, "scout");
+      await assert.rejects(api.request(group.id, "scout", "editor", "nested"), /already in progress/);
+      const doc = await api.save(group.id, { title: "Audience", body: "Small agencies" }, "scout");
+      assert.equal(doc.author, "Scout");
+      return { text: "Small agencies. See Audience.", threadId: "ses_real" };
+    } });
+    await assert.rejects(api.request(group.id, "editor", "scout", "Audience?"), /paused/);
+    await updateGroup(home, group.id, { collaborationEnabled: true });
+    await assert.rejects(api.history(group.id, "ops"), /no longer a member/);
+    const answer = await api.request(group.id, "editor", "scout", "Audience?");
+    assert.equal(calls, 1); assert.equal(answer.reply, "Small agencies. See Audience.");
+    const events = await readGroupTimeline(home, group.id);
+    assert.equal(events.find((e) => e.status === "answered").requestId, answer.requestId);
+    assert.equal(events.find((e) => e.status === "answered").slug, "scout");
+    const doc = (await api.documents(group.id, "editor"))[0];
+    const edits = await Promise.allSettled([
+      api.save(group.id, { id: doc.id, expectedRevision: 1, title: "Audience", body: "Agencies with five people" }, "editor"),
+      api.save(group.id, { id: doc.id, expectedRevision: 1, title: "Audience", body: "Discarded competing edit" }, "scout"),
+    ]);
+    assert.equal(edits[0].status, "fulfilled"); assert.equal(edits[1].status, "rejected");
+    assert.match(edits[1].reason.message, /Read revision 2/);
+    assert.equal((await api.read(group.id, doc.id, "scout")).author, "Editor");
+    assert.equal((await api.revisions(group.id, doc.id))[0].author, "Scout");
+    const restored = await api.restore(group.id, doc.id, 1, 2);
+    assert.equal(restored.revision, 3); assert.equal(restored.author, "You"); assert.equal(restored.body.trim(), "Small agencies");
+    await updateGroup(home, group.id, { participantSlugs: ["editor", "ops"] });
+    await assert.rejects(api.read(group.id, doc.id, "scout"), /no longer a member/);
+    await assert.rejects(api.request(group.id, "editor", "scout", "Again?"), /another member/);
+    await updateGroup(home, group.id, { collaborationEnabled: false });
+    assert.deepEqual(await api.list("editor"), []);
+    assert.equal((await api.read(group.id, doc.id)).body.trim(), "Small agencies");
+  });
+});
+
+test("pausing aborts an in-flight exchange and restart recovery does not fabricate answers", async () => {
+  await withHome(async (home) => {
+    for (const name of ["Scout", "Editor"]) await createCoworker(home, { name });
+    const group = await createGroup(home, { name: "Launch", participantSlugs: ["scout", "editor"], collaborationEnabled: true });
+    let ready;
+    const started = new Promise((resolve) => { ready = resolve; });
+    const api = createGroupCollaboration({ coworkersDir: home, ask: ({ signal }) => new Promise((_, reject) => {
+      signal.addEventListener("abort", () => reject(new Error("Stopped")), { once: true }); ready();
+    }) });
+    const request = api.request(group.id, "editor", "scout", "Please check");
+    const stopped = assert.rejects(request, /[Ss]topped/);
+    await started;
+    await updateGroup(home, group.id, { collaborationEnabled: false }); api.stop(group.id);
+    await stopped;
+    assert.deepEqual((await readGroupTimeline(home, group.id)).map((e) => e.status), ["requested", "stopped"]);
+    await appendGroupEvent(home, group.id, { kind: "coworker", slug: "editor", toSlug: "scout", requestId: "request_interrupted", status: "requested", text: "Before closing" });
+    await api.recover(); await api.recover();
+    assert.equal((await readGroupTimeline(home, group.id)).filter((e) => e.requestId === "request_interrupted" && e.status === "stopped").length, 1);
+  });
+});
+
+
+test("the exchange budget persists across service restarts", async () => {
+  await withHome(async (home) => {
+    for (const name of ["Scout", "Editor"]) await createCoworker(home, { name });
+    const group = await createGroup(home, { name: "Launch", participantSlugs: ["scout", "editor"], collaborationEnabled: true });
+    let calls = 0;
+    const options = { coworkersDir: home, ask: async () => { calls++; return { text: "Checked", threadId: "ses_check" }; } };
+    const api = createGroupCollaboration(options);
+    for (let i = 0; i < 4; i++) await api.request(group.id, "editor", "scout", `Check ${i}`);
+    await assert.rejects(createGroupCollaboration(options).request(group.id, "editor", "scout", "One more"), /four requests/);
+    assert.equal(calls, 4);
   });
 });

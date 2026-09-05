@@ -131,6 +131,18 @@ export default function App() {
     void boot();
   }, [boot]);
 
+  useEffect(() => {
+    const openSharedGroup = (event: Event) => {
+      const id: unknown = (event as CustomEvent<unknown>).detail;
+      if (typeof id === "string" && groups.some((group) => group.id === id && group.archivedAt === null)) {
+        setGroupDetailsOpen(false);
+        setSelectedGroupId(id);
+      }
+    };
+    window.addEventListener("coworker:open-group", openSharedGroup);
+    return () => window.removeEventListener("coworker:open-group", openSharedGroup);
+  }, [groups]);
+
   // A group turn keeps running when its view is closed; the rail line still says who is replying.
   useEffect(() => {
     const lastTurn = new Map<string, CoworkerGroupTurn>();

@@ -1,3 +1,4 @@
+import { keptResult } from "@/lib/documents";
 import { ActionMenu } from "@/ui/kit";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
@@ -2599,6 +2600,11 @@ function WorkReceipt({ calls, client }: { calls: TranscriptToolCall[]; client: C
         <span className={`text-mist/60 transition-transform ${open ? "rotate-90" : ""}`} aria-hidden="true">›</span>
       </button>
       {open ? <WorkPopover calls={calls} steps={steps} anchor={lineRef.current} placement={open} onClose={() => setOpen(null)} /> : null}
+      {calls.filter((call) => call.tool === "coworker_group_request" && (call.status === "completed" || call.status === "success")).map((call, index) => {
+        const group = keptResult({ output: call.output, metadata: call.metadata ?? {} })?.structuredContent?.group;
+        if (typeof group !== "object" || group === null || !("groupId" in group) || !("groupName" in group) || typeof group.groupId !== "string" || typeof group.groupName !== "string") return null;
+        return <button key={index} type="button" data-testid="group-request-reference" className="mx-auto mt-1 block max-w-full truncate text-xs text-spark hover:underline" onClick={() => window.dispatchEvent(new CustomEvent("coworker:open-group", { detail: group.groupId }))}>View exchange in {group.groupName} →</button>;
+      })}
       <ToolAttachments calls={calls} client={client} />
     </div>
   );

@@ -17,6 +17,7 @@ export type CoworkerDocumentSummary = {
   createdAt: number;
   updatedAt: number;
   updatedBy: DocumentAuthor;
+  author?: string;
   revision: number;
   words: number;
 };

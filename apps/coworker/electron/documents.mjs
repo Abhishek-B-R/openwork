@@ -142,6 +142,7 @@ export function parseDocument(content, fallbackId = "") {
     createdAt: Number.isFinite(Number(data.createdAt)) ? Number(data.createdAt) : 0,
     updatedAt: Number.isFinite(Number(data.updatedAt)) ? Number(data.updatedAt) : 0,
     updatedBy: UPDATED_BY.has(data.updatedBy) ? data.updatedBy : "coworker",
+    ...(typeof data.author === "string" ? { author: cleanText(data.author, 80) } : {}),
     revision: Number.isInteger(revision) && revision > 0 ? revision : 1,
     body: String(body ?? "").replace(/^\n+/, ""),
   };
@@ -158,6 +159,7 @@ export function serializeDocument(document) {
       createdAt: document.createdAt,
       updatedAt: document.updatedAt,
       updatedBy: document.updatedBy,
+      ...(document.author ? { author: document.author } : {}),
       revision: document.revision,
     },
     `\n${String(document.body ?? "").replace(/^\n+/, "").replace(/\s+$/, "")}\n`,
@@ -303,7 +305,7 @@ async function keepRevision(root, document) {
  * A new document from the coworker (or the person). Title, summary, highlights,
  * and body are cleaned; the id is derived from the title and made unique.
  */
-export async function createDocument(coworkersDir, slug, input, { now = Date.now(), by = "coworker" } = {}) {
+export async function createDocument(coworkersDir, slug, input, { now = Date.now(), by = "coworker", author } = {}) {
   const root = coworkerRoot(coworkersDir, slug);
   const title = cleanText(input?.title, 120);
   if (!title) throw new Error("A document needs a title.");
@@ -320,6 +322,7 @@ export async function createDocument(coworkersDir, slug, input, { now = Date.now
     createdAt: now,
     updatedAt: now,
     updatedBy: UPDATED_BY.has(by) ? by : "coworker",
+    ...(author ? { author: cleanText(author, 80) } : {}),
     revision: 1,
     body: withoutLeadingTitle(body, title),
   };
@@ -333,7 +336,7 @@ export async function createDocument(coworkersDir, slug, input, { now = Date.now
  * and highlights refresh when given. Every update is a new revision; the one
  * it replaces goes to history.
  */
-export async function updateDocument(coworkersDir, slug, id, input, { now = Date.now(), by = "coworker" } = {}) {
+export async function updateDocument(coworkersDir, slug, id, input, { now = Date.now(), by = "coworker", author } = {}) {
   const root = coworkerRoot(coworkersDir, slug);
   const current = await readDocumentFile(root, id);
   if (current.status === "archived") throw new Error(`"${current.title}" is archived. Only the person can bring it back.`);
@@ -356,6 +359,7 @@ export async function updateDocument(coworkersDir, slug, id, input, { now = Date
     body,
     updatedAt: now,
     updatedBy: UPDATED_BY.has(by) ? by : "coworker",
+    ...(author ? { author: cleanText(author, 80) } : {}),
     revision: current.revision + 1,
   };
   const secret = findSecretLike(`${next.title}\n${next.summary}\n${next.highlights.join("\n")}\n${next.body}`);

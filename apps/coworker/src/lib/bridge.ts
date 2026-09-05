@@ -20,6 +20,7 @@ export type CoworkerGroupSummary = {
   id: string;
   name: string;
   participantSlugs: string[];
+  collaborationEnabled?: boolean;
   /** The native discussion thread each participant uses for this group, in its own workspace. */
   participantThreadIds: Record<string, string>;
   /** "providerId/modelId" for the silent facilitator; empty means Automatic. */
@@ -70,6 +71,10 @@ export type GroupTimelineEvent = {
   id: string;
   at: number;
   kind: GroupTimelineEventKind;
+  toSlug?: string;
+  requestId?: string;
+  documentId?: string;
+  revision?: number;
   text: string;
   /** The coworker who spoke (coworker events) or whom a status or action concerns. */
   slug?: string;
@@ -378,10 +383,17 @@ export const coworkerBridge = {
     deleteRetired: (archiveId: string) => invoke<{ ok: boolean }>("coworkers.retired.delete", { archiveId }),
   },
   groups: {
+    documents: {
+      list: (id: string) => invoke<CoworkerDocumentSummary[]>("groups.documents.list", { id }),
+      read: (id: string, documentId: string) => invoke<CoworkerDocument>("groups.documents.read", { id, documentId }),
+      save: (id: string, input: { id?: string; expectedRevision?: number; title: string; body: string; summary?: string }) => invoke<CoworkerDocument>("groups.documents.save", { id, input }),
+      revisions: (id: string, documentId: string) => invoke<DocumentRevision[]>("groups.documents.revisions", { id, documentId }),
+      restore: (id: string, documentId: string, revision: number, expectedRevision: number) => invoke<CoworkerDocument>("groups.documents.restore", { id, documentId, revision, expectedRevision }),
+    },
     list: () => invoke<CoworkerGroupSummary[]>("groups.list"),
     get: (id: string) => invoke<CoworkerGroupSummary>("groups.get", { id }),
-    create: (input: { name: string; participantSlugs: string[] }) => invoke<CoworkerGroupSummary>("groups.create", input),
-    update: (id: string, patch: Partial<Pick<CoworkerGroupSummary, "name" | "participantSlugs" | "participantThreadIds" | "facilitatorModel" | "facilitatorThreadId">>) =>
+    create: (input: { name: string; participantSlugs: string[]; collaborationEnabled?: boolean }) => invoke<CoworkerGroupSummary>("groups.create", input),
+    update: (id: string, patch: Partial<Pick<CoworkerGroupSummary, "name" | "participantSlugs" | "collaborationEnabled" | "participantThreadIds" | "facilitatorModel" | "facilitatorThreadId">>) =>
       invoke<CoworkerGroupSummary>("groups.update", { id, patch }),
     archive: (id: string) => invoke<CoworkerGroupSummary>("groups.archive", { id }),
     readTimeline: (id: string, limit?: number) => invoke<GroupTimelineEvent[]>("groups.readTimeline", { id, limit }),

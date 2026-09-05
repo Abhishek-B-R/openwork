@@ -150,6 +150,10 @@ export function GroupDetailsSheet({
               </div>
             ) : null}
           </div>
+          <label className="flex items-start gap-3 py-3 text-sm text-snow">
+            <input type="checkbox" className="mt-1" checked={group.collaborationEnabled === true} disabled={busy === "collaboration"} onChange={(event) => void save({ collaborationEnabled: event.target.checked }, "collaboration")} data-testid="group-collaboration-toggle" />
+            <span>Allow coworkers to talk to each other<span className="mt-1 block text-xs leading-relaxed text-mist">Requests and shared-document edits are visible in this group. Turning this off stops automatic exchanges; your messages and documents stay.</span></span>
+          </label>
           <details className="py-3" data-testid="group-details-advanced">
             <summary className={`${labelClass} cursor-pointer list-none`}>Advanced</summary>
             <div className={`${rowClass} pb-0`}>

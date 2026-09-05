@@ -1,3 +1,4 @@
+import { GroupDocuments } from "@/ui/group-documents";
 import { createHeadlessThreadClient, isRunning, type HeadlessThreadClient, type HeadlessTurnAcceptance } from "@openwork/headless-threads";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { coworkerBridge, type CoworkerGroupSummary, type CoworkerGroupTurn, type CoworkerSummary, type GroupTimelineEvent, type RuntimeInfo } from "@/lib/bridge";
@@ -208,6 +209,7 @@ export function GroupChat({
   /** Open an assignment a group created, in its owner's view. */
   onOpenAssignment?: (slug: string, threadId: string) => void;
 }) {
+  const [sharedDocument, setSharedDocument] = useState<string | null>(null);
   const [events, setEvents] = useState<GroupTimelineEvent[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [message, setMessage] = useState("");
@@ -261,6 +263,16 @@ export function GroupChat({
     return () => {
       cancelled = true;
     };
+  }, [group.id]);
+
+  // Main-process collaborations continue while another conversation is visible.
+  useEffect(() => {
+    let cancelled = false;
+    const refresh = () => { void coworkerBridge.groups.readTimeline(group.id).then((items) => {
+      if (!cancelled) setEvents((current) => { const known = new Set(current.map((event) => event.id)); return [...current, ...items.filter((event) => !known.has(event.id))].sort((a, b) => a.at - b.at); });
+    }).catch(() => undefined); };
+    const timer = window.setInterval(refresh, 1000);
+    return () => { cancelled = true; window.clearInterval(timer); };
   }, [group.id]);
 
   // The run lives outside the view: pick it up on mount and follow it while here.
@@ -583,7 +595,8 @@ export function GroupChat({
   const replyingMember = replying ? coworkers.find((coworker) => coworker.slug === replying.slug) : null;
 
   return (
-    <div className="glass-main flex h-full min-w-0 flex-1 flex-col" data-testid="group-chat" data-group-id={group.id} data-live={live ? "true" : "false"}>
+    <div className="glass-main relative flex h-full min-w-0 flex-1 flex-col" data-testid="group-chat" data-group-id={group.id} data-live={live ? "true" : "false"}>
+      {sharedDocument !== null ? <GroupDocuments key={group.id} groupId={group.id} openId={sharedDocument} onClose={() => setSharedDocument(null)} /> : null}
       <header className="glass-header window-drag flex h-[78px] items-center gap-3 border-b border-line px-6 pt-2" data-testid="conversation-header">
         <GroupAvatars members={members} size={30} />
         <div className="min-w-0 flex-1">
@@ -605,8 +618,10 @@ export function GroupChat({
             <h1 className="truncate text-sm font-semibold text-snow" data-testid="group-name">{group.name}</h1>
           )}
           <p className="truncate text-xs text-mist" data-testid="conversation-header-title">{members.map((member) => member.name).join(", ")}</p>
+          {group.collaborationEnabled ? <button type="button" className="window-no-drag mt-0.5 block max-w-full truncate text-[10px] text-mint hover:underline" data-testid="group-collaboration-pause" onClick={() => { void coworkerBridge.groups.update(group.id, { collaborationEnabled: false }).then(onGroupChanged).catch((cause: unknown) => setError(String(cause))); }}>Collaboration on · Pause</button> : <span className="block text-[10px] text-mist/70">Collaboration paused</span>}
         </div>
         <div className="window-no-drag flex shrink-0 items-center gap-1" data-testid="conversation-header-actions">
+          <Button variant="ghost" onClick={() => setSharedDocument("")} data-testid="group-shared-documents">Shared documents</Button>
           {live ? <Button variant="ghost" onClick={() => void stopGroupRun(group.id)}>Stop all</Button> : null}
           <ActionMenu
             label="Group chat options"
@@ -618,7 +633,7 @@ export function GroupChat({
           />
         </div>
         {/* One plain line, no dot: who is replying, or Ready. */}
-        <span data-testid="coworker-top-status" data-tone="mist" className="shrink-0 text-xs text-mist">
+        <span data-testid="coworker-top-status" data-tone="mist" className="max-w-28 shrink-0 truncate text-xs text-mist">
           {statusLine}
         </span>
       </header>
@@ -635,7 +650,7 @@ export function GroupChat({
           {events.map((event, index) => {
             const previous = events[index - 1];
             const next = events[index + 1];
-            const sameSpeaker = (other: GroupTimelineEvent | undefined) => Boolean(other && other.kind === event.kind && other.slug === event.slug);
+            const sameSpeaker = (other: GroupTimelineEvent | undefined) => Boolean(other && other.kind === event.kind && other.slug === event.slug && other.toSlug === event.toSlug && other.requestId === event.requestId);
             const continued = sameSpeaker(previous) && event.at - (previous?.at ?? 0) < 5 * 60_000;
             const tail = !sameSpeaker(next);
             const label = timeLabelBetween(previous?.at, event.at);
@@ -645,7 +660,7 @@ export function GroupChat({
               const failure = speaker ? describeSpeakerFailure(speaker.error, nameFor(speaker.slug)) : null;
               return (
                 <p key={event.id} className="flex flex-wrap items-center justify-center gap-x-3 px-12 text-center text-[11px] text-mist" data-testid="group-status" data-status={event.status} data-speaker={event.slug} data-error={speaker?.error}>
-                  <span title={speaker?.error && speaker.error !== event.text ? speaker.error : undefined}>{event.text}</span>
+                  {event.documentId ? <button className="text-spark hover:underline" onClick={() => setSharedDocument(event.documentId ?? "")}>{event.text} · revision {event.revision}</button> : <span title={speaker?.error && speaker.error !== event.text ? speaker.error : undefined}>{event.text}</span>}
                   {speaker && recoverable ? (
                     <span className="flex items-center gap-x-3">
                       <button type="button" className="font-medium text-snow/80 underline-offset-2 hover:underline" data-testid="group-speaker-retry" data-speaker={speaker.slug} onClick={() => void resume(recoverable, speaker.slug)}>Retry</button>
@@ -686,15 +701,16 @@ export function GroupChat({
             return (
               <div key={event.id}>
                 {label ? <p className="pb-1 pt-2 text-center text-[11px] font-medium text-mist/80" data-testid="group-time-label">{label}</p> : null}
-                <div className={`flex items-end gap-2 ${continued ? "-mt-1.5" : ""}`} data-message-role="assistant" data-speaker={event.slug} data-continued={continued ? "true" : "false"}>
+                <div className={`flex items-end gap-2 ${continued ? "-mt-1.5" : ""}`} data-message-role="assistant" data-speaker={event.slug} data-request-id={event.requestId} data-recipient={event.toSlug} data-continued={continued ? "true" : "false"}>
                   <span className="w-6 shrink-0">
                     {tail && speaker ? <CoworkerAvatar color={speaker.avatarColor} glasses={speaker.avatarGlasses} name={speaker.name} size={24} /> : null}
                   </span>
                   <div className="max-w-[76%]">
-                    {!continued ? <p className="mb-0.5 px-2 text-[11px] font-medium text-mist" data-testid="group-speaker-name">{nameFor(event.slug ?? "")}</p> : null}
+                    {!continued ? <p className="mb-0.5 px-2 text-[11px] font-medium text-mist" data-testid="group-speaker-name">{nameFor(event.slug ?? "")}{event.toSlug ? ` → ${nameFor(event.toSlug)}` : ""}</p> : null}
                     <div className={`bubble bubble-coworker whitespace-pre-wrap ${tail ? "bubble-tail-left" : ""}`} title={timeLabel(event.at)}>
                       {event.text}
                     </div>
+                    {event.status === "requested" ? <p className="mt-1 px-2 text-[10px] text-mist">{events.some((entry) => entry.requestId === event.requestId && entry.status === "answered") ? "Answered" : events.some((entry) => entry.requestId === event.requestId && ["stopped", "failed"].includes(entry.status ?? "")) ? "Stopped · ask again to retry" : `Waiting for ${nameFor(event.toSlug ?? "")}`}</p> : null}
                   </div>
                 </div>
               </div>

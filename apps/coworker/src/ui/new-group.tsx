@@ -21,6 +21,7 @@ export function NewGroupSheet({
   const [selected, setSelected] = useState<string[]>(() => coworkers.slice(0, 2).map((coworker) => coworker.slug));
   const [nameEdited, setNameEdited] = useState(false);
   const [name, setName] = useState("");
+  const [collaborationEnabled, setCollaborationEnabled] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const members = useMemo(() => coworkers.filter((coworker) => selected.includes(coworker.slug)), [coworkers, selected]);
@@ -44,7 +45,7 @@ export function NewGroupSheet({
     setBusy(true);
     setError("");
     try {
-      onCreated(await coworkerBridge.groups.create({ name: shownName.trim() || suggested, participantSlugs: members.map((member) => member.slug) }));
+      onCreated(await coworkerBridge.groups.create({ name: shownName.trim() || suggested, participantSlugs: members.map((member) => member.slug), collaborationEnabled }));
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
       setBusy(false);
@@ -102,6 +103,10 @@ export function NewGroupSheet({
             if (event.key === "Enter") void create();
           }}
         />
+        <label className="mt-4 flex items-start gap-3 text-sm text-snow">
+          <input type="checkbox" className="mt-1" checked={collaborationEnabled} onChange={(event) => setCollaborationEnabled(event.target.checked)} data-testid="new-group-collaboration" />
+          <span>Allow coworkers to talk to each other<span className="mt-1 block text-xs leading-relaxed text-mist">Members can ask each other for help and edit shared documents. Their exchanges appear here. Runs while Open Coworker is open, using each coworker's model.</span></span>
+        </label>
         {error ? <div className="mt-3"><ErrorNote>{error}</ErrorNote></div> : null}
         <div className="mt-5 flex items-center justify-end gap-2">
           <Button variant="ghost" onClick={onCancel}>Cancel</Button>

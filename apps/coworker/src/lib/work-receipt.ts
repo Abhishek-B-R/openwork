@@ -6,7 +6,7 @@
  * the details disclosure, never in the collapsed line.
  */
 import { coworkerToolName, isAssignmentTool, isTeamTool, type CoworkerToolName } from "./coworker-tools.ts";
-import { documentToolName, humanizeDocumentId, structuredContextChanges, structuredDocument } from "./documents.ts";
+import { documentToolName, humanizeDocumentId, keptResult, structuredContextChanges, structuredDocument } from "./documents.ts";
 import { parseLocalSchedule } from "./local-schedule.ts";
 import { describeScheduleForPeople, describeScheduleInSentence } from "./responsibility-copy.ts";
 import { describeTeamStep } from "./team.ts";
@@ -254,6 +254,19 @@ export function describeWorkStep(call: WorkStepInput): WorkStep {
 
   const step = (label: string, doing: string, service: string): WorkStep => ({ label, doing, service, state, tool });
 
+  if (normalized.startsWith("coworker_group_")) {
+    const result = keptResult({ output: call.output, metadata: call.metadata ?? {} })?.structuredContent?.group;
+    const group = typeof result === "object" && result !== null && !Array.isArray(result) ? result : {};
+    const where = "groupName" in group ? text(group.groupName) : "";
+    if (normalized === "coworker_group_request") {
+      const who = clipLabel(("fromName" in group ? text(group.fromName) : "") || text(input.to) || "a teammate");
+      return step(`Asked ${who}${where ? ` in ${clipLabel(where)}` : " for help"}`, `waiting for ${who}`, "team");
+    }
+    if (normalized === "coworker_group_document_save") return step(`Saved shared document · ${clipLabel(text(input.title))}`, "saving shared work", "documents");
+    if (normalized === "coworker_group_document_read") return step("Read a shared document", "reading shared work", "documents");
+    if (normalized === "coworker_group_documents") return step("Checked shared documents", "checking shared documents", "documents");
+    return step(normalized.endsWith("history") ? "Read the group conversation" : "Found groups for collaboration", "checking shared groups", "team");
+  }
   const documentTool = documentToolName(tool);
   if (documentTool) return describeDocumentStep(documentTool, call, step);
   const workerTool = workerToolName(tool);

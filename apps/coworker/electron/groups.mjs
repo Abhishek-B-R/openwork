@@ -171,6 +171,7 @@ function normalizeStoredGroup(raw) {
     name: typeof raw.name === "string" ? raw.name : "Group chat",
     participantSlugs: Array.isArray(raw.participantSlugs) ? raw.participantSlugs.filter((slug) => typeof slug === "string" && SLUG.test(slug)) : [],
     participantThreadIds: raw.participantThreadIds && typeof raw.participantThreadIds === "object" ? { ...raw.participantThreadIds } : {},
+    collaborationEnabled: raw.collaborationEnabled === true,
     facilitatorModel: typeof raw.facilitatorModel === "string" ? raw.facilitatorModel : "",
     facilitatorThreadId: typeof raw.facilitatorThreadId === "string" ? raw.facilitatorThreadId : "",
     turns: Array.isArray(raw.turns) ? raw.turns.map(normalizeTurn).filter(Boolean).slice(-MAX_TURNS) : [],
@@ -180,7 +181,7 @@ function normalizeStoredGroup(raw) {
   };
 }
 
-export async function createGroup(coworkersDir, { name, participantSlugs }, { now = Date.now() } = {}) {
+export async function createGroup(coworkersDir, { name, participantSlugs, collaborationEnabled = false }, { now = Date.now() } = {}) {
   const slugs = normalizeParticipantSlugs(participantSlugs);
   const group = {
     schemaVersion: GROUP_SCHEMA_VERSION,
@@ -188,6 +189,7 @@ export async function createGroup(coworkersDir, { name, participantSlugs }, { no
     name: normalizeName(name, "Group chat"),
     participantSlugs: slugs,
     participantThreadIds: {},
+    collaborationEnabled: collaborationEnabled === true,
     facilitatorModel: "",
     facilitatorThreadId: "",
     turns: [],
@@ -230,6 +232,7 @@ export async function listGroups(coworkersDir) {
 export async function updateGroup(coworkersDir, id, patch = {}, { now = Date.now() } = {}) {
   return mutateGroup(coworkersDir, id, (group) => {
     const next = { ...group, updatedAt: now };
+    if (patch.collaborationEnabled !== undefined) next.collaborationEnabled = patch.collaborationEnabled === true;
     if (patch.name !== undefined) next.name = normalizeName(patch.name, group.name);
     if (patch.participantSlugs !== undefined) next.participantSlugs = normalizeParticipantSlugs(patch.participantSlugs);
     if (patch.participantThreadIds !== undefined) {
@@ -388,6 +391,10 @@ export function normalizeEvent(input, { now = Date.now() } = {}) {
     text,
   };
   if (slug) event.slug = slug;
+  for (const key of ["toSlug", "requestId", "documentId"]) {
+    if (typeof input[key] === "string" && input[key]) event[key] = input[key].slice(0, 100);
+  }
+  if (Number.isInteger(input.revision)) event.revision = input.revision;
   if (typeof input.turnId === "string" && input.turnId) event.turnId = input.turnId;
   if (typeof input.clientMessageId === "string" && input.clientMessageId) event.clientMessageId = input.clientMessageId;
   if (typeof input.status === "string" && input.status) event.status = input.status;

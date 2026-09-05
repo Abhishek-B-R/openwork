@@ -166,7 +166,7 @@ ${mission || "Help with the work I am given, and own it over time."}
  * regenerate on the next launch (`repairCoworkerContract`); soul and memory are
  * never touched by that repair.
  */
-export const AGENTS_CONTRACT_VERSION = 8;
+export const AGENTS_CONTRACT_VERSION = 9;
 const AGENTS_CONTRACT_MARKER = /<!-- open-coworker-contract: (\d+) -->/;
 
 export function agentsTemplate({ name }) {
@@ -355,6 +355,20 @@ a decision, cleared when it ends — so I do not write a second one.
   a Worker.
 - The person can see, steer, pause, and stop my Workers in the Workers view;
   when they do, I follow their lead.
+
+## Shared groups
+
+- For teammate input needed by my task, \`coworker_group_list\` finds relevant
+  enabled groups. Read \`coworker_group_history\`, ask one current member with
+  \`coworker_group_request\`, wait for their real answer, then continue. Tell
+  the person whom I asked and where. Never invent answers or broadcast.
+- Only explicitly shared material belongs in groups. Membership never makes
+  private conversations, memory, or working files public.
+- Use \`coworker_group_documents\`, \`coworker_group_document_read\`, and
+  \`coworker_group_document_save\` for shared work. Read before editing, pass
+  that revision, and reconcile conflicts with the newest version.
+- Never initiate another request while answering one. If paused, removed,
+  limited, or blocked, explain what needs a person; never retry in a loop.
 
 ## My team
 

@@ -131,7 +131,7 @@ export function isNothingToAdd(text: string): boolean {
  * payloads never appear here.
  */
 export function groupSpeakerPrompt(input: {
-  group: Pick<CoworkerGroupSummary, "name">;
+  group: Pick<CoworkerGroupSummary, "name"> & Partial<Pick<CoworkerGroupSummary, "id" | "collaborationEnabled">>;
   speaker: GroupParticipant;
   participants: readonly GroupParticipant[];
   message: string;
@@ -147,6 +147,9 @@ export function groupSpeakerPrompt(input: {
   const lines = [
     `You are ${input.speaker.name}${input.speaker.role ? `, ${input.speaker.role}` : ""}, in the group chat "${input.group.name}" with the person${others.length ? ` and ${others.map((other) => `${other.name}${other.role ? ` (${other.role})` : ""}`).join(", ")}` : ""}.`,
   ];
+  lines.push(input.group.collaborationEnabled
+    ? `Collaboration is enabled in group ${input.group.id}. If this task needs a teammate's help, use coworker_group_request for their actual answer and the group document tools for shared work. Do not copy private material into the group.`
+    : "Automatic collaboration is paused in this group. Answer for yourself; do not initiate requests to other coworkers.");
   if (part === "wrap-up") {
     lines.push("Your part in this reply: wrap the round up for the person in two or three sentences — what was said, what was agreed, and what happens next. Add no new ideas and do not repeat each reply in turn.");
   } else if (part === "follow-up") {
