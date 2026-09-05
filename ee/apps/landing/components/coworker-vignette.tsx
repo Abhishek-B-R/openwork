@@ -4,18 +4,19 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { FileText, MessageCircle, ListTodo, Plug, RotateCcw, ArrowUp, ArrowRight, ChevronLeft, Check, Pause, Play, Plus, Users } from "lucide-react";
 import { CoworkerAvatar, CoworkerMark } from "./coworker-brand";
 import { CoworkerAction } from "./coworker-announcement-actions";
-import { DEMO_VIEWS, EXAMPLES, TEAM, type CoworkerId, type DemoView } from "../lib/coworker-demo";
-import { CoworkerDemoBuilder, DEFAULT_DEMO_COWORKER, type DemoCoworker } from "./coworker-demo-builder";
+import { DEMO_VIEWS, EXAMPLES, TEAM, DEFAULT_DEMO_COWORKER, customExample, type CoworkerId, type DemoView, type DemoCoworker, type StockCoworkerId } from "../lib/coworker-demo";
+import { CoworkerDemoBuilder } from "./coworker-demo-builder";
 import { CoworkerDemoModels } from "./coworker-demo-models";
+import { DemoQuestionCard, GroupComposer, GroupConversation, GroupFaces, Thinking } from "./coworker-demo-conversations";
 import { capturePosthogEvent } from "../lib/posthog-client";
 
 const VIEW_ICONS = { chat: MessageCircle, documents: FileText, assignments: ListTodo, connections: Plug, group: Users, create: Plus };
 type Model = "free" | "models";
-type Progress = { replied: boolean; thinking: boolean; assigned: boolean; resultOpen: boolean; routinePaused: boolean; model: Model };
-type DemoAction = "coworker_selected" | "view_opened" | "message_sent" | "document_opened" | "assignment_created" | "assignment_result_opened" | "schedule_toggled" | "connection_toggled" | "model_selected" | "reset" | "group_started" | "coworker_created";
+type Progress = { replied: boolean; thinking: boolean; answer: number | null; answerThinking: boolean; assigned: boolean; resultOpen: boolean; routinePaused: boolean; model: Model };
+type DemoAction = "coworker_selected" | "view_opened" | "message_sent" | "document_opened" | "assignment_created" | "assignment_result_opened" | "schedule_toggled" | "connection_toggled" | "model_selected" | "reset" | "group_started" | "group_recipient_selected" | "coworker_created" | "question_answered";
+function emptyProgress(): Progress { return { replied: false, thinking: false, answer: null, answerThinking: false, assigned: false, resultOpen: false, routinePaused: false, model: "free" }; }
 function freshProgress(): Record<CoworkerId, Progress> {
-  const empty: Progress = { replied: false, thinking: false, assigned: false, resultOpen: false, routinePaused: false, model: "free" };
-  return { scout: { ...empty }, editor: { ...empty }, ops: { ...empty }, custom: { ...empty } };
+  return { scout: emptyProgress(), editor: emptyProgress(), ops: emptyProgress() };
 }
 
 /** An interactive sample workspace. All state is local to this component;
@@ -30,8 +31,11 @@ export function CoworkerVignette() {
   const [status, setStatus] = useState("");
   const [motion, setMotion] = useState(true);
   const [groupStep, setGroupStep] = useState(0);
+  const [groupSelected, setGroupSelected] = useState<StockCoworkerId[]>(() => TEAM.map((person) => person.id));
+  const [groupRun, setGroupRun] = useState<StockCoworkerId[]>([]);
   const [draft, setDraft] = useState<DemoCoworker>(DEFAULT_DEMO_COWORKER);
-  const [custom, setCustom] = useState<DemoCoworker | null>(null);
+  const [custom, setCustom] = useState<Array<DemoCoworker & { id: CoworkerId }>>([]);
+  const customId = useRef(0);
   const timers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   const completedRef = useRef(new Set<DemoView>());
   useEffect(() => { const pending = timers.current; return () => { pending.forEach(clearTimeout); pending.clear(); }; }, []);
@@ -40,17 +44,13 @@ export function CoworkerVignette() {
   const titleRef = useRef<HTMLHeadingElement>(null);
   const demoRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
-  const team = custom ? [...TEAM, custom] : TEAM;
+  const team = [...TEAM, ...custom];
   const member = team.find((person) => person.id === selected)!;
-  const example = selected === "custom" ? {
-    ...EXAMPLES.scout,
-    question: "Let’s plan a first task.",
-    answer: "Hi, I’m " + member.name + ". Give me a starting point and we’ll work through it together.",
-    followUp: "Help me turn my mission into a first task.",
-    reply: "Let’s start small: share a few notes, choose one useful outcome, and review a first draft together. Your mission is: “" + (custom?.mission || "Help with the work ahead.") + "”",
-    document: { ...EXAMPLES.scout.document, title: member.name + "’s first task", intro: custom?.mission || "Choose one useful outcome to work on together." },
-  } : EXAMPLES[selected];
   const state = progress[selected];
+  const customMember = custom.find((person) => person.id === selected);
+  const example = selected === "scout" || selected === "editor" || selected === "ops" ? EXAMPLES[selected] : customExample(customMember!, state.answer);
+  const groupBusy = groupStep > 0 && groupStep <= groupRun.length;
+  const groupDone = groupStep > groupRun.length;
 
   useEffect(() => {
     if (started.current) {
@@ -62,7 +62,7 @@ export function CoworkerVignette() {
     if (((view === "chat" && (state.replied || state.thinking)) || (view === "group" && groupStep > 0)) && contentRef.current) {
       contentRef.current.scrollTo({ top: contentRef.current.scrollHeight, behavior: "auto" });
     }
-  }, [selected, view, state.replied, state.thinking, groupStep]);
+  }, [selected, view, state.replied, state.thinking, state.answer, state.answerThinking, groupStep]);
 
   function track(action: DemoAction, detail?: string) {
     if (!started.current) {
@@ -70,7 +70,7 @@ export function CoworkerVignette() {
       capturePosthogEvent("coworker_demo_started", { campaign: "coworker", version: 1 });
     }
     // Only fixed example identifiers reach analytics; no visitor input or account data.
-    capturePosthogEvent("coworker_demo_interacted", { campaign: "coworker", action, coworker: selected, view, detail });
+    capturePosthogEvent("coworker_demo_interacted", { campaign: "coworker", action, coworker: selected.startsWith("custom-") ? "custom" : selected, view, detail: detail?.startsWith("custom-") ? "custom" : detail });
   }
   function markComplete(part: DemoView) {
     const next = new Set(completedRef.current).add(part);
@@ -101,28 +101,38 @@ export function CoworkerVignette() {
     timers.current.set(key, timer);
   }
   function playGroup() {
-    if (groupStep > 0 && groupStep < 4) return;
+    if (groupBusy || !groupSelected.length) return;
     track("group_started");
+    setGroupRun([...groupSelected]);
     setGroupStep(1);
     function next(step: number) {
       later("group", 1200, () => {
         setGroupStep(step);
-        if (step < 4) next(step + 1);
-        else { markComplete("group"); setStatus("Scout, Editor, and Ops have replied in the sample group chat."); }
+        if (step <= groupSelected.length) next(step + 1);
+        else { markComplete("group"); setStatus("The selected coworkers have replied in the sample group chat."); }
       });
     }
     next(2);
   }
   function createCoworker() {
-    const next = { ...draft, name: draft.name.trim(), role: draft.role.trim(), mission: draft.mission.trim() };
-    if (!next.name) return;
+    if (!draft.name.trim() || !draft.role.trim() || !draft.mission.trim() || draft.responsibilities.some((item) => !item.trim())) return;
+    const id: CoworkerId = `custom-${++customId.current}`;
+    const next = { ...draft, id, name: draft.name.trim(), role: draft.role.trim(), mission: draft.mission.trim(), responsibilities: draft.responsibilities.map((item) => item.trim()) };
     track("coworker_created");
-    clearTimeout(timers.current.get("reply:custom"));
-    timers.current.delete("reply:custom");
-    setCustom(next);
-    setProgress((current) => ({ ...current, custom: freshProgress().custom }));
-    setSelected("custom"); setView("chat"); setDocumentOpen(false);
+    setCustom((current) => [...current, next]);
+    setDraft(DEFAULT_DEMO_COWORKER);
+    setProgress((current) => ({ ...current, [id]: emptyProgress() }));
+    setSelected(id); setView("chat"); setDocumentOpen(false);
     markComplete("create"); setStatus(next.name + " joined the sample workspace.");
+  }
+  function answerQuestion(index: number) {
+    if (state.answerThinking || state.answer === index || !example.clarification.options[index]) return;
+    track("question_answered", String(index));
+    update({ answer: index, answerThinking: true, assigned: false, resultOpen: false });
+    later("answer:" + selected, 1000, () => {
+      setProgress((current) => ({ ...current, [selected]: { ...current[selected], answerThinking: false } }));
+      setStatus(member.name + " used your answer to shape the next step.");
+    });
   }
   function reply() {
     if (state.replied || state.thinking) return;
@@ -155,7 +165,7 @@ export function CoworkerVignette() {
   function reset() {
     track("reset");
     timers.current.forEach(clearTimeout); timers.current.clear();
-    setGroupStep(0); setCustom(null); setDraft(DEFAULT_DEMO_COWORKER);
+    setGroupStep(0); setGroupRun([]); setGroupSelected(TEAM.map((person) => person.id)); setCustom([]); setDraft(DEFAULT_DEMO_COWORKER); customId.current = 0;
     completedRef.current.clear();
     setProgress(freshProgress());
     setSelected("scout");
@@ -173,7 +183,7 @@ export function CoworkerVignette() {
       <div className="cw-demo-scenarios" aria-label="Choose a walkthrough">
         <button type="button" aria-pressed={view === "chat"} onClick={() => openView("chat")}><MessageCircle size={15} aria-hidden="true" />Check in</button>
         <button type="button" aria-pressed={view === "group"} onClick={() => openView("group")} id="demo-open-group" data-testid="demo-open-group"><Users size={15} aria-hidden="true" />Work as a team</button>
-        <button type="button" aria-pressed={view === "create"} onClick={() => openView("create")} id="demo-open-create" data-testid="demo-open-create"><Plus size={15} aria-hidden="true" />Create your own</button>
+        <button type="button" aria-pressed={view === "create"} onClick={() => openView("create")} id="demo-open-create" data-testid="demo-open-create" aria-label="Explore adding a coworker"><Plus size={15} aria-hidden="true" />Add a coworker</button>
       </div>
       <div className="cw-demo-topbar">
         <div className="flex items-center gap-2.5"><CoworkerMark size={23} /><span className="text-xs font-medium">Open Coworker</span></div>
@@ -187,6 +197,7 @@ export function CoworkerVignette() {
               <CoworkerAvatar {...person} size={30} /><span><span className="block text-sm font-medium">{person.name}</span><span className="cw-demo-role">{person.role}</span></span>
             </button>)}
           </div>
+          <button type="button" className="cw-demo-add" onClick={() => openView("create")}><Plus size={15} aria-hidden="true" />Add a coworker</button>
           <button type="button" className="cw-demo-group-link" aria-pressed={view === "group"} onClick={() => openView("group")}><GroupFaces /><span>Launch team<small>Group chat</small></span></button>
           <nav className="cw-demo-nav" aria-label="Explore the demo">
             {DEMO_VIEWS.map((item) => {
@@ -203,22 +214,26 @@ export function CoworkerVignette() {
           </header>
           <div className="cw-demo-content" ref={contentRef} tabIndex={0} role="region" aria-label={member.name + " " + view + " example"} key={selected + view + documentOpen}>
             {view === "create" && <CoworkerDemoBuilder value={draft} onChange={setDraft} onCreate={createCoworker} />}
-            {view === "group" && <GroupConversation step={groupStep} onReplay={playGroup} />}
+            {view === "group" && <GroupConversation step={groupStep} run={groupRun} />}
             {view === "chat" && <div className="cw-demo-conversation">
               <div className="flex justify-end"><p className="cw-chat-request">{example.question}</p></div>
               <div className="cw-demo-reply"><CoworkerAvatar {...member} size={27} /><div className="min-w-0"><p className="cw-demo-speaker">{member.name}</p><p>{example.answer}</p>
+                {customMember && <div className="cw-demo-owned-work"><p>What I’ll help with</p><ul>{example.responsibilities.map((item, index) => <li key={index}>{item}</li>)}</ul></div>}
                 <button type="button" className="cw-chat-document" onClick={openDocument} aria-label={"Open " + example.document.title}><FileText size={20} aria-hidden="true" /><span className="flex-1"><span className="block text-sm font-medium text-[var(--cw-text)]">{example.document.title}</span><span className="mt-0.5 block text-xs text-[var(--cw-muted)]">Draft · Ready to review</span></span><ArrowRight size={15} aria-hidden="true" /></button>
               </div></div>
               {(state.replied || state.thinking) && <div className="cw-demo-message-enter" data-testid="demo-follow-up"><div className="mb-6 flex justify-end"><p className="cw-chat-request">{example.followUp}</p></div>{state.thinking ? <Thinking member={member} /> : <div className="cw-demo-reply cw-demo-message-enter"><CoworkerAvatar {...member} size={27} /><div><p className="cw-demo-speaker">{member.name}</p><p>{example.reply}</p></div></div>}</div>}
+              {state.replied && <DemoQuestionCard member={member} question={example.clarification} selected={state.answer} thinking={state.answerThinking} onChoose={answerQuestion} />}
             </div>}
             {view === "documents" && (documentOpen ? <article className="cw-demo-document" data-testid="demo-document-preview">
               <button type="button" className="cw-demo-text-button mb-7" onClick={() => setDocumentOpen(false)}><ChevronLeft size={14} aria-hidden="true" />All documents</button>
               <p className="cw-eyebrow">{example.document.eyebrow}</p><h4>{example.document.title}</h4><p>{example.document.intro}</p>
               {selected === "editor" && state.replied && <div className="cw-demo-note"><strong>Alternative opening</strong><p>Good work starts with a little company. Meet your new coworkers.</p></div>}
+              {state.answer !== null && !state.answerThinking && <div className="cw-demo-note"><strong>Your direction · {example.clarification.options[state.answer]!.label}</strong><p>{example.clarification.options[state.answer]!.reply}</p></div>}
               <h5>What matters</h5><ul>{example.document.points.map((point) => <li key={point}>{point}</li>)}</ul><h5>Next step</h5><p>{example.document.next}</p>
             </article> : <div className="cw-demo-panel-body"><p className="cw-demo-description">The work you can open, review, and build on.</p><button type="button" className="cw-demo-list-row" onClick={openDocument} aria-label={"Read " + example.document.title}><FileText size={23} aria-hidden="true" /><span className="flex-1"><strong>{example.document.title}</strong><small>{member.name} · Ready to review</small></span><ArrowRight size={16} aria-hidden="true" /></button></div>)}
             {view === "assignments" && <div className="cw-demo-panel-body">
               <p className="cw-demo-description">Give {member.name} an outcome to work toward.</p>
+              <div className="cw-demo-owned-work"><p>{member.name}’s responsibilities</p><ul>{example.responsibilities.map((item, index) => <li key={index}>{item}</li>)}</ul></div>
               <p className="cw-eyebrow mb-3">Once</p>
               <div className="cw-demo-task" data-testid="demo-assignment">
                 <h4>{example.assignment.title}</h4><p>{example.assignment.description}</p>
@@ -241,6 +256,7 @@ export function CoworkerVignette() {
               <p className="mt-5 text-xs leading-5 text-[var(--cw-muted)]">These are example connections. Your accounts and files stay untouched.</p>
             </div>}
           </div>
+          {view === "group" && <GroupComposer selected={groupSelected} busy={groupBusy} onSend={playGroup} onEveryone={() => { track("group_recipient_selected", "everyone"); setGroupSelected(TEAM.map((person) => person.id)); }} onToggle={(id) => { track("group_recipient_selected", id); setGroupSelected((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id]); }} />}
           {view === "chat" && <div className="cw-demo-composer-area">
             {state.model === "models" && <div className="cw-demo-model-note">Explore models through an OpenWork membership.<CoworkerAction href="#models" action="models" placement="demo" className="underline underline-offset-4">See membership<ArrowRight size={12} aria-hidden="true" /></CoworkerAction></div>}
             <form className="cw-demo-composer" onSubmit={(event) => { event.preventDefault(); reply(); }}>
@@ -254,7 +270,7 @@ export function CoworkerVignette() {
         <div><p className="font-medium">{completed.size === 6 ? "Make a little room on your team." : view === "group" ? "Different strengths. One conversation." : view === "create" ? "A coworker shaped around your work." : view === "chat" ? state.replied ? "There’s something to build on." : "Try the conversation." : view === "documents" ? "A draft you can make your own." : view === "assignments" ? "Give your coworker the next step." : "A place for your tools, too."}</p>
           <p className="mt-1 text-xs text-[var(--cw-muted)]">{completed.size === 6 ? "You’ve explored a sample workday. Meet your own coworkers next." : "Explore at your own pace · " + completed.size + " of 6 moments tried"}</p></div>
         {completed.size === 6 ? <CoworkerAction href="#get-started" action="early_access" placement="demo" className="cw-demo-small-button">Get early access<ArrowRight size={14} aria-hidden="true" /></CoworkerAction>
-          : view === "group" ? <button type="button" className="cw-demo-small-button" disabled={groupStep > 0 && groupStep < 4} onClick={groupStep === 4 ? () => openView("create") : playGroup}>{groupStep === 4 ? "Create your coworker" : groupStep > 0 ? "Coworkers are replying…" : "Try a group chat"}<ArrowRight size={14} aria-hidden="true" /></button>
+          : view === "group" ? <button type="button" className="cw-demo-small-button" disabled={groupBusy || (!groupDone && groupSelected.length === 0)} onClick={groupDone ? () => openView("create") : playGroup}>{groupDone ? "Add your coworker" : groupBusy ? "Coworkers are replying…" : "Try a group chat"}<ArrowRight size={14} aria-hidden="true" /></button>
           : view === "create" ? <span className="text-xs text-[var(--cw-muted)]">Your changes appear in the preview.</span>
           : view === "chat" ? <button type="button" className="cw-demo-small-button" disabled={state.thinking} onClick={state.replied ? openDocument : reply}>{state.thinking ? "Thinking…" : state.replied ? "Open the draft" : "Try a reply"}<ArrowRight size={14} aria-hidden="true" /></button>
           : view === "documents" ? <button type="button" className="cw-demo-small-button" onClick={documentOpen ? () => openView("assignments") : openDocument}>{documentOpen ? "Explore assignments" : "Open the draft"}<ArrowRight size={14} aria-hidden="true" /></button>
@@ -269,26 +285,4 @@ export function CoworkerVignette() {
 /** A page invitation opens the same walkthrough view as its own navigation. */
 export function CoworkerDemoShortcut({ view, children }: { view: "group" | "create"; children: ReactNode }) {
   return <a href="#how" className="mt-5 inline-flex items-center gap-2 text-sm underline underline-offset-4" onClick={() => document.getElementById("demo-open-" + view)?.click()}>{children}<ArrowRight size={14} aria-hidden="true" /></a>;
-}
-
-function GroupFaces() {
-  return <span className="cw-demo-group-faces" aria-hidden="true">{TEAM.map((person) => <CoworkerAvatar key={person.id} {...person} size={25} />)}</span>;
-}
-
-function Thinking({ member }: { member: { name: string; color: typeof TEAM[number]["color"]; glasses: typeof TEAM[number]["glasses"] } }) {
-  return <div className="cw-demo-thinking" role="status" data-testid="demo-thinking"><CoworkerAvatar {...member} size={27} working /><span className="cw-demo-typing" aria-hidden="true">{[0, 1, 2].map((index) => <i key={index} style={{ animationDelay: `${index * 160}ms` }} />)}</span><span>{member.name} is thinking…</span></div>;
-}
-
-const GROUP_REPLIES = [
-  "The clearest angle is time back for the work you care about. Lead with a useful first draft, then show how people can shape it with their coworker.",
-  "Building on Scout’s research, I’d open with: ‘Your work. Better together.’ Then show a quick check-in turning into a draft you can use.",
-  "I’ll turn that into a simple handoff: finish the draft, review the walkthrough, then invite the first users. You choose when we’re ready to share.",
-];
-function GroupConversation({ step, onReplay }: { step: number; onReplay: () => void }) {
-  return <div className="cw-demo-conversation cw-demo-group-conversation">
-    <div className="cw-demo-group-intro"><GroupFaces /><div><h4>You, Scout, Editor & Ops.</h4><p>Bring the right coworkers into one conversation. Name the ones you want to hear from.</p></div></div>
-    <div className="flex justify-end"><p className="cw-chat-request">Scout, Editor, and Ops — help me get this launch ready. What should we do next?</p></div>
-    {step === 0 ? <div className="cw-demo-group-start"><p>See research become a draft, then a next step.</p><button type="button" className="cw-demo-small-button" onClick={onReplay}><Play size={13} aria-hidden="true" />Play the conversation</button></div> : TEAM.map((person, index) => step > index + 1 ? <div className="cw-demo-reply cw-demo-message-enter" key={person.id}><CoworkerAvatar {...person} size={27} /><div><p className="cw-demo-speaker">{person.name}<span>{person.role}</span></p><p>{GROUP_REPLIES[index]}</p></div></div> : step === index + 1 ? <Thinking key={person.id} member={person} /> : null)}
-    {step === 4 && <div className="cw-demo-group-end cw-demo-message-enter"><span><Check size={14} aria-hidden="true" />A direction, a draft, and a plan.</span><button type="button" className="cw-demo-text-button" onClick={onReplay}><RotateCcw size={13} aria-hidden="true" />Replay conversation</button></div>}
-  </div>;
 }

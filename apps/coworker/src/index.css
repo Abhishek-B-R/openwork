@@ -1,5 +1,6 @@
 @import "tailwindcss";
 @source "../../../packages/ui/src/react/coworker-avatar.tsx";
+@source "../../../packages/ui/src/react/coworker-option.tsx";
 
 @theme {
   --color-ink: #090c12;

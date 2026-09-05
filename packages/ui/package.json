@@ -8,6 +8,11 @@
       "development": "./src/react/index.ts",
       "default": "./src/react/index.ts"
     },
+    "./coworker-option": {
+      "types": "./src/react/coworker-option.tsx",
+      "development": "./src/react/coworker-option.tsx",
+      "default": "./src/react/coworker-option.tsx"
+    },
     "./coworker": {
       "types": "./src/react/coworker-avatar.tsx",
       "development": "./src/react/coworker-avatar.tsx",
