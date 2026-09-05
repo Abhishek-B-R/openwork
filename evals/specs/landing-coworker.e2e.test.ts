@@ -115,6 +115,14 @@ for (const width of [1280, 375]) {
       expect(await probe.text()).toContain("Building on Scout’s research");
       expect(await probe.text()).toContain("You choose when we’re ready to share.");
       await user.see({ role: "button", label: "Send group message" });
+      // Reply controls must remain usable after a longer conversation fills
+      // the scrollable panel, including the fixed-height desktop grid.
+      await user.click({ role: "button", label: "Ask Scout to reply" });
+      await user.click({ role: "button", label: "Ask Editor to reply" });
+      await user.see({ testId: "demo-group-mentions" }, { text: "@Ops" });
+      await user.click({ role: "button", label: "Send group message" });
+      await probe.eventually(() => probe.has("Ops replied. The others stayed out of this turn."), { within: 5_000, label: "the next group turn uses the new recipients" });
+      expect(await probe.text()).not.toContain("Building on Scout’s research");
       await user.click({ role: "link", label: "Make a coworker in the demo" });
       await user.see({ role: "textbox", label: "Coworker name" });
       await user.type({ role: "textbox", label: "Coworker name" }, "Robin", { replace: true });

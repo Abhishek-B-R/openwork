@@ -263,8 +263,8 @@ button.cw-demo-list-row:hover { background: var(--cw-surface-2); }
 .cw-custom-story { display: grid; grid-template-columns: 1fr 1fr; align-items: center; gap: 70px; padding-block: 40px 15px; border-top: 1px solid var(--cw-border); }
 .cw-custom-story h2 { font-size: 33px; }
 @media (min-width: 640px) {
-  .cw-demo-layout { height: clamp(480px, calc(100svh - 310px), 620px); }
-  .cw-demo-workspace { height: 100%; }
+  .cw-demo-layout { height: clamp(480px, calc(100svh - 310px), 620px); grid-template-rows: minmax(0, 1fr); }
+  .cw-demo-workspace { height: 100%; min-height: 0; }
   .cw-demo-sidebar { min-height: 0; }
   .cw-demo-team { overflow-y: auto; min-height: 90px; scrollbar-width: thin; scrollbar-color: #344050 transparent; }
   .cw-demo-sidebar-label, .cw-demo-add, .cw-demo-group-link, .cw-demo-nav { flex-shrink: 0; }
