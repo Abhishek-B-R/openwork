@@ -86,6 +86,9 @@ test("Open Coworker owns a branded boot surface and cross-platform icon set", as
   assert.equal(artwork.subarray(1, 4).toString("ascii"), "PNG");
   assert.ok(artwork.readUInt32BE(16) >= 1024);
   assert.equal(artwork.readUInt32BE(16), artwork.readUInt32BE(20));
+  for (const png of [artwork, iconPng, macIconPng, linuxIcon]) {
+    assert.equal(png[25], 6, "Desktop icons must retain RGBA transparency");
+  }
   assert.equal(iconIcns.subarray(0, 4).toString("ascii"), "icns");
   assert.equal(iconIco.readUInt16LE(2), 1);
   assert.equal(iconIco.readUInt16LE(4), 7);

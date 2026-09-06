@@ -1092,7 +1092,8 @@ pointer gaze remains, within the icon's restraint (pupils ≈2 px, turn ≤0.8°
 travel ≤1 px). The box never changes size, the stack takes no pointer events,
 and reduced motion renders the icon composition at once. The new-coworker
 preview reuses the component with the coworker being created in front. The desktop app icon uses one canonical raster artwork in
-`resources/icons/open-coworker-app-icon.png` (1254×1254). The generator derives
+`resources/icons/open-coworker-app-icon.png` (1254×1254 RGBA, with a transparent
+exterior and antialiased tile edges). The generator derives
 identical 1024-pixel `icon.png` and `icon-macos.png` files from this source,
 then renders the packaged ICNS, ICO, and Linux sizes. The macOS Dock uses
 `icon-macos.png`; the packaged app uses `icon.icns`. Regenerate all outputs

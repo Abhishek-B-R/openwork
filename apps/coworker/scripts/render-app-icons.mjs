@@ -30,6 +30,9 @@ const assertPngSize = (buffer, expectedSize, label) => {
   if (buffer.subarray(1, 4).toString("ascii") !== "PNG") {
     throw new Error(`${label} is not a PNG file.`);
   }
+  if (buffer[25] !== 6) {
+    throw new Error(`${label} must be an RGBA PNG to preserve the transparent icon exterior.`);
+  }
   const width = buffer.readUInt32BE(16);
   const height = buffer.readUInt32BE(20);
   if (width !== expectedSize || height !== expectedSize) {
