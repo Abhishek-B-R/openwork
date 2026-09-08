@@ -225,6 +225,48 @@ async function invokeCoworker(app: Awaited<ReturnType<typeof coworker>>, command
   );
 }
 
+test.skipIf(!enabled)("Coworker provider setup without credentials", { timeout: 300_000 }, async ({ evidence, skip }) => {
+  needs({ optIn: ["OPENWORK_EVAL_E2E_TESTS"], commands: ["opencode"] });
+  await using host = await resolveHost();
+  if (host.kind !== "local") skip("needs: a same-host disposable provider fixture; placement is not changed");
+  const profileDir = await mkdtemp(path.join(os.tmpdir(), "open-coworker-provider-setup-"));
+  onTestFinished(() => rm(profileDir, { recursive: true, force: true }));
+  const claudeDir = path.join(profileDir, "claude-config");
+  await mkdir(claudeDir, { recursive: true });
+  // Presence-only detection without a real credential or Keychain probe.
+  await writeFile(path.join(claudeDir, ".credentials.json"), "{}\n", "utf8");
+  await using app = await coworker({ name: "provider-setup", host, profileDir, env: {
+    CODEX_HOME: path.join(profileDir, "codex-home"), CLAUDE_CONFIG_DIR: claudeDir,
+    COWORKER_HOME_DIR: path.join(profileDir, "coworkers"),
+    COWORKER_SERVER_CONFIG: path.join(profileDir, "coworker-server.json"),
+    OPENWORK_RUNTIME_DB: path.join(profileDir, "coworker-runtime.sqlite"),
+    OPENCODE_CONFIG: "", OPENCODE_CONFIG_CONTENT: JSON.stringify({ enabled_providers: ["openai", "anthropic"] }),
+    OPENAI_API_KEY: "", ANTHROPIC_API_KEY: "", OPENROUTER_API_KEY: "", GEMINI_API_KEY: "", GOOGLE_API_KEY: "", GOOGLE_GENERATIVE_AI_API_KEY: "", XAI_API_KEY: "",
+    OLLAMA_HOST: "127.0.0.1:9", LMSTUDIO_HOST: "127.0.0.1:9",
+  } });
+  await waitFor(app, () => document.querySelector<HTMLButtonElement>('[data-testid="onboarding-local-choice"]')?.disabled === false, { timeoutMs: 30_000, label: "Use this Mac" });
+  await evalIn(app, () => document.querySelector<HTMLButtonElement>('[data-testid="onboarding-local-choice"]')?.click());
+  await waitFor(app, () => document.querySelector<HTMLElement>('[data-testid="local-providers"]')?.dataset.loaded === "true", { timeoutMs: 120_000, label: "local provider setup" });
+  expect(await evalIn(app, () => ({
+    claudeActions: [...(document.querySelector('[data-testid="found-claude-code"]')?.querySelectorAll("button") ?? [])].map((button) => button.textContent?.trim()),
+    codexFound: Boolean(document.querySelector('[data-testid="found-codex"]')),
+    connected: Boolean(document.querySelector('[data-testid="connected-openai"], [data-testid="connected-anthropic"]')),
+    preparationErrors: document.querySelectorAll('[data-testid="local-providers"] > p.text-rose').length,
+  }))).toEqual({ claudeActions: ["Add key"], codexFound: false, connected: false, preparationErrors: 0 });
+  await clickButton(app, "Set up ChatGPT");
+  await waitFor(app, () => document.querySelector<HTMLButtonElement>('[data-testid="add-openai-sign-in"]')?.disabled === false, { timeoutMs: 10_000, label: "ChatGPT sign-in offered without credentials" });
+  expect(await evalIn(app, () => ({
+    key: document.querySelector<HTMLInputElement>('[data-testid="add-another"] input[type="password"]')?.value,
+    waiting: Boolean(document.querySelector('[data-testid="sign-in-wait"]')),
+    connected: Boolean(document.querySelector('[data-testid="connected-openai"], [data-testid="connected-anthropic"]')),
+  }))).toEqual({ key: "", waiting: false, connected: false });
+  // Opening setup must not authorize anything; do not start the sign-in flow.
+  await evalIn(app, () => document.querySelector<HTMLButtonElement>('[data-testid="key-form"] button[type="button"]')?.click());
+  await waitFor(app, () => !document.querySelector('[data-testid="add-another"]') && Boolean(document.querySelector('[data-testid="chatgpt-setup"]')), { timeoutMs: 10_000, label: "setup closes" });
+  expect(await evalIn(app, () => Boolean(document.querySelector('[data-testid="connected-openai"], [data-testid="connected-anthropic"], [data-testid="sign-in-wait"]')))).toBe(false);
+  evidence.recordAssertionEvidence("ChatGPT setup is discoverable without credentials", "On first load, detected non-importable Claude credentials did not hide ChatGPT setup or cause a preparation error. Opening and cancelling setup left both providers disconnected, the key empty and authorization unstarted.", true);
+});
+
 test.skipIf(!enabled)(title, async ({ evidence }) => {
   needs({ optIn: ["OPENWORK_EVAL_E2E_TESTS"], commands: ["opencode"] });
   await using host = await resolveHost();
@@ -234,6 +276,8 @@ test.skipIf(!enabled)(title, async ({ evidence }) => {
   const stub = sameMachine ? await startStubModelServer() : null;
   const profileDir = sameMachine ? await mkdtemp(path.join(os.tmpdir(), "open-coworker-local-first-")) : undefined;
   if (profileDir) {
+    await mkdir(path.join(profileDir, "claude-config"), { recursive: true });
+    await writeFile(path.join(profileDir, "claude-config", ".credentials.json"), "{}\n", "utf8");
     const copilotDir = path.join(profileDir, "xdg-config", "github-copilot");
     await mkdir(copilotDir, { recursive: true });
     await writeFile(path.join(copilotDir, "hosts.json"), `${JSON.stringify({ "github.com.attacker.invalid": { user: "fixture", oauth_token: FAKE_COPILOT_TOKEN } }, null, 2)}\n`, "utf8");
@@ -251,6 +295,7 @@ test.skipIf(!enabled)(title, async ({ evidence }) => {
     ...(profileDir ? { profileDir } : {}),
     env: {
       CODEX_HOME: codexHome,
+      CLAUDE_CONFIG_DIR: profileDir ? path.join(profileDir, "claude-config") : "",
       GEMINI_API_KEY: FAKE_GEMINI_KEY,
       OPENAI_API_KEY: "",
       ANTHROPIC_API_KEY: "",
@@ -290,7 +335,7 @@ test.skipIf(!enabled)(title, async ({ evidence }) => {
   })()`, { timeoutMs: 120_000, label: "local mode rows" });
   if (!isRecord(localMode) || !Array.isArray(localMode.found) || !Array.isArray(localMode.connected)) throw new Error("Local mode facts were unavailable.");
   expect(localMode.found).toEqual(
-    sameMachine ? ["found-codex", "found-copilot", "found-server:ollama"] : ["found-codex"],
+    sameMachine ? ["found-claude-code", "found-codex", "found-copilot", "found-server:ollama"] : ["found-codex"],
   );
   expect(localMode.connected).toEqual(["connected-google"]);
   expectNoFixtureSecret(String(localMode.text), "the local mode screen");
@@ -313,6 +358,7 @@ test.skipIf(!enabled)(title, async ({ evidence }) => {
     return row.querySelector('[data-testid="connected-openai-count"]')?.textContent?.trim();
   })()`, { timeoutMs: 180_000, label: "OpenAI connected from the Codex sign-in" });
   expect(openaiModels).toMatch(/^[1-9]\d* models?$/);
+  expect(await evalIn(app, () => Boolean(document.querySelector('[data-testid="chatgpt-setup"]')))).toBe(false);
   expectNoFixtureSecret(String(await evalIn(app, "document.body.innerText")), "the screen after Connect");
   evidence.recordAssertionEvidence(
     "A discovered sign-in makes its models available without displaying credentials",

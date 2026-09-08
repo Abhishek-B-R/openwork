@@ -123,7 +123,7 @@ test("codexAuthFromFile yields the engine's own credential shape and refuses a m
   assert.equal(jwtExpiryMs(`${Buffer.from("{}").toString("base64url")}.${Buffer.from("{}").toString("base64url")}.x`), 0);
 });
 
-test("Claude Code is reported as signed in but unavailable, from its file or the macOS keychain", async () => {
+test("Claude Code credentials are detected but not offered for import, from a file or the macOS keychain", async () => {
   await using fixture = await tempHome();
   let probed = "";
   const viaKeychain = await detectLocalProviders({
@@ -139,12 +139,16 @@ test("Claude Code is reported as signed in but unavailable, from its file or the
   });
   assert.equal(probed, "Claude Code-credentials");
   assert.deepEqual(viaKeychain.found.map((finding) => [finding.id, finding.how, finding.providerId]), [["claude-code", "unavailable", "anthropic"]]);
-  assert.match(viaKeychain.found[0].reason, /only work inside Claude Code/);
+  assert.equal(viaKeychain.found[0].label, "Claude Code credentials found");
+  assert.equal(viaKeychain.found[0].reason, "These credentials cannot be imported into Open Coworker. Add an Anthropic API key instead.");
 
   await writeJson(path.join(fixture.home, ".claude", ".credentials.json"), { claudeAiOauth: { accessToken: "fixture-claude-token-not-real" } });
   const viaFile = await detectLocalProviders({ env: quietEnv, homeDir: fixture.home, platform: "linux", fetchImpl: fetchStub({}), timeoutMs: 50, keychainProbe: async () => { throw new Error("no keychain on linux"); } });
   assert.equal(viaFile.found[0]?.id, "claude-code");
   assert.ok(!JSON.stringify(viaFile).includes("fixture-claude-token"));
+  await writeJson(path.join(fixture.home, ".claude", ".credentials.json"), {});
+  const emptyFile = await detectLocalProviders({ env: quietEnv, homeDir: fixture.home, platform: "linux", fetchImpl: fetchStub({}), timeoutMs: 50, keychainProbe: noKeychain });
+  assert.deepEqual(emptyFile.found, viaKeychain.found, "presence never claims a validated sign-in, even for an empty object");
 });
 
 test("a Copilot hosts or apps file under XDG_CONFIG_HOME is found and imports as the engine's refresh token", async () => {

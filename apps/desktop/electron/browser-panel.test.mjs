@@ -15,6 +15,7 @@ export const session = { fromPartition(partition) { return { webRequest: { onBef
 export const shell = { async openExternal(url) { effects.push({ type: "external", url }); } };
 export const createdViews = [];
 export const createdWindows = [];
+export const loadGates = new Map();
 export class BrowserWindow {
   static getAllWindows() { return []; }
   constructor(options) {
@@ -51,22 +52,27 @@ export class WebContentsView {
         isAttached: () => attached,
         attach() { attached = true; },
         detach() { attached = false; },
-        async sendCommand(method, params) { this.commands.push({ method, params }); },
+        async sendCommand(method, params) {
+          this.commands.push({ method, params });
+          if (method === "Target.getTargetInfo") return { targetInfo: { type: "page", targetId: createdViews.find((view) => view.webContents?.debugger === this).targetId } };
+        },
       },
       on(event, handler) { listeners.set(event, handler); },
       once(event, handler) { listeners.set(event, handler); },
       emit(event, ...args) { listeners.get(event)?.(null, ...args); },
+      input(input) { let prevented = false; listeners.get("before-input-event")?.({ preventDefault() { prevented = true; } }, input); return prevented; },
       setWindowOpenHandler(handler) { this.openPopup = handler; },
       isDestroyed() { return destroyed; },
       getURL() { return this.url; },
       getTitle() { return ""; },
-      isLoading() { return false; },
+      isLoading() { return this.loading === true; },
+      stop() { this.loading = false; },
       canGoBack() { return this.backEnabled === true; },
       canGoForward() { return this.forwardEnabled === true; },
       goBack() { this.wentBack = true; },
       goForward() { this.wentForward = true; },
       reload() { this.reloaded = true; },
-      loadURL(url) { this.loads.push(url); this.url = url; return Promise.resolve(); },
+      loadURL(url) { this.loads.push(url); this.url = url; return loadGates.get(url.startsWith("data:") ? "marker" : url) ?? Promise.resolve(); },
       focus() {},
       close() { destroyed = true; this.emit("destroyed"); },
     };
@@ -109,7 +115,7 @@ const { createBrowserPanel } = await import("./browser-panel.mjs");
 const { createBrowserPanel: createBrowserHost } = await import("../../../packages/browser-tabs/electron.mjs");
 const { runDetachedTask } = await import("./process-resilience.mjs");
 // @ts-expect-error The registered test-only Electron stub exports its witnesses.
-const { createdViews, createdWindows, effects, requestHooks } = await import("electron");
+const { createdViews, createdWindows, effects, requestHooks, loadGates } = await import("electron");
 
 const PANEL_BOUNDS = { x: 800, y: 40, width: 400, height: 900 };
 const LINK = { url: "https://example.com/a%2Fb?x=one%20two&x=%2F#section", point: { x: 20, y: 30 }, sessionId: "A" };
@@ -588,6 +594,120 @@ test("the shared host parks multiple owners without a main window instead of cre
   assert.deepEqual(windows()[0].contentView.children, views());
   assert.equal(host.state().backgroundWindowVisible, false);
   assert.ok(host.state().nativeViews.every((view) => !view.attached));
+  host.destroy();
+});
+
+test("aborting an opening preserves only a shell-selected handoff tab, and reports uncertain cleanup", async (context) => {
+  stubCdp(context);
+  for (const preserve of [false, true, "uncertain"]) {
+    const { host, views } = createPanel(undefined, { shared: true });
+    const controller = new AbortController();
+    const entered = Promise.withResolvers();
+    const loading = Promise.withResolvers();
+    const opening = host.createBrowser({ ownerId: "A", url: "https://loading.example", signal: controller.signal, shouldPreserveOnAbort: ({ ownerId, tabId }) => {
+      assert.equal(ownerId, "A");
+      assert.equal(tabId, host.listBrowsers("A")[0].tabId);
+      return preserve !== false;
+    } });
+    const view = views()[0];
+    view.webContents.loadURL = (url) => { view.webContents.url = url; entered.resolve(); return loading.promise; };
+    view.webContents.stop = () => { loading.reject(new Error("Loading stopped")); if (preserve === "uncertain") throw new Error("Cannot confirm stop"); };
+    const close = view.webContents.close;
+    view.webContents.close = () => { close.call(view.webContents); loading.reject(new Error("Closed")); };
+    const rejected = assert.rejects(opening, preserve === "uncertain" ? { code: "BROWSER_ABORT_CLEANUP_UNCERTAIN" } : /cancelled/);
+    await entered.promise;
+    const original = host.listBrowsers("A")[0];
+    controller.abort(new Error("Opening cancelled"));
+    await rejected;
+    assert.equal(view.webContents.isDestroyed(), preserve === false);
+    if (preserve !== false) {
+      const remaining = host.listBrowsers("A")[0];
+      assert.equal(remaining.tabId, original.tabId);
+      assert.equal(remaining.targetId, original.targetId);
+      assert.equal(remaining.url, "https://loading.example");
+    }
+    host.destroy();
+  }
+  for (const phase of ["marker", "discovery"]) {
+    const { host, views } = createPanel(undefined, { shared: true });
+    const gate = Promise.withResolvers();
+    const entered = Promise.withResolvers();
+    const controller = new AbortController();
+    let discovery;
+    if (phase === "marker") loadGates.set("marker", gate.promise);
+    else discovery = context.mock.method(globalThis, "fetch", async () => { entered.resolve(); await gate.promise; return { ok: true, json: async () => [] }; });
+    const opening = host.createBrowser({ ownerId: "A", url: "https://must-not-reload.example", signal: controller.signal, shouldPreserveOnAbort: () => true });
+    const rejected = assert.rejects(opening, /cancelled/);
+    const view = views()[0];
+    view.webContents.stop = () => { view.webContents.loading = false; if (phase === "marker") gate.reject(new Error("Marker stopped")); };
+    if (phase === "discovery") await entered.promise;
+    assert.equal(host.listBrowsers("A")[0].targetId, null);
+    controller.abort(new Error("Opening cancelled"));
+    if (phase === "discovery") gate.resolve();
+    await rejected;
+    const preserved = host.listBrowsers("A")[0];
+    assert.equal(preserved.targetId, view.targetId, phase);
+    assert.equal(preserved.identityOnly, true);
+    assert.equal(view.webContents.loads.length, 1, "identity recovery neither reloads the marker nor starts the destination");
+    assert.ok(view.webContents.debugger.commands.some(({ method }) => method === "Target.getTargetInfo"));
+    assert.equal(view.webContents.isDestroyed(), false);
+    loadGates.delete("marker");
+    discovery?.mock.restore();
+    let stops = 0;
+    view.webContents.loading = true;
+    view.webContents.stop = () => { stops++; view.webContents.loading = false; };
+    await assert.rejects(host.stopBrowser({ ownerId: "B", tabId: preserved.tabId, targetId: preserved.targetId }), { code: "BROWSER_ABORT_CLEANUP_UNCERTAIN" });
+    assert.equal(stops, 0);
+    await host.stopBrowser({ ownerId: "A", tabId: preserved.tabId, targetId: preserved.targetId });
+    assert.equal(stops, 1);
+    assert.equal(view.webContents.isLoading(), false);
+    host.destroy();
+  }
+});
+
+test("watch capture stays parked at the supplied viewport, bounds JPEG output, and scopes fullscreen Escape", async (context) => {
+  stubCdp(context);
+  const exits = [];
+  const { host, views, onScreen, mainContents, commands } = createPanel(undefined, { shared: true, backgroundViewport: { width: 1280, height: 900 }, onPresentationExit: (target) => exits.push(target) });
+  let focused = 0;
+  mainContents.focus = () => { focused++; };
+  const tab = await host.createBrowser({ ownerId: "A", url: "https://example.com" });
+  const view = views()[0];
+  await flush();
+  assert.deepEqual(view.getBounds(), { x: 0, y: 0, width: 1280, height: 900 });
+  assert.equal(commands(view)[0].params.height, 900);
+  const sizes = [];
+  let bytes = 8;
+  view.webContents.capturePage = async () => ({ isEmpty: () => false, getSize: () => ({ width: 3200, height: 2000 }), resize(size) {
+    sizes.push(size);
+    return { toJPEG(quality) { sizes.at(-1).jpegQuality = quality; return Buffer.alloc(bytes); } };
+  } });
+  for (const size of ["thumbnail", "watch"]) {
+    const image = await host.captureBrowserThumbnail({ ownerId: "A", tabId: tab.tabId, size });
+    assert.ok(image.capturedAt <= Date.now() && image.capturedAt > 0);
+    assert.deepEqual([image.width, image.height], size === "watch" ? [1600, 1000] : [480, 300]);
+    assert.equal(sizes.at(-1).jpegQuality, size === "watch" ? 70 : 60);
+  }
+  bytes = 1536 * 1024 + 1;
+  assert.equal(await host.captureBrowserThumbnail({ ownerId: "A", tabId: tab.tabId, size: "watch" }), null);
+  bytes = 512 * 1024 + 1;
+  assert.equal(await host.captureBrowserThumbnail({ ownerId: "A", tabId: tab.tabId }), null);
+  assert.equal(onScreen(), null);
+  assert.equal(host.listBrowsers("A")[0].targetId, tab.targetId);
+  const escape = { type: "keyDown", key: "Escape" };
+  host.setPresentation({ ownerId: "A", tabId: tab.tabId, mode: "fullscreen" });
+  assert.equal(view.webContents.input(escape), false, "a parked page cannot trigger shell Escape");
+  host.show(PANEL_BOUNDS, { sessionId: "A" });
+  host.setPresentation({ ownerId: "A", tabId: "other", mode: "fullscreen" });
+  assert.equal(view.webContents.input(escape), false);
+  host.setPresentation({ ownerId: "A", tabId: tab.tabId, mode: "side" });
+  assert.equal(view.webContents.input(escape), false);
+  host.setPresentation({ ownerId: "A", tabId: tab.tabId, mode: "fullscreen" });
+  assert.equal(view.webContents.input(escape), true);
+  assert.equal(focused, 1);
+  assert.deepEqual(exits, [{ ownerId: "A", tabId: tab.tabId }]);
+  host.hide();
+  assert.equal(view.webContents.input(escape), false);
   host.destroy();
 });
 

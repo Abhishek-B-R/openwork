@@ -140,6 +140,7 @@ function useCoworkerHoldings(slug: string): {
 }
 
 export function CoworkerHome({
+  active,
   runtime,
   session,
   coworkers,
@@ -161,6 +162,7 @@ export function CoworkerHome({
   onHandOff,
   onVisitCoworker,
 }: {
+  active: boolean;
   runtime: RuntimeInfo;
   session: DenSession | null;
   coworkers: CoworkerSummary[];
@@ -462,6 +464,7 @@ export function CoworkerHome({
         ) : null}
         <main className="min-h-0 flex-1 overflow-hidden">
           <ThreadsPanel
+            active={active}
             runtime={runtime}
             session={session}
             coworker={coworker}

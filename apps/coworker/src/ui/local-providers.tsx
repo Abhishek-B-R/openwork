@@ -466,6 +466,7 @@ export function LocalProviders({
 
   const addableOpen = adding !== "";
   const addableChosen = plan.addable.find((provider) => provider.id === adding) ?? null;
+  const chatgpt = plan.addable.find((provider) => provider.id === "openai" && provider.canSignIn && !provider.connected);
   const addRowState = states["add-another"] ?? IDLE;
 
   return (
@@ -626,9 +627,10 @@ export function LocalProviders({
                     <p className="text-[12px] text-snow">{addableChosen.label}</p>
                     <button type="button" className="text-[11px] font-medium text-mist hover:text-snow" onClick={() => setAdding("list")}>{COPY.back}</button>
                   </div>
+                  {addableChosen.id === "openai" && addableChosen.canSignIn ? <p className="text-[11px] text-mist">{COPY.chatgptDetail}</p> : null}
                   {addableChosen.canSignIn ? (
                     (states[`add:${addableChosen.id}`] ?? IDLE).phase === "waiting" ? null : (
-                      <Button variant="default" onClick={() => void signIn(`add:${addableChosen.id}`, addableChosen.id)} data-testid={`add-${addableChosen.id}-sign-in`}>{COPY.signIn}</Button>
+                      <Button variant="default" onClick={() => void signIn(`add:${addableChosen.id}`, addableChosen.id)} data-testid={`add-${addableChosen.id}-sign-in`}>{addableChosen.id === "openai" ? COPY.chatgptSignIn : COPY.signIn}</Button>
                     )
                   ) : null}
                   {(() => {
@@ -666,7 +668,10 @@ export function LocalProviders({
           {addableOpen ? (
             <Button variant="ghost" onClick={() => setAdding("")}>{COPY.cancel}</Button>
           ) : (
-            <Button variant="ghost" onClick={() => { setRowState("add-another", IDLE); setAdding("list"); }} data-testid="add-another-open">{COPY.choose}</Button>
+            <span className="flex flex-col items-end gap-2 sm:flex-row">
+              {chatgpt ? <Button variant="default" onClick={() => { setRowState("add-another", IDLE); setAdding(chatgpt.id); }} data-testid="chatgpt-setup">{COPY.chatgptSetup}</Button> : null}
+              <Button variant="ghost" onClick={() => { setRowState("add-another", IDLE); setAdding("list"); }} data-testid="add-another-open">{COPY.choose}</Button>
+            </span>
           )}
         </FlatRow>
       </ul>

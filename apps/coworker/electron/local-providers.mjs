@@ -323,16 +323,16 @@ export async function detectLocalProviders({
   }
 
   const claudeFile = await readJsonFile(claudeCodeCredentialsPath(env, homeDir));
-  const claudeSignedIn = isRecord(claudeFile) || (platform === "darwin" && await keychainProbe(CLAUDE_CODE_KEYCHAIN_SERVICE).catch(() => false));
-  if (claudeSignedIn) {
+  const claudeCredentialsFound = isRecord(claudeFile) || (platform === "darwin" && await keychainProbe(CLAUDE_CODE_KEYCHAIN_SERVICE).catch(() => false));
+  if (claudeCredentialsFound) {
     found.push({
       id: "claude-code",
       kind: "claude-code",
-      label: "Claude (signed in with Claude Code)",
+      label: "Claude Code credentials found",
       detail: "",
       providerId: "anthropic",
       how: "unavailable",
-      reason: "Claude subscriptions only work inside Claude Code. Add an Anthropic key instead.",
+      reason: "These credentials cannot be imported into Open Coworker. Add an Anthropic API key instead.",
     });
   }
 

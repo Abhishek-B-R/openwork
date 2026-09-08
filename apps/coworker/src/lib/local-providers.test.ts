@@ -45,7 +45,7 @@ test("planLocalMode keeps findings out of Found once their provider is connected
   ];
   const findings = [
     finding({ id: "codex", kind: "codex", providerId: "openai", how: "import", label: "ChatGPT (signed in with Codex)" }),
-    finding({ id: "claude-code", kind: "claude-code", providerId: "anthropic", how: "unavailable", reason: "Claude subscriptions only work inside Claude Code. Add an Anthropic key instead." }),
+    finding({ id: "claude-code", kind: "claude-code", providerId: "anthropic", how: "unavailable", reason: "These credentials cannot be imported into Open Coworker. Add an Anthropic API key instead." }),
     finding({ id: "copilot", kind: "copilot", providerId: "github-copilot", how: "import" }),
     finding({ id: "env:GEMINI_API_KEY", kind: "env", providerId: "google", how: "in-use", envName: "GEMINI_API_KEY" }),
   ];
@@ -59,6 +59,8 @@ test("planLocalMode keeps findings out of Found once their provider is connected
     ["google", "GOOGLE_API_KEY", false, true, true],
     ["github-copilot", "GITHUB_TOKEN", true, false, false],
   ], "only well-known providers the AI service lists are offered");
+  const keyPlan = planLocalMode({ findings, readiness: { providers: providers.map((provider) => provider.id === "openai" ? { ...provider, source: "api" } : provider), signIns: {} }, catalog });
+  assert.equal(keyPlan.connected.find((provider) => provider.providerId === "openai")?.detail, "An API key saved on this Mac; shared with OpenWork Desktop.", "a saved key is not described as a ChatGPT subscription just because Codex was detected");
   const noCopilotSignIn = planLocalMode({ findings, readiness: { providers, signIns: {} }, catalog });
   assert.deepEqual(noCopilotSignIn.addable.map((entry) => entry.id), ["openai", "anthropic", "google"], "a subscription-only provider without a sign-in is not offered");
   assert.equal(pickFreeModel({ models: [] }), null);

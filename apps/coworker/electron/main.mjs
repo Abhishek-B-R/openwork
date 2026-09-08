@@ -1597,7 +1597,17 @@ async function listPreparedCoworkers() {
 }
 
 /** The silent facilitator's hidden workspace, registered on first use; never listed as a coworker. */
-async function ensureCoordinatorWorkspace() {
+let coordinatorPreparation = null;
+function ensureCoordinatorWorkspace() {
+  // Startup, provider discovery and group routing can arrive together. They
+  // must share initialization rather than race on config writes/registration.
+  if (!coordinatorPreparation) {
+    coordinatorPreparation = prepareCoordinatorWorkspace().finally(() => { coordinatorPreparation = null; });
+  }
+  return coordinatorPreparation;
+}
+
+async function prepareCoordinatorWorkspace() {
   await ensurePlatformServer();
   const coordinator = await ensureCoordinatorHome(coworkersDir);
   await installProgressPlugin(coordinator);
@@ -2057,6 +2067,7 @@ const commands = {
   "browser.bind": (input) => browserControl.bind(input),
   "browser.detach": (input) => browserControl.detach(input),
   "browser.read": (input) => browserControl.read(input),
+  "browser.thumbnail": (input) => browserControl.thumbnail(input),
   "browser.command": (input) => browserControl.command(input),
   "computer.snapshot": (input) => computerControl.snapshot(input),
   "computer.configure": (input) => computerControl.configure(input),
@@ -2527,6 +2538,9 @@ async function createMainWindow() {
     if (isMainFrame) { deepLinkListenerReady = false; browserControl.hideWindow(); }
   });
   window.on("close", () => browserControl.hideWindow());
+  window.webContents.on("render-process-gone", () => { deepLinkListenerReady = false; browserControl.hideWindow(); });
+  window.webContents.on("destroyed", () => browserControl.hideWindow());
+  window.on("unresponsive", () => browserControl.hideWindow());
   window.on("closed", () => {
     if (mainWindow === window) mainWindow = null;
     deepLinkListenerReady = false;

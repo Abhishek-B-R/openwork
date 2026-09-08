@@ -724,10 +724,10 @@ pay for. One component (`ui/local-providers.tsx`; the rules in
     instead the row reads *OpenAI key (saved by Codex)*.
   - *GitHub Copilot (signed in on this Mac)* — a Copilot `hosts.json` or
     `apps.json` under the XDG config dir carries a github.com sign-in.
-  - *Claude (signed in with Claude Code)* — `~/.claude/.credentials.json`, or
-    on macOS the *Claude Code-credentials* keychain item. Shown without
-    Connect: Claude subscriptions only work inside Claude Code, so the row
-    offers **Add key** (an Anthropic key) instead.
+  - *Claude Code credentials found* — `~/.claude/.credentials.json`, or
+    on macOS the *Claude Code-credentials* keychain item. Presence does not
+    validate a sign-in. These credentials cannot be imported into Open Coworker;
+    the row offers **Add key** (an Anthropic API key), never Connect.
   - *Ollama* / *LM Studio (running on this Mac)* — the server answers on its
     default port (Ollama honours `OLLAMA_HOST`; `LMSTUDIO_HOST` overrides LM
     Studio) with its model list. Each probe gives up after 200 ms.
@@ -753,10 +753,16 @@ pay for. One component (`ui/local-providers.tsx`; the rules in
   from, its model count, and **Disconnect**. Disconnecting a credential the
   shared store holds first says, in one sentence, that OpenWork Desktop and
   OpenCode lose it too; a key from the environment cannot be disconnected here
-  and says where to remove it.
+  and says where to remove it. A stored API key is labelled as a key, not a
+  ChatGPT subscription, even when Codex credentials are also detected.
 - **A free model is ready now** — the free provider's default model (nothing
   to set up); the default until something else is connected.
-- **Add another** — the well-known providers the AI service lists (OpenAI,
+- **Add another** — **Set up ChatGPT** opens the existing **OpenAI / ChatGPT**
+  form whenever the AI service offers its sign-in and OpenAI is not connected,
+  even with no Codex credentials or with Claude Code detected. Opening setup
+  does not authorize anything: **Sign in with ChatGPT** starts the existing
+  flow. Installing the ChatGPT app alone does not connect it to Open Coworker.
+  **Choose** lists the well-known providers the AI service offers (OpenAI / ChatGPT,
   Anthropic, Google, OpenRouter, GitHub Copilot, xAI, Mistral, Groq, DeepSeek)
   plus **Custom (OpenAI-compatible)**. A key provider asks for the key only;
   Custom asks for a name, the address, and an optional key, lists the models
@@ -1320,6 +1326,19 @@ activity with links to its source conversations. **Gather the team** requests a
 briefing; **Find our next move** asks for a recommendation. Normal chat,
 @mentions, follow-up questions, and assignments use the existing group-chat
 engine and each coworker's chosen model.
+
+In assignment mode, Enter reveals and focuses the owner chooser immediately;
+no model call is needed to suggest an owner. Escape or dismiss returns to the
+draft, and only an explicit owner choice starts the assignment. While creating
+it, the chooser names the owner and ignores duplicate choices. Completion does
+not take focus away from a document the person has started editing.
+
+Sending shows acknowledgement before preparation finishes. Status, queue,
+receipts and conversation activity refresh independently, so a slow activity
+read does not stall the other observations. Timeline and execution snapshots
+remain paired, and the initial idle state stays **Checking activity** until
+activity and receipts have been read. Existing routing and model choices remain
+unchanged.
 
 Set a focus in Settings, or write **Focus on …** in the conversation to remember
 it. Group details lets you choose the participating coworkers and facilitator

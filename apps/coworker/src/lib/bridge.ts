@@ -379,15 +379,22 @@ type BridgeResponse = { ok: true; result: unknown } | { ok: false; error: string
 export type BrowserSnapshot = {
   revision: number;
   requested: boolean;
+  presentation: { mode: "floating" | "side" | "fullscreen" | "hidden"; snap: "top" | "middle" | "bottom" };
+  activity: { label: string; state: "running" | "idle" | "interrupted" } | null;
   activeTabId: string | null;
   tabs: Array<{ id: string; url: string; title: string; status: string; canGoBack: boolean; canGoForward: boolean }>;
+  control: { state: "automation" } | { state: "human"; phase: "pausing" | "ready"; handoffId: string; tabId: string; reason: "sign-in" | "takeover" };
 };
+export type BrowserThumbnail = { tabId: string; generation: number; mimeType: "image/jpeg"; imageBase64: string; width: number; height: number; capturedAt: number };
 export type BrowserCommand =
   | { action: "request"; open: boolean }
-  | { action: "hide" | "back" | "forward" | "reload" }
+  | { action: "present"; mode: BrowserSnapshot["presentation"]["mode"] }
+  | { action: "snap"; position: BrowserSnapshot["presentation"]["snap"] }
+  | { action: "hide" | "back" | "forward" | "reload" | "exit-fullscreen" }
   | { action: "bounds"; bounds: { x: number; y: number; width: number; height: number } }
   | { action: "open" | "navigate"; url: string }
-  | { action: "select" | "close"; tabId: string };
+  | { action: "select" | "close" | "takeover"; tabId: string }
+  | { action: "resume"; handoffId: string };
 
 export type ComputerSnapshot = {
   revision: number;
@@ -430,6 +437,7 @@ export const coworkerBridge = {
     bind: (slug: string, threadId: string, viewId: string) => invoke<BrowserSnapshot>("browser.bind", { slug, threadId, viewId }),
     detach: (viewId: string) => invoke<void>("browser.detach", { viewId }),
     read: (viewId: string) => invoke<BrowserSnapshot>("browser.read", { viewId }),
+    thumbnail: (viewId: string, tabId: string, size?: "thumbnail" | "watch") => invoke<BrowserThumbnail | null>("browser.thumbnail", { viewId, tabId, size }),
     command: (viewId: string, command: BrowserCommand) => invoke<BrowserSnapshot>("browser.command", { ...command, viewId }),
   },
   computer: {

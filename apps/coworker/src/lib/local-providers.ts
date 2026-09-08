@@ -28,6 +28,9 @@ export const LOCAL_MODE_COPY = {
   addAnother: "Add another",
   choose: "Choose…",
   addAnotherDetail: "A provider you pay for, a key you already have, or a server you run.",
+  chatgptSetup: "Set up ChatGPT",
+  chatgptDetail: "Sign in here to use ChatGPT. Installing the ChatGPT app does not connect it to Open Coworker.",
+  chatgptSignIn: "Sign in with ChatGPT",
   custom: "Custom (OpenAI-compatible)",
   customDetail: "Any server that answers like OpenAI: a name, its address, and a key if it needs one.",
   connect: "Connect",
@@ -76,7 +79,7 @@ export function bannedWordIn(text: string): string | null {
 
 /** The providers Add another offers by name; everything else goes through Custom. */
 export const WELL_KNOWN_PROVIDERS: ReadonlyArray<{ id: string; label: string; signInOnly?: true }> = [
-  { id: "openai", label: "OpenAI" },
+  { id: "openai", label: "OpenAI / ChatGPT" },
   { id: "anthropic", label: "Anthropic" },
   { id: "google", label: "Google" },
   { id: "openrouter", label: "OpenRouter" },
@@ -120,6 +123,7 @@ function connectedDetail(provider: EngineProviderSummary, findings: LocalProvide
   if (provider.source === "env" && envFinding?.envName) return `From ${envFinding.envName} in your environment.`;
   if (provider.source === "env") return "From a key in your environment.";
   if (provider.source === "config") return "A server you added here.";
+  if (provider.source === "api") return "An API key saved on this Mac; shared with OpenWork Desktop.";
   const imported = findings.find((finding) => finding.providerId === provider.id && finding.kind !== "env" && finding.kind !== "opencode");
   if (imported?.kind === "codex") return "Your ChatGPT subscription, signed in with Codex.";
   if (imported?.kind === "copilot") return "Your Copilot subscription.";
