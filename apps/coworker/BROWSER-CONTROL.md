@@ -97,7 +97,7 @@ The colocated tests cover receipts, native abort propagation, policy handling
 and the panel's real bounds effect using a simulated hook/viewport lifecycle;
 these are regression checks, not native app proof.
 
-Runtime proof should extend `evals/specs/open-coworker-discussion.e2e.test.ts`:
+Runtime proof should extend `evals/specs/open-coworker-browser.e2e.test.ts`:
 open and operate an owned page through a native tool turn, switch discussions
 while another opens a page, reject cross-owner/app targets, and verify the
 address controls, popup ownership, overlay hiding and unchanged document aside.

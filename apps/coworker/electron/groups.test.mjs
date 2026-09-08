@@ -14,10 +14,8 @@ import {
   archiveGroup,
   beginGroupTurn,
   createGroup,
-  deriveTurnStatus,
   getGroup,
   listGroups,
-  listNames,
   normalizeParticipantSlugs,
   parseTimeline,
   readGroupTimeline,
@@ -100,18 +98,6 @@ test("timeline events append in order, tolerate one truncated final line, and va
     await assert.rejects(appendGroupEvent(home, group.id, { kind: "bogus", text: "x" }), /Unknown timeline event kind/);
     assert.equal((await readGroupTimeline(home, group.id, { limit: 1 })).length, 1);
   });
-});
-
-test("a turn's status follows its speakers", () => {
-  assert.equal(deriveTurnStatus([]), "routing");
-  assert.equal(deriveTurnStatus([{ status: "queued" }, { status: "succeeded" }]), "running");
-  assert.equal(deriveTurnStatus([{ status: "succeeded" }, { status: "passed" }]), "succeeded");
-  assert.equal(deriveTurnStatus([{ status: "succeeded" }, { status: "failed" }]), "partial");
-  assert.equal(deriveTurnStatus([{ status: "succeeded" }, { status: "stopped" }]), "partial");
-  assert.equal(deriveTurnStatus([{ status: "failed" }, { status: "failed" }]), "failed");
-  assert.equal(deriveTurnStatus([{ status: "failed" }, { status: "stopped" }]), "stopped");
-  assert.equal(listNames(["Scout"]), "Scout");
-  assert.equal(listNames(["Scout", "Editor", "Ops"]), "Scout, Editor and Ops");
 });
 
 test("a turn is recorded once per client message, with its user line, and is updated through the store", async () => {

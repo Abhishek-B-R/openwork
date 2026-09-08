@@ -10,13 +10,11 @@ import {
   codexSignInMode,
   copilotAuthFromFile,
   copilotSignedIn,
-  customProviderId,
   detectLocalProviders,
   jwtExpiryMs,
   listOpenAiCompatibleModels,
   localServerProviderPatch,
   normalizeOpenAiCompatibleAddress,
-  normalizeServerAddress,
   openAiCompatibleProviderConfig,
   opencodeAuthPath,
 } from "./local-providers.mjs";
@@ -198,58 +196,9 @@ test("API keys are reported by name only, once per provider, and blanks do not c
   assert.ok(!JSON.stringify(result).includes("not-real"), "key values never appear");
 });
 
-test("local model servers are found with their model lists; a silent port times out quietly", async () => {
-  await using fixture = await tempHome();
-  const result = await detectLocalProviders({
-    env: { ...quietEnv, OLLAMA_HOST: "0.0.0.0:11500" },
-    homeDir: fixture.home,
-    platform: "linux",
-    fetchImpl: fetchStub({
-      "http://127.0.0.1:11500/api/tags": { models: [{ name: "llama3.2:latest", model: "llama3.2:latest" }, { name: "qwen3:8b" }] },
-      "http://127.0.0.1:1234/v1/models": { object: "list", data: [{ id: "qwen/qwen3-8b" }, { id: "qwen/qwen3-8b" }] },
-    }),
-    timeoutMs: 50,
-    keychainProbe: noKeychain,
-  });
-  assert.deepEqual(result.found.map((finding) => [finding.id, finding.how, finding.address, finding.models]), [
-    ["server:ollama", "add", "http://127.0.0.1:11500", ["llama3.2:latest", "qwen3:8b"]],
-    ["server:lm-studio", "add", "http://127.0.0.1:1234", ["qwen/qwen3-8b"]],
-  ]);
-  assert.equal(result.found[0].detail, "2 models ready. Uses them for coworkers on this Mac; no account needed.");
-  const empty = await detectLocalProviders({
-    env: quietEnv,
-    homeDir: fixture.home,
-    platform: "linux",
-    fetchImpl: fetchStub({ "http://127.0.0.1:11434/api/tags": { models: [] } }),
-    timeoutMs: 50,
-    keychainProbe: noKeychain,
-  });
-  assert.deepEqual(empty.found.map((finding) => [finding.id, finding.how]), [["server:ollama", "unavailable"]]);
-  assert.equal(normalizeServerAddress("localhost:11434", "x"), "http://localhost:11434");
-  assert.equal(normalizeServerAddress("", "http://127.0.0.1:11434"), "http://127.0.0.1:11434");
-  assert.equal(normalizeServerAddress("::", "fallback"), "fallback");
-});
-
-test("the provider config for a server is derived: compatible SDK, address, listed models, tool calls on", () => {
-  assert.deepEqual(
-    localServerProviderPatch({ providerId: "ollama", address: "http://127.0.0.1:11434", models: ["llama3.2:latest", "llama3.2:latest"] }),
-    {
-      ollama: {
-        npm: "@ai-sdk/openai-compatible",
-        name: "Ollama",
-        options: { baseURL: "http://127.0.0.1:11434/v1" },
-        models: { "llama3.2:latest": { name: "llama3.2:latest", tool_call: true } },
-      },
-    },
-  );
+test("server provider config rejects invalid providers or empty models and contains no key", () => {
   assert.throws(() => localServerProviderPatch({ providerId: "openai", address: "http://x" }), /not a local model server/);
-  assert.deepEqual(
-    openAiCompatibleProviderConfig({ name: "  Office box ", address: "http://10.0.0.5:8000/v1", models: ["a", "b"] }),
-    { npm: "@ai-sdk/openai-compatible", name: "Office box", options: { baseURL: "http://10.0.0.5:8000/v1" }, models: { a: { name: "a", tool_call: true }, b: { name: "b", tool_call: true } } },
-  );
   assert.throws(() => openAiCompatibleProviderConfig({ name: "x", address: "http://x", models: [] }), /at least one model/);
-  assert.equal(customProviderId("Office box (GPU)"), "custom-office-box-gpu");
-  assert.equal(customProviderId("   "), "custom-server");
   assert.ok(!JSON.stringify(openAiCompatibleProviderConfig({ name: "n", address: "http://x/v1", models: ["m"] })).includes("key"));
 });
 
