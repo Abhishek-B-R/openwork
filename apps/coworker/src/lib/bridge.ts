@@ -13,6 +13,7 @@ export type AllHandsPatch = Partial<Pick<AllHandsSettings, "enabled" | "frequenc
 
 /** Typed access to the Open Coworker main-process bridge. */
 import type { CoworkerDocument, CoworkerDocumentSummary, DocumentRevision, DocumentStatus } from "./documents";
+import type { GroupDocument, GroupDocumentSave, GroupDocumentSaved, GroupDocumentSummary, GroupDocumentsApi } from "./group-documents";
 import type { LocalSchedule } from "./local-schedule.ts";
 import type { EffortStop } from "./effort.ts";
 import type { ModelMode } from "./model-choice.ts";
@@ -22,6 +23,10 @@ import type { AssignedCoworkerTemplate } from "@openwork/types/coworker-template
 import type { HeadlessThreadModel, HeadlessTurnAcceptance } from "@openwork/headless-threads";
 import type { ThreadTurnState } from "./thread-queue.ts";
 import type { ExecutionActivity } from "./progress-activity.ts";
+import type { PendingInteractions, PermissionReply } from "./threads.ts";
+
+export type GroupInteraction = { executionId: string; slug: string; threadId: string; workspaceId: string; deadline: number; pending: PendingInteractions };
+export type GroupInteractionReply = { groupId: string; executionId: string; slug: string; threadId: string; workspaceId: string; requestId: string } & ({ kind: "permission"; reply: PermissionReply } | { kind: "question"; answers: string[][]; reply?: never } | { kind: "question"; reply: "reject"; answers?: never });
 
 export type CollaborationReceipt = {
   id: string;
@@ -109,6 +114,8 @@ export type GroupTimelineEvent = {
   action?: string;
   title?: string;
   part?: GroupSpeakerPart;
+  documentId?: string;
+  revision?: number;
 };
 
 export type CoworkerSummary = {
@@ -144,8 +151,8 @@ export type CoworkerSummary = {
 
 export type ModelChosenBy = "app" | "person" | "";
 
-export type AvatarColor = "blue" | "violet" | "mint" | "orange" | "rose" | "slate" | "sand";
-export type AvatarGlasses = "round" | "square" | "oval" | "none";
+export type AvatarColor = "blue" | "violet" | "mint" | "orange" | "rose" | "slate" | "sand" | "sage";
+export type AvatarGlasses = "round" | "square" | "oval" | "none" | "sunglasses" | "monocle";
 
 /** One role from the team catalog, as onboarding and the Add screen propose it. */
 export type TeamRole = {
@@ -251,6 +258,8 @@ export type CoworkerSettings = {
   minimumRunGapMinutes: number;
   /** The most runs one assignment may make in a day on this Mac. */
   maxRunsPerDay: number;
+  progressSummariesEnabled: boolean;
+  progressSummaryModelId: string;
 };
 
 /** One recorded change to the coworker's memory or soul, by the coworker, the person, or an undo. */
@@ -367,6 +376,38 @@ export type GroupTurnPatch = {
 
 type BridgeResponse = { ok: true; result: unknown } | { ok: false; error: string };
 
+export type BrowserSnapshot = {
+  revision: number;
+  requested: boolean;
+  activeTabId: string | null;
+  tabs: Array<{ id: string; url: string; title: string; status: string; canGoBack: boolean; canGoForward: boolean }>;
+};
+export type BrowserCommand =
+  | { action: "request"; open: boolean }
+  | { action: "hide" | "back" | "forward" | "reload" }
+  | { action: "bounds"; bounds: { x: number; y: number; width: number; height: number } }
+  | { action: "open" | "navigate"; url: string }
+  | { action: "select" | "close"; tabId: string };
+
+export type ComputerSnapshot = {
+  revision: number;
+  targetId: string;
+  targets: Array<{ id: string; label: string; placement: "desktop" | "cloud"; available: boolean; reason?: string }>;
+  enabled: boolean;
+  readiness: "ready" | "setup-required" | "unsupported" | "unavailable";
+  detail: string;
+  session: null | {
+    state: string;
+    purpose: string;
+    appName?: string;
+    windowTitle?: string;
+    phase?: string;
+    expiresAt?: string;
+    reason?: string;
+  };
+  cleanupPending?: boolean;
+};
+
 type BridgeWindow = Window & {
   __COWORKER__?: {
     invoke: (command: string, payload?: unknown) => Promise<BridgeResponse>;
@@ -385,6 +426,18 @@ async function invoke<T>(command: string, payload?: unknown): Promise<T> {
 }
 
 export const coworkerBridge = {
+  browser: {
+    bind: (slug: string, threadId: string, viewId: string) => invoke<BrowserSnapshot>("browser.bind", { slug, threadId, viewId }),
+    detach: (viewId: string) => invoke<void>("browser.detach", { viewId }),
+    read: (viewId: string) => invoke<BrowserSnapshot>("browser.read", { viewId }),
+    command: (viewId: string, command: BrowserCommand) => invoke<BrowserSnapshot>("browser.command", { ...command, viewId }),
+  },
+  computer: {
+    snapshot: (slug: string, threadId: string) => invoke<ComputerSnapshot>("computer.snapshot", { slug, threadId }),
+    configure: (input: { slug: string; threadId: string; expectedRevision: number; enabled: boolean; targetId: string }) => invoke<ComputerSnapshot>("computer.configure", input),
+    stop: (input: { slug: string; threadId: string; expectedRevision: number }) => invoke<ComputerSnapshot>("computer.stop", input),
+    setup: (targetId?: string) => invoke<void>("computer.setup", targetId === undefined ? {} : { targetId }),
+  },
   collaboration: {
     receipts: (scope: { slug?: string; threadId?: string; groupId?: string }) => invoke<CollaborationReceipt[]>("collaboration.receipts", scope),
     cancel: (id: string) => invoke<{ ok: boolean }>("collaboration.cancel", { id }),
@@ -395,7 +448,8 @@ export const coworkerBridge = {
     activity: (slug: string, threadId: string) => invoke<ExecutionActivity[]>("turns.activity", { slug, threadId }),
     state: (slug: string, threadId: string) => invoke<ThreadTurnState>("turns.state", { slug, threadId }),
     update: (slug: string, threadId: string, previous: ThreadTurnState, next: ThreadTurnState) => invoke<ThreadTurnState>("turns.update", { slug, threadId, previous, next }),
-    send: (input: { slug: string; threadId: string; prompt: string; messageId: string; model?: HeadlessThreadModel; retry?: boolean; retryByPerson?: boolean; retryLabel?: string; kind: "discussion" | "assignment" | "worker" }) => invoke<HeadlessTurnAcceptance>("turns.send", input),
+    /** Explicit person recovery may return a NEW messageId and continuation prompt after tool work. */
+    send: (input: { slug: string; threadId: string; prompt: string; messageId: string; model?: HeadlessThreadModel; retry?: boolean; retryByPerson?: boolean; retryLabel?: string; kind: "discussion" | "assignment" | "worker" }) => invoke<HeadlessTurnAcceptance & { prompt: string }>("turns.send", input),
     cancel: (slug: string, threadId: string, messageId?: string) => invoke<{ ok: boolean }>("turns.cancel", { slug, threadId, messageId }),
   },
   templates: {
@@ -421,9 +475,17 @@ export const coworkerBridge = {
     deleteRetired: (archiveId: string) => invoke<{ ok: boolean }>("coworkers.retired.delete", { archiveId }),
   },
   groups: {
+    documents: {
+      list: (id: string) => invoke<GroupDocumentSummary[]>("groups.documents.list", { id }),
+      read: (id: string, documentId: string) => invoke<GroupDocument>("groups.documents.read", { id, documentId }),
+      save: (id: string, input: GroupDocumentSave) => invoke<GroupDocumentSaved>("groups.documents.save", { id, input }),
+      revisions: (id: string, documentId: string) => invoke<GroupDocument[]>("groups.documents.revisions", { id, documentId }),
+      restore: (id: string, documentId: string, revision: number, expectedRevision: number) => invoke<GroupDocumentSaved>("groups.documents.restore", { id, documentId, revision, expectedRevision }),
+    } satisfies GroupDocumentsApi,
     activity: (id: string) => invoke<{ timeline: GroupTimelineEvent[]; executions: ExecutionActivity[] }>("groups.activity", { id }),
     submit: (id: string, input: { clientMessageId: string; text: string; context?: string; turnId?: string; only?: string; attempt?: number }) => invoke<{ accepted: boolean }>("groups.submit", { id, ...input }),
-    status: (id: string) => invoke<{ active: boolean; turn: CoworkerGroupTurn | null; queue: Array<{ clientMessageId: string; text: string }> }>("groups.status", { id }),
+    status: (id: string) => invoke<{ active: boolean; interactions: GroupInteraction[]; turn: CoworkerGroupTurn | null; queue: Array<{ clientMessageId: string; text: string }> }>("groups.status", { id }),
+    replyInteraction: (input: GroupInteractionReply) => invoke<{ ok: boolean }>("groups.interactions.reply", input),
     cancel: (id: string) => invoke<{ ok: boolean }>("groups.cancel", { id }),
     removeQueued: (id: string, clientMessageId: string) => invoke<{ ok: boolean }>("groups.removeQueued", { id, clientMessageId }),
     list: () => invoke<CoworkerGroupSummary[]>("groups.list"),
@@ -548,6 +610,7 @@ export const coworkerBridge = {
   },
   settings: {
     get: () => invoke<CoworkerSettings>("settings.get"),
+    progressModels: () => invoke<import("./threads.ts").ProgressModelOption[]>("settings.progressModels"),
     update: (patch: Partial<CoworkerSettings>) => invoke<CoworkerSettings>("settings.update", patch),
   },
   openExternal: (url: string) => invoke<{ ok: boolean }>("shell.openExternal", { url }),

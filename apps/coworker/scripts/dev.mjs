@@ -63,6 +63,14 @@ if (!existsSync(automationsBundle)) {
   await runOnce(pnpmCmd, ["--filter", "@openwork/automations", "build"], { cwd: repoRoot });
 }
 
+if (process.platform === "darwin") {
+  console.log("[coworker-dev] Preparing the shared Computer Use helper...");
+  await runOnce(process.execPath, [
+    resolve(repoRoot, "apps", "desktop", "scripts", "prepare-computer-use-helper.mjs"),
+    "--force", "--outdir", resolve(appRoot, "resources", "helpers"),
+  ], { cwd: appRoot });
+}
+
 console.log(`[coworker-dev] Starting Vite on ${startUrl}`);
 const vite = run(pnpmCmd, ["exec", "vite", "--port", String(devPort)], {
   cwd: appRoot,

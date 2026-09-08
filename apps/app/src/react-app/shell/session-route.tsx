@@ -18,8 +18,9 @@ import { buildDiagnosticsBundleJson } from "@/app/lib/diagnostics-bundle";
 import { downloadTextAsFile } from "@/app/lib/download";
 import { canCreateWorkspaces } from "@/app/lib/workspace-creation-policy";
 import { createClient, unwrap } from "@/app/lib/opencode";
+import { isOpencodeV2BaseUrl, V2_SESSION_ARCHIVE_UNAVAILABLE } from "@/app/lib/opencode-v2-adapter";
 import { abortSessionSafe, forkSession, listCommands, revertSession, setSessionArchived, shellInSession, unrevertSession } from "@/app/lib/opencode-session";
-import { deleteNativeSession, getNativeSessionMessages } from "@/app/lib/opencode-session-native";
+import { getNativeSessionMessages } from "@/app/lib/opencode-session-native";
 import { useSessionManagementStore as sessionManagementStore } from "@/react-app/domains/session/sidebar/session-management-store";
 import { getSessionDescendantIds } from "@/react-app/domains/session/sidebar/utils";
 import {
@@ -79,6 +80,7 @@ import {
   describeTaskCreateRetry,
   describeWorkspaceCreateError,
   createRouteSession,
+  deleteRouteSession,
   downloadWorkspaceJson,
   folderNameFromPath,
   getSessionStatus,
@@ -494,6 +496,7 @@ export function SessionRoute() {
     onServerSettingsChanged: () => setOpenworkServerSettingsVersion((value) => value + 1),
     onHostInfo: setOpenworkServerHostInfoState,
   });
+  const archiveDisabledReason = isOpencodeV2BaseUrl(opencodeBaseUrl) ? V2_SESSION_ARCHIVE_UNAVAILABLE : undefined;
   // The dashboard is user-scoped while MCP servers are workspace-scoped: the
   // selected workspace's runtime is primary, and every other available one is
   // a per-tile fallback so tiles keep working when the selected workspace does
@@ -623,7 +626,7 @@ export function SessionRoute() {
         }),
     [sessionsByWorkspaceId],
   );
-  const selectedPermissionSessionIds = useMemo(() => {
+  const selectedInteractionSessionIds = useMemo(() => {
     const selected = selectedSessionId?.trim();
     if (!selected) return [];
     const sessions = sessionsByWorkspaceId[selectedWorkspaceId] ?? [];
@@ -631,14 +634,14 @@ export function SessionRoute() {
   }, [selectedSessionId, selectedWorkspaceId, sessionsByWorkspaceId]);
   const activeSelectedWorkspaceSessionIds = useMemo(
     () => Array.from(new Set([
-      ...selectedPermissionSessionIds,
+      ...selectedInteractionSessionIds,
       ...(sessionsByWorkspaceId[selectedWorkspaceId] ?? []).flatMap((session) => {
         if (!isActiveSessionStatus(getSessionStatus(session))) return [];
         const id = String(session?.id ?? "").trim();
         return id ? [id] : [];
       }),
     ])),
-    [selectedPermissionSessionIds, selectedWorkspaceId, sessionsByWorkspaceId],
+    [selectedInteractionSessionIds, selectedWorkspaceId, sessionsByWorkspaceId],
   );
   const remoteAccessRestart = useRemoteAccessRestart({
     isEnabled: () => openworkServerSettings.remoteAccessEnabled === true,
@@ -1088,7 +1091,7 @@ export function SessionRoute() {
     // a client-only prefix, while interaction caches use the server workspace.
     workspaceId: selectedWorkspaceEndpoint?.workspaceId ?? selectedWorkspaceId,
     sessionId: selectedSessionId,
-    permissionSessionIds: selectedPermissionSessionIds,
+    interactionSessionIds: selectedInteractionSessionIds,
     workspaceRoot: selectedWorkspaceRoot,
   });
   const activePermissionSourceTitle = useMemo(() => {
@@ -2363,6 +2366,7 @@ export function SessionRoute() {
     canCreateTask,
     openworkClient: client,
     opencodeClient,
+    archiveDisabledReason,
     endpointForWorkspace,
     navigateToSession: navigateToSessionForControl,
     navigateToSessionRoot: navigateToSessionRootForControl,
@@ -3372,6 +3376,18 @@ export function SessionRoute() {
         },
         onPrefetchSession: () => {},
         onCreateTaskInWorkspace: (workspaceId, groupId) => {
+          const { focusedPane, secondary } = useWorkbenchStore.getState();
+          const hasWorkspaceError = Boolean(errorsByWorkspaceId[workspaceId]?.trim())
+            || workspaceConnectionStateById[workspaceId]?.status === "error";
+          if (!groupId && !hasWorkspaceError && !(focusedPane === "secondary" && secondary)) {
+            // The empty composer creates its session on submit. Opening it must
+            // not wait for an engine request, especially on a cold v2 runtime.
+            setLegacySelectedWorkspaceId(workspaceId);
+            writeActiveWorkspaceId(workspaceId);
+            navigateToWorkspaceSession(workspaceId);
+            focusPromptSoon();
+            return;
+          }
           void handleCreateTaskInWorkspace(workspaceId).then((sessionId) => {
             if (sessionId && groupId) {
               sessionManagementStore.getState().assignGroup(workspaceId, sessionId, groupId);
@@ -3507,7 +3523,7 @@ export function SessionRoute() {
           ? async (sessionId) => {
               const endpoint = endpointForWorkspace(selectedWorkspace);
               if (!endpoint) return;
-              await deleteNativeSession(endpoint, sessionId);
+              await deleteRouteSession(endpoint, sessionId);
               if (selectedSessionId === sessionId) {
                 navigateToWorkspaceSession(selectedWorkspaceId);
               }
@@ -3516,6 +3532,7 @@ export function SessionRoute() {
           : undefined
       }
       onArchiveSession={opencodeClient ? handleArchiveSession : undefined}
+      archiveDisabledReason={archiveDisabledReason}
       statusBar={{
         // No per-session loading state here: the account row renders only
         // app-scoped facts. Session loading lives in the pane; an unresolved

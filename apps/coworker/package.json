@@ -29,6 +29,8 @@
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@opencode-ai/sdk": "^1.18.15",
     "@openwork/automations": "workspace:*",
+    "@openwork/browser-tabs": "workspace:*",
+    "@openwork/computer-use": "workspace:*",
     "@openwork/enterprise-mcp-client": "workspace:*",
     "@openwork/headless-threads": "workspace:*",
     "@openwork/paths": "workspace:*",
@@ -41,6 +43,7 @@
     "jsonc-parser": "^3.2.1",
     "marked": "^17.0.1",
     "minimatch": "^10.2.5",
+    "opencode-chrome-devtools": "1.0.4",
     "react": "catalog:",
     "react-dom": "catalog:",
     "undici": "6.28.0",
@@ -60,5 +63,5 @@
     "typescript": "^5.6.3",
     "vite": "^6.4.3"
   },
-  "packageManager": "pnpm@10.27.0"
+  "packageManager": "pnpm@11.4.0"
 }

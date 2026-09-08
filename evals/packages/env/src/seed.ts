@@ -1,5 +1,6 @@
+import type { BrowserEvaluation, EvaluateOptions } from "@openwork/cdp";
 import type { DenFetchResult, DenSession, NativeConnectorInput } from "@openwork/behaviors";
-import type { AttachedSurface, CdpFunctionArgument, Surface } from "@openwork/cdp";
+import type { AttachedSurface, Surface } from "@openwork/cdp";
 import type { StartMockMcpOptions } from "@openwork/labs";
 import type { DaytonaExec, DesktopHandle } from "@openwork/hosts";
 import type { App } from "./desktop-app.ts";
@@ -13,8 +14,12 @@ export interface SeedDesktopOptions {
   signIn?: false;
   model?: string;
   workspacePath?: string;
+  /** Arrange a previously activated private-Den installation; does not test activation. */
+  enterpriseActivated?: boolean;
   profileDir?: string;
   name?: string;
+  /** Extra environment for this isolated Electron process. */
+  env?: Record<string, string>;
 }
 
 export interface SeedWebOptions {
@@ -103,5 +108,5 @@ export interface Seed {
   tmpPath(label: string): string;
   composerText(app: Surface, text: string): Promise<void>;
   /** Migration-only raw write escape hatch. New specs must not use it. */
-  evalIn(surface: Surface, expression: string, options?: { args?: readonly CdpFunctionArgument[]; awaitPromise?: boolean; timeoutMs?: number }): Promise<unknown>;
+  evalIn<T>(surface: Surface, expression: BrowserEvaluation<T>, options?: EvaluateOptions): Promise<Awaited<T>>;
 }

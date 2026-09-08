@@ -38,7 +38,9 @@ npmRebuild: false
 # Notarization runs in the after-sign hook only when a release asks for it
 # (MACOS_NOTARIZE=true with Apple API key credentials); electron-builder's own
 # notarize step stays off so local unsigned builds are unaffected.
-afterSign: scripts/electron-after-sign.cjs
+# The build module's hook validates the actual packaged helper CPU and signature.
+afterPack: scripts/electron-build.mjs
+afterSign: ../desktop/scripts/electron-after-sign.cjs
 mac:
   icon: resources/icons/icon.icns
   category: public.app-category.productivity
@@ -47,6 +49,11 @@ mac:
   notarize: false
   entitlements: build/entitlements.mac.plist
   entitlementsInherit: build/entitlements.mac.plist
+  extraResources:
+    - from: resources/helpers
+      to: helpers
+      filter:
+        - "OpenWork Computer Use.app/**"
   target:
     - dmg
     - zip

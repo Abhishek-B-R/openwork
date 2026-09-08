@@ -1,8 +1,9 @@
+import { browserScript } from "@openwork/cdp";
 import { spawn } from "node:child_process";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { join, resolve } from "node:path";
-import { evalIn } from "@openwork/behaviors";
+import { evalIn, assertNoLiveSecret, liveOpenAiEnabled, liveOpenAiModel, liveProviderId, provisionLiveOpenAi } from "@openwork/behaviors";
 import { resolveEvalEngine, type Seed } from "@openwork/env";
 import type { MockAgentWorkload } from "@openwork/labs";
 
@@ -85,14 +86,15 @@ export async function configureProvider(
   providerId: string,
   modelId: string,
   opencode: Record<string, unknown>,
+  engine = resolveEvalEngine(),
 ): Promise<void> {
   // TODO(primitive): configure a workspace provider and select its model.
-  const result = await seed.evalIn(app, `async (workspaceId, providerId, modelId, defaultModel, opencodeJson) => {
+  const result = await seed.evalIn(app, browserScript(async (workspaceId, providerId, modelId, defaultModel, opencodeJson) => {
     const port = localStorage.getItem("openwork.server.port");
     const token = localStorage.getItem("openwork.server.token");
     if (!port || !token) return "missing local server credentials";
     const opencode = JSON.parse(opencodeJson);
-    const request = async (path, init) => {
+    const request = async (path: string, init?: RequestInit) => {
       const response = await fetch("http://127.0.0.1:" + port + path, {
         ...init,
         headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
@@ -111,7 +113,7 @@ export async function configureProvider(
     const reloaded = await request("/workspace/" + encodeURIComponent(workspaceId) + "/engine/reload", { method: "POST" });
     if (reloaded !== "ok") return reloaded;
     const raw = localStorage.getItem("openwork.preferences");
-    let preferences = {};
+    let preferences: Record<string, unknown> = {};
     try { preferences = raw ? JSON.parse(raw) : {}; } catch { preferences = {}; }
     if (!preferences || typeof preferences !== "object" || Array.isArray(preferences)) preferences = {};
     localStorage.setItem("openwork.preferences", JSON.stringify({
@@ -123,29 +125,35 @@ export async function configureProvider(
     localStorage.setItem("openwork.defaultModel", defaultModel);
     localStorage.removeItem("openwork.sessionModels." + workspaceId);
     return "ok";
-  }`, {
-    args: [workspaceId, providerId, modelId, `${providerId}/${modelId}`, JSON.stringify(opencode)],
-    awaitPromise: true,
-    timeoutMs: 120_000,
-  });
+  }, [workspaceId, providerId, modelId, `${providerId}/${modelId}`, JSON.stringify(opencode)]), { awaitPromise: true, timeoutMs: 120_000 });
   if (result !== "ok") throw new Error(`Provider configuration failed: ${String(result)}`);
-  await seed.evalIn(app, "location.reload(); true");
-  const ready = await seed.evalIn(app, `async (workspaceId) => {
+  await seed.evalIn(app, () => { location.reload(); return true; });
+  const ready = await seed.evalIn(app, browserScript(async (workspaceId, engine, providerId, modelId) => {
     const deadline = Date.now() + 60000;
     while (Date.now() < deadline) {
-      const port = localStorage.getItem("openwork.server.port");
-      const token = localStorage.getItem("openwork.server.token");
+      const base = "http://127.0.0.1:" + localStorage.getItem("openwork.server.port");
+      const headers = { Authorization: "Bearer " + localStorage.getItem("openwork.server.token") };
       try {
-        const response = await fetch("http://127.0.0.1:" + port + "/workspace/" + encodeURIComponent(workspaceId) + "/opencode/session", {
-          headers: { Authorization: "Bearer " + token },
-        });
-        if (response.ok && window.__openworkControl) return true;
+        const statusResponse = await fetch(base + "/experimental/engine-v2-preview/status", { headers });
+        const status = statusResponse.ok ? await statusResponse.json() : null;
+        const selected = status ? status.enabled && status.chatRouting : false;
+        if ((engine === "v2") !== selected || (!statusResponse.ok && statusResponse.status !== 404)) {
+          await new Promise((resolve) => setTimeout(resolve, 250));
+          continue;
+        }
+        const mounted = base + "/workspace/" + encodeURIComponent(workspaceId);
+        const response = await fetch(mounted + (engine === "v2" ? "/opencode2/api/model" : "/opencode/session"), { headers });
+        if (response.ok && window.__openworkControl) {
+          if (engine === "v1") return true;
+          const catalog = JSON.stringify(await response.json());
+          if (catalog.includes(providerId) && catalog.includes(modelId)) return true;
+        }
       } catch {}
       await new Promise((resolve) => setTimeout(resolve, 500));
     }
     return false;
-  }`, { args: [workspaceId], awaitPromise: true, timeoutMs: 120_000 });
-  if (ready !== true) throw new Error("Engine did not become ready after provider configuration.");
+  }, [workspaceId, engine, providerId, modelId]), { awaitPromise: true, timeoutMs: 120_000 });
+  if (ready !== true) throw new Error(`Selected ${engine} engine did not become ready after provider configuration.`);
 }
 
 async function seedControls(
@@ -163,7 +171,7 @@ export async function arrangeControl(
   args?: unknown,
 ): Promise<unknown> {
   // TODO(primitive): invoke a named renderer fixture control and await its result.
-  return seed.evalIn(app, `async (action, argsJson) => {
+  return seed.evalIn(app, browserScript(async (action, argsJson) => {
     const deadline = Date.now() + 30000;
     while (Date.now() < deadline) {
       const available = window.__openworkControl?.listActions().find((candidate) => candidate.id === action && !candidate.disabled);
@@ -173,7 +181,7 @@ export async function arrangeControl(
     const result = await window.__openworkControl.execute(action, JSON.parse(argsJson));
     if (!result?.ok) throw new Error(String(result?.error ?? "control action failed"));
     return result.value;
-  }`, { args: [action, JSON.stringify(args ?? null)], awaitPromise: true, timeoutMs: 120_000 });
+  }, [action, JSON.stringify(args ?? null)]), { awaitPromise: true, timeoutMs: 120_000 });
 }
 
 async function seedSessionRetry(
@@ -208,20 +216,31 @@ export async function paletteSessionActions(seed: Seed) {
   return { app, workspace, session };
 }
 
-export async function newSplitPrimary(seed: Seed) {
+async function splitPaneQuestions(
+  seed: Seed,
+  name: string,
+  agentWorkloads: MockAgentWorkload[],
+  policy: Record<string, unknown> = { permission: { question: "allow" } },
+) {
   const providerId = "split-send-mock";
   const modelId = "split-send-model";
-  const primaryPrompt = "Reply to the primary split message";
-  const secondaryPrompt = "Reply to the secondary split message";
-  const switchPrompt = "Reply after switching the primary session";
-  const mock = seed.mock({ agentWorkloads: [
-    { promptMarker: primaryPrompt, finalReply: "Primary split received", steps: [] },
-    { promptMarker: secondaryPrompt, finalReply: "Secondary split received", steps: [] },
-    { promptMarker: switchPrompt, finalReply: "Switched session received", steps: [] },
-  ] });
+  const mock = seed.mock({ agentWorkloads });
   const den = await seed.den({ mocks: { agent: mock } });
-  const app = await seed.desktop({ name: "new-split-session", den, as: "admin", model: `${providerId}/${modelId}` });
-  const workspace = await seed.workspace(app, seed.tmpPath("new-split-session"));
+  const app = await seed.desktop({ name, den, as: "admin", model: `${providerId}/${modelId}` });
+  const workspace = await seed.workspace(app, seed.tmpPath(name));
+  // Arrange an allowed native question tool independently of custom-agent defaults.
+  // TODO(primitive): write workspace fixture files through a first-class seed API.
+  const questionPolicyWritten = await seed.evalIn(app, browserScript(async (workspaceId, content) => {
+    const port = localStorage.getItem("openwork.server.port");
+    const token = localStorage.getItem("openwork.server.token");
+    const response = await fetch("http://127.0.0.1:" + port + "/workspace/" + encodeURIComponent(workspaceId) + "/files/content", {
+      method: "POST",
+      headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
+      body: JSON.stringify({ path: "opencode.json", content }),
+    });
+    return response.ok;
+  }, [workspace.workspaceId, JSON.stringify(policy)]), { awaitPromise: true });
+  if (questionPolicyWritten !== true) throw new Error("Could not arrange the question-tool policy.");
   await configureProvider(seed, app, workspace.workspaceId, providerId, modelId, {
     provider: {
       [providerId]: {
@@ -232,34 +251,105 @@ export async function newSplitPrimary(seed: Seed) {
       },
     },
   });
+  return { app, workspace, mock: den.mocks.agent };
+}
+
+export async function delegatedQuestionHandoff(seed: Seed) {
+  const engine = resolveEvalEngine();
+  const delegationTool = engine === "v2" ? "subagent" : "task";
+  const rootPrompt = "Delegate choosing the task format, then report the result.";
+  const child = {
+    prompt: "Help me choose the delegated task format",
+    question: "Which format should the child task use?",
+    answer: "Child checklist",
+    alternative: "Child outline",
+  };
+  const unrelated = {
+    prompt: "Help me choose the unrelated task format",
+    question: "Which format should the unrelated task use?",
+    answer: "Unrelated outline",
+    alternative: "Unrelated checklist",
+  };
+  const base = await splitPaneQuestions(seed, "delegated-question-handoff", [
+    {
+      promptMarker: rootPrompt, latestUserTurn: true,
+      finalReply: "Unused: return the actual child result.", finalReplyFrom: "last-tool-text",
+      steps: [{ tool: delegationTool, arguments: {
+        description: "Choose delegated task format", prompt: child.prompt,
+        // v2 beta-19086 calls this subagent; foreground must await the child's answer.
+        ...(engine === "v2" ? { agent: "general", background: false } : { subagent_type: "general" }),
+      } }],
+    },
+    ...[child, unrelated].map((question): MockAgentWorkload => ({
+      promptMarker: question.prompt, latestUserTurn: true,
+      finalReply: "Unused: return the actual question result.", finalReplyFrom: "last-tool-text",
+      steps: [{ tool: "question", arguments: { questions: [{
+        header: "Task format", question: question.question,
+        options: [
+          { label: question.answer, description: "Use this format" },
+          { label: question.alternative, description: "Use the other format" },
+        ],
+      }] } }],
+    })),
+  ], {
+    permission: { question: "allow", task: "allow" },
+    // Both engines deny questions for general by default; v2 migrates task to subagent.
+    agent: { general: { permission: { question: "allow" } } },
+  });
+  const root = await seedSessionRetry(seed, base.app, { title: "Delegated question parent" });
+  const other = await seedSessionRetry(seed, base.app, { title: "Unrelated question root" });
+  return { ...base, engine, delegationTool, root: { ...root, prompt: rootPrompt }, child, unrelated: { ...other, ...unrelated } };
+}
+
+export async function newSplitPrimary(seed: Seed) {
+  const primaryPrompt = "Reply to the primary split message";
+  const secondaryPrompt = "Reply to the secondary split message";
+  const switchPrompt = "Reply after switching the primary session";
+  const primaryQuestionPrompt = "Help me choose the main task format";
+  const secondaryQuestionPrompt = "Help me choose the side task format";
+  const contextPrompt = "Describe your conversation context";
+  const { app, workspace } = await splitPaneQuestions(seed, "new-split-session", [
+    ...["Main", "Side"].map((pane): MockAgentWorkload => ({
+      promptMarker: pane === "Main" ? primaryQuestionPrompt : secondaryQuestionPrompt,
+      latestUserTurn: true, finalReply: "Answered the format question.", finalReplyFrom: "last-tool-text",
+      steps: [{ tool: "question", arguments: { questions: [{
+        header: `${pane} format`, question: `Which format should the ${pane.toLowerCase()} task use?`,
+        options: [{ label: `${pane} outline`, description: "A brief overview" }, { label: `${pane} checklist`, description: "A sequence of steps" }],
+      }] } }],
+    })),
+    { promptMarker: contextPrompt, latestUserTurn: true, finalReply: "Conversation context.", finalReplyFrom: "system-text", steps: [] },
+    { latestUserTurn: true, promptMarker: primaryPrompt, finalReply: "Primary split received", steps: [] },
+    { latestUserTurn: true, promptMarker: secondaryPrompt, finalReply: "Secondary split received", steps: [] },
+    { latestUserTurn: true, promptMarker: switchPrompt, finalReply: "Switched session received", steps: [] },
+  ]);
   const switchSession = await seedSessionRetry(seed, app, { title: "Split switch target" });
   const session = await seedSessionRetry(seed, app, { title: "New split primary" });
-  const splitFacts = () => evalIn(app, `(() => {
+  const splitFacts = () => evalIn(app, () => {
     const context = window.__openworkControl?.context?.();
     const layout = context?.conversations?.layout;
-    const primaryPane = document.querySelector('[data-workbench-pane="primary"]');
-    const secondaryPanes = [...document.querySelectorAll('[data-workbench-pane="secondary"]')];
+    const primaryPane = document.querySelector<HTMLElement>('[data-workbench-pane="primary"]');
+    const secondaryPanes = [...document.querySelectorAll<HTMLElement>('[data-workbench-pane="secondary"]')];
     const secondaryPane = secondaryPanes[0];
     return {
       layoutKind: layout?.kind ?? "",
-      focusedPane: layout?.focused ?? "",
+      focusedPane: (layout?.kind === "split" ? layout.focused : undefined) ?? "",
       focusedComposerSessionId: document.activeElement?.matches('[contenteditable="true"]')
         ? document.activeElement.closest("[data-session-surface-id]")?.getAttribute("data-session-surface-id") ?? ""
         : "",
-      primarySessionId: layout?.primarySessionId ?? layout?.sessionId ?? "",
-      secondarySessionId: layout?.secondarySessionId ?? "",
-      primaryWorkspaceId: layout?.primaryWorkspaceId ?? "",
-      secondaryWorkspaceId: layout?.secondaryWorkspaceId ?? "",
-      primarySurfaceSessionId: primaryPane?.querySelector('[data-session-surface-id]')
+      primarySessionId: (layout?.kind === "split" ? layout.primarySessionId : undefined) ?? (layout?.kind === "single" ? layout.sessionId : undefined) ?? "",
+      secondarySessionId: (layout?.kind === "split" ? layout.secondarySessionId : undefined) ?? "",
+      primaryWorkspaceId: (layout?.kind === "split" ? layout.primaryWorkspaceId : undefined) ?? "",
+      secondaryWorkspaceId: (layout?.kind === "split" ? layout.secondaryWorkspaceId : undefined) ?? "",
+      primarySurfaceSessionId: primaryPane?.querySelector<HTMLElement>('[data-session-surface-id]')
         ?.getAttribute('data-session-surface-id') ?? "",
-      secondarySurfaceSessionId: secondaryPane?.querySelector('[data-session-surface-id]')
+      secondarySurfaceSessionId: secondaryPane?.querySelector<HTMLElement>('[data-session-surface-id]')
         ?.getAttribute('data-session-surface-id') ?? "",
       secondaryPaneWorkspaceId: secondaryPane?.getAttribute('data-workbench-workspace-id') ?? "",
       secondaryPaneCount: secondaryPanes.length,
       locationHash: window.location.hash,
     };
-  })()`);
-  const agentContextViaServer = () => evalIn(app, `(async () => {
+  });
+  const agentContextViaServer = () => evalIn(app, async () => {
     const response = await fetch("http://127.0.0.1:" + localStorage.getItem("openwork.server.port") + "/experimental/ui-control/request", {
       method: "POST",
       headers: {
@@ -269,8 +359,8 @@ export async function newSplitPrimary(seed: Seed) {
       body: JSON.stringify({ kind: "context" }),
     });
     return response.json();
-  })()`, { awaitPromise: true, timeoutMs: 15_000 });
-  return { app, workspace, session, splitFacts, agentContextViaServer, primaryPrompt, secondaryPrompt, switchSession, switchPrompt };
+  }, { awaitPromise: true, timeoutMs: 15_000 });
+  return { app, workspace, session, splitFacts, agentContextViaServer, primaryPrompt, secondaryPrompt, switchSession, switchPrompt, primaryQuestionPrompt, secondaryQuestionPrompt, contextPrompt };
 }
 
 export async function shimmerChat(seed: Seed) {
@@ -309,12 +399,12 @@ export async function connectionsMenu(seed: Seed) {
   const app = await seed.desktop({ den, as: "admin" });
   const session = await seedSessionRetry(seed, app);
   // TODO(primitive): click a button by its title when it has no accessible name.
-  const opened = await seed.evalIn(app, `(() => {
-    const trigger = document.querySelector('button[title="Agents, commands, skills, plugins, and connections"]');
+  const opened = await seed.evalIn(app, () => {
+    const trigger = document.querySelector<HTMLButtonElement>('button[title="Agents, commands, skills, plugins, and connections"]');
     if (!(trigger instanceof HTMLButtonElement)) return false;
     trigger.click();
     return true;
-  })()`);
+  });
   if (opened !== true) throw new Error("Composer capability menu did not open.");
   return { app, den, session, connections };
 }
@@ -487,25 +577,25 @@ export async function renderCycle(seed: Seed) {
       },
     });
     // TODO(primitive): enable the renderer profiler before desktop launch.
-    await seed.evalIn(app, `(() => {
+    await seed.evalIn(app, () => {
       localStorage.setItem("openwork.debug.profiler", "1");
       localStorage.removeItem("openwork.debug.profilerOverlay");
       location.reload();
       return true;
-    })()`);
-    const controlsReady = await seed.evalIn(app, `(async () => {
+    });
+    const controlsReady = await seed.evalIn(app, async () => {
       const deadline = Date.now() + 30000;
       while (Date.now() < deadline) {
         if (window.__openworkControl?.listActions().some((action) => action.id === "session.create_task" && !action.disabled)) return true;
         await new Promise((resolve) => setTimeout(resolve, 100));
       }
       return false;
-    })()`, { awaitPromise: true, timeoutMs: 120_000 });
+    }, { awaitPromise: true, timeoutMs: 120_000 });
     if (controlsReady !== true) throw new Error("Session controls did not return after enabling the profiler.");
     const session = await seedSessionRetry(seed, app);
     await seed.composerText(app, `Reply with exactly: ${renderCycleFirstReply}`);
     // TODO(primitive): send an arranged historical turn and await its completion.
-    const historical = await seed.evalIn(app, `async (expectedReply) => {
+    const historical = await seed.evalIn(app, browserScript(async (expectedReply) => {
       const sent = await window.__openworkControl.execute("composer.send", null);
       if (!sent?.ok) throw new Error(String(sent?.error ?? "composer.send failed"));
       const deadline = Date.now() + 30000;
@@ -514,7 +604,7 @@ export async function renderCycle(seed: Seed) {
         await new Promise((resolve) => setTimeout(resolve, 100));
       }
       return false;
-    }`, { args: [renderCycleFirstReply], awaitPromise: true, timeoutMs: 120_000 });
+    }, [renderCycleFirstReply]), { awaitPromise: true, timeoutMs: 120_000 });
     if (historical !== true) throw new Error(`Historical turn did not complete. Requests: ${requests.join("; ")}`);
     return {
       app,
@@ -529,6 +619,7 @@ export async function renderCycle(seed: Seed) {
 }
 
 export const streamedMarkdownMarker = "STREAM_MARKDOWN_ANSWER";
+export const streamedMarkdownReasoning = "Preparing the formatted response.";
 /** A multi-block answer: heading, prose, list, table, fenced code, closing prose. */
 export const streamedMarkdownAnswer = [
   "## Streamed answer heading",
@@ -562,7 +653,9 @@ export async function streamedMarkdown(seed: Seed) {
     agentWorkloads: [{
       promptMarker: streamedMarkdownMarker,
       finalReply: streamedMarkdownAnswer,
-      finalReplyChunkSize: 8,
+      finalReasoning: streamedMarkdownReasoning,
+      // Allow live reasoning inspection over remote CDP before the mid-turn reload.
+      finalReplyChunkSize: 1,
       finalReplyDelayMs: 1500,
       steps: [],
     }],
@@ -576,12 +669,12 @@ export async function streamedMarkdown(seed: Seed) {
         npm: "@ai-sdk/openai-compatible",
         name: "Streamed markdown mock",
         options: { baseURL: `${den.mocks.agent.url}/v1`, apiKey: "sk-streamed-markdown" },
-        models: { [modelId]: { name: "Streamed markdown model" } },
+        models: { [modelId]: { name: "Streamed markdown model", reasoning: true } },
       },
     },
   });
   // A tiny H.264 clip, served through the same authenticated file endpoint as user files.
-  await seed.evalIn(app, `async (workspaceId, dataBase64) => {
+  await seed.evalIn(app, browserScript(async (workspaceId, dataBase64) => {
     const base = "http://127.0.0.1:" + localStorage.getItem("openwork.server.port");
     const response = await fetch(base + "/workspace/" + encodeURIComponent(workspaceId) + "/files/raw", {
       method: "POST",
@@ -589,9 +682,9 @@ export async function streamedMarkdown(seed: Seed) {
       body: JSON.stringify({ path: "clip.mp4", dataBase64 }),
     });
     if (!response.ok) throw new Error("Video fixture write failed: " + response.status);
-  }`, { args: [workspace.workspaceId, (await readFile(new URL("../fixtures/assistant-video.mp4", import.meta.url))).toString("base64")], awaitPromise: true });
+  }, [workspace.workspaceId, (await readFile(new URL("../fixtures/assistant-video.mp4", import.meta.url))).toString("base64")]), { awaitPromise: true });
   const engine = resolveEvalEngine();
-  const ready = await seed.evalIn(app, `async (workspaceId, engine, providerId, modelId) => {
+  const ready = await seed.evalIn(app, browserScript(async (workspaceId, engine, providerId, modelId) => {
     const base = "http://127.0.0.1:" + localStorage.getItem("openwork.server.port");
     const headers = { Authorization: "Bearer " + localStorage.getItem("openwork.server.token") };
     const deadline = Date.now() + 60000;
@@ -608,18 +701,18 @@ export async function streamedMarkdown(seed: Seed) {
       await new Promise(resolve => setTimeout(resolve, 250));
     }
     return false;
-  }`, { args: [workspace.workspaceId, engine, providerId, modelId], awaitPromise: true, timeoutMs: 65000 });
+  }, [workspace.workspaceId, engine, providerId, modelId]), { awaitPromise: true, timeoutMs: 65000 });
   if (ready !== true) throw new Error(`Selected ${engine} engine was not ready for the streaming journey`);
   const session = await seedSessionRetry(seed, app);
   return { app, den, workspace, session,
     async videoState(play = false) {
-      return seed.evalIn(app, `async (play) => {
-        const video = document.querySelector('video[data-openwork-video-path="clip.mp4"]');
+      return seed.evalIn(app, browserScript(async (play) => {
+        const video = document.querySelector<HTMLVideoElement>('video[data-openwork-video-path="clip.mp4"]');
         if (!video) return null;
         if (play) await video.play();
         return { controls: video.controls, autoplay: video.autoplay, ready: video.readyState >= 2,
           paused: video.paused, time: video.currentTime, error: video.error?.message ?? null };
-      }`, { args: [play], awaitPromise: true });
+      }, [play]), { awaitPromise: true });
     },
   };
 }
@@ -782,26 +875,26 @@ async function writeProviderConfig(path: string, providerId: string, modelId: st
 
 async function selectModelInWorld(seed: Seed, app: Awaited<ReturnType<Seed["desktop"]>>, modelName: string): Promise<void> {
   // TODO(primitive): select a model as arranged state.
-  const selected = await seed.evalIn(app, `async (modelName) => {
+  const selected = await seed.evalIn(app, browserScript(async (modelName) => {
     const deadline = Date.now() + 60000;
-    if (!document.querySelector('input[placeholder="Search providers and models..."]')) {
+    if (!document.querySelector<HTMLInputElement>('input[placeholder="Search providers and models..."]')) {
       const result = await window.__openworkControl.execute("session.model_picker.open", null);
       if (!result?.ok) return false;
     }
     while (Date.now() < deadline) {
-      const input = document.querySelector('input[placeholder="Search providers and models..."]');
+      const input = document.querySelector<HTMLInputElement>('input[placeholder="Search providers and models..."]');
       if (input instanceof HTMLInputElement && input.value !== modelName) {
         const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
         setter?.call(input, modelName);
         input.dispatchEvent(new Event("input", { bubbles: true }));
       }
-      const dialog = document.querySelector('[data-slot="dialog-content"]');
+      const dialog = document.querySelector<HTMLElement>('[data-slot="dialog-content"]');
       const item = [...(dialog?.querySelectorAll("button") ?? [])]
         .find((candidate) => !candidate.disabled && (candidate.textContent ?? "").includes(modelName));
       if (item instanceof HTMLElement) {
         item.click();
         while (Date.now() < deadline) {
-          if (!document.querySelector('input[placeholder="Search providers and models..."]')) return true;
+          if (!document.querySelector<HTMLInputElement>('input[placeholder="Search providers and models..."]')) return true;
           await new Promise((resolve) => setTimeout(resolve, 100));
         }
         return false;
@@ -809,7 +902,7 @@ async function selectModelInWorld(seed: Seed, app: Awaited<ReturnType<Seed["desk
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
     return false;
-  }`, { args: [modelName], awaitPromise: true, timeoutMs: 120_000 });
+  }, [modelName]), { awaitPromise: true, timeoutMs: 120_000 });
   if (selected !== true) throw new Error(`Model ${modelName} was not selectable.`);
 }
 
@@ -993,7 +1086,7 @@ async function configureCrossWorkspaces(
   baseUrl: string,
 ): Promise<void> {
   // TODO(primitive): configure one provider across several workspaces and select its model.
-  const configured = await seed.evalIn(app, `async (workspaceIdsJson, providerBaseUrl) => {
+  const configured = await seed.evalIn(app, browserScript(async (workspaceIdsJson, providerBaseUrl) => {
     const port = localStorage.getItem("openwork.server.port");
     const token = localStorage.getItem("openwork.server.token");
     if (!port || !token) return "missing local server credentials";
@@ -1023,7 +1116,7 @@ async function configureCrossWorkspaces(
       if (!reload.ok && reload.status !== 504) return "reload:" + reload.status + ":" + (await reload.text()).slice(0, 300);
     }
     const raw = localStorage.getItem("openwork.preferences");
-    let preferences = {};
+    let preferences: Record<string, unknown> = {};
     try { preferences = raw ? JSON.parse(raw) : {}; } catch { preferences = {}; }
     if (!preferences || typeof preferences !== "object" || Array.isArray(preferences)) preferences = {};
     localStorage.setItem("openwork.preferences", JSON.stringify({
@@ -1034,9 +1127,9 @@ async function configureCrossWorkspaces(
     }));
     localStorage.setItem("openwork.defaultModel", "composer-switch-mock/composer-switch-model");
     return "ok";
-  }`, { args: [JSON.stringify(workspaceIds), `${baseUrl}/v1`], awaitPromise: true, timeoutMs: 180_000 });
+  }, [JSON.stringify(workspaceIds), `${baseUrl}/v1`]), { awaitPromise: true, timeoutMs: 180_000 });
   if (configured !== "ok") throw new Error(`Cross-workspace provider configuration failed: ${String(configured)}`);
-  await seed.evalIn(app, "location.reload(); true");
+  await seed.evalIn(app, () => { location.reload(); return true; });
 }
 
 export async function crossWorkspace(seed: Seed) {
@@ -1204,7 +1297,7 @@ export async function snapshotFailure(seed: Seed) {
   const workspace = await seed.workspace(app, seed.tmpPath("composer-snapshot-failure"));
   const session = await seedSessionRetry(seed, app, { title: "Composer snapshot failure proof" });
   await arrangeControl(seed, app, "eval.chat_transcript.seed");
-  const failureJson = await seed.evalIn(app, `async () => {
+  const failureJson = await seed.evalIn(app, browserScript(async () => {
     const deadline = Date.now() + 30000;
     while (Date.now() < deadline) {
       const available = window.__openworkControl?.listActions()
@@ -1215,7 +1308,7 @@ export async function snapshotFailure(seed: Seed) {
     const result = await window.__openworkControl.execute("eval.session_snapshot.fail", null);
     if (!result?.ok) throw new Error(String(result?.error ?? "control action failed"));
     return JSON.stringify(result.result);
-  }`, { args: [], awaitPromise: true, timeoutMs: 120_000 });
+  }, []), { awaitPromise: true, timeoutMs: 120_000 });
   const failure: unknown = typeof failureJson === "string" ? JSON.parse(failureJson) : failureJson;
   if (!isRecord(failure) || failure.isError !== true) {
     throw new Error(`Session snapshot failure was not established: ${JSON.stringify(failure)}`);
@@ -1302,7 +1395,7 @@ export async function computerMentions(seed: Seed) {
     den, app, workspace, session,
     async submittedParts() {
       // TODO(primitive): inspect submitted engine parts, including synthetic routing instructions.
-      return seed.evalIn(app, `async (workspaceId) => {
+      return seed.evalIn(app, browserScript(async (workspaceId) => {
         const port = localStorage.getItem("openwork.server.port");
         const token = localStorage.getItem("openwork.server.token");
         const base = "http://127.0.0.1:" + port + "/workspace/" + encodeURIComponent(workspaceId) + "/opencode/session";
@@ -1318,10 +1411,10 @@ export async function computerMentions(seed: Seed) {
         }
         messages.sort((a, b) => a.info.time.created - b.info.time.created);
         return messages.filter((message) => message.info.role === "user").map((message) => ({
-          visible: message.parts.filter((part) => part.type === "text" && !part.synthetic).map((part) => part.text).join("").trim(),
-          routing: message.parts.filter((part) => part.type === "text" && part.synthetic && part.text.includes("remote-session:create")).map((part) => part.text),
+          visible: message.parts.filter((part: { type: string; synthetic?: boolean; text: string }) => part.type === "text" && !part.synthetic).map((part: { text: string }) => part.text).join("").trim(),
+          routing: message.parts.filter((part: { type: string; synthetic?: boolean; text: string }) => part.type === "text" && part.synthetic).map((part: { text: string }) => part.text),
         }));
-      }`, { args: [workspace.workspaceId], awaitPromise: true });
+      }, [workspace.workspaceId]), { awaitPromise: true });
     },
   };
 }
@@ -1361,12 +1454,12 @@ export async function visualization(seed: Seed) {
   return {
     den, app, workspace, session,
     preview: async () => {
-      const result = await evalIn(app, `(() => {
-      const preview = document.querySelector('[data-testid="visualization-preview"]');
+      const result = await evalIn(app, () => {
+      const preview = document.querySelector<HTMLElement>('[data-testid="visualization-preview"]');
       return { viewport: preview?.getAttribute('data-viewport'), width: preview?.getBoundingClientRect().width,
         scripts: preview?.querySelectorAll('script').length, executed: window.mockupExecuted === true,
-        cards: document.querySelectorAll('[data-testid="visualization-card"]').length };
-    })()`);
+        cards: document.querySelectorAll<HTMLElement>('[data-testid="visualization-card"]').length };
+    });
       if (!isRecord(result) || typeof result.width !== "number") throw new Error("Visualization preview missing");
       return { ...result, width: result.width };
     },
@@ -1403,4 +1496,82 @@ export async function workspaceEngineUpgrade(seed: Seed) {
   return { app, den, primary, other, original, otherOriginal, providerId, modelId,
     otherName: otherPath.split("/").at(-1),
   };
+}
+
+/** A running conversation whose workspace skills can change through OpenWork. */
+export async function skillLifecycle(seed: Seed) {
+  const live = liveOpenAiEnabled();
+  const orgName = "Skill lifecycle";
+  const den = await seed.den({ org: { name: orgName }, mocks: { model: seed.mock({}) } });
+  const managed = await provisionLiveOpenAi(den.admin, orgName);
+  try {
+    const app = await seed.desktop({ den, as: "admin" });
+    const workspace = await seed.workspace(app, seed.tmpPath("skill-lifecycle"));
+    const request = async (path: string) => {
+      const response = await seed.evalIn(app, browserScript(async (path) => {
+        const response = await fetch("http://127.0.0.1:" + localStorage.getItem("openwork.server.port") + path, {
+          headers: { Authorization: "Bearer " + localStorage.getItem("openwork.server.token") },
+          signal: AbortSignal.timeout(10000),
+        });
+        return { status: response.status, json: await response.json() };
+      }, [path]), { awaitPromise: true });
+      if (!isRecord(response) || typeof response.status !== "number") throw new Error("Missing desktop response");
+      assertNoLiveSecret(response);
+      return { status: response.status, json: response.json };
+    };
+    const providerId = live ? await liveProviderId(request, managed.id) : "skill-lifecycle";
+    const modelId = live ? liveOpenAiModel() : "skill-lifecycle-model";
+    // This world arranges an opted-in native v2 conversation, including when
+    // invoked by the standard E2E command without an engine override.
+    await seed.evalIn(app, async () => {
+      const response = await fetch("http://127.0.0.1:" + localStorage.getItem("openwork.server.port") + "/experimental/engine-v2-preview", {
+        method: "PUT", headers: { Authorization: "Bearer " + localStorage.getItem("openwork.server.token"), "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: true, chatRouting: true }), signal: AbortSignal.timeout(180000),
+      });
+      if (!response.ok) throw new Error("Could not enable the native engine");
+      return true;
+    }, { awaitPromise: true, timeoutMs: 185_000 });
+    await configureProvider(seed, app, workspace.workspaceId, providerId, modelId, {
+      permission: { skill: "allow" },
+      ...(!live ? { provider: { [providerId]: {
+        npm: "@ai-sdk/openai-compatible", name: "Skill lifecycle model",
+        options: { baseURL: `${den.mocks.model.url}/v1`, apiKey: "eval-only-key" },
+        models: { [modelId]: { name: "Skill lifecycle model", tool_call: true } },
+      } } } : {}),
+    }, "v2");
+    const session = await seedSessionRetry(seed, app, { title: "Release report" });
+    const skillName = "release-briefing";
+    return {
+      app, den, workspace, session, skillName, live, modelId,
+      async prepareTurn(prompt: string) {
+        if (live) return;
+        const result = await fetch(`${den.mocks.model.url}/admin/agent-workloads`, {
+          method: "POST", headers: { "content-type": "application/json" },
+          body: JSON.stringify({ workloads: [{ latestUserTurn: true, promptMarker: prompt,
+            finalReply: "OpenWork: UNAVAILABLE", finalReplyFrom: "last-tool-text",
+            steps: [{ tool: "skill", argumentsFrom: "skill-catalog", arguments: { skill: skillName } }],
+          }] }),
+        });
+        if (!result.ok) throw new Error("Could not arrange model response");
+      },
+      async usedConfiguredModel() {
+        const result = await request(`/workspace/${workspace.workspaceId}/opencode2/api/session/${session.sessionId}/message`);
+        const messages = isRecord(result.json) && Array.isArray(result.json.data) ? result.json.data.filter(isRecord) : [];
+        const replies = messages.filter(message => message.type === "assistant" && message.finish === "stop");
+        return replies.length > 0 && replies.every(message => isRecord(message.model)
+          && message.model.id === modelId && message.model.providerID === providerId
+          && isRecord(message.tokens) && typeof message.tokens.output === "number" && message.tokens.output > 0);
+      },
+      async runtimeIdentity() {
+        const result = await request("/experimental/engine-v2-preview/status");
+        if (!isRecord(result.json) || result.json.running !== true || result.json.chatRouting !== true
+          || typeof result.json.pid !== "number") throw new Error("The v2 conversation runtime is not running");
+        return result.json.pid;
+      },
+      async [Symbol.asyncDispose]() { await managed[Symbol.asyncDispose](); },
+    };
+  } catch (error) {
+    await managed[Symbol.asyncDispose]();
+    throw error;
+  }
 }

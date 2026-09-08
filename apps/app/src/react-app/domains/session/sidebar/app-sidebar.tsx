@@ -153,7 +153,7 @@ import {
   sidebarRowPaddingInlineStart,
 } from "./sidebar-lanes";
 import { WorkspaceAvatarPicker } from "./workspace-avatar-picker";
-import { isSameWorkbenchSession, useWorkbenchStore } from "../chat/workbench-store";
+import { isSameWorkbenchSession, useWorkbenchStore, workbenchSessionKey } from "../chat/workbench-store";
 import { SidebarDestination } from "./sidebar-destination";
 import { SessionTitle } from "./session-title";
 
@@ -372,10 +372,13 @@ function SessionMenuContent({
           </DropdownMenuSubContent>
         </DropdownMenuSub>
         {ctx.onArchiveSession ? (
-          <DropdownMenuItem onClick={() => ctx.onArchiveSession?.(sessionId, !isArchived)}>
+          <DropdownMenuItem disabled={Boolean(ctx.archiveDisabledReason)} onClick={() => ctx.onArchiveSession?.(sessionId, !isArchived)}>
             {isArchived ? <ArchiveRestore className="size-4" /> : <Archive className="size-4" />}
             {isArchived ? t("session_management.unarchive_session") : t("session_management.archive_session")}
           </DropdownMenuItem>
+        ) : null}
+        {ctx.onArchiveSession && ctx.archiveDisabledReason ? (
+          <p className="px-2 py-1 text-xs text-muted-foreground">{ctx.archiveDisabledReason}</p>
         ) : null}
         {ctx.onOpenDeleteSession ? (
           <>
@@ -463,10 +466,13 @@ function SessionMenuContent({
         </ContextMenuSubContent>
       </ContextMenuSub>
       {ctx.onArchiveSession ? (
-        <ContextMenuItem onClick={() => ctx.onArchiveSession?.(sessionId, !isArchived)}>
+        <ContextMenuItem disabled={Boolean(ctx.archiveDisabledReason)} onClick={() => ctx.onArchiveSession?.(sessionId, !isArchived)}>
           {isArchived ? <ArchiveRestore className="size-4" /> : <Archive className="size-4" />}
           {isArchived ? t("session_management.unarchive_session") : t("session_management.archive_session")}
         </ContextMenuItem>
+      ) : null}
+      {ctx.onArchiveSession && ctx.archiveDisabledReason ? (
+        <p className="px-2 py-1 text-xs text-muted-foreground">{ctx.archiveDisabledReason}</p>
       ) : null}
       {ctx.onOpenDeleteSession ? (
         <>
@@ -553,6 +559,8 @@ function SessionHoverQuickActions({
           size="icon"
           className="size-5 text-muted-foreground hover:bg-transparent hover:text-foreground"
           aria-label={isArchived ? t("session_management.unarchive_session") : t("session_management.archive_session")}
+          disabled={Boolean(ctx.archiveDisabledReason)}
+          title={ctx.archiveDisabledReason}
           onClick={(event) => {
             event.stopPropagation();
             ctx.onArchiveSession?.(sessionId, !isArchived);
@@ -786,71 +794,59 @@ function RemoteConnectionIssueCard(props: {
   );
 }
 
-type SidebarSplitPillProps = {
-  workspaceSessionGroups: WorkspaceSessionGroup[];
-};
-
-/** Readable shortcuts to the two currently visible conversations. */
-function SidebarSplitPill({ workspaceSessionGroups }: SidebarSplitPillProps) {
+/** The split travels with its owning session, including when that row is pinned. */
+function SessionSideChatControl({ workspaceId, sessionId, title }: {
+  workspaceId: string;
+  sessionId: string;
+  title: string;
+}) {
+  const ctx = useSidebarContext();
+  const sideChat = useWorkbenchStore((state) => state.sideChats[workbenchSessionKey({ workspaceId, sessionId })]);
   const primary = useWorkbenchStore((state) => state.primary);
-  const secondary = useWorkbenchStore((state) => state.secondary);
   const focusedPane = useWorkbenchStore((state) => state.focusedPane);
+  const [focusRequested, setFocusRequested] = React.useState(false);
+  const unreadIds = useUnreadSessionIds();
+  const selected = isSameWorkbenchSession(primary, { workspaceId, sessionId });
+  const status = sideChat ? ctx.sessionStatusById?.[sideChat.sessionId] : undefined;
+  const isUnread = Boolean(sideChat && unreadIds.has(sideChat.sessionId) && !selected);
+  const isActiveWork = isActiveWorkSessionStatus(status);
 
-  if (!primary || !secondary) {
-    return null;
-  }
+  React.useEffect(() => {
+    if (!focusRequested || !selected || !sideChat) return;
+    useWorkbenchStore.getState().focusPane("secondary");
+    setFocusRequested(false);
+  }, [focusRequested, selected, sideChat]);
 
-  const detailsFor = (workspaceId: string, sessionId: string) => {
-    const group = workspaceSessionGroups.find((candidate) => candidate.workspace.id === workspaceId);
-    const match = group?.sessions.find((session) => session.id === sessionId);
-    return {
-      title: match ? getDisplaySessionTitle(match.title) : t("session.default_title"),
-      workspaceTitle: group?.workspace.displayName?.trim()
-        || group?.workspace.name?.trim()
-        || group?.workspace.path?.trim()
-        || workspaceId,
-    };
-  };
-
-  const segments = [
-    { session: primary, pane: "primary" as const },
-    { session: secondary, pane: "secondary" as const },
-  ];
-  const crossWorkspace = primary.workspaceId !== secondary.workspaceId;
+  if (!sideChat && !selected) return null;
 
   return (
-    <div className="px-2 pb-3">
-      <div className="px-2 pb-2 text-xs font-medium text-muted-foreground">
-        {t("session_management.open_chats")}
-      </div>
-      <div data-session-tab-split-pill className="space-y-1">
-        {segments.map(({ session, pane }) => {
-          const details = detailsFor(session.workspaceId, session.sessionId);
-          const focused = focusedPane === pane;
-          return (
-            <button
-              key={pane}
-              type="button"
-              data-session-tab-id={session.sessionId}
-              data-session-tab-workspace-id={session.workspaceId}
-              aria-pressed={focused}
-              className={cn(
-                "flex w-full min-w-0 items-center gap-2 rounded-lg border px-3 py-2 text-left",
-                focused ? "border-sidebar-border bg-sidebar-accent text-sidebar-accent-foreground" : "border-transparent text-sidebar-foreground/70 hover:bg-sidebar-accent/50",
-              )}
-              onClick={() => useWorkbenchStore.getState().focusPane(pane)}
-            >
-              <span className="min-w-0 flex-1">
-                <span className="block text-[11px] text-muted-foreground">{t(pane === "primary" ? "session_management.main_chat" : "session_management.split_view")}</span>
-                <span className="block truncate text-sm" title={details.title}>{details.title}</span>
-                {crossWorkspace ? <span className="block truncate text-[11px] text-muted-foreground">{details.workspaceTitle}</span> : null}
-              </span>
-              {focused ? <span className="size-1.5 shrink-0 rounded-full bg-current" aria-hidden="true" /> : null}
-            </button>
-          );
-        })}
-      </div>
-    </div>
+    <button
+      type="button"
+      data-session-side-chat={sideChat?.sessionId ?? "new"}
+      aria-label={sideChat ? `${t("session_management.split_view")} · ${title}` : t("session_management.new_split")}
+      aria-pressed={Boolean(sideChat && selected && focusedPane === "secondary")}
+      aria-description={isSessionActivityStatus(status) && status !== "idle" ? getSessionActivityStatusLabel(status) : undefined}
+      disabled={!sideChat && ctx.newTaskDisabled}
+      title={sideChat?.title || t("session_management.new_split")}
+      className={cn(
+        "flex h-8 shrink-0 items-center gap-1 rounded-r-md border-l border-sidebar-border/60 px-2 text-[11px] text-sidebar-foreground/60 hover:bg-sidebar-accent disabled:opacity-50",
+        selected && focusedPane === "secondary" && "bg-sidebar-accent text-sidebar-accent-foreground",
+      )}
+      onClick={() => {
+        if (!sideChat) {
+          ctx.onCreateSplitTaskInWorkspace(workspaceId);
+          return;
+        }
+        useSessionManagementStore.getState().clearUnread(sideChat.sessionId);
+        setFocusRequested(true);
+        if (!selected) ctx.onOpenSession(workspaceId, sessionId);
+      }}
+    >
+      {isActiveWork || isNeedsAttentionSessionStatus(status) || isUnread
+        ? <SessionStatusIndicator status={status} isActiveWork={isActiveWork} isUnread={isUnread} />
+        : <Plus className="size-3" />}
+      {sideChat ? <span>{t("session_management.split_view")}</span> : null}
+    </button>
   );
 }
 
@@ -873,6 +869,7 @@ export type AppSidebarProps = {
   onOpenRenameSession?: (sessionId: string) => void;
   onOpenDeleteSession?: (sessionId: string) => void;
   onArchiveSession?: (sessionId: string, archived: boolean) => void;
+  archiveDisabledReason?: string;
   onOpenCreateGroupModal?: (workspaceId: string) => void;
   onOpenRenameWorkspace: (workspaceId: string) => void;
   onShareWorkspace: (workspaceId: string) => void;
@@ -909,8 +906,6 @@ function isSessionActivityStatus(status: string | undefined): status is SessionA
 }
 
 export function AppSidebar(props: AppSidebarProps) {
-  const sideChatOpen = useWorkbenchStore((state) => state.secondary !== null);
-  const sideChatAction = t(sideChatOpen ? "session_management.close_split_view" : "session_management.new_split");
   // Lives in the UI store (not component state) so the open/closed state of
   // each workspace group survives this sidebar unmounting, e.g. while the
   // user is in Settings.
@@ -1015,6 +1010,7 @@ export function AppSidebar(props: AppSidebarProps) {
     onOpenRenameSession: props.onOpenRenameSession,
     onOpenDeleteSession: props.onOpenDeleteSession,
     onArchiveSession: props.onArchiveSession,
+    archiveDisabledReason: props.archiveDisabledReason,
     onOpenCreateGroupModal: props.onOpenCreateGroupModal,
     onOpenRenameWorkspace: props.onOpenRenameWorkspace,
     onShareWorkspace: props.onShareWorkspace,
@@ -1128,24 +1124,6 @@ export function AppSidebar(props: AppSidebarProps) {
                 <span className="flex-1 truncate">{t("session.new_task")}</span>
               </SidebarMenuButton>
             </SidebarMenuItem>
-            <SidebarMenuItem>
-              <SidebarMenuButton
-                type="button"
-                data-sidebar-new-split
-                className="text-sidebar-foreground/60"
-                aria-label={sideChatAction}
-                tooltip={sideChatOpen ? sideChatAction : t("session_management.side_chat_hint")}
-                isActive={sideChatOpen}
-                disabled={!sideChatOpen && props.newTaskDisabled}
-                onClick={() => {
-                  if (sideChatOpen) useWorkbenchStore.getState().setSplit(null);
-                  else props.onCreateSplitTaskInWorkspace(props.selectedWorkspaceId);
-                }}
-              >
-                <Columns2 className="size-4" />
-                <span className="flex-1 truncate">{sideChatAction}</span>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
             {props.onOpenSessionSearch ? (
               <SidebarMenuItem>
                 <SidebarMenuButton
@@ -1200,9 +1178,6 @@ export function AppSidebar(props: AppSidebarProps) {
             </SidebarMenuItem>
           </SidebarMenu>
         </SidebarHeader>
-        <SidebarSplitPill
-          workspaceSessionGroups={props.workspaceSessionGroups}
-        />
         <LazyMotion features={domMax}>
           <m.div
             layoutScroll
@@ -2231,6 +2206,8 @@ function SessionMenuItem({
   workspaceName,
 }: SessionMenuItemProps) {
   const ctx = useSidebarContext();
+  const attachedAsSideChat = useWorkbenchStore((state) => Object.values(state.sideChats).some((chat) =>
+    isSameWorkbenchSession(chat, { workspaceId, sessionId: session.id })));
   const [isTitleHovered, setIsTitleHovered] = React.useState(false);
   const [isTitleFocused, setIsTitleFocused] = React.useState(false);
   const unreadIds = useUnreadSessionIds();
@@ -2316,6 +2293,7 @@ function SessionMenuItem({
   const item = (
     <SidebarMenuSubItem
       {...dragProps}
+      className="flex items-center"
       data-sidebar-session-id={session.id}
       data-sidebar-session-workspace-id={workspaceId}
     >
@@ -2327,33 +2305,38 @@ function SessionMenuItem({
         isPinned={isPinned}
         isArchived={isArchived}
       >
-        <SidebarMenuSubButton
-          isActive={isSelected}
-          data-session-tab-id={session.id}
-          data-session-tab-active={isSelected ? "true" : undefined}
-          onClick={openSession}
-          onPointerEnter={handlePointerEnter}
-          onPointerLeave={() => setIsTitleHovered(false)}
-          onFocus={() => {
-            prefetchSession();
-            setIsTitleFocused(true);
-          }}
-          onBlur={() => setIsTitleFocused(false)}
-          aria-label={accessibleState}
-          aria-description={shortcutDigit === undefined ? undefined : sessionNumberShortcutDescription(ctx.sessionNumberShortcutOs, shortcutDigit)}
-          aria-keyshortcuts={ariaKeyShortcuts}
-          className={rowButtonClass}
-          style={rowButtonStyle}
-        >
-          {leading}
-          <SessionTitle intent={titleIntent} title={displayTitle} tooltip={itemTitle} />
-          <SessionNumberShortcutSlot digit={shortcutDigit} />
-        </SidebarMenuSubButton>
+        <div className="relative min-w-0 flex-1">
+          <SidebarMenuSubButton
+            render={<button type="button" />}
+            isActive={isSelected}
+            data-session-tab-id={session.id}
+            data-session-tab-active={isSelected ? "true" : undefined}
+            onClick={openSession}
+            onPointerEnter={handlePointerEnter}
+            onPointerLeave={() => setIsTitleHovered(false)}
+            onFocus={() => {
+              prefetchSession();
+              setIsTitleFocused(true);
+            }}
+            onBlur={() => setIsTitleFocused(false)}
+            aria-label={accessibleState}
+            aria-description={shortcutDigit === undefined ? undefined : sessionNumberShortcutDescription(ctx.sessionNumberShortcutOs, shortcutDigit)}
+            aria-keyshortcuts={ariaKeyShortcuts}
+            className={cn(rowButtonClass, "w-full text-start")}
+            style={rowButtonStyle}
+          >
+            {leading}
+            <SessionTitle intent={titleIntent} title={displayTitle} tooltip={itemTitle} />
+            <SessionNumberShortcutSlot digit={shortcutDigit} />
+          </SidebarMenuSubButton>
+          {trailing}
+        </div>
       </SessionContextMenu>
-      {trailing}
+      <SessionSideChatControl workspaceId={workspaceId} sessionId={session.id} title={displayTitle} />
     </SidebarMenuSubItem>
   );
 
+  if (attachedAsSideChat && !isSelected) return null;
   if (!draggable) return item;
 
   return (

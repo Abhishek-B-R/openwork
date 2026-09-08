@@ -16,6 +16,7 @@ import { appendFile, mkdir, readFile, readdir, rename, writeFile } from "node:fs
 import path from "node:path";
 import { resolveCoworkerFile } from "./coworkers.mjs";
 import { ASSIGNMENT_TOOL_NAMES, SELF_TOOL_NAMES, TEAM_TOOL_NAMES } from "../src/lib/coworker-tools.ts";
+import { COMPUTER_DENY } from "./computer-control.mjs";
 
 export const WORKERS_DIR = "workers";
 export const WORKERS_REGISTRY_FILE = "workers.json";
@@ -39,7 +40,7 @@ export function workerTurnTools() {
     ...SELF_TOOL_NAMES.filter((name) => name !== "self_read"),
     ...TEAM_TOOL_NAMES.filter((name) => name !== "team_list"),
   ];
-  return { task: false, coworker_team_consult: false, ...Object.fromEntries(management.map((name) => [`coworker_${name}`, false])) };
+  return { task: false, question: false, coworker_team_consult: false, ...COMPUTER_DENY, ...Object.fromEntries(management.map((name) => [`coworker_${name}`, false])) };
 }
 
 export const WORKER_STATUSES = ["starting", "running", "waiting", "paused", "finished", "cancelled", "failed"];

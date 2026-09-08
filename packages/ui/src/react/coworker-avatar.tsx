@@ -1,8 +1,12 @@
-import type { Ref } from "react";
+"use client";
 
-/** Shared artwork for the app and its product walkthrough. */
-export type AvatarColor = "blue" | "violet" | "mint" | "orange" | "rose" | "slate" | "sand";
-export type AvatarGlasses = "round" | "square" | "oval" | "none";
+import { useCallback, useRef } from "react";
+import { StaticCoworkerAvatar, type StaticCoworkerAvatarProps, type AvatarColor, type AvatarGlasses } from "./coworker-avatar-artwork";
+import { useAvatarMotion, type AvatarGather } from "./coworker-avatar-motion";
+
+export type { AvatarColor, AvatarGlasses } from "./coworker-avatar-artwork";
+export { acknowledgeCoworker } from "./coworker-avatar-motion";
+export type { AvatarMotion, AvatarReaction } from "./coworker-avatar-motion";
 
 const AVATAR_COLORS: Array<{ id: AvatarColor; label: string; swatch: string }> = [
   { id: "blue", label: "OpenWork blue", swatch: "#b8c9f0" },
@@ -12,6 +16,7 @@ const AVATAR_COLORS: Array<{ id: AvatarColor; label: string; swatch: string }> =
   { id: "rose", label: "Rose", swatch: "#e2c1cb" },
   { id: "slate", label: "Pearl", swatch: "#e3e6ea" },
   { id: "sand", label: "Sand", swatch: "#ded0b0" },
+  { id: "sage", label: "Sage", swatch: "#becab4" },
 ];
 
 const AVATAR_GLASSES: Array<{ id: AvatarGlasses; label: string }> = [
@@ -19,32 +24,17 @@ const AVATAR_GLASSES: Array<{ id: AvatarGlasses; label: string }> = [
   { id: "square", label: "Soft square" },
   { id: "oval", label: "Oval" },
   { id: "none", label: "None" },
+  { id: "sunglasses", label: "Sunglasses" },
+  { id: "monocle", label: "Monocle" },
 ];
 
-const PALETTES: Record<AvatarColor, { fill: string; edge: string; depth: string }> = {
-  blue: { fill: "#b8c9f0", edge: "#91a9dc", depth: "#7389b7" },
-  violet: { fill: "#c8c1e2", edge: "#aaa1d0", depth: "#81789f" },
-  mint: { fill: "#b2d5cb", edge: "#8dbbae", depth: "#668e84" },
-  orange: { fill: "#e4c3ad", edge: "#cda589", depth: "#9d7961" },
-  rose: { fill: "#e2c1cb", edge: "#cda1ae", depth: "#9c7682" },
-  slate: { fill: "#e3e6ea", edge: "#c2c8d0", depth: "#939aa4" },
-  sand: { fill: "#ded0b0", edge: "#c1ae86", depth: "#95825c" },
-};
+export type CoworkerAvatarProps = StaticCoworkerAvatarProps & { gaze?: boolean };
 
-function motionPhase(name: string) {
-  const value = [...name].reduce((sum, character) => sum + character.charCodeAt(0), 0);
-  return value % 3;
+export function CoworkerAvatar(props: CoworkerAvatarProps) {
+  return <AnimatedAvatar {...props} />;
 }
 
-function blinkPhase(name: string) {
-  const value = [...name].reduce(
-    (sum, character, index) => sum + character.charCodeAt(0) * (index + 1),
-    0,
-  );
-  return value % 6;
-}
-
-export function CoworkerAvatar({
+function AnimatedAvatar({
   name,
   color,
   glasses,
@@ -52,107 +42,48 @@ export function CoworkerAvatar({
   animated = true,
   working = false,
   svgRef,
-}: {
-  name: string;
-  color: AvatarColor;
-  glasses: AvatarGlasses;
+  identity = name,
+  motion = size <= 44 ? "quiet" : "attentive",
+  gaze = true,
+  gather,
+}: CoworkerAvatarProps & { gather?: AvatarGather }) {
+  const motionRef = useAvatarMotion({ identity, motion, animated, gaze, prominent: motion !== "quiet" && motion !== "navigation", gather });
+  // A stable callback avoids detaching the observed SVG on ordinary parent renders.
+  const setRef = useCallback((node: SVGSVGElement | null) => {
+    motionRef.current = node;
+    if (typeof svgRef === "function") return svgRef(node);
+    if (svgRef) svgRef.current = node;
+  }, [motionRef, svgRef]);
+
+  return <StaticCoworkerAvatar name={name} color={color} glasses={glasses} size={size} animated={animated} working={working} identity={identity} motion={motion} svgRef={setRef} />;
+}
+
+export type GroupAvatarsProps = {
+  members: readonly { slug: string; name: string; avatarColor: AvatarColor; avatarGlasses: AvatarGlasses }[];
   size?: number;
   animated?: boolean;
-  working?: boolean;
-  /** The desktop supplies its pointer-gaze ref; the site shares the artwork. */
-  svgRef?: Ref<SVGSVGElement>;
-}) {
-  const palette = PALETTES[color];
-  const phase = motionPhase(name);
-  const motionClass = animated ? `is-animated motion-phase-${phase} blink-phase-${blinkPhase(name)}` : "";
+  activeSlugs?: readonly string[];
+  /** Set only on a prominent group header, not its rail or transcript copies. */
+  gatherKey?: string;
+};
 
+export function GroupAvatars({ members, size = 26, animated = true, activeSlugs = [], gatherKey }: GroupAvatarsProps) {
+  const owner = useRef({});
+  const shown = members.slice(0, 3);
+  const extra = members.length - shown.length;
+  const step = Math.round(size * 0.94);
+  const countWidth = Math.max(Math.round(size * 0.7), String(extra).length * 6 + 12);
+  const facesWidth = shown.length ? size + step * (shown.length - 1) : size;
+  const width = facesWidth + (extra > 0 ? countWidth + 2 : 0);
   return (
-    <svg
-      ref={svgRef}
-      aria-label={`${name || "Coworker"} avatar`}
-      className={`coworker-avatar ${motionClass} ${working ? "is-working" : ""}`}
-      role="img"
-      style={{ width: size, height: size }}
-      viewBox="0 0 122 122"
-    >
-      <g className="coworker-avatar__pointer-body">
-        <g className="coworker-avatar__body">
-          <g className="coworker-avatar__depth">
-            <path
-              d="M26 8h65c15 0 23 10 23 26v46c0 15-8 24-23 24H57l-15 9c-5 3-10 0-10-6v-3h-5C12 104 5 95 5 80V34C5 18 12 8 26 8Z"
-              fill={palette.depth}
-              opacity="0.72"
-              transform="translate(3 3)"
-            />
-          </g>
-          <path
-            d="M26 8h65c15 0 23 10 23 26v46c0 15-8 24-23 24H57l-15 9c-5 3-10 0-10-6v-3h-5C12 104 5 95 5 80V34C5 18 12 8 26 8Z"
-            fill={palette.fill}
-            stroke={palette.edge}
-            strokeWidth="1.25"
-          />
-          <path
-            d="M26 11h64c12 0 20 7 21 19"
-            fill="none"
-            stroke="#ffffff"
-            strokeLinecap="round"
-            strokeOpacity="0.24"
-            strokeWidth="1"
-          />
-
-          <g className="coworker-avatar__pointer-features">
-            <g className="coworker-avatar__features">
-              <g className="coworker-avatar__pointer-gaze">
-                <g className="coworker-avatar__gaze">
-                  <g className="coworker-avatar__pupils" fill="#0b0e14">
-                    <rect x="34.5" y="50" width="6" height="14" rx="3" />
-                    <rect x="79.5" y="50" width="6" height="14" rx="3" />
-                  </g>
-                </g>
-              </g>
-
-              {glasses === "round" ? (
-                <g
-                  className="coworker-avatar__glasses"
-                  fill="none"
-                  stroke="#11151d"
-                  strokeLinecap="round"
-                  strokeWidth="5"
-                >
-                  <circle cx="37.5" cy="57" r="17.5" />
-                  <circle cx="82.5" cy="57" r="17.5" />
-                  <path d="M57.5 57c1.25-4 3.75-4 5 0" />
-                  <path d="M15 57h4.5M100.5 57h4.5" strokeWidth="7" />
-                </g>
-              ) : null}
-              {glasses === "oval" ? (
-                <g className="coworker-avatar__glasses" fill="none" stroke="#11151d" strokeLinecap="round" strokeWidth="5">
-                  <ellipse cx="37.5" cy="57" rx="18" ry="14" />
-                  <ellipse cx="82.5" cy="57" rx="18" ry="14" />
-                  <path d="M57.5 57c1.25-4 3.75-4 5 0" />
-                  <path d="M15 57h4.5M100.5 57h4.5" strokeWidth="7" />
-                </g>
-              ) : null}
-              {glasses === "square" ? (
-                <g
-                  className="coworker-avatar__glasses"
-                  fill="none"
-                  stroke="#11151d"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth="5"
-                >
-                  <rect x="19.5" y="39" width="36" height="36" rx="10" />
-                  <rect x="64.5" y="39" width="36" height="36" rx="10" />
-                  <path d="M58 57c1-3.5 3-3.5 4 0" />
-                  <path d="M15 57h4.5M100.5 57h4.5" strokeWidth="7" />
-                </g>
-              ) : null}
-            </g>
-          </g>
-        </g>
-      </g>
-    </svg>
+    <span className="coworker-avatar-group" style={{ width, height: size }} data-testid="group-avatars" data-count={members.length} data-context={gatherKey === undefined ? "rail" : "header"} role="img" aria-label={members.length ? `Group: ${members.map((member) => member.name).join(", ")}` : "Group"}>
+      {shown.map((member, index) => (
+        <span key={member.slug} className="coworker-avatar-group__member" aria-hidden="true" data-active={activeSlugs.includes(member.slug)} style={{ left: index * step, width: size, height: size }}>
+          <AnimatedAvatar name={member.name} identity={member.slug} color={member.avatarColor} glasses={member.avatarGlasses} size={size} animated={animated} motion="quiet" gaze={false} gather={gatherKey === undefined ? undefined : { key: gatherKey, owner: owner.current, index }} />
+        </span>
+      ))}
+      {extra > 0 ? <span aria-hidden="true" className="coworker-avatar-group__extra" style={{ left: facesWidth + 2, width: countWidth, height: size }}>+{extra}</span> : null}
+    </span>
   );
 }
 

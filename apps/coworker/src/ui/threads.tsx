@@ -38,7 +38,7 @@ import {
   type PendingInteractions,
   type ThreadListItem,
 } from "@/lib/threads";
-import { isRunning, type HeadlessThreadModel, type HeadlessThreadUsage, type HeadlessTurnAcceptance } from "@openwork/headless-threads";
+import { isRunning, type HeadlessThreadModel, type HeadlessThreadUsage } from "@openwork/headless-threads";
 import {
   classifyThreads,
   configureDiscussionStore,
@@ -52,6 +52,8 @@ import {
 } from "@/lib/discussions";
 import { effortForTurn, laneWithPreference, replyKindForLane, type EffortStop } from "@/lib/effort";
 import { EffortDial } from "@/ui/effort-dial";
+import { ComputerControl } from "@/ui/computer-control";
+import { DiscussionBrowser } from "@/ui/browser-panel";
 import { PopoverDisclosure, TechnicalText } from "@/ui/details-popover";
 import { carryVariant, chooseModelForLane, classifyRequest, describeModelChoice, markAutoPicked, wasAutoPicked, type ModelLane } from "@/lib/model-choice";
 import { describeReview, parseWorkerReview, parseWorkerTurn, workerNameFromTitle, type WorkerReview, type WorkerSummary } from "@/lib/workers";
@@ -98,7 +100,7 @@ import { classifyFailure, retryDelayMs } from "@/lib/turn-retry";
 import { applyStreamEvent, type LiveStream } from "@/lib/live-stream";
 import { useAutoGrow } from "@/ui/use-auto-grow";
 import { InteractionCard, InteractionCards, LETTERS, OptionRow, typingInField } from "@/ui/interactions";
-import { CoworkerAvatar } from "@/ui/coworker-avatar";
+import { acknowledgeCoworker, CoworkerAvatar } from "@/ui/coworker-avatar";
 import { InlineLoader } from "@/ui/brand";
 import { Button, Empty, ErrorNote, PlusIcon, StatusDot, ToolIcon } from "@/ui/kit";
 import { Markdown } from "@/ui/markdown";
@@ -241,7 +243,7 @@ function QuietEmptyConversation({ coworker, warmingUp = false, proposerName = ""
   const fromTeammate = newcomerLine(coworker, proposerName);
   return (
     <div className="mx-auto flex h-full max-w-md flex-col items-center justify-center py-10 text-center" data-testid="coworker-discussion-empty">
-      <CoworkerAvatar animated color={coworker.avatarColor} glasses={coworker.avatarGlasses} name={coworker.name} size={44} />
+      <CoworkerAvatar identity={coworker.slug} animated={false} motion="quiet" gaze={false} color={coworker.avatarColor} glasses={coworker.avatarGlasses} name={coworker.name} size={44} />
       <p className="mt-3 text-sm font-semibold text-snow">{coworker.name}</p>
       {coworker.role ? <p className="mt-0.5 text-xs text-mist">{coworker.role}</p> : null}
       <p className="mt-4 text-sm text-mist" data-testid="coworker-discussion-empty-line">{fromTeammate || "What should we work through?"}</p>
@@ -660,6 +662,7 @@ export function ThreadsPanel({
       coworker={coworker}
       runtime={runtime}
       kind="discussion"
+      browserEligible={registeredDiscussions.includes(discussionThreadId)}
       headerSlots={headerSlots}
       assignmentDraft={pendingAssignment}
       discussionDraft={discussionDraft}
@@ -746,6 +749,7 @@ function DiscussionWelcome({
     setComposerError("");
     try {
       await onStartDiscussion(text);
+      acknowledgeCoworker(coworker.slug);
       setMessage("");
     } catch (cause) {
       setComposerError(cause instanceof Error ? cause.message : String(cause));
@@ -954,6 +958,7 @@ function ThreadView({
   onWorkersChanged,
   summary = null,
   onOpenSummary,
+  browserEligible = false,
 }: {
   threads: NonNullable<ReturnType<typeof createCoworkerThreads>>;
   threadId: string;
@@ -961,6 +966,7 @@ function ThreadView({
   runtime: RuntimeInfo;
   /** `worker`: a Worker's own thread, shown read-only; steering and stopping live in the Workers view. */
   kind: "discussion" | "assignment" | "worker";
+  browserEligible?: boolean;
   headerSlots: HeaderSlots;
   /** How the conversation answers a coworker's offers about the team; absent in Worker and assignment threads. */
   team?: TeamHooks;
@@ -1294,6 +1300,7 @@ function ThreadView({
     const messageLane: ModelLane = laneWithPreference(classifyRequest(prompt), coworker.effortPreference);
     const turnLane: ModelLane = automatic ? messageLane : "standard";
     const attempt = send.mode === "retry" ? send.attempt : 0;
+    let continued = false;
     /**
      * When a model the app chose by itself cannot answer, move to the next
      * choice and try the same message again, once or twice, telling the
@@ -1387,6 +1394,12 @@ function ThreadView({
       const recorded = await coworkerBridge.turns.activity(coworker.slug, threadId).catch(() => []);
       const ownedFailure = recorded.find((entry) => entry.messageId === messageId)?.failure;
       if (ownedFailure) { message = ownedFailure; engineKnows = false; }
+      const snapshot = await threads.client.getThreadSnapshot(threadId).catch(() => null);
+      // Never schedule a replay after tool work, including after a provider failure.
+      if (!snapshot || snapshot.messages.some((entry) => entry.parentId === messageId && entry.parts.some((part) => part.type === "tool"))) {
+        setFailure(message);
+        return;
+      }
       if (await fallBack(message)) return;
       if (retryLater(message, retryable)) return;
       // The engine's own reply carries the words; only a failure it never saw needs remembering here.
@@ -1446,10 +1459,16 @@ function ThreadView({
         }
       }
       // A re-send waits for the engine to let go of the earlier attempt (a stop is still settling, say).
-      const acceptance: HeadlessTurnAcceptance = await coworkerBridge.turns.send({ slug: coworker.slug, threadId, kind, prompt, messageId, model: turnModel, retry: send.mode === "retry", retryByPerson: send.mode === "retry" && send.byPerson === true, retryLabel: send.mode === "retry" ? send.switchedTo : undefined });
+      const acceptance = await coworkerBridge.turns.send({ slug: coworker.slug, threadId, kind, prompt, messageId, model: turnModel, retry: send.mode === "retry", retryByPerson: send.mode === "retry" && send.byPerson === true, retryLabel: send.mode === "retry" ? send.switchedTo : undefined });
+      if (acceptance.messageId && acceptance.messageId !== messageId) {
+        continued = true;
+        messageId = acceptance.messageId;
+        prompt = acceptance.prompt;
+        commitTurnState((state) => beginPending(state, { messageId, prompt, startedAt: acceptance.acceptedAt }));
+      }
       // Keep the selected retry model when admission is confirmed. Its receipt
       // is displayed only once the correlated reply actually completes.
-      if (send.mode === "retry" && send.switchedTo) setResolution({ messageId, note: `Retried with ${send.switchedTo}` });
+      if (send.mode === "retry" && send.switchedTo) setResolution({ messageId, note: `${continued ? "Continued" : "Retried"} with ${send.switchedTo}` });
       const waiting: ActiveTurn = { messageId, prompt, phase: "waiting" };
       activeTurnRef.current = waiting;
       setActiveTurn(waiting);
@@ -1500,7 +1519,7 @@ function ThreadView({
         // The stream closed without a word: the person hears that the reply never came and can retry it.
         await settleFailure(EMPTY_REPLY_MESSAGE, false, true);
       } else if (result.outcome === "settled" || landed) {
-        if (send.mode === "retry" && send.switchedTo) setResolution({ messageId, note: `Retried with ${send.switchedTo}` });
+        if (send.mode === "retry" && send.switchedTo) setResolution({ messageId, note: `${continued ? "Continued" : "Retried"} with ${send.switchedTo}` });
         commitTurnState((state) => state.pending?.messageId === messageId ? clearPending(state) : state);
       } else if (result.outcome === "failed" || (result.outcome === "timeout" && terminalError)) {
         // The same raw text the transcript's failure reads, so the retry decision sees the provider's own error type too.
@@ -1596,7 +1615,7 @@ function ThreadView({
     check();
   }), []);
 
-  /** Run the unresolved turn again under its own message id, on another model when one was chosen. */
+  /** The backend retries tool-free work or creates a new continuation after tool work. */
   const retryPending = useCallback(async (switched?: { model: HeadlessThreadModel; label: string }) => {
     // A Retry pressed the moment after Stop waits for the stopped turn to let go rather than being lost.
     await untilTurnReleased();
@@ -1660,6 +1679,7 @@ function ThreadView({
   function sendText(words: string) {
     const text = words.trim();
     if (!text) return;
+    acknowledgeCoworker(coworker.slug);
     if (activeTurnRef.current || turnStateRef.current.pending || appRetry || engineRunning) {
       commitTurnState((state) => enqueue(state, { id: newQueuedId(), text, queuedAt: Date.now() }));
       return;
@@ -1798,7 +1818,7 @@ function ThreadView({
 
   const needsYou = hasPendingInteractions(pending);
   // The one value every surface reads: derived from the record, the engine, the reply, and the clock.
-  const outcome = deriveTurnOutcome({
+  const rawOutcome = deriveTurnOutcome({
     coworkerName: coworker.name,
     now,
     turn: pendingTurn ? { ...pendingTurn, recovered } : null,
@@ -1812,6 +1832,10 @@ function ThreadView({
     signedIn: session !== null,
     recommendedModel: recommendedModel?.modelLabel ?? "",
   });
+  const needsContinuation = pendingTurn && messages.some((message) => message.parentId === pendingTurn.messageId && message.toolCalls.length > 0);
+  const outcome = rawOutcome && needsContinuation && ["failed", "stopped-by-you", "cut-off"].includes(rawOutcome.kind)
+    ? { ...rawOutcome, detail: "Earlier actions and their history are kept. Continue performs only missing work, using a new message in this discussion.", choices: rawOutcome.choices.map((choice): TurnChoice => choice.id === "retry" || choice.id === "continue" ? { ...choice, id: "continue", label: "Continue" } : choice) }
+    : rawOutcome;
   // A reply that landed while this view was not driving the turn (after a reload) settles the record.
   useEffect(() => {
     if (outcome?.kind === "replied" && !activeTurnRef.current) commitTurnState(clearPending);
@@ -1946,6 +1970,7 @@ function ThreadView({
         )}
         actions={(
           <>
+            {kind === "discussion" && threadId ? <ComputerControl key={`${coworker.slug}:${threadId}`} slug={coworker.slug} threadId={threadId} /> : null}
             {kind !== "discussion" ? <Button variant="ghost" onClick={onBack}>Back</Button> : null}
             {kind !== "worker" ? (
               // Stop keeps its place while it is not offered, so the status word beside it never slides.
@@ -1955,6 +1980,7 @@ function ThreadView({
         )}
       />
       {/* Progress and problems show inline in the conversation; this keeps the turn state readable to assistive tech and tests. */}
+      {kind === "discussion" && browserEligible ? <DiscussionBrowser key={`${coworker.slug}:${threadId}`} slug={coworker.slug} threadId={threadId} actionsSlot={headerSlots.actions} /> : null}
       <p data-testid="coworker-thread-status" className="sr-only" aria-live="polite" data-state={needsYou ? "needs-you" : working ? "working" : "idle"} data-outcome={outcome?.kind ?? ""}>
         {kind === "discussion" && !working && !needsYou && !failed && !settledWord ? "Ready" : readableStatus}
       </p>
@@ -2159,7 +2185,7 @@ export function conversationBlocks(
     calls = [];
   };
   // Bubbles decide grouping: a reply with no visible words never counts as a neighbour, nor does a review turn.
-  const continuation = (message: TranscriptMessage) => message.role === "user" && message.text.startsWith("Continue the original task using these requested results.");
+  const continuation = (message: TranscriptMessage) => message.role === "user" && (message.text.startsWith("Continue the original task using these requested results.") || message.text.startsWith("Continue the earlier private request."));
   const bubbles = messages.filter((message, index) =>
     message.role === "assistant" ? Boolean(message.text) || isActive(message, index) : !reviewTurn(message) && !continuation(message),
   );

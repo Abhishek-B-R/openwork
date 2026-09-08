@@ -279,4 +279,3 @@ export function previewAutomaticChoice(catalog: Pick<EngineModelCatalog, "models
     deep: chooseModelForLane(catalog, "deep", { standard }),
   };
 }
-

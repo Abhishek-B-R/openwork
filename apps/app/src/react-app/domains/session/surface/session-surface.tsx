@@ -53,7 +53,7 @@ import { isComputerTarget } from "./composer/computer-mentions";
 import { decodeComposerMentionValue, encodeComposerMentionValue, type ComposerMentionKind } from "./composer/mention-encoding";
 import { desktopBridge, openDesktopUrl } from "@/app/lib/desktop";
 import { parseSlashCommandInvocation } from "./composer/slash-command";
-import { connectSkillPrompt, parseConnectSkillToken } from "./composer/connect-skill-token";
+import { parseConnectSkillToken } from "./composer/connect-skill-token";
 import { createPastedTextChip, resolvePastedTextPlaceholders } from "./composer/pasted-text";
 import {
   canAdmitNextQueuedItem,
@@ -1739,7 +1739,7 @@ export function SessionSurface(props: SessionSurfaceProps) {
       }
       const connectSkill = parseConnectSkillToken(segment);
       if (connectSkill) {
-        return [{ type: "text", text: connectSkillPrompt(connectSkill) } satisfies ComposerDraft["parts"][number]];
+        return [{ type: "connect-skill", ...connectSkill } satisfies ComposerDraft["parts"][number]];
       }
       const skillMatch = segment.match(/^\[skill (.+)\]$/);
       if (skillMatch?.[1]) {
@@ -1763,13 +1763,14 @@ export function SessionSurface(props: SessionSurfaceProps) {
     resolved = resolved.replace(/\[attachment [^\]]+\]/g, "");
     resolved = resolved.replace(/\[connect-skill [^\]]+\]/g, (match) => {
       const token = parseConnectSkillToken(match);
-      return token ? connectSkillPrompt(token) : match;
+      return token ? `/${token.slug}` : match;
     });
     resolved = resolved.replace(/\[skill ([^\]]+)\]/g, (_match, name: string) => `the \"${name}\" skill`);
     for (const value of Object.keys(mentions)) {
       resolved = resolved.replaceAll(`@${encodeComposerMentionValue(value)}`, `@${value}`);
     }
-    const slashCommand = parseSlashCommandInvocation(resolved);
+    // A selected Connect skill is a mention, even though its label starts with /.
+    const slashCommand = text.trimStart().startsWith("[connect-skill ") ? null : parseSlashCommandInvocation(resolved);
     return {
       mode: "prompt",
       parts,
@@ -2220,24 +2221,6 @@ export function SessionSurface(props: SessionSurfaceProps) {
     replaceComposerDraft(props.sessionId, text, revertMessageId);
     await waitForControl(40);
   }, [props.sessionId, replaceComposerDraft]);
-
-  useEffect(() => {
-    const handleVoiceTranscript = (event: Event) => {
-      if (!(event instanceof CustomEvent)) return;
-      const detail: unknown = event.detail;
-      if (!detail || typeof detail !== "object" || Array.isArray(detail) || !("text" in detail) || typeof detail.text !== "string") return;
-      const text = detail.text;
-      void typeComposerText(text);
-      props.onDraftChange(buildDraft(text, attachments));
-      recordInspectorEvent("voice.transcript.applied", {
-        workspaceId: props.workspaceId,
-        sessionId: props.sessionId,
-        length: text.length,
-      });
-    };
-    window.addEventListener("openwork:voice-transcript", handleVoiceTranscript);
-    return () => window.removeEventListener("openwork:voice-transcript", handleVoiceTranscript);
-  }, [attachments, buildDraft, props.onDraftChange, props.sessionId, props.workspaceId, typeComposerText]);
 
   const composerSetTextControlAction = useMemo<OpenworkControlAction>(() => ({
     id: "composer.set_text",
@@ -2818,11 +2801,7 @@ export function SessionSurface(props: SessionSurfaceProps) {
                 onOpenModelPicker={handleOpenModelPicker}
               />
             ) : props.chatPane === "secondary" && snapshot && renderedMessages.length === 0 ? (
-              <div className="mx-auto max-w-sm px-4 py-12" data-second-chat-intro>
-                <h2 className="text-xl font-semibold tracking-tight">{t("session_management.second_chat_title")}</h2>
-                <p className="mt-3 text-sm leading-relaxed text-muted-foreground">{t("session_management.second_chat_description")}</p>
-                <p className="mt-4 text-xs leading-relaxed text-muted-foreground">{t("session_management.second_chat_saved")}</p>
-              </div>
+              null
             ) : (
               <DevProfiler id="MessageList">
                 <OpenTargetProvider
@@ -2892,11 +2871,6 @@ export function SessionSurface(props: SessionSurfaceProps) {
       </div>
 
       <div ref={composerShellRef} className="shrink-0 px-0 pb-2 pt-2">
-        {props.chatPane ? (
-          <div className="mx-auto mb-2 max-w-[800px] px-5 text-xs font-medium text-muted-foreground" data-chat-composer-label={props.chatPane}>
-            {t(props.chatPane === "primary" ? "session_management.message_main" : "session_management.message_second")}
-          </div>
-        ) : null}
         {(props.providerConnectedCount ?? 0) === 0 ? (
           <button
             type="button"

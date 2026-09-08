@@ -132,11 +132,7 @@ export function selfToolCatalog() {
     },
     {
       name: "memory_note",
-      description: [
-        "Keep one line in working memory saying where a piece of work stands, so the person can see what you are doing and you can pick it up again after an interruption.",
-        "Call it before you start anything longer than a quick answer (what you are doing, what done looks like, the next step) and again after each meaningful step, finding, or change of plan — not after every tool call. The same work name replaces the previous note in place; an empty text clears it when the work is done or dropped.",
-        "One or two lines per piece of work, never a log: details belong in a document, and what stays true belongs in long-term memory. Open Coworker keeps this line for each of your Workers itself.",
-      ].join(" "),
+      description: "Set one progress note per work name in working memory; the same name replaces it, and empty text clears it. Follow AGENTS.md for when to note progress; Open Coworker maintains Worker notes itself.",
       inputSchema: {
         type: "object",
         properties: {

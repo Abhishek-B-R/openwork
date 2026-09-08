@@ -53,7 +53,10 @@ function browserLabel(value: string): string {
 
 function artifactFromString(value: string, key: string, tool: string): CoworkerArtifact | null {
   const trimmed = value.trim();
+  // Automation handles are control-plane addresses, never links to open.
+  if (/^(?:browser_?url|target_?id|tab_?id|owner_?id|owner_session_id|endpoint|webSocketDebuggerUrl)$/i.test(key)) return null;
   if (/^https?:\/\//i.test(trimmed) && (URL_KEY.test(key) || BROWSER_TOOL.test(tool))) {
+    if (tool.startsWith("coworker_browser_")) return { kind: "browser", label: browserLabel(trimmed), value: trimmed };
     return { kind: "browser", label: browserLabel(trimmed), value: trimmed, openUrl: trimmed };
   }
   if (!FILE_KEY.test(key)) return null;

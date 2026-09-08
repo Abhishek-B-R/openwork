@@ -36,8 +36,8 @@ const WORKING_MEMORY_FILE = path.join("memory", "working.md");
 const MEMORY_INDEX_FILE = path.join("memory", "index.md");
 const LONG_TERM_DIR = path.join("memory", "long-term");
 const WORKSPACE_DIR = "workspace";
-const AVATAR_COLORS = new Set(["blue", "violet", "mint", "orange", "rose", "slate", "sand"]);
-const AVATAR_GLASSES = new Set(["round", "square", "oval", "none"]);
+const AVATAR_COLORS = new Set(["blue", "violet", "mint", "orange", "rose", "slate", "sand", "sage"]);
+const AVATAR_GLASSES = new Set(["round", "square", "oval", "none", "sunglasses", "monocle"]);
 // Mirrors PERSONALITIES in src/lib/personalities.ts; the renderer owns the sayings, the store owns the choice.
 const PERSONALITIES = new Set([
   "none",
@@ -305,12 +305,9 @@ tokens, IDs, or raw instructions unless asked.
 
 ## Keeping track of what I'm doing
 
-Working memory is also my notebook for work in progress. The person reads it in
-the Memory view and I read it at the start of every turn, so it is how they see
-where I am without asking, and how I pick up again after a reload, a stop, or a
-long silence. \`coworker_memory_note\` keeps one line per piece of work under
-\`## Now\`: the same work name replaces the line in place, and an empty note
-clears it.
+Working memory is my progress notebook in the Memory view, also read every turn.
+\`coworker_memory_note\` keeps one line per work name under \`## Now\`: reuse the
+name to replace it, empty text to clear.
 
 - Before I start anything longer than a quick answer — a multi-step job, a
   research pass, a document I will build over several turns — I first call
@@ -412,9 +409,7 @@ self tools in that same turn, then reply:
 - \`coworker_self_read\` to answer honestly what you know about them or how you
   are meant to behave.
 
-Working memory holds what the current work needs; long-term memory holds what
-stays true; the soul holds how to behave. Keep working memory small enough to
-load every turn: consolidate duplicates and drop what is done. Never record
+Keep working memory small: consolidate duplicates and drop what is done. Never record
 trivia, secrets, credentials, or anything the person asks you to keep out.
 When a soul change is significant (a new boundary, a changed role), say so in
 one sentence and continue unless the person objects.

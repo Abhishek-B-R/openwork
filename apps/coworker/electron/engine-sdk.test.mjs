@@ -24,10 +24,10 @@ async function seedPlugin(directory, version) {
 }
 
 test("the SDK directories follow the engine: XDG config dir, plus OPENCODE_CONFIG_DIR once", () => {
-  assert.deepEqual(engineSdkDirectories({}, "/Users/me"), ["/Users/me/.config/opencode"]);
-  assert.deepEqual(engineSdkDirectories({ XDG_CONFIG_HOME: "/x/cfg" }, "/Users/me"), ["/x/cfg/opencode"]);
-  assert.deepEqual(engineSdkDirectories({ XDG_CONFIG_HOME: "/x/cfg", OPENCODE_CONFIG_DIR: "/p/opencode-config" }, "/Users/me"), ["/x/cfg/opencode", "/p/opencode-config"]);
-  assert.deepEqual(engineSdkDirectories({ XDG_CONFIG_HOME: "/x/cfg", OPENCODE_CONFIG_DIR: "/x/cfg/opencode" }, "/Users/me"), ["/x/cfg/opencode"], "the same directory is not listed twice");
+  assert.deepEqual(engineSdkDirectories({}, "/Users/me"), [path.join("/Users/me", ".config", "opencode")]);
+  assert.deepEqual(engineSdkDirectories({ XDG_CONFIG_HOME: "/x/cfg" }, "/Users/me"), [path.join("/x/cfg", "opencode")]);
+  assert.deepEqual(engineSdkDirectories({ XDG_CONFIG_HOME: "/x/cfg", OPENCODE_CONFIG_DIR: "/p/opencode-config" }, "/Users/me"), [path.join("/x/cfg", "opencode"), "/p/opencode-config"]);
+  assert.deepEqual(engineSdkDirectories({ XDG_CONFIG_HOME: "/x/cfg", OPENCODE_CONFIG_DIR: path.join("/x/cfg", "opencode") }, "/Users/me"), [path.join("/x/cfg", "opencode")], "the same directory is not listed twice");
 });
 
 test("the pinned version comes from the sidecar's versions.json and is otherwise empty", async () => {

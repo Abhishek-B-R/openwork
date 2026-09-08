@@ -378,51 +378,53 @@ OPENWORK_EVAL_ELECTRON_BINARY="apps/coworker/dist-electron/mac-arm64/Open Cowork
 The app decides a number of things for the person without asking. Each such
 choice must be right by default, explainable in one plain line the interface
 can show, overridable where a person would look (and the override kept), never
-swapped behind the person's back once they chose, stable (the same inputs give
-the same choice, or the app says why not), and proven by a unit test on the
-rule and a journey assertion on the effect. The inventory below is the list of
-those choices; the standard above is what each row is held to.
+swapped behind the person's back once they chose, and stable (the same inputs
+give the same choice, or the app says why not). Apply [Clever Testing](#clever-testing):
+verify the effect and automate only a consequential failure that could escape
+that verification. Do not require a unit test and a journey assertion for every
+choice. Coverage pointers below locate relevant checks, not proof that every
+sentence or current revision passed.
 
 **What a coworker needs**
 
-| Choice | Where | Inputs | Rule | Fallback | Override | Explained to the person? | Proven by |
+| Choice | Where | Inputs | Rule | Fallback | Override | Explained to the person? | Coverage / verification |
 |---|---|---|---|---|---|---|---|
-| The team proposed at onboarding | `electron/team.mjs` `recommendTeam` | The intents picked, in order | None picked → Scout and Ops; one → it plus its complement (Ops for everyone, Scout for Ops); two or three → one each; more → the first three. Names: the role's default, then its alternates, then numbered. Deterministic. | — | Rename in place, remove (one stays), add a role; *I'll add my own* skips it | The cards show name, role, mission; the complement is not explained as such (left: a one-line "why" per card is the open item) | `team.test.mjs`, `open-coworker-team` (two intents → two cards, a rename) |
-| Roles suggested on the Add screen | `new-coworker-suggested` | The team | Up to three catalog roles nobody covers | — | The form stays editable | The card's pitch | `onboarding-team.test.ts` |
+| The team proposed at onboarding | `electron/team.mjs` `recommendTeam` | The intents picked, in order | None picked → Scout and Ops; one → it plus its complement (Ops for everyone, Scout for Ops); two or three → one each; more → the first three. Names: the role's default, then its alternates, then numbered. Deterministic. | — | Rename in place, remove (one stays), add a role; *I'll add my own* skips it | The cards show name, role, mission; the complement is not explained as such (left: a one-line "why" per card is the open item) | `open-coworker-team` (preset team persisted after a rename); `onboarding-team.test.ts` (draft recovery, name collisions, retry without duplicate creation). Verify recommendation and naming rules directly |
+| Roles suggested on the Add screen | `new-coworker-suggested` | The team | Up to three catalog roles nobody covers | — | The form stays editable | The card's pitch | Verify suggestions and the editable form directly |
 | Offering to pass a request to a teammate | Contract `## My team`; `team_refer` in `electron/team-tools.mjs` | The request, `team/roster.md` | When the request is clearly a teammate's job and more than a quick answer, before doing the work; never in a group chat. The handler refuses a teammate who is not on the team, itself, and — since contract 6 — the same request the person already chose to keep with this coworker | The person's tap decides; Continue makes the coworker do it | Ask ‹teammate› / Continue with ‹coworker›; a later message closes the pills | The tile's small print ("Editor could take this · Writing and content") and the coworker's sentence; receipts name the outcome, including "you asked to keep this here" | `team-tools.test.mjs`, `team.test.ts`, `open-coworker-team` |
 | Proposing a new teammate | Contract `## My team`; `team_suggest` + `suggestionGuard` | The request, the team, `team/suggestions.jsonl` | When uncovered work comes up twice in a conversation or once when ongoing, or the person asks who could do it. The handler refuses a role a teammate covers, a role declined within fourteen days, and a second proposal in one day | The person's tap decides | Add to team / Not now | Small print "Suggested by Nova · Customer support"; the guards read "Checked the team · …" | `team.test.mjs`, `team-tools.test.mjs`, `open-coworker-team` |
-| The shape of an answer: reply, document, assignment, Worker | Contract `### Which shape an answer takes` (one rule, one example each); the tool descriptions | The request | A reply for what fits in a few sentences; a document beside the reply past about 120 words; an assignment whenever the person named a schedule; a Worker for one goal with an end that is not on a clock. Tie-break: a schedule wins over a Worker, a document beside a short reply over a long reply | A long reply with no document folds behind *Show the rest* and leaves a one-line reminder in the documents index until the next document | Ask for a shape by name; put a document aside; steer or stop a Worker; change or remove an assignment | Receipts: "Wrote a document · Launch plan", "Started a Worker · Market scan", "Created assignment · Move the car · Every weekday at 9:00 AM" | `coworkers.test.mjs` (the rule and its examples), `open-coworker-documents`, `open-coworker-workers`, `open-coworker-local-first` (scheduling) |
+| The shape of an answer: reply, document, assignment, Worker | Contract `### Which shape an answer takes` (one rule, one example each); the tool descriptions | The request | A reply for what fits in a few sentences; a document beside the reply past about 120 words; an assignment whenever the person named a schedule; a Worker for one goal with an end that is not on a clock. Tie-break: a schedule wins over a Worker, a document beside a short reply over a long reply | A long reply with no document folds behind *Show the rest* and leaves a one-line reminder in the documents index until the next document | Ask for a shape by name; put a document aside; steer or stop a Worker; change or remove an assignment | Receipts: "Wrote a document · Launch plan", "Started a Worker · Market scan", "Created assignment · Move the car · Every weekday at 9:00 AM" | Verify shape selection and contract wording directly; `open-coworker-documents` (document effects), `open-coworker-team` (Worker delegation), `open-coworker-local-first` (scheduling) |
 | Who answers in a group, in what order | `lib/facilitator.ts`; scorer in `lib/groups.ts` | Members with roles, missions, and who is busy; the last 12 visible lines; the last 5 speaking orders; the message and its mentions | One strict JSON plan, validated (unknown or duplicate coworkers, the wrong count, ignored mentions, a dependency the wrong way are rejected), repaired once, tried once on the next model, else the deterministic scorer (role and mission words, last speaker +0.5, then the first member). Mentions always rule; without a name one speaker, never more than three | The scorer | `@name`, `@everyone`; Group details › Advanced for the model | "Choosing who should respond…", then "Scout is replying… then Editor" — the who, not the why, by design (the facilitator is silent; its briefs are in the turn record) | `facilitator.test.ts`, `groups.test.ts`, `open-coworker-group-conversation` |
 | Sequential or parallel; one follow-up; a wrap-up | The plan | The plan | Parallel only when replies do not depend on one another; a dependency forces sequential; at most one follow-up; a wrap-up only when the facilitator asked | Sequential | — | Replies settle in the plan's order; *Nothing to add.* is a quiet line | `facilitator.test.ts`, `groups.test.ts` |
 
 **What a coworker is told**
 
-| Choice | Where | Inputs | Rule | Fallback | Override | Explained to the person? | Proven by |
+| Choice | Where | Inputs | Rule | Fallback | Override | Explained to the person? | Coverage / verification |
 |---|---|---|---|---|---|---|---|
-| The fixed stack every turn | `AGENTS.md`, `soul.md`, `memory/working.md`, `memory/index.md`, `documents/index.md`, `team/roster.md`, the 23-tool catalog, the tool server's one line | — | Each rule is said in one layer: the contract owns the rules, the app-written files carry facts, the tool server's line names the server and points at the contract. Measured: 27,549 characters for a fresh coworker with one teammate (contract 9,818; tool catalog 16,218, of which descriptions 5,438; the six files 1,295 without the contract; the server line 218), 29,174 with five documents in play and ten long-term memories — only the two indexes grow. In the packaged app the engine adds its own system prompt and built-in tools: a fresh coworker's first request carried a 24,503-character system prompt and 49 tools (73,920 characters in all), and the free model reported 24,547 input tokens for it, none from cache | — | The person edits soul and memory; the contract is the app's | The Memory view shows soul and memory as pages | `prompt-stack.test.mjs` (budget 30,000 / 32,000 and said-once); `open-coworker-team` reads what the model received (system prompt size, the shape rule present, the tools offered, whether the server line reached the prompt) and `open-coworker-workers` the engine's reported tokens on the free model |
-| The per-turn variable part | `assignmentPrompt` / `referralPrompt` in `lib/conversation.ts`; `groupSpeakerPrompt`; `workerTurnPrompt`, `reviewPrompt` in `electron/workers.mjs`; `facilitatorPrompt` | The visible conversation, never reasoning or tool payloads | Bounded: an assignment carries 8 messages / 6,000 characters; a hand-over 3 exchanges / 600; a group speaker the last 12 lines at 600 each and the earlier replies of the turn; a Worker turn its frame (name, goal, lifespan, the reporting contract) every turn; a review the live Workers and the new findings | — | — | The person sees a brief, not the scaffolding (`parseAssignmentBrief`, `parseReferralBrief`; the review turn is one action line) | `conversation.test.ts`, `groups.test.ts`, `workers.test.mjs` |
+| The fixed stack every turn | `AGENTS.md`, `soul.md`, `memory/working.md`, `memory/index.md`, `documents/index.md`, `team/roster.md`, the tool catalog, the tool server's one line | — | Each rule is said in one layer: the contract owns the rules, the app-written files carry facts, the tool server's line names the server and points at the contract. Adding documents and long-term memories grows the two indexes. In the packaged app the engine adds its own system prompt and built-in tools | — | The person edits soul and memory; the contract is the app's | The Memory view shows soul and memory as pages | `prompt-stack.test.mjs` (aggregate budgets of 34,000 / 36,000 characters for fresh / populated stacks; index-only growth). Verify prompt wording directly; these are not runtime input-token measurements |
+| The per-turn variable part | `assignmentPrompt` / `referralPrompt` in `lib/conversation.ts`; `groupSpeakerPrompt`; `workerTurnPrompt`, `reviewPrompt` in `electron/workers.mjs`; `facilitatorPrompt` | The visible conversation, never reasoning or tool payloads | Bounded: an assignment carries 8 messages / 6,000 characters; a hand-over 3 exchanges / 600; a group speaker the last 12 lines at 600 each and the earlier replies of the turn; a Worker turn its frame (name, goal, lifespan, the reporting contract) every turn; a review the live Workers and the new findings | — | — | The person sees a brief, not the scaffolding (`parseAssignmentBrief`, `parseReferralBrief`; the review turn is one action line) | `conversation.test.ts` (assignment context), `team.test.ts` (referral context), `groups.test.ts` (visible group context). Verify Worker, review, and facilitator framing directly |
 | Style enforcement | `lib/documents.ts`, `memory/style.jsonl`, the documents index reminder | A finished reply over about 1,200 characters with no document call in its turn | Fold behind *Show the rest*; record; one-line reminder until the next document | — | *Show the rest*; nothing is cut | The fold itself | `documents.test.mjs`, `open-coworker-documents` |
 
 **How hard a coworker thinks**
 
-| Choice | Where | Inputs | Rule | Fallback | Override | Explained to the person? | Proven by |
+| Choice | Where | Inputs | Rule | Fallback | Override | Explained to the person? | Coverage / verification |
 |---|---|---|---|---|---|---|---|
-| The AI model when nobody chose | `recommendModel` in `lib/threads.ts`; first pick in `ui/coworker-home.tsx` and `ui/threads.tsx` | The connected catalog | A connected, tool-capable, non-deprecated model from the best tier (OpenWork account → subscription or key on this Mac → model server on this Mac → the free model), preferring the provider default, then a reasoning model, then the newest release. A model started on the local mode screen goes to the first coworker instead, once | None can use tools → "No connected AI model can use tools." with the two ways out | Coworker settings; the failure card's *Choose AI model* / *Use ‹model›*; *Start with this* on the local mode screen | One line under the model in Coworker settings when the app chose it: "Chosen for you, from your OpenWork account. It stays until you pick one; if it can't answer, the next best takes over once." | `threads.test.ts`, `model-choice.test.ts`, `open-coworker-local-first` (who chose, the line present or absent) |
+| The AI model when nobody chose | `recommendModel` in `lib/threads.ts`; first pick in `ui/coworker-home.tsx` and `ui/threads.tsx` | The connected catalog | A connected, tool-capable, non-deprecated model from the best tier (OpenWork account → subscription or key on this Mac → model server on this Mac → the free model), preferring the provider default, then a reasoning model, then the newest release. A model started on the local mode screen goes to the first coworker instead, once | None can use tools → "No connected AI model can use tools." with the two ways out | Coworker settings; the failure card's *Choose AI model* / *Use ‹model›*; *Start with this* on the local mode screen | One line under the model in Coworker settings when the app chose it: "Chosen for you, from your OpenWork account. It stays until you pick one; if it can't answer, the next best takes over once." | `threads.test.ts`, `model-choice.test.ts`, `open-coworker-local-first` (person-selected model and `modelChosenBy` persist after reload). Verify the explanation line directly |
 | Swapping a model that cannot answer | `wasAutoPicked` in `lib/model-choice.ts`; `fallBack` in `ui/threads.tsx` | `coworker.md` `modelChosenBy`, the failure | Only the app's own pick, only for a model-related failure, at most two more recommendations, never the person's model. The record on disk carries who chose, so the rule reads the same after a relaunch (a record that never said is the person's) | The failure card | Choosing a model or an effort makes it the person's | "‹model› could not answer, so Nova is trying ‹next› instead." then "Retried with ‹next›" | `model-choice.test.ts`, `coworkers.test.mjs`, `open-coworker-turn-recovery` (the card's choices) |
-| Thinking effort per turn | `lib/effort.ts`; the dial in the composer and Coworker settings; `submitTurn`, group replies, `localRunModel`, the facilitator | The kind of turn, the dial's stop (`effortPreference`), the model's offered efforts, an exact effort if fixed | Baseline per kind (quick reply low · reply medium · deep work, Worker turn, assignment run high · review medium · facilitator minimal), shifted −2 … +2 by the stop, snapped to what the model offers; the model default when it offers none; a fixed exact effort wins. The dial also nudges the lane and a Worker's default turns | The model default | The dial (Reset to Balanced); *Exact thinking effort* in Coworker settings fixes one for every turn | The dial's one line per stop ("The usual: quick questions get quick answers, real work and Workers think harder."); an exact effort survives a model change only when offered | `effort.test.ts`, `model-choice.test.ts`; `open-coworker-team` (a fixed high arrives as `reasoning_effort` every turn; on the dial at Balanced a draft is asked for high and a one-line question for low); `open-coworker-local-first` (the dial's pill, popover, and record) |
+| Thinking effort per turn | `lib/effort.ts`; the dial in the composer and Coworker settings; `submitTurn`, group replies, `localRunModel`, the facilitator | The kind of turn, the dial's stop (`effortPreference`), the model's offered efforts, an exact effort if fixed | Baseline per kind (quick reply low · reply medium · deep work, Worker turn, assignment run high · review medium · facilitator minimal), shifted −2 … +2 by the stop, snapped to what the model offers; the model default when it offers none; a fixed exact effort wins. The dial also nudges the lane and a Worker's default turns | The model default | The dial (Reset to Balanced); *Exact thinking effort* in Coworker settings fixes one for every turn | The dial's one line per stop ("The usual: quick questions get quick answers, real work and Workers think harder."); an exact effort survives a model change only when offered | `effort.test.ts`, `model-choice.test.ts`; `open-coworker-team` (fixed and per-turn `reasoning_effort` reach the provider); `open-coworker-local-first` (`effortPreference` persists after a dial change and reload). Verify dial copy and geometry directly |
 | The facilitator's model | `facilitatorModels` in `lib/facilitator.ts` | The members' models, the catalog, the group's setting | The model the person set for the group, else the coworkers' models (account first, then most used), else the recommendation; the next such model is the second try; the model default effort | The scorer | Group details › Advanced | "Automatic" in the setting | `facilitator.test.ts` |
 | A Cloud assignment's model | `resolveCloudModel` in `lib/cloud-responsibilities.ts` | The coworker's model, the organization's providers | The coworker's model when the organization authorizes it, else a mapped equivalent, else the free starter | The free starter | The coworker's model | The assignment names its model | `cloud-responsibilities.test.ts` |
 
 **Workers**
 
-| Choice | Where | Inputs | Rule | Fallback | Override | Explained to the person? | Proven by |
+| Choice | Where | Inputs | Rule | Fallback | Override | Explained to the person? | Coverage / verification |
 |---|---|---|---|---|---|---|---|
-| Starting a Worker | Contract `### Which shape an answer takes` and `## Workers`; `worker_spawn`, `workerTurnTools` | The request | One bounded goal, not a schedule or quick question. Worker turns disable direct management tools and task delegation through native session permissions; the shared workspace is not a sandbox. | — | New Worker; Steer, Pause, Stop | "Started a Worker · Name" and one sentence from the coworker | `coworkers.test.mjs`, `workers.test.mjs`, `open-coworker-turn-recovery` |
+| Starting a Worker | Contract `### Which shape an answer takes` and `## Workers`; `worker_spawn`, `workerTurnTools` | The request | One bounded goal, not a schedule or quick question. Worker turns disable direct management tools and task delegation through native session permissions; the shared workspace is not a sandbox. | — | New Worker; Steer, Pause, Stop | "Started a Worker · Name" and one sentence from the coworker | `workers.test.mjs` (creation and tool handling), `open-coworker-team` (native Worker delegation), `open-coworker-turn-recovery` (native tool boundary) |
 | Its lifespan | `normalizeLifespan`; `spawnWorker` with the effort dial | The tool's `lifespan`, or nothing; the dial's stop | A number of turns (1–100), a deadline, or until stopped; when nobody chose, the dial says how much work is welcome — 6 · 8 · 10 · 14 · 20 turns from Light to All in (10 at Balanced) | Ten turns | The coworker chooses; the person steers or stops, or turns the dial | The row reads "3 of 10 turns left", "Until 4:30 PM", "Until you stop it"; the dial's line names Workers | `workers.test.mjs`, `workers.test.ts`, `effort.test.ts` |
 | At most three live per coworker | `createWorker` | The live Workers | The fourth is refused with a sentence | — | Stop one | The tool's sentence, `workers_list` | `workers.test.mjs` |
 | When a turn runs | `admitWorkerTurn` in `electron/main.mjs` | This Mac's run limit (`maxParallelLocalRuns`, default 2) | Turns follow one another as soon as a slot is free; runs already in line go first | Queued | AI & local setup › the limit | "Waiting its turn" | `open-coworker-workers` (limit 1 → queued) |
 | Waking the coworker | `createReviewScheduler` | Findings | Per coworker, at most once a minute, as one turn in the open discussion once it is idle (up to five minutes); held without a discussion; retried once after a failure, then dropped and recorded on the Worker | Held / dropped, recorded | — | "Reviewed an update from Market scan"; "Not reviewed …" on the Worker | `workers.test.mjs`, `open-coworker-workers` |
-| Needs a decision | `nextWorkerState`; the review prompt | The Worker's report | The Worker waits; the coworker is told not to ask the person the same question; the discussion shows a lettered choice card; the answer is a steer | Waits | Steer or stop | The card and the amber "Waiting for a decision" | `workers.test.mjs`, `workers.test.ts` |
+| Needs a decision | `nextWorkerState`; the review prompt | The Worker's report | The Worker waits; the coworker is told not to ask the person the same question; the discussion shows a lettered choice card; the answer is a steer | Waits | Steer or stop | The card and the amber "Waiting for a decision" | `workers.test.mjs` (waiting state), `workers.test.ts` (decision parsing), `open-coworker-workers-view` (the person's choice steers the Worker) |
 | Done on the first turn | `nextWorkerState` | The report | Finishes; the slot is released; one turn spent | — | — | "Done" | `workers.test.mjs` |
 | After a quit | `prepareWorkerTurn`, `recoverInterruptedWorkers` | Durable steering and pending turn | Reuse the admitted message id; do not re-execute accepted work. Decisions keep waiting; paused stays paused with its steering. | Interrupted replies may fail | Resume a paused Worker | "Checking the interrupted step before continuing after the app closed." | `workers.test.mjs`, `open-coworker-turn-recovery` |
 
@@ -430,7 +432,7 @@ Left as they are, with the reason: the onboarding cards do not yet say *why*
 a complement joins (one line per card would); the facilitator's reason stays
 private by design; the Worker review queue is still process-local, so findings
 remain on disk after a quit but are not automatically requeued for review; the
-tool catalog's 16 KB of JSON is the largest fixed cost of a turn and its
+tool catalog is a substantial fixed cost of a turn and its
 schedule schema is carried twice (create and update), which a later pass may
 trim once the free model's scheduling is shown to survive it.
 
@@ -523,8 +525,9 @@ OPENWORK_EVAL_ELECTRON_BINARY="apps/coworker/dist-electron/mac-arm64/Open Cowork
 
 The `open-coworker-live-turn` journey paces a scripted provider through preparing,
 tool execution, streaming, and long work. Reasoning and unknown payload canaries
-must never enter the DOM. It also checks keyboard inspection, recorded duration,
-reply timing, deterministic progress notes, and reload.
+must never enter the DOM. It also checks keyboard inspection, completed tool
+state, deterministic progress notes, and privacy after reload. Verify duration
+and reply-timing labels directly.
 
 ## Models membership and connected apps
 
@@ -545,6 +548,21 @@ Apps & tools panel remains the place to use those connections.
 
 Promotion terms are not part of this integration. Available models, subscription
 entitlements, and checkout remain controlled by the existing services.
+
+## Computer control
+
+A saved private discussion has a **Computer** control in its header. Access
+starts off. **Allow for this discussion** enables requests to the shared native
+Computer Use runtime; the person still approves the exact app/window and scope.
+Take over, Continue and Stop remain native controls. Leaving the conversation
+does not cancel its task, and an uncertain stop is never presented as confirmed.
+
+The first adapter is **This Mac** (macOS 14+). The registry pins Desktop or Cloud
+placement rather than guessing or falling back. Remote computer is unavailable
+until a compatible authorized service exists; no Daytona machine is provisioned.
+Workers and scheduled responsibilities do not inherit a discussion's access.
+See [the computer-control design and adapter contract](COMPUTER-CONTROL.md) for
+scope, runtime reuse, remote rollout requirements and the native journey.
 
 ## Architecture
 
@@ -685,8 +703,9 @@ tap ever creates a coworker.
   "Suggested a teammate · Care", "Checked the team · Editor already covers
   this", "Checked the team · you asked to keep this here" — never an id.
 
-Proof: `evals/specs/open-coworker-team.e2e.test.ts` (a scripted model plays
-both coworkers so every tool call is exact) plus the unit tests in
+Journey: `evals/specs/open-coworker-team.e2e.test.ts` (scripted inference through
+native team and collaboration paths). Focused guard, persistence, and recovery
+checks remain in
 `electron/team.test.mjs`, `electron/team-tools.test.mjs`, `src/lib/team.test.ts`,
 and `src/lib/onboarding-team.test.ts`.
 
@@ -905,7 +924,42 @@ Verified against the bundled engine (OpenCode 1.18.18) before building:
   engine's `message.*` events collapse into one refresh per 250 ms; questions,
   permissions, and status changes still refresh at once.
 
+## Clever Testing
+
+Optimize for fast, verified iteration, not test volume. Default to zero new
+tests. Before adding or keeping one, name the consequential failure that would
+escape the verification of this change and why this check is the cheapest useful
+way to catch it. A new component, helper or bug fix is not sufficient reason.
+
+- Implement the smallest working path using existing patterns, run the cheapest
+  relevant coherence check, and exercise the changed behavior when needed.
+  Observe the actual result; read back persisted state or inspect effects rather
+  than treating a screenshot or successful click as completion.
+- Keep focused checks for silent data loss, isolation, permissions, replay,
+  cancellation, recovery and unintended spending. Choose the layer that catches
+  the risk; do not duplicate a truth table in both units and journeys.
+- Verify ordinary copy, layout, icons, animations and navigation directly. Delete
+  source-text snapshots, catalog inventories, repeated CRUD and cosmetic matrices
+  instead of moving them into another suite.
+- Journey specs must be lean too: minimum setup, meaningful action, result and
+  the negative control that matters. No app-wide control tours, replacement
+  mega-specs, exhaustive combinations or screenshot ceremony. Extend an existing
+  owner only when a missing material boundary earns the assertion.
+- Keep isolated fixtures, bounded waits and real request/effect witnesses. Never
+  manufacture passing judgments, hide red regressions, add skips, loosen budget
+  limits or change runner gates to make pruning green.
+- Run the relevant check, not this whole inventory after every edit. No coverage
+  percentage, assertion count or deletion quota is a development gate.
+
+Direct verification, static checks and unit results are not substitutes for
+canonical runtime evidence. Root `AGENTS.md` and `evals/README.md` still govern
+exact-head journey proof and placement. Report missing execution as Incomplete;
+test deletion does not establish that an existing release defect was fixed.
+
 ## Review / develop
+
+Command reference, not a per-change checklist. Pick the check for the actual risk;
+build or package only when the changed boundary needs it.
 
 ```bash
 pnpm --filter openwork-server build        # once: the embedded platform bundle
@@ -1091,11 +1145,11 @@ about 2.3 seconds and never loops. Afterwards only the front card's existing
 pointer gaze remains, within the icon's restraint (pupils ≈2 px, turn ≤0.8°,
 travel ≤1 px). The box never changes size, the stack takes no pointer events,
 and reduced motion renders the icon composition at once. The new-coworker
-preview reuses the component with the coworker being created in front. The app
-icon on macOS uses the blue porcelain tile and white coworker in
-`resources/icons/icon-macos.png`, a transparent 1024-pixel master shared by the
-Dock and packaged `.icns` icon. Windows and Linux use the vector artwork in
-`resources/icons/open-coworker-app-icon.svg`. Regenerate the platform icon sets
+preview reuses the component with the coworker being created in front. The desktop app icon uses one canonical raster artwork in
+`resources/icons/open-coworker-app-icon.png` (1254×1254). The generator derives
+identical 1024-pixel `icon.png` and `icon-macos.png` files from this source,
+then renders the packaged ICNS, ICO, and Linux sizes. The macOS Dock uses
+`icon-macos.png`; the packaged app uses `icon.icns`. Regenerate all outputs
 with `pnpm --filter @openwork/coworker icons:render`.
 
 The avatars' always-on idle motion (an 8.8 s float of 0.8 px and turns of about
@@ -1106,8 +1160,8 @@ of a CPU core while the app sat idle (renderer 25%, GPU process 61%); stepped,
 the same motion idles near the floor (about 5–10% each), with brief spikes only
 when a coworker actually blinks or glances. Blinks, idle glances, and pointer
 gaze keep their smooth curves. Idle glances are skipped while the window is
-hidden or covered, so a journey brings the window to front before waiting for
-one.
+hidden or covered; bring the window to front when verifying idle glances
+directly.
 
 Coworker settings lay out as rows on the panel — Apps & tools first (the level
 described above), then an identity row, Profile (look, glasses, role, mission,
@@ -1305,24 +1359,54 @@ fences late results and automatic resumption. Unknown legacy Worker origins do
 not route to whichever discussion happens to be open.
 
 Defaults: four active collaboration executions, one producer per native session,
-30-second setup, 60-second admission observation, 15-minute execution limits,
+30-second setup, 60-second admission observation, three-minute group replies,
+15-minute private execution limits,
 one-hour dependency deadlines, depth two, at most three dependencies per task,
 and at most two explicit follow-ups. Workers retain the existing background
 capacity setting. An admitted but incomplete idle execution requires recovery;
-it is not silently executed again. Group requests needing a permission or answer
-stop with an explanation instead of waiting invisibly.
+it is not silently executed again. An explicit private **Continue** after tool
+work admits a new message in the same native thread, preserving the earlier
+history, failure, and completed effects. Its bounded continuation brief references
+that work and fences the old dependency generation. Tool-free retries retain the
+original message ID.
+
+Group permissions and questions appear beside the conversation under the named
+participant. They enter a durable, quiet waiting state with a one-hour deadline,
+release global execution capacity, and retain their native-session lock. Answers
+are bound to the exact group, workspace, session, execution and request; stale or
+cross-scope replies are refused. Answering resumes that same native execution,
+not a resubmitted prompt. The existing permission rules still apply. Coworker
+enables native questions only where no explicit question/catch-all rule already
+exists; Workers and the progress summarizer do not receive that tool.
 
 `src/lib/progress-config.ts` is the progress-budget location: notes after 15 seconds,
 2-second debounce, 30-second minimum model-call interval, 5-second timeout,
-three calls per execution, 2,048 input characters, and 80 output tokens. Only
-changed facts can trigger optional summarization; stale/cancelled results are
-discarded. The optional interface selects existing facts, never invents prose.
-**This build uses deterministic notes and makes no extra inference calls.** The
-native model client cannot enforce a per-request output-token cap, so the optional
-cheap-model transport is not enabled or integrated. No expensive fallback is used.
+three attempts per originating task, a conservative 1,024-byte/token ASCII input
+bound including framing reserve, and at most 80 output tokens. Only changed facts
+can trigger optional summarization; stale/cancelled results are discarded. The
+model selects existing facts and never authors speculative progress prose.
+
+**Settings → General → Progress summaries** is off by default. Enabling it requires
+an explicit eligible model: active, text-capable, non-reasoning, using a supported
+OpenAI/OpenAI-compatible transport, with positive catalog prices at or below
+$0.50 input and $2 output per million tokens. Missing/zero prices are excluded
+because native catalogs may synthesize zero for unknown custom-provider pricing.
+Catalog pricing is not a vendor billing guarantee. There is no automatic or
+expensive replacement model; ineligibility keeps deterministic notes.
+
+The main process owns the budget across navigation, settings toggles, and task
+continuations. Previously running work does not acquire a new inference budget
+after an app restart. Each request uses a fresh tool-less coordinator session;
+a scoped native plugin strips inherited context, enforces `maxOutputTokens`,
+and blocks hidden provider retries. Timeout, disablement and stale work explicitly
+abort the native summary session with a separate bounded cleanup signal. Missing
+plugin/cap support fails closed. Summary failure never blocks the actual task.
 
 The extended `open-coworker-team` journey exercises the real packaged plugin,
 consultation and Worker returns, independent conversations, cancellation, and
-process restart with loopback scripted inference. A supplied absolute native
+process restart, non-replaying private continuation, and group approval/question
+isolation with loopback scripted inference. `open-coworker-live-turn` also checks
+the actual provider cap, request/stream cancellation, context isolation, and
+unchanged-budget behavior. A supplied absolute native
 Electron binary makes the CLI report its actual local placement; explicit
 remote/attached placement is not overridden. Module checks are not journey proof.

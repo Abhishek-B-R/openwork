@@ -12,6 +12,7 @@ import {
   eventually,
   localMysqlIsRunning,
   needs,
+  quitDesktop,
   readDenClientState,
   relaunchDesktop,
   server,
@@ -49,25 +50,25 @@ const title = !e2eTestsEnabled
 const ORG_A = "Handoff Atomic A";
 const ORG_B = "Handoff Atomic B";
 
-const EVENT_RECORDER = `(() => {
+const EVENT_RECORDER = () => {
   if (!window.__handoffProofEvents) {
     window.__handoffProofEvents = [];
     window.addEventListener("openwork-den-session-updated", (event) => {
-      window.__handoffProofEvents.push(String(event?.detail?.status ?? "unknown"));
+      window.__handoffProofEvents.push(String(event instanceof CustomEvent ? event.detail?.status ?? "unknown" : "unknown"));
     });
   }
   return true;
-})()`;
+};
 
 async function readSessionEvents(desktop: Surface): Promise<string[]> {
-  const raw = await evalIn(desktop, "JSON.stringify(window.__handoffProofEvents ?? [])");
+  const raw = await evalIn(desktop, () => (JSON.stringify(window.__handoffProofEvents ?? [])));
   return JSON.parse(String(raw)) as string[];
 }
 
 async function readEnrollmentOrigin(desktop: Surface): Promise<string | null> {
   const raw = await evalIn(
     desktop,
-    "window.localStorage.getItem('openwork.den.sessionOrigin') ?? ''",
+    () => (window.localStorage.getItem('openwork.den.sessionOrigin') ?? ''),
   );
   return String(raw).trim() || null;
 }
@@ -250,6 +251,9 @@ test.skipIf(!e2eTestsEnabled || !localPlacement || !mysqlOpen)(
       // port would otherwise rotate the origin that scopes localStorage.
       const rendererPort = desktop.handle.meta?.vitePort;
       if (!rendererPort) throw new Error("The first launch did not record its renderer port.");
+      // Exercise a user quit, allowing Chromium to persist renderer storage,
+      // before disposing the dev processes. stop() alone sends SIGINT.
+      await quitDesktop(desktop);
       await desktop.stop();
       desktop = null;
       // The dev server auto-increments a busy port instead of failing, which
@@ -266,7 +270,7 @@ test.skipIf(!e2eTestsEnabled || !localPlacement || !mysqlOpen)(
         env: { PORT: rendererPort },
       });
       try {
-        const restartedOrigin = String(await evalIn(restarted, "window.location.origin"));
+        const restartedOrigin = String(await evalIn(restarted, () => (window.location.origin)));
         if (new URL(restartedOrigin).port !== rendererPort) {
           throw new Error(
             `The relaunched renderer did not reuse port ${rendererPort} (origin ${restartedOrigin}); the restart cannot observe the persisted session.`,

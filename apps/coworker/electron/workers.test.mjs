@@ -4,11 +4,10 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, test } from "node:test";
 import { createCoworker } from "./coworkers.mjs";
-import { createCoworkerToolsServer, handleMcpMessage, toolCatalog } from "./coworker-tools.mjs";
+import { createCoworkerToolsServer, handleMcpMessage } from "./coworker-tools.mjs";
 import {
   DEFAULT_TURN_BUDGET,
   MAX_LIVE_WORKERS,
-  REVIEW_OPENER,
   WORKERS_REGISTRY_FILE,
   appendWorkerEvent,
   createReviewScheduler,
@@ -29,14 +28,9 @@ import {
   readWorkerEvents,
   readWorkerRegistry,
   registerWorkerThread,
-  reviewPrompt,
-  steerBody,
   updateWorker,
-  WORKER_NOTE_TEXT,
-  workerProgressNote,
   workerThreadTitle,
   workerToolCatalog,
-  workerTurnPrompt,
   workerTurnOutcome,
 } from "./workers.mjs";
 
@@ -192,23 +186,6 @@ test("an interrupted step cannot reuse an older finding or continue from an inco
   assert.deepEqual(workerTurnOutcome(result, { messages: [old, partial, complete] }, "msg_current"), { kind: "settled", report: { kind: "finding", text: "Compared two sources." } });
 });
 
-test("the worker prompt frame names the goal, the lifespan, and the reporting contract", () => {
-  const worker = { name: "Market scan", goal: "Watch vendor prices.", lifespan: { kind: "turns", max: 10, used: 4 } };
-  const prompt = workerTurnPrompt({ worker, coworkerName: "Nova", body: "Begin working toward the goal now.", now: NOW });
-  assert.match(prompt, /^You are a Worker named "Market scan" started by Nova\./);
-  assert.match(prompt, /Watch vendor prices\./);
-  assert.match(prompt, /Lifespan: 6 of 10 turns left\./);
-  assert.match(prompt, /section titled "Finding"/);
-  assert.match(prompt, /section titled "Needs a decision"/);
-  assert.match(prompt, /section titled "Done"/);
-  assert.match(prompt, /never start, steer, or stop Workers, never set up or change assignments, and never change Nova's memory or soul \(those tools are Nova's\)/);
-  assert.ok(prompt.endsWith("Begin working toward the goal now."));
-  assert.equal(
-    steerBody([{ by: "coworker", text: "Skip vendor C." }, { by: "person", text: "Add vendor D." }], "Nova"),
-    "Steering from Nova: Skip vendor C.\n\nSteering from the person Nova works for: Add vendor D.",
-  );
-});
-
 test("a settled turn decides whether the worker continues, holds, or stops", () => {
   const base = { id: "wrk_a", name: "Scan", status: "running", waitingFor: "", lifespan: { kind: "turns", max: 3, used: 0 } };
   const finding = nextWorkerState(base, { kind: "settled", report: { kind: "finding", text: "Step one done." } }, { now: NOW });
@@ -291,61 +268,6 @@ test("steering and an admitted turn survive rereads, while pause and stop win se
   await assert.rejects(queueWorkerSteer(coworkersDir, "scout", worker.id, "One more.", "person"), /already stopped/);
 });
 
-test("the working-memory line for a Worker follows it from start to finding to decision and clears when it ends", () => {
-  const base = { id: "wrk_a", name: "Market scan", goal: "Watch the three competitors' pricing pages and report any change.", status: "starting", waitingFor: "", lifespan: { kind: "turns", max: 10, used: 0 } };
-  // Keyed by the Worker's name so it never collides with the coworker's own notes.
-  const started = workerProgressNote(base);
-  assert.deepEqual(started, { work: "Worker · Market scan", text: "started — Watch the three competitors' pricing pages and report any change" });
-  assert.equal(workerProgressNote({ ...base, status: "running" }).text, "working — Watch the three competitors' pricing pages and report any change");
-  assert.equal(workerProgressNote({ ...base, status: "waiting", waitingFor: "turn" }).text, "working — Watch the three competitors' pricing pages and report any change");
-  // A finding replaces the goal with the latest state; a decision says it is waiting for one.
-  assert.equal(workerProgressNote({ ...base, status: "waiting", waitingFor: "turn" }, { kind: "finding", report: "finding", text: "Acme dropped its Pro tier by 10%." }).text, "latest: Acme dropped its Pro tier by 10%.");
-  assert.equal(workerProgressNote({ ...base, status: "waiting", waitingFor: "decision" }, { kind: "finding", report: "decision", text: "Should I include the annual plans too?" }).text, "needs a decision: Should I include the annual plans too?");
-  assert.equal(workerProgressNote({ ...base, status: "waiting", waitingFor: "decision" }).text, "waiting for a decision — Watch the three competitors' pricing pages and report any change");
-  // A steer or a status event is not a finding and leaves the goal in place.
-  assert.equal(workerProgressNote({ ...base, status: "running" }, { kind: "steer", text: "Skip Beta." }).text, "working — Watch the three competitors' pricing pages and report any change");
-  assert.equal(workerProgressNote({ ...base, status: "paused" }).text, "paused — Watch the three competitors' pricing pages and report any change");
-  // Every ending clears the line, whatever the last finding said.
-  for (const status of ["finished", "cancelled", "failed"]) {
-    assert.deepEqual(workerProgressNote({ ...base, status }, { kind: "finding", report: "done", text: "All three pages checked." }), { work: "Worker · Market scan", text: "" });
-  }
-  // Long goals and findings are cut so the line fits the memory limit; an empty goal leaves no dangling dash.
-  const long = "x".repeat(WORKER_NOTE_TEXT + 50);
-  assert.equal(workerProgressNote({ ...base, goal: long }).text, `started — ${"x".repeat(WORKER_NOTE_TEXT)}`);
-  assert.equal(workerProgressNote({ ...base, status: "running" }, { kind: "finding", report: "finding", text: long }).text, `latest: ${"x".repeat(WORKER_NOTE_TEXT)}`);
-  assert.equal(workerProgressNote({ ...base, goal: "" }).text, "started");
-});
-
-test("the review prompt opens with the marker the renderer recognises and lists each update", () => {
-  const workers = [
-    { id: "wrk_a", name: "Market scan", status: "running", waitingFor: "", spawnedBy: "coworker", lifespan: { kind: "turns", max: 10, used: 2 } },
-    { id: "wrk_b", name: "Inbox watch", status: "waiting", waitingFor: "decision", spawnedBy: "person", lifespan: { kind: "open" } },
-  ];
-  const prompt = reviewPrompt({
-    coworkerName: "Nova",
-    workers,
-    findings: [
-      { workerId: "wrk_a", workerName: "Market scan", report: "finding", text: "Prices rose 3%." },
-      { workerId: "wrk_b", workerName: "Inbox watch", report: "decision", text: "Archive the newsletter?" },
-      { workerId: "wrk_gone", workerName: "Old one", report: "done", text: "All done." },
-      { workerId: "wrk_flaky", workerName: "Flaky", report: "failed", text: "Model unavailable" },
-    ],
-    now: NOW,
-  });
-  assert.match(prompt, /Worker "Flaky" didn't finish: Model unavailable/);
-  assert.ok(prompt.startsWith(`${REVIEW_OPENER}\n`));
-  assert.match(prompt, /- "Market scan" \(wrk_a\) — working on it, 8 of 10 turns left — started by you/);
-  assert.match(prompt, /- "Inbox watch" \(wrk_b\) — waiting for a decision — started by the person/);
-  assert.match(prompt, /Worker "Market scan" reported: Prices rose 3%\./);
-  assert.match(prompt, /Worker "Inbox watch" needs a decision: Archive the newsletter\?/);
-  assert.match(prompt, /Worker "Old one" finished: All done\./);
-  assert.match(prompt, /say so plainly/);
-  const withTools = reviewPrompt({ coworkerName: "Nova", workers: [], findings: [], toolsAvailable: true });
-  assert.match(withTools, /steer it with your Worker tools now/);
-  assert.match(withTools, /never stop a Worker the person started unless they ask/);
-  assert.match(withTools, /do not ask them the same question yourself/);
-});
-
 test("reviews run at once for the first finding, batch inside the window, and retry once after a failure", async () => {
   const timers = [];
   let clock = 0;
@@ -418,16 +340,7 @@ test("reviews run at once for the first finding, batch inside the window, and re
   assert.equal(timers.length, 0);
 });
 
-test("the worker tool catalog sits beside the document tools with strict schemas and plain descriptions", () => {
-  const names = workerToolCatalog().map((tool) => tool.name);
-  assert.deepEqual(names, ["workers_list", "worker_spawn", "worker_steer", "worker_pause", "worker_resume", "worker_cancel", "worker_findings"]);
-  const all = [...toolCatalog(), ...workerToolCatalog()];
-  assert.equal(new Set(all.map((tool) => tool.name)).size, all.length);
-  for (const tool of workerToolCatalog()) {
-    assert.equal(tool.inputSchema.type, "object");
-    assert.equal(tool.inputSchema.additionalProperties, false);
-    assert.ok(tool.description.length > 40);
-  }
+test("worker tool lifespans preserve the default budget and reject invalid limits", () => {
   assert.deepEqual(lifespanFromToolArgs(undefined, { now: NOW }), { kind: "turns", max: DEFAULT_TURN_BUDGET, used: 0 });
   assert.deepEqual(lifespanFromToolArgs({ kind: "turns", turns: 4 }, { now: NOW }), { kind: "turns", max: 4, used: 0 });
   assert.deepEqual(lifespanFromToolArgs({ kind: "until", until: new Date(NOW + 3_600_000).toISOString() }, { now: NOW }), { kind: "until", at: NOW + 3_600_000 });

@@ -14,10 +14,11 @@ import { createHash, randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
+import { createServer as createPortProbe } from "node:net";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { BrowserWindow, Menu, app, dialog, ipcMain, nativeTheme, shell } from "electron";
-import { bindWindowAppearance } from "./window-appearance.mjs";
+import { bindWindowAppearance, windowMaterial } from "./window-appearance.mjs";
 import { openworkConfigDir } from "@openwork/paths";
 import { createHeadlessThreadClient, isRunning, toTranscript } from "@openwork/headless-threads";
 import { createCollaboration, collaborationId } from "./collaboration.mjs";
@@ -25,7 +26,19 @@ import { readExecutionActivity } from "../src/lib/progress-activity.ts";
 import { PROGRESS_LIMITS } from "../src/lib/progress-config.ts";
 import { createGroupExecution, repairGroupSelection } from "./group-execution.mjs";
 import { installCollaborationPlugin } from "./collaboration-plugin.mjs";
-import { connectedModelCatalog } from "../src/lib/threads.ts";
+import { assertGroupDocumentToolContext, createGroupDocumentService, groupDocumentToolCatalog } from "./group-documents.mjs";
+import { installGroupDocumentPlugin } from "./group-document-plugin.mjs";
+import { installComputerPlugin } from "./computer-plugin.mjs";
+import { createComputerControl, assertPrivateComputerDiscussion, COMPUTER_TOOLS, COMPUTER_DENY, COMPUTER_STOP_GUIDANCE, trustedComputerSender } from "./computer-control.mjs";
+import { createLocalComputerAdapter } from "./computer-local.mjs";
+import { createBrowserPanel } from "@openwork/browser-tabs/electron";
+import { server as chromeDevtools } from "opencode-chrome-devtools";
+import { assertBrowserToolContext, BROWSER_TOOLS, checkBrowserPolicy, createBrowserControl } from "./browser-control.mjs";
+import { installBrowserPlugin } from "./browser-plugin.mjs";
+import { DISCUSSION_REGISTRY_FILE, parseDiscussionRegistry } from "../src/lib/discussions.ts";
+import { installProgressPlugin } from "./progress-plugin.mjs";
+import { createProgressSummaries } from "./progress-summaries.mjs";
+import { connectedModelCatalog, createCoworkerThreads, eligibleProgressModels } from "../src/lib/threads.ts";
 import { cloudModelOptions, resolveCloudModel } from "../src/lib/cloud-responsibilities.ts";
 import { createDenAutomationsClient, listAssignedCoworkerTemplates } from "../src/lib/den.ts";
 import { createTemplateInstaller, exportCoworkerTemplate, parseCoworkerTemplateFile, templateScope } from "./templates.mjs";
@@ -120,6 +133,7 @@ import {
   prepareWorkerTurn,
   queueWorkerSteer,
   readWorkerEvents,
+  readWorkerRegistry,
   registerWorkerThread,
   updateWorker,
   workerProgressNote,
@@ -149,14 +163,18 @@ const explicitCdpPort = Number.parseInt(
   process.env.OPENWORK_ELECTRON_REMOTE_DEBUG_PORT?.trim() ?? "",
   10,
 );
-if (Number.isFinite(explicitCdpPort) && explicitCdpPort > 0) {
-  app.commandLine.appendSwitch("remote-debugging-port", String(explicitCdpPort));
-  app.commandLine.appendSwitch("remote-debugging-address", "127.0.0.1");
-  if (isDev) console.log(`[open-coworker] Electron CDP exposed at http://127.0.0.1:${explicitCdpPort}`);
-}
+const remoteDebugPort = Number.isSafeInteger(explicitCdpPort) && explicitCdpPort > 0 && explicitCdpPort <= 65535
+  ? explicitCdpPort : await new Promise((resolve, reject) => {
+    const probe = createPortProbe();
+    probe.once("error", reject);
+    probe.listen(0, "127.0.0.1", () => { const { port } = probe.address(); probe.close((error) => error ? reject(error) : resolve(port)); });
+  });
+app.commandLine.appendSwitch("remote-debugging-port", String(remoteDebugPort));
+app.commandLine.appendSwitch("remote-debugging-address", "127.0.0.1");
 const extraLaunchArgs = (process.env.ELECTRON_EXTRA_LAUNCH_ARGS ?? "").trim();
 for (const argument of extraLaunchArgs.split(/\s+/).filter(Boolean)) {
   const cleaned = argument.replace(/^--/, "");
+  if (/^remote-debugging-(port|address)(=|$)/.test(cleaned)) continue;
   const separator = cleaned.indexOf("=");
   if (separator > 0) {
     app.commandLine.appendSwitch(cleaned.slice(0, separator), cleaned.slice(separator + 1));
@@ -183,6 +201,9 @@ const serverConfigPath = process.env.COWORKER_SERVER_CONFIG?.trim()
 // rewrites the OpenWork desktop app's engine state on the same machine.
 process.env.OPENWORK_RUNTIME_DB ||= path.join(path.dirname(serverConfigPath), "coworker-runtime.sqlite");
 process.env.OPENWORK_ENV_STORE ||= path.join(path.dirname(serverConfigPath), "coworker-env.json");
+// This desktop client renders native question cards. A non-interactive parent
+// process must not hide the tool; workspace permission rules still govern it.
+process.env.OPENCODE_ENABLE_QUESTION_TOOL = "true";
 const settingsPath = path.join(path.dirname(serverConfigPath), SETTINGS_FILE);
 
 /**
@@ -197,7 +218,7 @@ const protocolRegistered = app.isPackaged
   && process.env.OPENWORK_ELECTRON_DISABLE_PROTOCOL_REGISTRATION !== "1"
   && !(process.platform === "linux" && process.env.APPIMAGE);
 
-/** @type {{ url: string, stop: () => Promise<void>, managedOpencode: { pid: number | null, isAlive: () => boolean } | null } | null} */
+/** @type {{ url: string, policyToken: string, stop: () => Promise<void>, managedOpencode: { pid: number | null, isAlive: () => boolean } | null } | null} */
 let serverHandle = null;
 let ownerToken = "";
 let engineError = "";
@@ -392,7 +413,7 @@ async function startPlatformServer() {
   await mkdir(coworkersDir, { recursive: true });
   const coworkers = await listCoworkers(coworkersDir);
   const contextServer = await ensureToolsServer();
-  for (const coworker of coworkers) await installCollaborationPlugin(coworker, { url: contextServer.url.replace(/\/mcp$/, "/context"), token: coworkerToolToken(coworker.slug) });
+  for (const coworker of coworkers) await installNativeCoworkerPlugins(coworker, contextServer);
   // The registry file is the source of truth once it exists; seeds only shape
   // the very first boot (mirrors the OpenWork desktop's embedded-server use).
   const seedWorkspaces = existsSync(serverConfigPath) ? [] : coworkers.map((coworker) => coworker.path);
@@ -509,16 +530,20 @@ async function ensurePlatformServer() {
 }
 
 async function restartPlatformServer() {
-  // Settle an in-flight boot first so a restart is a real stop-then-start
-  // rather than a second subscriber to the old start.
-  if (startingServer) await startingServer.catch(() => undefined);
-  if (serverHandle) {
-    const previous = serverHandle;
-    serverHandle = null;
-    await previous.stop().catch(() => undefined);
-  }
-  warmedCoworkerWorkspaces.clear();
-  return ensurePlatformServer();
+  const reset = await computerControl.reset(false, async () => {
+    // Keep computer admission closed for the entire stop-and-start, including
+    // UI requests arriving while the replacement engine is booting.
+    if (startingServer) await startingServer.catch(() => undefined);
+    if (serverHandle) {
+      const previous = serverHandle;
+      serverHandle = null;
+      await previous.stop().catch(() => undefined);
+    }
+    warmedCoworkerWorkspaces.clear();
+    return ensurePlatformServer();
+  });
+  if (!reset.confirmed) throw new Error(COMPUTER_STOP_GUIDANCE);
+  return reset.value;
 }
 
 function runtimeInfo() {
@@ -659,12 +684,12 @@ async function executeLocalResponsibility(
       });
       let acceptance;
       if (threadId) {
-        acceptance = await client.sendTurn(threadId, { prompt: RESUME_PROMPT(started.name, resumeReason) });
+        acceptance = await client.sendTurn(threadId, { prompt: RESUME_PROMPT(started.name, resumeReason), tools: COMPUTER_DENY });
       } else {
         const thread = await client.createThread({ title: started.name });
         threadId = thread.id;
         await attachLocalResponsibilityThread(coworkersDir, slug, id, activeRunId, threadId);
-        acceptance = await client.sendTurn(threadId, { prompt: started.instructions });
+        acceptance = await client.sendTurn(threadId, { prompt: started.instructions, tools: COMPUTER_DENY });
       }
       const result = await client.waitForThread(threadId, {
         timeoutMs: 60 * 60_000,
@@ -813,6 +838,7 @@ const collaboration = createCollaboration({
   consult: (task) => groupExecution.consultation(task),
   spawn: (slug, input) => spawnWorker(slug, input, "coworker"),
   cancelWorker: (slug, id) => cancelWorker(slug, id, "The originating task stopped.", "person"),
+  onExecutionEnd: (entry) => computerControl.endTurn(entry),
   publish: async (task) => {
     if (!task.groupId) return;
     await appendGroupEvent(coworkersDir, task.groupId, { id: `evt_${collaborationId(task.id, "answer").slice(5)}`, kind: task.state === "succeeded" ? "coworker" : "status", slug: task.to, threadId: task.owner.threadId, status: task.state, text: task.state === "succeeded" ? task.result : `${task.label}: ${task.error || "The request stopped."}` });
@@ -824,6 +850,38 @@ const collaboration = createCollaboration({
     for (const child of children.filter((task) => task.kind === "worker")) await appendWorkerEvent(coworkersDir, child.origin.slug, child.workerId, { id: `evt_${collaborationId(entry.id, child.id, "review").slice(5)}`, kind: "review", reviewThreadId: entry.owner.threadId, text: entry.state === "succeeded" ? "The coworker reviewed this in the original conversation." : "The follow-up did not finish. Its receipt is in the original conversation.", ...(entry.state === "succeeded" ? {} : { error: entry.error }) });
   },
 });
+const computerControl = createComputerControl({
+  adapters: [createLocalComputerAdapter()],
+  discussionFor: computerDiscussion,
+  resolveContext: (slug, context, expected) => collaboration.context(slug, context, expected),
+});
+let browserTools;
+const browserControl = createBrowserControl({
+  createPanel: createBrowserPanel,
+  panelOptions: {
+    getWindow: () => mainWindow,
+    remoteDebugPort,
+    partition: "persist:coworker-browser",
+    // The packaged asset is always next to this bundle; only source dev resolves the package.
+    preloadPath: app.isPackaged ? fileURLToPath(new URL("./browser-content-preload.cjs", import.meta.url))
+      : existsSync(fileURLToPath(new URL("./browser-content-preload.cjs", import.meta.url)))
+        ? fileURLToPath(new URL("./browser-content-preload.cjs", import.meta.url))
+        : fileURLToPath(import.meta.resolve("@openwork/browser-tabs/preload")),
+    openExternal: async () => { throw new Error("Browser requests stay in the embedded Coworker browser."); },
+    runDetachedTask: (_label, task) => { void Promise.resolve().then(task).catch(() => console.warn("[open-coworker] Browser navigation could not finish.")); },
+  },
+  discussionFor: computerDiscussion,
+  resolveContext: (slug, context, expected) => collaboration.context(slug, context, expected, assertBrowserToolContext),
+  checkPolicy: (input) => checkBrowserPolicy(serverHandle, input),
+  runTool: async (name, args, context) => {
+    if (!context?.sessionID || !context.messageID || !context.callID || !context.directory || !(context.abort instanceof AbortSignal)) throw new Error("Browser tools require the validated native origin and cancellation signal.");
+    context.abort.throwIfAborted();
+    browserTools ??= chromeDevtools();
+    const tools = await browserTools;
+    context.abort.throwIfAborted();
+    return tools.tool[name].execute(args, context);
+  },
+});
 const groupExecution = createGroupExecution({
   directory: coworkersDir,
   collaboration,
@@ -831,12 +889,21 @@ const groupExecution = createGroupExecution({
   coordinator: () => ensureCoordinatorWorkspace(),
   catalogFor: async (workspace, signal) => {
     const handle = await ensurePlatformServer();
-    const response = await fetch(`${handle.url}/workspace/${encodeURIComponent(workspace.workspaceId)}/opencode/config/providers`, { headers: { Authorization: `Bearer ${ownerToken}` }, signal: AbortSignal.any([signal, AbortSignal.timeout(15_000)]) });
+    const response = await fetch(`${handle.url}/workspace/${encodeURIComponent(workspace.workspaceId)}/opencode/provider`, { headers: { Authorization: `Bearer ${ownerToken}` }, signal: AbortSignal.any([signal, AbortSignal.timeout(15_000)]) });
     if (!response.ok) throw new Error("The group's AI models could not be read.");
     const result = await response.json();
-    return connectedModelCatalog({ all: result.providers, connected: result.providers.map((provider) => provider.id), default: result.default });
+    // A model catalog is not a connection inventory. Retain the native
+    // connected-provider set so routing cannot select an unavailable provider.
+    return connectedModelCatalog(result);
   },
   clientFor: collaborationClient,
+});
+
+const groupDocumentTools = new Set(groupDocumentToolCatalog().map((tool) => tool.name));
+const groupDocuments = createGroupDocumentService({
+  coworkersDir,
+  coworkerFor: (slug) => getCoworker(coworkersDir, slug),
+  resolveContext: (slug, context, expected) => collaboration.context(slug, context, expected, assertGroupDocumentToolContext),
 });
 
 async function collaborationClient(slug, { kind = "reply", signal } = {}) {
@@ -845,27 +912,17 @@ async function collaborationClient(slug, { kind = "reply", signal } = {}) {
   if (!handle.managedOpencode || !coworker.workspaceId) throw new Error("The AI service is not ready. Your work has been kept.");
   if (slug !== ".coordinator") {
     const server = await ensureToolsServer();
-    await installCollaborationPlugin(coworker, { url: server.url.replace(/\/mcp$/, "/context"), token: coworkerToolToken(slug) });
+    await installNativeCoworkerPlugins(coworker, server);
     if (!toolsRegistered.has(slug)) await registerCoworkerTools(coworker);
   }
   signal?.throwIfAborted();
   const client = createHeadlessThreadClient({ baseUrl: handle.url, workspaceId: coworker.workspaceId, token: ownerToken, defaultModel: await localRunModel(coworker, kind) });
-  client.pendingInteractions = async (threadId, abort) => {
-    const base = `${handle.url}/workspace/${encodeURIComponent(coworker.workspaceId)}/opencode`;
-    const headers = { Authorization: `Bearer ${ownerToken}` };
-    const replies = await Promise.all(["/permission", "/question", `/v2/session/${encodeURIComponent(threadId)}/permission`].map(async (route) => {
-      const response = await fetch(`${base}${route}`, { headers, signal: AbortSignal.any([abort, AbortSignal.timeout(8_000)]) });
-      // Older native engines serve their HTML fallback for an unknown v2 route.
-      // That optional protocol probe is not a failed collaboration turn.
-      const optional = route.startsWith("/v2/");
-      const json = response.headers.get("content-type")?.includes("application/json");
-      if (optional && (!json || response.status === 404)) return [];
-      if (!response.ok || !json) throw new Error("The coworker's permission requests could not be read. Its work has been kept.");
-      const result = await response.json();
-      return Array.isArray(result) ? result : result.data ?? [];
-    }));
-    return replies.some((items) => items.some((item) => item.sessionID === threadId));
-  };
+  const interactions = createCoworkerThreads({ serverUrl: handle.url, workspaceId: coworker.workspaceId, token: ownerToken });
+  client.workspaceId = coworker.workspaceId;
+  client.pendingInteractions = interactions.listThreadInteractions;
+  client.replyPermission = interactions.replyPermission;
+  client.replyQuestion = interactions.replyQuestion;
+  client.rejectQuestion = interactions.rejectQuestion;
   return client;
 }
 
@@ -877,10 +934,68 @@ async function privateOwner(slug, threadId, kind = "private") {
   return collaboration.registerOwner({ slug, threadId, conversationId: threadId, kind });
 }
 
-/** Activity observation never starts a server, installs tools, or cancels native work. */
+async function computerDiscussion(slug, threadId) {
+  if (typeof threadId !== "string" || !threadId || slug === ".coordinator") throw new Error("Choose a saved private discussion.");
+  const coworker = await getCoworker(coworkersDir, slug);
+  if (!coworker.workspaceId) throw new Error("This coworker's workspace is not ready.");
+  const [saved, workers, workerIds, groups, assignments, owners] = await Promise.all([
+    readCoworkerFile(coworkersDir, slug, DISCUSSION_REGISTRY_FILE).catch((error) => { if (error.code === "ENOENT") return ""; throw error; }),
+    listWorkers(coworkersDir, slug), readWorkerRegistry(coworkersDir, slug), listGroups(coworkersDir),
+    listLocalResponsibilities(coworkersDir, slug),
+    collaboration.read((state) => [state.owners[`${slug}:${threadId}`], ...Object.values(state.executions).filter((entry) => entry.owner.slug === slug && entry.owner.threadId === threadId).map((entry) => entry.owner)].filter(Boolean)),
+  ]);
+  assertPrivateComputerDiscussion({ slug, threadId, savedIds: parseDiscussionRegistry(saved), workerIds, workers, groups, assignments, owners });
+  const client = await collaborationClient(slug);
+  const snapshot = await client.getThreadSnapshot(threadId, { signal: AbortSignal.timeout(8000) });
+  if (snapshot.threadId !== threadId || !snapshot.directory || path.resolve(snapshot.directory) !== path.resolve(coworker.path) || client.workspaceId !== coworker.workspaceId) throw new Error("This native discussion does not belong to the coworker's workspace.");
+  return { workspaceId: coworker.workspaceId, directory: path.resolve(coworker.path) };
+}
+
+const nativePluginInstalls = new Map();
+async function installNativeCoworkerPlugins(coworker, server) {
+  const key = path.resolve(coworker.path);
+  const pending = (nativePluginInstalls.get(key) ?? Promise.resolve()).catch(() => undefined).then(async () => {
+    await installCollaborationPlugin(coworker, { url: server.url.replace(/\/mcp$/, "/context"), token: coworkerToolToken(coworker.slug) });
+    await installComputerPlugin(coworker);
+    await installBrowserPlugin(coworker);
+    await installGroupDocumentPlugin(coworker);
+  });
+  nativePluginInstalls.set(key, pending);
+  try { await pending; } finally { if (nativePluginInstalls.get(key) === pending) nativePluginInstalls.delete(key); }
+}
+
+let progressCoordinator = null;
+/** Only an already-warmed coordinator is usable. No setup or engine repair on this path. */
+async function readyProgressTransport() {
+  const handle = serverHandle;
+  const workspaceId = progressCoordinator?.workspaceId;
+  if (!handle?.managedOpencode || !workspaceId || !warmedCoworkerWorkspaces.has(workspaceId)) return null;
+  const response = await fetch(`${handle.url}/workspace/${encodeURIComponent(workspaceId)}/opencode/provider`, { headers: { Authorization: `Bearer ${ownerToken}` }, signal: AbortSignal.timeout(PROGRESS_LIMITS.activityReadTimeoutMs) });
+  if (!response.ok || handle !== serverHandle) return null;
+  const catalog = connectedModelCatalog(await response.json());
+  return {
+    key: `${handle.url}/${workspaceId}`,
+    models: eligibleProgressModels(catalog),
+    client: createHeadlessThreadClient({ baseUrl: handle.url, workspaceId, token: ownerToken, requestTimeoutMs: PROGRESS_LIMITS.timeoutMs }),
+  };
+}
+
+const progressSummaries = createProgressSummaries({
+  settings: () => readSettings(settingsPath),
+  ready: readyProgressTransport,
+  listExecutions: () => collaboration.read((state) => Object.values(state.executions).filter((entry) => {
+    const task = state.tasks[entry.taskId];
+    if (entry.state !== "running" || entry.owner.kind === "coordinator" || task?.executionId !== entry.id || ["succeeded", "failed", "cancelled"].includes(task.state)) return false;
+    for (let parent = task, depth = 0; parent && depth < 8; parent = state.tasks[parent.parentId], depth++) if (parent.cancelRequested || parent.state === "cancelled") return false;
+    return !state.groups[entry.owner.groupId]?.cancelledRequestIds?.includes(entry.groupRequestId);
+  }).map((entry) => ({ executionId: entry.id, budgetId: entry.taskId, createdAt: Math.min(entry.createdAt, state.tasks[entry.taskId].createdAt), slug: entry.owner.slug, threadId: entry.owner.threadId, groupId: entry.owner.groupId }))),
+  readActivity: async (entry) => (await readCollaborationActivity({ ...(entry.groupId ? { groupId: entry.groupId } : { slug: entry.slug, threadId: entry.threadId }), executionId: entry.executionId }))[0],
+});
+
+/** Activity observation never starts a server, installs tools, or cancels parent work. */
 async function readCollaborationActivity(scope) {
   const entries = await collaboration.activityEntries(scope, PROGRESS_LIMITS.maxActivityExecutions);
-  const observed = await Promise.all(entries.map(async (entry) => {
+  const observed = await Promise.all(entries.filter((entry) => !scope.executionId || entry.executionId === scope.executionId).map(async (entry) => {
     const empty = { replies: [], tools: [], completedSteps: 0, failedSteps: 0, available: false, nativeStatus: "unknown" };
     if (!serverHandle?.managedOpencode) return { ...entry, ...empty };
     try {
@@ -893,7 +1008,9 @@ async function readCollaborationActivity(scope) {
   const current = await collaboration.activityEntries(scope, PROGRESS_LIMITS.maxActivityExecutions);
   return observed.flatMap((entry) => {
     const latest = current.find((item) => item.executionId === entry.executionId && item.messageId === entry.messageId && item.threadId === entry.threadId && item.slug === entry.slug);
-    return latest ? [{ ...entry, ...latest }] : [];
+    if (!latest) return [];
+    const activity = { ...entry, ...latest };
+    return [{ ...activity, progressNote: progressSummaries.noteFor(activity) }];
   });
 }
 
@@ -1256,7 +1373,7 @@ let coworkerWarmupTail = Promise.resolve();
 async function runCoworkerWorkspaceWarmup(coworker) {
   if (coworker.slug) {
     const contextServer = await ensureToolsServer();
-    await installCollaborationPlugin(coworker, { url: contextServer.url.replace(/\/mcp$/, "/context"), token: coworkerToolToken(coworker.slug) });
+    await installNativeCoworkerPlugins(coworker, contextServer);
   }
   let handle = await ensurePlatformServer();
   if (!handle.managedOpencode || !coworker?.workspaceId) return;
@@ -1345,7 +1462,10 @@ async function ensureToolsServer() {
   // functions the panel views use, so the run limit, the guardrails, and the records agree.
   startingToolsServer ??= createCoworkerToolsServer({
     resolveSlug: (token) => toolTokenSlugs.get(token) ?? null,
-    onContextTool: async (slug, { name, args, context }) => {
+    onContextTool: async (slug, { name, args, context, cancel }) => {
+      if (Object.hasOwn(COMPUTER_TOOLS, name)) return computerControl.execute(slug, { name, args, context, cancel });
+      if (Object.hasOwn(BROWSER_TOOLS, name)) return browserControl.execute(slug, { name, args, context, cancel });
+      if (groupDocumentTools.has(name)) return groupDocuments.executeNative(slug, { name, args, context });
       const trusted = await collaboration.context(slug, context);
       if (name === "team_consult") {
         const target = (await listCoworkers(coworkersDir)).find((coworker) => coworker.slug === args.to || coworker.name.toLowerCase() === String(args.to).toLowerCase());
@@ -1480,14 +1600,17 @@ async function listPreparedCoworkers() {
 async function ensureCoordinatorWorkspace() {
   await ensurePlatformServer();
   const coordinator = await ensureCoordinatorHome(coworkersDir);
+  await installProgressPlugin(coordinator);
   if (coordinator.workspaceId) {
     await warmCoworkerWorkspace(coordinator);
+    progressCoordinator = coordinator;
     return coordinator;
   }
   const workspaceId = await registerCoworkerWorkspace(coordinator);
   const updated = await updateCoordinator(coworkersDir, { workspaceId });
   if (!serverHandle?.managedOpencode) await restartPlatformServer();
   await warmCoworkerWorkspace(updated);
+  progressCoordinator = updated;
   return updated;
 }
 
@@ -1931,6 +2054,14 @@ function shortDate(at) {
 const installTemplates = createTemplateInstaller(coworkersDir, addCoworker);
 
 const commands = {
+  "browser.bind": (input) => browserControl.bind(input),
+  "browser.detach": (input) => browserControl.detach(input),
+  "browser.read": (input) => browserControl.read(input),
+  "browser.command": (input) => browserControl.command(input),
+  "computer.snapshot": (input) => computerControl.snapshot(input),
+  "computer.configure": (input) => computerControl.configure(input),
+  "computer.stop": (input) => computerControl.stop(input),
+  "computer.setup": (input) => computerControl.setup(input),
   "collaboration.receipts": async (scope) => collaboration.receipts(scope),
   "collaboration.cancel": async ({ id }) => { await collaboration.cancel(id); return { ok: true }; },
   "collaboration.retry": async ({ id }) => { await collaboration.retry(id); return { ok: true }; },
@@ -1944,9 +2075,13 @@ const commands = {
   "turns.send": async ({ slug, threadId, prompt, messageId, model, retry, retryByPerson, retryLabel, kind }) => {
     const owner = await privateOwner(slug, threadId, kind === "assignment" ? "assignment" : "private");
     const entry = await collaboration.submit({ owner, prompt, messageId, model, retry, retryByPerson: retryByPerson === true, retryLabel, track: true });
-    return collaboration.acceptance(entry.id);
+    return { ...await collaboration.acceptance(entry.id), prompt: entry.prompt };
   },
-  "turns.cancel": async ({ slug, threadId, messageId }) => { await collaboration.cancelThread(slug, threadId, messageId); return { ok: true }; },
+  "turns.cancel": async ({ slug, threadId, messageId }) => {
+    if (typeof messageId !== "string" || !messageId.trim()) throw new Error("Stopping a turn requires its exact message ID. Use Computer Stop to revoke the whole discussion.");
+    await collaboration.cancelThread(slug, threadId, messageId);
+    return { ok: true };
+  },
   "templates.sync": async ({ userEmail, automatic = false, installIds = [] }) => {
     const session = denSession;
     if (!session) throw new Error("Sign in to OpenWork to get your team's coworkers.");
@@ -2061,6 +2196,7 @@ const commands = {
     // Deregister the workspace first so the registry never points at a
     // directory that is about to disappear. Best effort: a failed
     // deregistration must not leave the coworker half-retired in the UI.
+    if (!await computerControl.revoke({ slug })) throw new Error(COMPUTER_STOP_GUIDANCE);
     const coworker = await getCoworker(coworkersDir, slug).catch(() => null);
     if (coworker?.workspaceId) {
       const handle = await ensurePlatformServer();
@@ -2096,8 +2232,14 @@ const commands = {
   // Group chats: several coworkers in one conversation. Metadata and the timeline
   // live under the coworkers home beside the coworker folders.
   "groups.list": async () => listGroups(coworkersDir),
+  "groups.documents.list": ({ id }) => groupDocuments.list(id),
+  "groups.documents.read": ({ id, documentId }) => groupDocuments.read(id, documentId),
+  "groups.documents.save": ({ id, input }) => groupDocuments.save(id, input),
+  "groups.documents.revisions": ({ id, documentId }) => groupDocuments.revisions(id, documentId),
+  "groups.documents.restore": ({ id, documentId, revision, expectedRevision }) => groupDocuments.restore(id, documentId, revision, expectedRevision),
   "groups.submit": async ({ id, ...input }) => groupExecution.submit(id, input),
   "groups.status": async ({ id }) => groupExecution.status(id),
+  "groups.interactions.reply": async (input) => { await groupExecution.replyInteraction(input); return { ok: true }; },
   "groups.activity": async ({ id }) => {
     // Read delivered bubbles first. An execution behind any of these is already terminal,
     // so the later running-only projection cannot return the same reply as a live bubble.
@@ -2253,9 +2395,14 @@ const commands = {
   "allHands.prepare": async () => prepareAllHands(coworkersDir, await listCoworkers(coworkersDir)),
   "allHands.claim": async () => claimAllHands(coworkersDir),
   "settings.get": async () => readSettings(settingsPath),
+  "settings.progressModels": async () => {
+    const transport = await readyProgressTransport().catch(() => null);
+    return (transport?.models ?? []).map(({ id, label, cost }) => ({ id, label, cost }));
+  },
   "settings.update": async (patch) => {
     const next = await updateSettings(settingsPath, patch);
-    void drainLocalRunQueue();
+    progressSummaries.configure(next);
+    if (patch?.maxParallelLocalRuns !== undefined) void drainLocalRunQueue();
     return next;
   },
   "shell.openExternal": async ({ url }) => {
@@ -2304,6 +2451,9 @@ function registerIpc() {
       return { ok: false, error: "Open Coworker commands are only available to the main app frame." };
     }
     const command = typeof request?.command === "string" ? request.command : "";
+    if ((command.startsWith("computer.") || command.startsWith("browser.") || command.startsWith("groups.documents.")) && !trustedComputerSender(event, mainWindow?.webContents, rendererUrl())) {
+      return { ok: false, error: "Native controls require the trusted Open Coworker window and renderer URL." };
+    }
     const handler = commands[command];
     if (!handler) {
       return { ok: false, error: `Unknown Open Coworker command: ${command}` };
@@ -2335,8 +2485,13 @@ function rendererUrl() {
 }
 
 async function createMainWindow() {
+  const initialMaterial = windowMaterial(nativeTheme);
   const macWindowChrome = process.platform === "darwin"
     ? {
+        // Match the appearance binding before Chromium creates its layers,
+        // rather than switching an initially opaque backing to vibrancy later.
+        backgroundColor: initialMaterial === "vibrancy" ? "#00000000" : "#090c12",
+        vibrancy: initialMaterial === "vibrancy" ? "under-window" : undefined,
         hasShadow: true,
         titleBarStyle: "hiddenInset",
         trafficLightPosition: { x: 18, y: 18 },
@@ -2369,11 +2524,13 @@ async function createMainWindow() {
   });
   // A reload replaces the renderer; its deep-link listener must re-announce.
   window.webContents.on("did-start-navigation", (_event, _url, _isInPlace, isMainFrame) => {
-    if (isMainFrame) deepLinkListenerReady = false;
+    if (isMainFrame) { deepLinkListenerReady = false; browserControl.hideWindow(); }
   });
+  window.on("close", () => browserControl.hideWindow());
   window.on("closed", () => {
     if (mainWindow === window) mainWindow = null;
     deepLinkListenerReady = false;
+    if (process.platform !== "darwin") app.quit();
   });
   mainWindow = window;
   await window.loadURL(rendererUrl());
@@ -2381,7 +2538,7 @@ async function createMainWindow() {
 }
 
 async function focusMainWindow() {
-  const window = mainWindow ?? BrowserWindow.getAllWindows()[0] ?? await createMainWindow();
+  const window = mainWindow ?? await createMainWindow();
   if (window.isMinimized()) window.restore();
   window.show();
   window.focus();
@@ -2412,14 +2569,20 @@ if (!singleInstanceLock) {
     installApplicationMenu();
     registerIpc();
     // Start the platform in the background; the renderer gates on runtime.info.
-    void ensurePlatformServer().then(async () => { await groupExecution.start(); await collaboration.start(); }).catch((error) => {
+    void ensurePlatformServer().then(async () => {
+      await groupExecution.start();
+      await collaboration.start();
+      progressSummaries.start();
+      // Ordinary initialization, never triggered by a progress note or activity read.
+      void ensureCoordinatorWorkspace().catch(() => {});
+    }).catch((error) => {
       engineError = error instanceof Error ? error.message : String(error);
     });
     startLocalResponsibilitiesScheduler();
     await createMainWindow();
     queueDeepLinks(forwardedDeepLinks(process.argv));
     app.on("activate", () => {
-      if (BrowserWindow.getAllWindows().length === 0) void createMainWindow();
+      if (!mainWindow) void createMainWindow();
     });
   });
 
@@ -2427,22 +2590,38 @@ if (!singleInstanceLock) {
     if (process.platform !== "darwin") app.quit();
   });
 
+  let quitting = false;
+  let quitReady = false;
   app.on("before-quit", (event) => {
-    groupExecution.stop();
-    void collaboration.stop();
-    if (localResponsibilitiesTimer) {
-      clearInterval(localResponsibilitiesTimer);
-      localResponsibilitiesTimer = null;
-    }
-    if (toolsServer) {
-      const tools = toolsServer;
-      toolsServer = null;
-      void tools.stop().catch(() => undefined);
-    }
-    if (!serverHandle) return;
+    if (quitReady) return;
     event.preventDefault();
-    const handle = serverHandle;
-    serverHandle = null;
-    void handle.stop().catch(() => undefined).finally(() => app.quit());
+    if (quitting) return;
+    quitting = true;
+    void (async () => {
+      const stopped = await computerControl.reset(true);
+      if (!stopped.confirmed) {
+        const options = { type: "warning", title: "Computer control may still be active", message: COMPUTER_STOP_GUIDANCE,
+          detail: "Quitting cannot confirm that the selected computer released this session.", buttons: ["Keep Open", "Quit Anyway"], defaultId: 0, cancelId: 0 };
+        const choice = mainWindow ? await dialog.showMessageBox(mainWindow, options) : await dialog.showMessageBox(options);
+        if (choice.response !== 1) return;
+      }
+      progressSummaries.stop();
+      browserControl.destroy();
+      groupExecution.stop();
+      if (localResponsibilitiesTimer) {
+        clearInterval(localResponsibilitiesTimer);
+        localResponsibilitiesTimer = null;
+      }
+      await collaboration.stop();
+      if (toolsServer) await toolsServer.stop().catch(() => undefined);
+      toolsServer = null;
+      if (serverHandle) await serverHandle.stop().catch(() => undefined);
+      serverHandle = null;
+      quitReady = true;
+      app.quit();
+    })().catch(async () => {
+      await dialog.showMessageBox({ type: "error", title: "Shutdown needs attention", message: "Open Coworker could not finish stopping.", detail: COMPUTER_STOP_GUIDANCE, buttons: ["Keep Open"] })
+        .catch(() => console.warn(COMPUTER_STOP_GUIDANCE));
+    }).finally(() => { quitting = false; });
   });
 }

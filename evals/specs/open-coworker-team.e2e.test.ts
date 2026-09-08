@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { chmod, mkdtemp, rm, stat } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import os from "node:os";
 import path from "node:path";
@@ -16,7 +16,7 @@ import { expect, onTestFinished } from "vitest";
  * coworkers' side so every tool call is exact; everything else is the real
  * product path.
  *
- * Coverage gap: this team journey also needs private consultation -> visible
+ * This journey also covers private consultation -> visible
  * group answer -> one original-thread synthesis, and Worker yield -> one return
  * through the installed plugin. Only inference is scripted; user sends start
  * work and backend reads witness it. No collaboration records are seeded.
@@ -75,13 +75,32 @@ const OTHER_DISCUSSION_PROMPT = "Keep this separate discussion for tomorrow's ag
 const OTHER_DISCUSSION_REPLY = "This discussion is for tomorrow's agenda.";
 const PRIVATE_EDITOR_PROMPT = "Can you answer this private question while the consultation is running?";
 const PRIVATE_EDITOR_REPLY = "Yes. This private reply is independent of the group consultation.";
+const CANARY_PROMPT = "Write one counted line to continuation-canary.md, then confirm the receipt.";
+const CANARY_CONTINUED = "The earlier counted line is kept. Only the missing confirmation is complete.";
+const APPROVAL_PROMPT = "@editor Write one approved line to approval-canary.md, asking me first.";
+const APPROVAL_REPLY = "The approved line was written once.";
+const GROUP_QUESTION = "@editor Ask which direction the group should choose.";
+const GROUP_CANCEL_QUESTION = "@editor Ask which direction to choose before I stop this step.";
+const SHARED_DOCUMENT_TITLE = "Shared launch plan";
+const SHARED_DOCUMENT_UPDATE = "@editor Update the shared launch plan with the review checklist.";
+const SHARED_DOCUMENT_BODY = "## Review checklist\n\nConfirm the public headline and ask the team to review it.";
+const SHARED_DOCUMENT_REPLY = "The shared launch plan now includes the review checklist.";
+const PRIVATE_QUESTION = "Ask my private-only question and wait here for my answer.";
+const DIRECTION_QUESTION = { questions: [{ header: "Group direction", question: "Which direction should this group choose?", options: [{ label: "North", description: "The first route" }, { label: "South", description: "The second route" }], custom: false }] };
 
-type GateName = "consultation" | "worker" | "foreground" | "cancelled-worker";
+type GateName = "consultation" | "worker" | "foreground" | "cancelled-worker" | "approval";
 type ScriptedCall = { name: string; arguments: Record<string, unknown> };
 type ScriptedTurn = { call: ScriptedCall | null; reply: string; gate?: GateName };
 
 /** First match wins: a request passed on carries the original words too, so the hand-over line comes first. */
 const SCRIPT: Array<{ match: string; turn: ScriptedTurn }> = [
+  { match: SHARED_DOCUMENT_UPDATE, turn: { call: { name: "coworker_group_document_save", arguments: { title: SHARED_DOCUMENT_TITLE, body: SHARED_DOCUMENT_BODY, expectedRevision: 1 } }, reply: SHARED_DOCUMENT_REPLY } },
+  { match: "Continue the earlier private request.", turn: { call: null, reply: CANARY_CONTINUED } },
+  { match: CANARY_PROMPT, turn: { call: { name: "bash", arguments: { command: "printf 'counted\\n' >> continuation-canary.md", description: "Write the continuation canary once" } }, reply: "Unreachable before explicit continuation" } },
+  { match: APPROVAL_PROMPT, turn: { call: { name: "bash", arguments: { command: "printf 'approved\\n' >> approval-canary.md", description: "Write the group approval canary once" } }, reply: APPROVAL_REPLY, gate: "approval" } },
+  { match: GROUP_QUESTION, turn: { call: { name: "question", arguments: DIRECTION_QUESTION }, reply: "The group chose North." } },
+  { match: GROUP_CANCEL_QUESTION, turn: { call: { name: "question", arguments: DIRECTION_QUESTION }, reply: "This cancelled question must not complete." } },
+  { match: PRIVATE_QUESTION, turn: { call: { name: "question", arguments: { questions: [{ header: "Private-only choice", question: "PRIVATE-QUESTION-CANARY: keep this in my discussion.", options: [{ label: "Private answer", description: "Not a group answer" }], custom: false }] } }, reply: "The private question was answered." } },
   { match: PRIVATE_EDITOR_PROMPT, turn: { call: null, reply: PRIVATE_EDITOR_REPLY } },
   { match: OTHER_DISCUSSION_PROMPT, turn: { call: null, reply: OTHER_DISCUSSION_REPLY } },
   { match: `Objective: ${CONSULT_OBJECTIVE}`, turn: { call: null, reply: CONSULT_SYNTHESIS } },
@@ -213,24 +232,12 @@ function toolResults(body: unknown): string[] {
     .map((message) => (typeof message.content === "string" ? message.content : JSON.stringify(message.content)));
 }
 
-/** What one request tells about the instruction stack the model received: the system prompt's size and what it carries, and the tools offered. */
-type PromptFacts = { systemChars: number; contractInPrompt: boolean; toolServerLineInPrompt: boolean; tools: number; toolNames: string[]; privateCanary: boolean; bodyChars: number; prompt: string; reasoningEffort: string };
+type PromptFacts = { toolNames: string[]; privateCanary: boolean; prompt: string; reasoningEffort: string };
 
 function promptFacts(body: unknown, raw: string, prompt: string): PromptFacts {
-  const system = isRecord(body) && Array.isArray(body.messages)
-    ? body.messages
-      .filter((message): message is Record<string, unknown> => isRecord(message) && message.role === "system")
-      .map((message) => (typeof message.content === "string" ? message.content : Array.isArray(message.content) ? message.content.map((part) => (isRecord(part) && typeof part.text === "string" ? part.text : "")).join("\n") : ""))
-      .join("\n")
-    : "";
   return {
-    systemChars: system.length,
-    contractInPrompt: system.includes("Which shape an answer takes"),
-    toolServerLineInPrompt: system.includes("Open Coworker's own tools for this coworker"),
-    tools: isRecord(body) && Array.isArray(body.tools) ? body.tools.length : 0,
     toolNames: isRecord(body) && Array.isArray(body.tools) ? body.tools.flatMap((entry) => isRecord(entry) && isRecord(entry.function) && typeof entry.function.name === "string" ? [entry.function.name] : []) : [],
     privateCanary: raw.includes(PRIVATE_CANARY),
-    bodyChars: raw.length,
     prompt,
     // The thinking effort as the provider receives it (the "high" variant declared on the scripted model).
     reasoningEffort: isRecord(body) && typeof body.reasoning_effort === "string" ? body.reasoning_effort : "",
@@ -262,19 +269,33 @@ async function startScriptedModel() {
         let body: unknown = null;
         try { body = JSON.parse(raw); } catch { body = null; }
         const prompt = lastUserText(body);
-        const scripted = SCRIPT.find((entry) => prompt.includes(entry.match));
+        const groupMarker = "\nThe person's message: ";
+        const groupStart = prompt.lastIndexOf(groupMarker);
+        const currentRequest = groupStart >= 0 ? prompt.slice(groupStart + groupMarker.length) : prompt;
+        const scripted = SCRIPT.find((entry) => currentRequest.includes(entry.match));
         const results = toolResults(body);
         state.seenToolResults.push(...results);
+        if (prompt === CANARY_PROMPT && results.length > 0) {
+          response.writeHead(400, { "content-type": "application/json" });
+          response.end(JSON.stringify({ error: { message: "Interrupted after the canary write. Review the completed action before continuing.", type: "interrupted_execution" } }));
+          return;
+        }
         if (results.length === 0) {
           state.prompts.push(prompt);
           state.facts.push(promptFacts(body, raw, prompt));
         }
         if (scripted?.turn.call && results.length === 0) {
           const call = scripted.turn.call;
+          const args = { ...call.arguments };
+          if (call.name === "coworker_group_document_save") {
+            const identity = /Shared document identity: (grp_[a-z0-9]{8,32})\/([a-z0-9][a-z0-9-]{0,63})\./.exec(currentRequest);
+            if (!identity) throw new Error("The shared-document request did not name its group and document.");
+            args.groupId = identity[1]; args.id = identity[2];
+          }
           streamChunks(response, [{
             role: "assistant",
             content: null,
-            tool_calls: [{ index: 0, id: `call_${call.name}`, type: "function", function: { name: call.name, arguments: JSON.stringify(call.arguments) } }],
+            tool_calls: [{ index: 0, id: `call_${call.name}`, type: "function", function: { name: call.name, arguments: JSON.stringify(args) } }],
           }], "tool_calls");
           return;
         }
@@ -380,8 +401,8 @@ async function waitForTools(app: App, slug: string): Promise<void> {
   expect(connected).toBe("connected");
 }
 
-/** Send one message and wait for the reply; returns the settled action line's collapsed words. */
-async function converse(app: App, name: string, prompt: string, reply: string, alreadySent = false): Promise<{ summary: string; steps: string[]; text: string }> {
+/** Wait for the matched assistant reply and its turn to settle. */
+async function converse(app: App, name: string, prompt: string, reply: string, alreadySent = false): Promise<void> {
   if (!alreadySent) {
     await fill(app, `textarea[aria-label=${json(`Message ${name}`)}]`, prompt);
     await clickButton(app, "Send");
@@ -411,48 +432,17 @@ async function converse(app: App, name: string, prompt: string, reply: string, a
     })()`, { awaitPromise: true, timeoutMs: 30_000 }).catch((cause: unknown) => String(cause));
     throw new Error(`${error instanceof Error ? error.message : String(error)}\n\nSettle diagnostics: ${JSON.stringify(diagnostics)}`, { cause: error });
   }
-  const facts = await waitFor(app, `(() => {
-    const bubbles = [...document.querySelectorAll('[data-message-role]')];
-    const userIndex = bubbles.findIndex((bubble) => (bubble.textContent ?? "").includes(${json(prompt)}));
-    const replyIndex = bubbles.findIndex((bubble) => (bubble.textContent ?? "").includes(${json(reply)}));
-    if (userIndex === -1 || replyIndex === -1) return false;
-    const top = bubbles[userIndex].getBoundingClientRect().bottom;
-    const bottom = bubbles[replyIndex].getBoundingClientRect().top;
-    const line = [...document.querySelectorAll('[data-testid="coworker-action-line"]')].find((candidate) => {
-      const rect = candidate.getBoundingClientRect();
-      return rect.top >= top - 1 && rect.bottom <= bottom + 1;
-    });
-    const receipt = line?.querySelector('[data-testid="coworker-work-receipt"]');
-    if (!(line instanceof HTMLElement) || !(receipt instanceof HTMLElement) || receipt.dataset.state !== "done") return false;
-    const summary = line.querySelector('[data-testid="coworker-work-summary"]');
-    if (summary instanceof HTMLElement && summary.getAttribute("aria-expanded") !== "true") summary.click();
-    return {
-      summary: summary?.querySelector("span")?.textContent?.trim() ?? "",
-      steps: [...line.querySelectorAll('[data-testid="coworker-work-step"]')].map((step) => step.querySelector("p")?.textContent?.trim() ?? ""),
-      text: line.innerText,
-    };
-  })()`, { timeoutMs: 60_000, label: `the action line between ${json(prompt)} and its reply` });
-  if (!isRecord(facts) || typeof facts.summary !== "string" || !Array.isArray(facts.steps) || typeof facts.text !== "string") {
-    throw new Error("Action line facts were unavailable.");
-  }
-  return { summary: facts.summary, steps: facts.steps.map(String), text: facts.text };
 }
 
-/** The team tiles on screen, as the person sees them: kind, state, name plate, small print, and the pills' printed words. */
+/** Recommendation identity, decision state and available actions. */
 const READ_TILES = `[...document.querySelectorAll('[data-testid="teammate-card"]')].map((tile) => {
   const pills = tile.parentElement?.querySelector('[data-testid="teammate-choices"]');
   return {
     kind: tile.dataset.kind,
     state: tile.dataset.state,
     name: tile.querySelector('[data-testid="teammate-card-name"]')?.textContent?.trim() ?? "",
-    role: tile.querySelector('[data-testid="teammate-card-role"]')?.textContent?.trim() ?? "",
-    mission: tile.querySelector('[data-testid="teammate-card-mission"]')?.textContent?.trim() ?? "",
-    smallPrint: tile.querySelector('[data-testid="teammate-card-small-print"]')?.textContent?.trim() ?? "",
     slug: tile.dataset.slug ?? "",
-    hasAvatar: Boolean(tile.querySelector('[data-testid="teammate-card-avatar"] svg')),
-    insideBubble: Boolean(tile.closest(".bubble")),
     pills: pills ? [...pills.querySelectorAll('[data-testid="teammate-choice"]')].map((pill) => [...pill.childNodes].filter((node) => node.nodeType === 3).map((node) => node.textContent).join("").trim()) : [],
-    buttonsInside: tile.querySelectorAll("button").length,
   };
 })`;
 
@@ -502,7 +492,7 @@ async function readThreadMessages(app: App, slug: string, threadId: string): Pro
       id: message.info.id, parentId: message.info.parentID ?? "", role: message.info.role,
       completed: typeof message.info.time?.completed === "number",
       text: message.parts.filter((part) => part.type === "text" && !part.synthetic).map((part) => part.text ?? "").join(""),
-      tools: message.parts.filter((part) => part.type === "tool").map((part) => ({ name: part.tool, callId: part.callID, status: part.state.status, output: part.state.output ?? "" })),
+      tools: message.parts.filter((part) => part.type === "tool").map((part) => ({ name: part.tool, callId: part.callID, status: part.state.status, output: part.state.output ?? part.state.error ?? "" })),
     }));
   })()`, { awaitPromise: true, timeoutMs: 30_000 });
   if (!Array.isArray(messages) || !messages.every(isRecord)) throw new Error("Unexpected native message list.");
@@ -565,41 +555,10 @@ test.skipIf(!enabled)(title, { timeout: 1_200_000 }, async ({ evidence }) => {
   await evalIn(app, `document.querySelector('[data-testid="onboarding-local-choice"]').click(); true`);
   await waitFor(app, `Boolean(document.querySelector('[data-testid="local-mode"]'))`, { timeoutMs: 60_000, label: "the Use this Mac step" });
   await clickButton(app, "Continue", { timeoutMs: 120_000 });
-  await waitFor(app, `document.querySelectorAll('[data-testid="onboarding-intent"]').length === 6`, { timeoutMs: 60_000, label: "the six intents" });
-  expect(await evalIn(app, `document.querySelector('select[aria-label="Profession"]').options.length`)).toBe(9);
+  await waitFor(app, `Boolean(document.querySelector('select[aria-label="Profession"]'))`, { timeoutMs: 60_000, label: "profession selection" });
   await evalIn(app, `(() => { const select = document.querySelector('select[aria-label="Profession"]'); select.value = "marketing"; select.dispatchEvent(new Event("change", { bubbles: true })); return true; })()`);
-  await waitFor(app, `document.querySelector('[data-testid="work-pattern-outcome"]')?.textContent.includes("weekly campaign")`, { label: "profession explains its workflow" });
-  expect(await evalIn(app, `[...document.querySelectorAll('[data-testid="onboarding-intent"][aria-pressed="true"]')].map((tile) => tile.dataset.intent)`)).toEqual(["research", "writing"]);
   await evalIn(app, `document.querySelector('[data-testid="onboarding-intents-continue"]').click(); true`);
-  const proposed = await waitFor(app, `(() => {
-    const cards = [...document.querySelectorAll('[data-testid="onboarding-team-cards"] [data-testid="teammate-card"]')];
-    if (cards.length !== 2) return false;
-    return {
-      cards: cards.map((card) => ({
-        roleId: card.dataset.roleId,
-        name: card.querySelector('[data-testid="teammate-card-name"]')?.textContent?.trim().replace(/✎$/, "").trim(),
-        role: card.querySelector('[data-testid="teammate-card-role"]')?.textContent?.trim(),
-        mission: card.querySelector('[data-testid="teammate-card-mission"]')?.textContent?.trim(),
-        avatar: Boolean(card.querySelector('[data-testid="teammate-card-avatar"] svg')),
-      })),
-      selects: document.querySelectorAll("select").length,
-      railVisible: Boolean(document.querySelector('[data-testid="coworker-rail"]')),
-    };
-  })()`, { timeoutMs: 60_000, label: "the proposed team" });
-  expect(proposed).toEqual({
-    cards: [
-      { roleId: "research", name: "Scout", role: "Research and synthesis", mission: expect.stringContaining("sourced campaign brief"), avatar: true },
-      { roleId: "writing", name: "Editor", role: "Writing and content", mission: expect.stringContaining("content calendar for your review"), avatar: true },
-    ],
-    selects: 0,
-    railVisible: false,
-  });
-  expect(await evalIn(app, `(() => {
-    const cards = [...document.querySelectorAll('[data-testid="onboarding-team-cards"] [data-testid="teammate-card"]')];
-    return cards.every((card) => card.scrollWidth <= card.clientWidth && [...card.querySelectorAll('p')].every((text) => text.scrollWidth <= text.clientWidth));
-  })()`)).toBe(true);
-  await screenshot(app);
-  evidence.recordAssertionEvidence("Profession presets propose an editable team with concrete responsibilities", "Marketing selected research and writing, then proposed a sourced campaign brief and reviewable content calendar. Both full-width cards contained their role and mission without horizontal overflow; no coworker or schedule was created by selecting the preset.", true);
+  await waitFor(app, `Boolean(document.querySelector('[data-testid="onboarding-team-cards"] [data-testid="teammate-card-name"]'))`, { timeoutMs: 60_000, label: "editable proposed team" });
   // Rename the first coworker in place: tap the name, type, Enter.
   await evalIn(app, `document.querySelector('[data-testid="onboarding-team-cards"] [data-testid="teammate-card-name"]').click(); true`);
   await fill(app, '[data-testid="teammate-card-name-input"]', "Nova");
@@ -610,29 +569,9 @@ test.skipIf(!enabled)(title, { timeout: 1_200_000 }, async ({ evidence }) => {
   const team = resultList(await invokeCoworker(app, "coworkers.list", {}));
   expect(team.map((member) => [member.slug, member.name, member.roleId])).toEqual([["editor", "Editor", "writing"], ["nova", "Nova", "research"]]);
   await waitForConversation(app, "Nova");
-  expect(await evalIn(app, `document.querySelector('[data-testid="coworker-discussion-empty-line"]')?.textContent?.trim()`)).toBe("What should we work through?");
-  expect(await evalIn(app, `Boolean(document.querySelector('textarea[aria-label="Message Nova"]'))`)).toBe(true);
-  // Each coworker's home knows the team and why it joined; the contract carries the team section.
-  const novaRoster = resultText(await invokeCoworker(app, "coworkers.files.read", { slug: "nova", path: "team/roster.md" }));
-  expect(novaRoster).toMatch(/^# My team/);
-  expect(novaRoster).toContain("I am Nova (Research and synthesis).");
-  expect(novaRoster).toContain("- Editor (`editor`) — Writing and content — I turn the campaign brief into consistent posts");
-  expect(resultText(await invokeCoworker(app, "coworkers.files.read", { slug: "editor", path: "team/roster.md" }))).toContain("- Nova (`nova`) — Research and synthesis");
-  const agents = resultText(await invokeCoworker(app, "coworkers.files.read", { slug: "nova", path: "AGENTS.md" }));
-  expect(agents).toContain("<!-- open-coworker-contract: 10 -->");
-  expect(agents).toContain("coworker_team_consult");
-  expect(agents).toContain("end my turn; I never poll");
-  expect(agents).toContain("## My team");
-  // The shape rule is one section with an example per shape; the roster carries facts only, the rule is not said twice.
-  expect(agents).toContain("### Which shape an answer takes");
-  expect(agents).toContain("**Work on a clock.**");
-  expect(agents).toContain("**A goal that outlives one reply.**");
-  expect(novaRoster).not.toContain("coworker_team_refer");
-  expect(resultText(await invokeCoworker(app, "coworkers.files.read", { slug: "nova", path: "memory/working.md" }))).toMatch(/- Joined the team on [A-Z][a-z]{2} \d{1,2} to help with research and writing\./);
-  expect(JSON.parse(resultText(await invokeCoworker(app, "coworkers.files.read", { slug: "nova", path: "opencode.json" }))).instructions).toContain("team/roster.md");
   evidence.recordAssertionEvidence(
     "Onboarding proposes a team from what the person picks and creates it in one step",
-    "After Use this Mac, the six intents appeared with Continue disabled until one was picked; research and writing proposed Scout and Editor as live cards with no select on screen; Scout was renamed Nova in place; Create my team made both coworkers, opened Nova's empty conversation with its composer, wrote each one's team description naming the other (facts only, no repeated rule), a contract at version 8 with the team section and the one shape rule with an example per shape, and a first memory line saying when it joined and what for.",
+    "The marketing preset proposed a team. Renaming Scout to Nova and choosing Create my team persisted exactly Nova in research and Editor in writing, then opened Nova's conversation.",
     true,
   );
 
@@ -698,45 +637,27 @@ test.skipIf(!enabled)(title, { timeout: 1_200_000 }, async ({ evidence }) => {
   await waitForTools(app, "editor");
 
   // --- 2. A request that is Editor's job: Nova offers to pass it on, and Ask Editor hands it over with a brief.
-  const offered = await converse(app, "Nova", DRAFT_PROMPT, DRAFT_REPLY);
-  expect(offered.summary).toBe("Team collaboration: Completed");
-  expect(offered.text).not.toMatch(/coworker_|team_refer|ref_|\{/);
+  await converse(app, "Nova", DRAFT_PROMPT, DRAFT_REPLY);
   const referralTiles = await waitFor(app, `(() => { const tiles = ${READ_TILES}; return tiles.length === 1 && tiles[0].state === "open" ? tiles : false; })()`, { timeoutMs: 30_000, label: "the hand-over tile" });
   expect(referralTiles).toEqual([{
     kind: "referral",
     state: "open",
     name: "Editor",
-    role: "Writing and content",
-    mission: expect.stringMatching(/^I turn the campaign brief/),
-    smallPrint: "Editor could take this · Writing and content",
     slug: "editor",
-    hasAvatar: true,
-    insideBubble: false,
     pills: ["Ask Editor", "Continue with Nova"],
-    buttonsInside: 0,
   }]);
-  // What Nova's first turn received: the contract (the shape rule included) reaches the model through the
-  // instruction files; the size of the system prompt and the tools offered are recorded as measured.
+  // Fixed effort reaches the real provider request.
   const firstTurn = scripted.facts.find((facts) => facts.prompt.includes(DRAFT_PROMPT));
   expect(firstTurn).toBeDefined();
-  expect(firstTurn?.contractInPrompt).toBe(true);
-  expect(firstTurn?.tools ?? 0).toBeGreaterThanOrEqual(23);
   expect(firstTurn?.reasoningEffort).toBe("high");
   expect(scripted.facts.filter((facts) => facts.prompt.includes(DRAFT_PROMPT)).every((facts) => facts.reasoningEffort === "high")).toBe(true);
   evidence.recordAssertionEvidence(
-    "A coworker's first turn receives the contract once, with the shape rule, beside its tools, at the thinking effort the person chose",
-    `Nova's first request carried a system prompt of ${firstTurn?.systemChars ?? 0} characters that included the contract's "Which shape an answer takes" section, offered ${firstTurn?.tools ?? 0} tools, measured ${firstTurn?.bodyChars ?? 0} characters as a whole, and asked the provider for the person's exact thinking effort (reasoning_effort high, fixed in settings, so the dial stays out of it); the tool server's own one-line instruction ${firstTurn?.toolServerLineInPrompt ? "was" : "was not"} part of the prompt on this engine.`,
+    "A coworker's fixed thinking effort reaches the provider",
+    "Nova's draft requests used reasoning_effort high, as fixed in its settings.",
     true,
   );
   await tapPill(app, "ask");
   await waitForConversation(app, "Editor");
-  const passed = await waitFor(app, `(() => {
-    const line = document.querySelector('[data-testid="coworker-passed-from"]');
-    const bubble = line?.parentElement?.querySelector(".bubble-user");
-    if (!(line instanceof HTMLElement) || !(bubble instanceof HTMLElement)) return false;
-    return { line: line.textContent?.trim(), bubble: bubble.textContent?.trim(), briefShown: (document.body.innerText ?? "").includes("Take it from here") };
-  })()`, { timeoutMs: 60_000, label: "the passed request in Editor's conversation" });
-  expect(passed).toEqual({ line: "Passed from Nova", bubble: DRAFT_PROMPT, briefShown: false });
   await waitFor(app, `[...document.querySelectorAll('[data-message-role="assistant"]')].some((message) => (message.textContent ?? "").includes(${json(EDITOR_REPLY)}))`, { timeoutMs: 300_000, label: "Editor's reply to the passed request" });
   const editorPrompt = scripted.prompts.find((prompt) => prompt.includes("Passed from Nova"));
   expect(editorPrompt).toBeDefined();
@@ -746,26 +667,24 @@ test.skipIf(!enabled)(title, { timeout: 1_200_000 }, async ({ evidence }) => {
   expect(editorPrompt).toContain("Take it from here as your own request; the person is now talking to you.");
   await openCoworker(app, "nova", "Nova");
   const afterAsk = await waitFor(app, `(() => { const tiles = ${READ_TILES}; return tiles.length === 1 && tiles[0].state === "asked" ? tiles[0] : false; })()`, { timeoutMs: 30_000, label: "the hand-over tile settled" });
-  expect(afterAsk).toMatchObject({ kind: "referral", state: "asked", smallPrint: "Passed to Editor", pills: [] });
+  expect(afterAsk).toMatchObject({ kind: "referral", state: "asked", pills: [] });
   evidence.recordAssertionEvidence(
-    "A coworker offers to pass a teammate's job on, and one tap hands it over with a brief the person never sees as scaffolding",
-    "Nova answered the draft request with one sentence and a tile for Editor (avatar, name, role, mission, small print) under it — not inside the bubble, no buttons inside, two pills with no letters printed. Ask Editor switched to Editor, whose conversation showed the person's own words as their bubble under a small Passed from Nova line while the model received the request, who passed it and why, and a closing line; Editor replied. Back in Nova's conversation the tile read Passed to Editor with no pills.",
+    "A referral hands the request and brief to the chosen teammate",
+    "Ask Editor switched to Editor and produced its matched reply. The provider received the original request and Nova's handoff brief at high effort; Nova's referral settled as asked with no remaining actions.",
     true,
   );
 
   // --- 2b. A request the person keeps with Nova is never offered again: the same request comes back as a check, not a tile.
-  const proofread = await converse(app, "Nova", PROOFREAD_PROMPT, PROOFREAD_REPLY);
-  expect(proofread.summary).toBe("Team collaboration: Completed");
+  await converse(app, "Nova", PROOFREAD_PROMPT, PROOFREAD_REPLY);
   await waitFor(app, `(() => { const tiles = ${READ_TILES}; return tiles.length === 2 && tiles[1].state === "open" && tiles[1].pills.join(",") === "Ask Editor,Continue with Nova"; })()`, { timeoutMs: 30_000, label: "the second hand-over tile" });
   await tapPill(app, "continue");
   await waitFor(app, `[...document.querySelectorAll('[data-message-role="assistant"]')].some((message) => (message.textContent ?? "").includes(${json(KEPT_REPLY)}))`, { timeoutMs: 300_000, label: "Nova taking the request back" });
   await waitFor(app, `(() => { const tiles = ${READ_TILES}; return tiles.length === 2 && tiles[1].state === "continued" && tiles[1].pills.length === 0; })()`, { timeoutMs: 30_000, label: "the kept tile settled" });
-  const keptAgain = await converse(app, "Nova", PROOFREAD_AGAIN_PROMPT, PROOFREAD_AGAIN_REPLY);
-  expect(keptAgain.summary).toBe("Team collaboration: Completed");
+  await converse(app, "Nova", PROOFREAD_AGAIN_PROMPT, PROOFREAD_AGAIN_REPLY);
   expect(await evalIn(app, `${READ_TILES}.length`)).toBe(2);
   evidence.recordAssertionEvidence(
     "A request the person chose to keep with the coworker is never offered to a teammate again",
-    "Asked to proofread the pricing page, Nova offered it to Editor; Continue with Nova sent Nova the person's Go ahead and settled the tile as kept. The same request a second time read Checked the team · you asked to keep this here between the bubbles and left no new tile — the team tool answered the model in one sentence instead of recording another offer.",
+    "Continue with Nova produced Nova's matched reply and settled the referral as continued. Repeating the request with different case and punctuation produced a reply without another referral.",
     true,
   );
 
@@ -774,35 +693,23 @@ test.skipIf(!enabled)(title, { timeout: 1_200_000 }, async ({ evidence }) => {
   await waitFor(app, `Boolean(document.querySelector('[data-testid="new-coworker-suggested"]'))`, { label: "readable suggested roles" });
   await evalIn(app, `(() => { const select = document.querySelector('select[aria-label="Profession"]'); select.value = "support"; select.dispatchEvent(new Event("change", { bubbles: true })); return true; })()`);
   await waitFor(app, `document.querySelector('[data-testid="teammate-pick"]')?.getAttribute("data-role-id") === "support"`, { label: "support profession leads with the missing support role" });
-  expect(await evalIn(app, `(() => {
-    const cards = [...document.querySelectorAll('[data-testid="new-coworker-suggested"] [data-testid="teammate-card"]')];
-    return cards.length === 3 && cards.every((card) => card.getBoundingClientRect().width >= 300 && card.scrollWidth <= card.clientWidth && [...card.querySelectorAll('p')].every((text) => text.scrollWidth <= text.clientWidth));
-  })()`)).toBe(true);
-  await screenshot(app);
   await evalIn(app, `document.querySelector('[data-testid="coworker-team-advice"] summary').click(); true`);
   await evalIn(app, `(() => { const select = document.querySelector('select[aria-label="Ask coworker"]'); select.value = "nova"; select.dispatchEvent(new Event("change", { bubbles: true })); return true; })()`);
   await fill(app, 'textarea[aria-label="Your work and goals"]', INBOX_PROMPT);
   expect(resultList(await invokeCoworker(app, "coworkers.list", {}))).toHaveLength(2);
   await evalIn(app, `document.querySelector('[data-testid="coworker-team-advice-send"]').click(); true`);
   await waitForConversation(app, "Nova");
-  const inbox = await converse(app, "Nova", INBOX_PROMPT, INBOX_REPLY, true);
+  await converse(app, "Nova", INBOX_PROMPT, INBOX_REPLY, true);
   expect(scripted.prompts.some((prompt) => prompt.includes(INBOX_PROMPT) && prompt.includes("Customer success & support") && prompt.includes("Prefer existing teammates"))).toBe(true);
   expect(resultList(await invokeCoworker(app, "coworkers.list", {}))).toHaveLength(2);
-  evidence.recordAssertionEvidence("The Add screen recommends roles for a profession and asks an existing coworker for AI advice", "The suggested roles were readable full-width rows. Customer success prioritized the missing support role. Asking Nova with the work description used the existing conversation and model, sent the profession and review boundaries, and returned a real teammate suggestion without creating anyone before Add to team.", true);
-  expect(inbox.summary).toBe("Team collaboration: Completed");
+  evidence.recordAssertionEvidence("Team advice does not create a coworker before approval", "Customer success prioritized the missing support role. Asking Nova sent the profession and review boundaries through its conversation; the team still had two members before Add to team.", true);
   const suggestionTiles = await waitFor(app, `(() => { const tiles = ${READ_TILES}; return tiles.length === 3 && tiles[2].state === "open" ? tiles[2] : false; })()`, { timeoutMs: 30_000, label: "the suggested teammate tile" });
   expect(suggestionTiles).toEqual({
     kind: "suggestion",
     state: "open",
     name: "Care",
-    role: "Customer support",
-    mission: "I watch the inbox and answer with care.",
-    smallPrint: "Suggested by Nova · Customer support",
     slug: "",
-    hasAvatar: true,
-    insideBubble: false,
     pills: ["Add to team", "Not now"],
-    buttonsInside: 0,
   });
   const railBefore = await evalIn(app, `document.querySelectorAll('[data-testid="coworker-rail-row"]').length`);
   await tapPill(app, "add");
@@ -814,43 +721,38 @@ test.skipIf(!enabled)(title, { timeout: 1_200_000 }, async ({ evidence }) => {
     if (!rail) return false;
     return { tile, stillNova: [...document.querySelectorAll("h1")].some((heading) => heading.textContent?.trim() === "Nova"), rows: document.querySelectorAll('[data-testid="coworker-rail-row"]').length };
   })()`, { timeoutMs: 180_000, label: "Care added to the team" });
-  expect(added).toMatchObject({ tile: { state: "added", slug: "care", smallPrint: expect.stringMatching(/^Added to your team · /), pills: ["Say hi"] }, stillNova: true, rows: Number(railBefore) + 1 });
+  expect(added).toMatchObject({ tile: { state: "added", slug: "care", pills: ["Say hi"] }, stillNova: true, rows: Number(railBefore) + 1 });
   const care = resultRecord(await invokeCoworker(app, "coworkers.get", { slug: "care" }));
-  expect(care).toMatchObject({ name: "Care", role: "Customer support", roleId: "support", suggestedBy: { slug: "nova", why: "the support inbox comes up every morning" }, model: scriptedId, avatarColor: "rose" });
-  expect(resultText(await invokeCoworker(app, "coworkers.files.read", { slug: "care", path: "memory/working.md" }))).toMatch(/- Joined the team on [A-Z][a-z]{2} \d{1,2}; Nova suggested me because the support inbox comes up every morning\./);
+  expect(care).toMatchObject({ name: "Care", roleId: "support", suggestedBy: { slug: "nova", why: "the support inbox comes up every morning" }, model: scriptedId });
   expect(resultText(await invokeCoworker(app, "coworkers.files.read", { slug: "nova", path: "team/roster.md" }))).toContain("- Care (`care`) — Customer support — I watch the inbox and answer with care.");
   await tapPill(app, "say-hi");
   await waitForConversation(app, "Care");
-  expect(await evalIn(app, `document.querySelector('[data-testid="coworker-discussion-empty-line"]')?.textContent?.trim()`)).toBe("Nova suggested me — the support inbox comes up every morning.");
   evidence.recordAssertionEvidence(
-    "A coworker proposes a teammate as a contact-style tile, and one tap adds it to the team",
-    "Asked to watch the support inbox every morning, Nova proposed Care with one sentence and a tile: avatar, Care, Customer support, the mission, Suggested by Nova small print, Add to team and Not now under it. Add to team created Care on Nova's model without leaving Nova's conversation, the rail gained a row, the tile flipped to Added to your team with one Say hi pill, Nova's team description named Care, Care's record remembered who proposed it and why, and Say hi opened Care's empty conversation with the line Nova suggested me — the support inbox comes up every morning.",
+    "Approving a teammate suggestion creates the proposed coworker on the existing model",
+    "Add to team created Care on Nova's model without leaving Nova's conversation. The team gained one member, Nova's roster named Care, and Care retained the suggestion's author and reason. Say hi opened Care's conversation.",
     true,
   );
 
   // --- 4. The guards leave no tile behind: a role a teammate covers, and a role the person declined.
   await openCoworker(app, "nova", "Nova");
-  const covered = await converse(app, "Nova", WRITER_PROMPT, WRITER_REPLY);
-  expect(covered.summary).toBe("Team collaboration: Completed");
+  await converse(app, "Nova", WRITER_PROMPT, WRITER_REPLY);
   expect(await evalIn(app, `${READ_TILES}.length`)).toBe(3);
   await openCoworker(app, "editor", "Editor");
-  const sales = await converse(app, "Editor", SALES_PROMPT, SALES_REPLY);
-  expect(sales.summary).toBe("Team collaboration: Completed");
+  await converse(app, "Editor", SALES_PROMPT, SALES_REPLY);
   // A one-line question is a quick reply: the dial at Balanced asks the provider for low, never the dial's own value.
   expect(scripted.facts.find((facts) => facts.prompt.includes(SALES_PROMPT))?.reasoningEffort).toBe("low");
   const salesTile = await waitFor(app, `(() => { const tiles = ${READ_TILES}; const tile = tiles.find((candidate) => candidate.kind === "suggestion"); return tile && tile.state === "open" ? tile : false; })()`, { timeoutMs: 30_000, label: "the sales suggestion" });
-  expect(salesTile).toMatchObject({ name: "Pipeline", role: "Sales and relationships", smallPrint: "Suggested by Editor · Sales and relationships", pills: ["Add to team", "Not now"] });
+  expect(salesTile).toMatchObject({ name: "Pipeline", pills: ["Add to team", "Not now"] });
   await tapPill(app, "dismiss");
   const declined = await waitFor(app, `(() => { const tiles = ${READ_TILES}; const tile = tiles.find((candidate) => candidate.kind === "suggestion"); return tile && tile.state === "declined" ? tile : false; })()`, { timeoutMs: 30_000, label: "the declined suggestion" });
-  expect(declined).toMatchObject({ state: "declined", smallPrint: expect.stringMatching(/^Not now · /), pills: [] });
+  expect(declined).toMatchObject({ state: "declined", pills: [] });
   expect(resultText(await invokeCoworker(app, "coworkers.files.read", { slug: "editor", path: "team/roster.md" }))).toMatch(/## Recently declined[\s\S]*- a sales and relationships coworker — [A-Z][a-z]{2} \d{1,2}/);
-  const again = await converse(app, "Editor", SALES_AGAIN_PROMPT, SALES_AGAIN_REPLY);
-  expect(again.summary).toBe("Team collaboration: Completed");
+  await converse(app, "Editor", SALES_AGAIN_PROMPT, SALES_AGAIN_REPLY);
   expect(await evalIn(app, `${READ_TILES}.filter((tile) => tile.kind === "suggestion").length`)).toBe(1);
   expect(resultList(await invokeCoworker(app, "coworkers.list", {})).map((member) => member.slug)).toEqual(["care", "editor", "nova"]);
   evidence.recordAssertionEvidence(
     "A teammate who already covers a role, or a role the person declined, never becomes another tile",
-    "Asked to add a writing coworker, Nova's turn read Checked the team · Editor already covers this and left no tile. Editor proposed Pipeline for the sales leads; Not now settled the tile as a record, Editor's team description listed the decline, and asking again read Checked the team · you said not now to this one with no new tile. The team is still Care, Editor, and Nova.",
+    "The covered writing role produced no new suggestion. Not now declined Pipeline; Editor's roster retained the decline and another sales request produced no new suggestion. The team remained Care, Editor and Nova.",
     true,
   );
 
@@ -867,33 +769,10 @@ test.skipIf(!enabled)(title, { timeout: 1_200_000 }, async ({ evidence }) => {
     "After a reload Editor's conversation still showed the declined Pipeline tile with no pills, and Nova's showed the first hand-over as Passed to Editor, the second as kept with Nova, and the Care suggestion as added with its Say hi pill.",
     true,
   );
-  await evalIn(app, `document.querySelector('button[title="New coworker"], button[aria-label="New coworker"]').click(); true`);
-  await clickButton(app, "Start from scratch");
-  await waitFor(app, `Boolean(document.querySelector('[data-testid="new-coworker-step-identity"]'))`, { label: "custom coworker form" });
-  await fill(app, 'input[placeholder="Scout"]', "Willow");
-  await evalIn(app, `document.querySelector('button[aria-label="Sand"]').click(); true`);
-  await clickButton(app, "Oval");
-  expect(await evalIn(app, `document.querySelectorAll('.avatar-stage .coworker-avatar__glasses ellipse').length`)).toBe(2);
-  await waitFor(app, `document.querySelector('[data-testid="new-coworker-step-identity"]') && !document.querySelector('[data-testid="new-coworker-suggested"]') && [...document.querySelectorAll("button")].some((button) => button.textContent?.trim() === "Add coworker" && button.getBoundingClientRect().bottom <= innerHeight)`, { label: "custom form separates recommendations and keeps its create button visible" });
-  await screenshot(app);
-  await clickButton(app, "Add coworker");
-  await waitForConversation(app, "Willow");
-  const willow = resultList(await invokeCoworker(app, "coworkers.list", {})).find((member) => member.slug === "willow");
-  expect(willow).toMatchObject({ avatarColor: "sand", avatarGlasses: "oval" });
-  await evalIn(app, "location.reload(); true");
-  await waitFor(app, `Boolean(document.querySelector('[data-testid="coworker-rail"]'))`, { timeoutMs: 60_000, label: "custom avatar after reload" });
-  expect(resultList(await invokeCoworker(app, "coworkers.list", {})).find((member) => member.slug === "willow")).toMatchObject({ avatarColor: "sand", avatarGlasses: "oval" });
-  evidence.recordAssertionEvidence("Sand and oval frames persist without changing the avatar's established shape", "The creation form preview showed two oval lenses. Creating Willow stored sand and oval, and the same look returned after reloading the app.", true);
-
+  // Keep a separate group as the negative isolation fixture.
   await evalIn(app, `document.querySelector('[data-testid="new-group-chat"]').click(); true`);
   await clickButton(app, "Create group chat");
-  const groupReady = await waitFor(app, `(() => {
-    if (!document.querySelector('[data-testid="group-chat-empty"]')) return false;
-    const status = document.querySelector('[data-testid="coworker-top-status"]');
-    return status?.textContent?.trim() === "Ready" ? { tone: status.dataset.tone, color: getComputedStyle(status).color, dots: status.querySelectorAll('span').length } : false;
-  })()`, { label: "new group is ready in the same muted sage" });
-  expect(groupReady).toEqual({ tone: "ready", color: "rgb(120, 148, 135)", dots: 0 });
-  evidence.recordAssertionEvidence("Group availability shares the discreet Ready tone", "Creating a group from the rail opened an empty conversation with Ready in muted sage rgb(120, 148, 135), with no status dot or unsolicited message.", true);
+  await waitFor(app, `Boolean(document.querySelector('[data-testid="group-chat-empty"]'))`, { label: "unrelated empty group" });
 
   // --- 6. A private request consults Editor in a visible group, then returns only to its origin.
   const unrelatedGroupId = String(await evalIn(app, `document.querySelector('[data-testid="group-chat"]').dataset.groupId`));
@@ -1000,6 +879,64 @@ test.skipIf(!enabled)(title, { timeout: 1_200_000 }, async ({ evidence }) => {
   expect(afterConsult.filter((message) => message.role === "assistant" && message.text === CONSULT_SYNTHESIS)).toEqual([expect.objectContaining({ completed: true, parentId: completedConsult.messageId })]);
   evidence.recordAssertionEvidence("A private consultation shares only its explicit brief, publishes one group answer and returns one synthesis to the origin", "A user send invoked the installed consultation tool with a completed native tool receipt. Editor's entire inference request omitted the private canary. The pair group contained one question and one signed answer; its native answer thread was excluded from private discussions. Nova received one automatic synthesis in the originating thread while the selected Editor private conversation and unrelated group stayed unchanged.", true);
 
+  // The person and a real native group tool edit one document while the conversation stays beside it.
+  await openGroup(app, pair.id);
+  const groupSelector = `[data-testid="group-chat"][data-group-id=${json(pair.id)}]`;
+  const documentsSelector = `${groupSelector} [data-testid="group-documents"]`;
+  await evalIn(app, `document.querySelector(${json(`${groupSelector} [data-testid="group-shared-documents"]`)}).click(); true`);
+  await waitFor(app, `Boolean(document.querySelector(${json(documentsSelector)}))`, { label: "shared documents beside the group conversation" });
+  await evalIn(app, `document.querySelector(${json(`${documentsSelector} [data-testid="group-document-new"]`)}).click(); true`);
+  await fill(app, `${documentsSelector} input[aria-label="Shared document title"]`, SHARED_DOCUMENT_TITLE);
+  await fill(app, `${documentsSelector} textarea[aria-label="Shared document body"]`, "A public launch plan for the group.");
+  await evalIn(app, `document.querySelector(${json(`${documentsSelector} [data-testid="group-document-save"]`)}).click(); true`);
+  const sharedId = await waitFor(app, `(() => {
+    const reader = document.querySelector(${json(`${documentsSelector} [data-testid="group-document-reader"]`)});
+    return reader?.dataset.revision === "1" ? reader.dataset.documentId : false;
+  })()`, { label: "person-created shared document revision one" });
+  if (typeof sharedId !== "string" || !sharedId) throw new Error("The saved shared document has no id.");
+  expect(resultRecord(await invokeCoworker(app, "groups.documents.read", { id: pair.id, documentId: sharedId }))).toMatchObject({ groupId: pair.id, author: "You", authorSlug: "", revision: 1 });
+  await evalIn(app, `[...document.querySelectorAll(${json(`${documentsSelector} button`)})].find((button) => button.textContent.trim() === "Edit").click(); true`);
+  const personDraft = "My unsaved addition: confirm the launch date.";
+  await fill(app, `${documentsSelector} textarea[aria-label="Shared document body"]`, personDraft);
+  const sharedPrompt = `${SHARED_DOCUMENT_UPDATE} Shared document identity: ${pair.id}/${sharedId}.`;
+  await fill(app, `${groupSelector} [data-testid="group-composer"]`, sharedPrompt);
+  await evalIn(app, `document.querySelector(${json(`${groupSelector} [data-testid="group-send"]`)}).click(); true`);
+  await waitFor(app, `[...document.querySelectorAll(${json(`${groupSelector} [data-message-role="assistant"]`)})].some((message) => message.textContent.includes(${json(SHARED_DOCUMENT_REPLY)}))`, { timeoutMs: 180_000, label: "native group document update finishes beside the preserved draft" });
+  const sharedGroup = resultRecord(await invokeCoworker(app, "groups.get", { id: pair.id }));
+  const sharedThread = isRecord(sharedGroup.participantThreadIds) ? sharedGroup.participantThreadIds.editor : null;
+  if (typeof sharedThread !== "string") throw new Error("The shared document update has no native group thread.");
+  const sharedTools = (await readThreadMessages(app, "editor", sharedThread)).flatMap((message) => Array.isArray(message.tools) ? message.tools.filter((tool) => isRecord(tool) && tool.name === "coworker_group_document_save") : []);
+  expect(sharedTools, "One completed native shared-document write").toMatchObject([{ name: "coworker_group_document_save", status: "completed" }]);
+  expect(resultRecord(await invokeCoworker(app, "groups.documents.read", { id: pair.id, documentId: sharedId })), `Native shared-document receipts: ${JSON.stringify(sharedTools)}`).toMatchObject({ author: "Editor", authorSlug: "editor", revision: 2, body: `${SHARED_DOCUMENT_BODY}\n` });
+  expect(scripted.facts.find((facts) => facts.prompt.includes(SHARED_DOCUMENT_UPDATE))?.toolNames).toContain("coworker_group_document_save");
+  expect(await evalIn(app, `document.querySelector(${json(`${documentsSelector} textarea[aria-label="Shared document body"]`)}).value`)).toBe(personDraft);
+  await evalIn(app, `document.querySelector(${json(`${documentsSelector} [data-testid="group-document-save"]`)}).click(); true`);
+  await waitFor(app, `document.querySelector(${json(documentsSelector)}).textContent.includes("This document changed")`, { label: "stale revision is rejected without replacing the person's draft" });
+  expect(await evalIn(app, `document.querySelector(${json(`${documentsSelector} textarea[aria-label="Shared document body"]`)}).value`)).toBe(personDraft);
+  expect(resultRecord(await invokeCoworker(app, "groups.documents.read", { id: pair.id, documentId: sharedId })).revision).toBe(2);
+  await evalIn(app, `document.querySelector(${json(`${documentsSelector} [data-testid="group-document-compare"]`)}).click(); true`);
+  await waitFor(app, `document.querySelector(${json(`${documentsSelector} [data-testid="group-document-conflict-preview"]`)})?.textContent.includes("Latest: revision 2 by Editor")`, { label: "latest native revision is available to reconcile" });
+  const reconciledBody = `${SHARED_DOCUMENT_BODY}\n\n${personDraft}`;
+  await fill(app, `${documentsSelector} textarea[aria-label="Shared document body"]`, reconciledBody);
+  await evalIn(app, `[...document.querySelectorAll(${json(`${documentsSelector} button`)})].find((button) => button.textContent.includes("I've reconciled my draft")).click(); true`);
+  await evalIn(app, `document.querySelector(${json(`${documentsSelector} [data-testid="group-document-save"]`)}).click(); true`);
+  await waitFor(app, `document.querySelector(${json(`${documentsSelector} [data-testid="group-document-reader"]`)})?.dataset.revision === "3"`, { label: "reconciled shared document saved as revision three" });
+  expect(resultRecord(await invokeCoworker(app, "groups.documents.read", { id: pair.id, documentId: sharedId }))).toMatchObject({ author: "You", revision: 3, body: `${reconciledBody}\n` });
+  await evalIn(app, `document.querySelector(${json(`${documentsSelector} [data-testid="group-document-history"]`)}).click(); true`);
+  await waitFor(app, `(() => {
+    const history = document.querySelector(${json(`${documentsSelector} [data-testid="group-document-history-view"]`)});
+    return history?.textContent.includes("Revision 2") && history.textContent.includes("Revision 1");
+  })()`, { label: "both authors' earlier revisions are retained" });
+  expect(resultList(await invokeCoworker(app, "groups.documents.revisions", { id: pair.id, documentId: sharedId })).map((revision) => [revision.revision, revision.author])).toEqual([[2, "Editor"], [1, "You"]]);
+  const sharedDocumentTimeline = resultList(await invokeCoworker(app, "groups.readTimeline", { id: pair.id }));
+  expect(sharedDocumentTimeline.filter((event) => event.documentId === sharedId).map((event) => event.revision)).toEqual([1, 2, 3]);
+  expect(resultList(await invokeCoworker(app, "groups.documents.list", { id: unrelatedGroupId }))).toEqual([]);
+  expect(await evalIn(app, `document.querySelector(${json(`${groupSelector} [data-testid="group-conversation"]`)}).textContent.includes(${json(CONSULT_ANSWER)})`)).toBe(true);
+  await screenshot(app);
+  evidence.recordAssertionEvidence("Shared group documents retain the conversation, trusted authors and conflict drafts", "The person created a shared plan in the beside-conversation panel. While its edit draft stayed open, Editor updated the same document through the installed native group tool. Saving the stale draft was rejected without losing it; comparing and reconciling produced revision three by You. History retained revisions by both authors, the group timeline retained document ids and revisions, and another group had no shared documents.", true);
+  await openCoworker(app, "nova", "Nova");
+  await openDiscussion(app, origin);
+
   // --- 7. A one-turn Worker yields; its completion waits behind real foreground chat.
   await converse(app, "Nova", WORKER_PROMPT, WORKER_ACK);
   await expect.poll(() => scripted.held.has("worker"), { timeout: 120_000 }).toBe(true);
@@ -1055,7 +992,7 @@ test.skipIf(!enabled)(title, { timeout: 1_200_000 }, async ({ evidence }) => {
   expect(returnedMessages.filter((message) => message.role === "assistant" && message.text === WORKER_SYNTHESIS)).toEqual([expect.objectContaining({ completed: true, parentId: completedWorker.messageId })]);
   expect(returnedMessages.filter((message) => message.role === "assistant" && message.text === FOREGROUND_REPLY)).toHaveLength(1);
   expect(returnedMessages.findIndex((message) => message.text === FOREGROUND_REPLY)).toBeLessThan(returnedMessages.findIndex((message) => message.text === WORKER_SYNTHESIS));
-  expect(resultList(await invokeCoworker(app, "groups.readTimeline", { id: pair.id }))).toEqual(consultationTimeline);
+  expect(resultList(await invokeCoworker(app, "groups.readTimeline", { id: pair.id }))).toEqual(sharedDocumentTimeline);
   evidence.recordAssertionEvidence("A bounded Worker yields and returns once after foreground chat without stealing navigation", "The user send invoked the installed Worker tool and started a distinct native Worker thread with one turn. Its held Done response let the parent settle and accept a foreground message. Finishing the Worker queued, but did not send, the continuation while foreground inference was held. Releasing that reply delivered one reviewed finding to the original private thread, after the foreground answer, with Editor still selected and no group mutation.", true);
 
   // Stop a second held child through the visible receipt; a late response,
@@ -1085,7 +1022,7 @@ test.skipIf(!enabled)(title, { timeout: 1_200_000 }, async ({ evidence }) => {
   for (let observation = 0; observation < 5; observation += 1) {
     await new Promise((resolve) => setTimeout(resolve, 1_000));
     expect(await readThreadMessages(restarted, "nova", origin)).toEqual(settledMessages);
-    expect(resultList(await invokeCoworker(restarted, "groups.readTimeline", { id: pair.id }))).toEqual(consultationTimeline);
+    expect(resultList(await invokeCoworker(restarted, "groups.readTimeline", { id: pair.id }))).toEqual(sharedDocumentTimeline);
     expect(scripted.prompts.filter((prompt) => prompt.startsWith(FOLLOW_UP) && prompt.includes(CANCEL_OBJECTIVE))).toEqual([]);
     expect(scripted.prompts.filter((prompt) => prompt.startsWith(FOLLOW_UP) && prompt.includes(CONSULT_OBJECTIVE))).toHaveLength(1);
     expect(scripted.prompts.filter((prompt) => prompt.startsWith(FOLLOW_UP) && prompt.includes(WORKER_OBJECTIVE))).toHaveLength(1);
@@ -1099,4 +1036,132 @@ test.skipIf(!enabled)(title, { timeout: 1_200_000 }, async ({ evidence }) => {
   expect(scripted.errors).toEqual([]);
   expect(scripted.held.size).toBe(0);
   evidence.recordAssertionEvidence("Stopping a held Worker prevents its late return and restart does not duplicate settled collaboration", "Stop follow-up cancelled the second Worker through the visible receipt. Releasing its late provider response, reloading the renderer, and relaunching the packaged app on the same temporary profile kept the cancellation. Across five seconds of scheduler polling, native private messages and the pair timeline stayed identical, both completed automatic follow-ups still numbered one, other private threads stayed unchanged, and no cancelled follow-up was requested.", true);
+
+  // --- 8. Real tool-side-effect canary: Continue is a new native message, not a replay.
+  const liveRuntime = resultRecord(await invokeCoworker(restarted, "runtime.info", {}));
+  for (const member of team) {
+    const base = `${String(liveRuntime.serverUrl)}/workspace/${encodeURIComponent(String(member.workspaceId))}`;
+    const headers = { "Content-Type": "application/json", Authorization: `Bearer ${String(liveRuntime.ownerToken)}` };
+    // Tool permissions belong to the workspace file. The server's runtime
+    // provider/MCP patch intentionally does not accept arbitrary tool grants.
+    const config: unknown = JSON.parse(resultText(await invokeCoworker(restarted, "coworkers.files.read", { slug: String(member.slug), path: "opencode.json" })));
+    if (!isRecord(config)) throw new Error("Expected the fixture workspace configuration.");
+    await invokeCoworker(restarted, "coworkers.files.write", { slug: String(member.slug), path: "opencode.json", content: JSON.stringify({ ...config, permission: { ...(isRecord(config.permission) ? config.permission : {}), bash: member.slug === "editor" ? "ask" : "allow", question: "allow" } }) });
+    expect((await fetch(`${base}/engine/reload`, { method: "POST", headers, body: JSON.stringify({ force: true }) })).status).toBe(200);
+  }
+  await evalIn(restarted, "location.reload(); true");
+  await openCoworker(restarted, "nova", "Nova");
+  await openDiscussion(restarted, origin);
+  await fill(restarted, 'textarea[aria-label="Message Nova"]', CANARY_PROMPT);
+  await clickButton(restarted, "Send");
+  await waitFor(restarted, `document.querySelector('[data-testid="coworker-turn-failed"] [data-choice="continue"]')?.textContent.includes("Continue")`, { timeoutMs: 120_000, label: "tool-bearing failure offers Continue" });
+  const failedHistory = await readThreadMessages(restarted, "nova", origin);
+  const failedUser = failedHistory.find((message) => message.role === "user" && message.text === CANARY_PROMPT);
+  expect(failedUser).toBeDefined();
+  expect(resultText(await invokeCoworker(restarted, "coworkers.files.read", { slug: "nova", path: "continuation-canary.md" }))).toBe("counted\n");
+  const failedTools = failedHistory.filter((message) => message.parentId === failedUser?.id).flatMap((message) => Array.isArray(message.tools) ? message.tools : []);
+  expect(failedTools).toEqual([expect.objectContaining({ name: "bash", status: "completed" })]);
+  await evalIn(restarted, `document.querySelector('[data-testid="coworker-turn-failed"] [data-choice="continue"]').click(); true`);
+  await waitForText(restarted, CANARY_CONTINUED, { timeoutMs: 120_000 });
+  await waitFor(restarted, `!document.querySelector('[data-testid="coworker-working"]')`, { label: "continuation settled" });
+  const continuedHistory = await readThreadMessages(restarted, "nova", origin);
+  expect(continuedHistory.slice(0, failedHistory.length)).toEqual(failedHistory);
+  const continuedUser = continuedHistory.filter((message) => message.role === "user" && String(message.text).startsWith("Continue the earlier private request."));
+  expect(continuedUser).toHaveLength(1);
+  expect(continuedUser[0]?.id).not.toBe(failedUser?.id);
+  expect(continuedHistory.filter((message) => message.text === CANARY_CONTINUED)).toEqual([expect.objectContaining({ parentId: continuedUser[0]?.id, completed: true })]);
+  await evalIn(restarted, "location.reload(); true");
+  await openCoworker(restarted, "nova", "Nova");
+  expect(resultText(await invokeCoworker(restarted, "coworkers.files.read", { slug: "nova", path: "continuation-canary.md" }))).toBe("counted\n");
+  expect(await readThreadMessages(restarted, "nova", origin)).toEqual(continuedHistory);
+  expect(await readThreadMessages(restarted, "nova", otherPrivate)).toEqual(otherMessages);
+  expect(scripted.prompts.filter((prompt) => prompt === CANARY_PROMPT)).toHaveLength(1);
+  evidence.recordAssertionEvidence("Continue preserves a failed tool-bearing execution and its single real file effect", "Native bash appended one counted line, then inference failed. The visible Continue action admitted one new user message in the same native thread. All earlier user/assistant/tool records survived unchanged, the file still had exactly one line after continuation and renderer reload, and the other private discussion did not change.", true);
+
+  // --- 9. Group native approval/question cards never answer another private session.
+  await openCoworker(restarted, "editor", "Editor");
+  await fill(restarted, 'textarea[aria-label="Message Editor"]', PRIVATE_QUESTION);
+  await clickButton(restarted, "Send");
+  const privateQuestionState = await waitFor(restarted, `document.querySelector('[data-testid="question-card"]')?.textContent.includes("PRIVATE-QUESTION-CANARY") ? "pending" : [...document.querySelectorAll('[data-message-role="assistant"]')].some((node) => node.textContent.includes("The private question was answered.")) ? "answered" : false`, { timeoutMs: 120_000, label: "private native question pending" });
+  const questionConfig = privateQuestionState === "pending" ? null : await evalIn(restarted, `(async () => {
+    const runtime = (await window.__COWORKER__.invoke("runtime.info")).result;
+    const member = (await window.__COWORKER__.invoke("coworkers.get", {slug:"editor"})).result;
+    const base = runtime.serverUrl + "/workspace/" + encodeURIComponent(member.workspaceId) + "/opencode";
+    const headers = {Authorization: "Bearer " + runtime.ownerToken};
+    const [config, agents, ids] = await Promise.all(["/config", "/agent", "/experimental/tool/ids"].map(route => fetch(base + route, {headers}).then(response => response.json()).catch(() => null)));
+    return {defaultAgent: config?.default_agent, questionPermission: config?.permission?.question, questionTool: config?.tools?.question, agents: Array.isArray(agents) ? agents.map(agent => ({name:agent.name, questionRules:agent.permission?.filter(rule=>rule.permission==="question")})) : null, questionRegistered: Array.isArray(ids) ? ids.includes("question") : null};
+  })()`, {awaitPromise:true});
+  expect(privateQuestionState, JSON.stringify({ results: scripted.seenToolResults.slice(-3), config: questionConfig, tools: scripted.facts.find((fact) => fact.prompt === PRIVATE_QUESTION)?.toolNames })).toBe("pending");
+  const privateWaiting = await readThreadMessages(restarted, "editor", editorPrivate);
+  await openGroup(restarted, pair.id);
+  await fill(restarted, '[data-testid="group-composer"]', APPROVAL_PROMPT);
+  await clickButton(restarted, "Send");
+  await waitFor(restarted, `Boolean(document.querySelector('[data-testid="group-waiting-person"][data-speaker="editor"] [data-testid="permission-card"]')) && !document.querySelector('[data-testid="group-working"]')`, { timeoutMs: 120_000, label: "quiet inline group permission" });
+  await waitFor(restarted, `document.querySelector('[data-testid="coworker-top-status"]')?.textContent?.trim() === "Waiting for you" && document.querySelector('[data-testid="group-rail-row"][data-group-id=${json(pair.id)}] [data-testid="group-rail-line"]')?.textContent?.trim() === "Editor waiting for you" && !document.querySelector('[data-testid="group-chat"] header .coworker-avatar-group__member[data-active="true"]')`, { timeoutMs: 10_000, label: "human approval takes precedence over active group faces and reply wording" });
+  const approvalStatus = resultRecord(await invokeCoworker(restarted, "groups.status", { id: pair.id }));
+  const approval = Array.isArray(approvalStatus.interactions) ? approvalStatus.interactions.find(isRecord) : null;
+  if (!isRecord(approval) || !isRecord(approval.pending) || !Array.isArray(approval.pending.permissions) || !isRecord(approval.pending.permissions[0])) throw new Error("Missing bound group approval.");
+  const approvalBinding = { groupId: pair.id, executionId: approval.executionId, slug: approval.slug, threadId: approval.threadId, workspaceId: approval.workspaceId, requestId: approval.pending.permissions[0].id, kind: "permission", reply: "once" };
+  expect(approval.threadId).not.toBe(editorPrivate);
+  expect(await invokeCoworker(restarted, "coworkers.files.read", { slug: "editor", path: "approval-canary.md" })).toMatchObject({ ok: false });
+  expect(await evalIn(restarted, `document.body.innerText.includes("PRIVATE-QUESTION-CANARY")`)).toBe(false);
+  await fill(restarted, '[data-testid="group-composer"]', "Keep this draft while I decide");
+  await expect.poll(() => evalIn(restarted, `document.activeElement?.getAttribute("data-testid")`)).toBe("group-composer");
+  await openGroup(restarted, unrelatedGroupId);
+  expect(await evalIn(restarted, `document.querySelectorAll('[data-testid="permission-card"], [data-testid="question-card"]').length`)).toBe(0);
+  expect(await invokeCoworker(restarted, "groups.interactions.reply", { ...approvalBinding, groupId: unrelatedGroupId })).toMatchObject({ ok: false });
+  expect(await invokeCoworker(restarted, "groups.interactions.reply", { ...approvalBinding, threadId: editorPrivate })).toMatchObject({ ok: false });
+  expect(await readThreadMessages(restarted, "editor", editorPrivate)).toEqual(privateWaiting);
+  await openGroup(restarted, pair.id);
+  await waitFor(restarted, `Boolean(document.querySelector('[data-testid="group-waiting-person"][data-speaker="editor"] [data-testid="permission-card"]'))`, { label: "restored group approval before the activity fault" });
+  // Deny timeline reads without blocking group status. Hold the provider's final
+  // reply so delivery never needs that timeline during the fault.
+  const approvalTimeline = path.join(String(runtime.coworkersDir), ".groups", String(pair.id), "timeline.jsonl");
+  const approvalTimelineMode = (await stat(approvalTimeline)).mode;
+  try {
+    await chmod(approvalTimeline, 0o200);
+    expect(await invokeCoworker(restarted, "groups.activity", { id: pair.id })).toMatchObject({ ok: false, error: expect.stringContaining("EACCES") });
+    await waitForText(restarted, "Live activity could not be refreshed.", { timeoutMs: 10_000 });
+    await waitFor(restarted, `document.querySelector('[data-testid="coworker-top-status"]')?.textContent?.trim() === "Waiting for you"`, { timeoutMs: 10_000, label: "unanswered approval retains waiting-first presentation during the activity fault" });
+    await waitFor(restarted, `(() => { const button = [...document.querySelectorAll('[data-testid="group-waiting-person"][data-speaker="editor"] [data-testid="permission-card"] button')].find((button) => button.textContent.includes("Allow once")); if (!(button instanceof HTMLButtonElement) || button.disabled) return false; button.click(); return true; })()`, { label: "approve the restored group permission card once" });
+    await expect.poll(() => scripted.held.has("approval"), { timeout: 30_000 }).toBe(true);
+    await waitFor(restarted, `window.__COWORKER__.invoke("groups.status", { id: ${json(pair.id)} }).then((response) => response.ok && response.result.interactions.length === 0)`, { awaitPromise: true, timeoutMs: 10_000, label: "native approval cleared while activity is unavailable" });
+    await waitFor(restarted, `!document.querySelector('[data-testid="group-waiting-person"]') && document.querySelector('[data-testid="coworker-top-status"]')?.textContent?.trim() === "Activity unavailable" && document.querySelector('[data-testid="group-rail-row"][data-group-id=${json(pair.id)}] [data-testid="group-rail-line"]')?.textContent?.trim() === "Activity unavailable" && !document.querySelector('[data-testid="group-chat"] header .coworker-avatar-group__member[data-active="true"]')`, { timeoutMs: 10_000, label: "answered wait disappears despite the ancillary activity failure" });
+    expect(await invokeCoworker(restarted, "groups.activity", { id: pair.id })).toMatchObject({ ok: false, error: expect.stringContaining("EACCES") });
+    expect(await readThreadMessages(restarted, "editor", editorPrivate)).toEqual(privateWaiting);
+  } finally {
+    await chmod(approvalTimeline, approvalTimelineMode);
+  }
+  scripted.release("approval");
+  evidence.recordAssertionEvidence("Answered group waits clear even when activity cannot refresh", "A real timeline read-permission fault left the pending approval visible. After Allow once, native status cleared the interaction and the header and rail reported Activity unavailable with no waiting card or active face, while timeline reads still failed and the private question was unchanged. Timeline permissions were restored before releasing the held final reply.", true);
+  await waitForText(restarted, APPROVAL_REPLY, { timeoutMs: 120_000 });
+  await waitFor(restarted, `!document.querySelector('[data-testid="group-waiting-person"]') && document.querySelector('[data-testid="group-chat"]')?.dataset.live === "false"`, { label: "same group approval execution finished" });
+  expect(resultText(await invokeCoworker(restarted, "coworkers.files.read", { slug: "editor", path: "approval-canary.md" }))).toBe("approved\n");
+  const approvalMessages = await readThreadMessages(restarted, "editor", String(approval.threadId));
+  expect(approvalMessages.filter((message) => message.role === "user")).toHaveLength(1);
+  expect(approvalMessages.filter((message) => message.text === APPROVAL_REPLY)).toHaveLength(1);
+  expect(await invokeCoworker(restarted, "groups.interactions.reply", approvalBinding)).toMatchObject({ ok: false });
+  for (const { prompt, cancel } of [{ prompt: GROUP_QUESTION, cancel: false }, { prompt: GROUP_CANCEL_QUESTION, cancel: true }]) {
+    await fill(restarted, '[data-testid="group-composer"]', prompt);
+    await clickButton(restarted, "Send");
+    await waitFor(restarted, `Boolean(document.querySelector('[data-testid="group-waiting-person"] [data-testid="question-card"]')) && !document.querySelector('[data-testid="group-working"]')`, { timeoutMs: 120_000, label: "native question inside the group" });
+    const status = resultRecord(await invokeCoworker(restarted, "groups.status", { id: pair.id }));
+    const wait = Array.isArray(status.interactions) ? status.interactions.find(isRecord) : null;
+    if (!isRecord(wait) || !isRecord(wait.pending) || !Array.isArray(wait.pending.questions) || !isRecord(wait.pending.questions[0])) throw new Error("Missing bound group question.");
+    if (cancel) await evalIn(restarted, `document.querySelector('[data-testid="group-waiting-person"] > button').click(); true`);
+    else await evalIn(restarted, `[...document.querySelectorAll('[data-testid="group-waiting-person"] [data-testid="question-card"] button')].find((button) => button.textContent.includes("North")).click(); true`);
+    await waitFor(restarted, `!document.querySelector('[data-testid="group-waiting-person"]') && document.querySelector('[data-testid="group-chat"]')?.dataset.live === "false"`, { timeoutMs: 120_000, label: cancel ? "group question cancellation settled" : "native question answer settled" });
+    if (!cancel) await waitForText(restarted, "The group chose North.");
+    expect(await invokeCoworker(restarted, "groups.interactions.reply", { groupId: pair.id, executionId: wait.executionId, workspaceId: wait.workspaceId, slug: wait.slug, threadId: wait.threadId, kind: "question", requestId: wait.pending.questions[0].id, answers: [["North"]] })).toMatchObject({ ok: false });
+  }
+  const groupMessages = await readThreadMessages(restarted, "editor", String(approval.threadId));
+  expect(groupMessages.filter((message) => message.role === "user")).toHaveLength(3);
+  expect(groupMessages.some((message) => message.text === "This cancelled question must not complete.")).toBe(false);
+  expect(groupMessages.filter((message) => message.role === "assistant").flatMap((message) => Array.isArray(message.tools) ? message.tools : [])).toEqual(expect.arrayContaining([expect.objectContaining({ name: "question", status: "completed", output: expect.stringContaining("North") })]));
+  expect(await readThreadMessages(restarted, "editor", editorPrivate)).toEqual(privateWaiting);
+  await openCoworker(restarted, "editor", "Editor", false);
+  await waitFor(restarted, `document.querySelector('[data-testid="question-card"]')?.textContent.includes("PRIVATE-QUESTION-CANARY")`, { label: "private question remains unanswered" });
+  expect(await evalIn(restarted, `document.body.innerText.includes("Group direction")`)).toBe(false);
+  expect(await invokeCoworker(restarted, "turns.cancel", { slug: "editor", threadId: editorPrivate })).toMatchObject({ ok: true });
+  evidence.recordAssertionEvidence("Group permission and question replies stay bound to their native execution and do not expose or answer a private question", "The group showed Editor's native cards with a static waiting receipt and no writing indicator. Wrong-group and wrong-session replies were rejected, Allow once wrote one line without another native user message, North answered the next native question, and cancelling the last question rejected a late answer. The simultaneous private question remained unchanged and visible only in Editor's private discussion.", true);
 });

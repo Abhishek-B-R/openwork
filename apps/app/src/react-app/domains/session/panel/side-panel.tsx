@@ -43,6 +43,7 @@ import {
   hasNativeBrowserOccluder,
   sameBounds,
 } from "./utils";
+import { LoginSyncCard } from "../../browser-logins/login-sync-card";
 
 type SidePanelProps = {
   sessionId: string;
@@ -52,7 +53,6 @@ type SidePanelProps = {
   isRemoteWorkspace?: boolean;
   onClose: () => void;
   onOpenExtensions?: () => void;
-  onOpenVoice?: () => void;
 };
 
 // HMR can remount this module without unmounting BrowserPanelContent, leaving
@@ -422,7 +422,6 @@ export function SidePanel({
   isRemoteWorkspace = false,
   onClose,
   onOpenExtensions,
-  onOpenVoice,
 }: SidePanelProps) {
   const { tabs } = useSessionPanelState(sessionId);
   const activeTab = useActivePanelTab(sessionId);
@@ -668,11 +667,13 @@ export function SidePanel({
           <PanelEmpty
             onOpenBrowser={isBrowserAvailable ? createTab : undefined}
             onOpenExtensions={onOpenExtensions}
-            onOpenVoice={onOpenVoice}
           />
         ) : null}
         {activeTab?.type === "browser" ? (
-          <BrowserPanelContent sessionId={sessionId} tab={activeTab} onClose={onClose} />
+          <>
+            <LoginSyncCard />
+            <BrowserPanelContent sessionId={sessionId} tab={activeTab} onClose={onClose} />
+          </>
         ) : activeTab?.type === "app" ? (
           <div className="min-h-0 flex-1 overflow-hidden"><AppArtifact key={activeTab.id} appId={activeTab.appId} revisionId={activeTab.revisionId} receiptId={activeTab.receiptId} onClose={onClose} /></div>
         ) : activeTab?.type === "artifact" ? (

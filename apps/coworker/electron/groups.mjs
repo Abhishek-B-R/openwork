@@ -10,6 +10,7 @@
 import { randomUUID } from "node:crypto";
 import { appendFile, mkdir, readFile, readdir, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { isDocumentId } from "./documents.mjs";
 
 export const GROUPS_DIR = ".groups";
 export const GROUP_SCHEMA_VERSION = 1;
@@ -401,6 +402,11 @@ export function normalizeEvent(input, { now = Date.now() } = {}) {
   if (typeof input.action === "string" && input.action) event.action = input.action;
   if (typeof input.title === "string" && input.title) event.title = input.title;
   if (SPEAKER_PARTS.has(input.part)) event.part = input.part;
+  if (input.documentId !== undefined || input.revision !== undefined) {
+    if (!isDocumentId(input.documentId) || !Number.isSafeInteger(input.revision) || input.revision < 1) throw new Error("A document event needs its document id and revision.");
+    event.documentId = input.documentId;
+    event.revision = input.revision;
+  }
   return event;
 }
 

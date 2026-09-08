@@ -130,6 +130,7 @@ type AdminUser = {
 };
 
 type AdminOrganizationCapabilities = {
+  modelsAnalytics: boolean;
   installLinks: boolean;
   mcpConnections: boolean;
   coworkerTeams: boolean;
@@ -452,6 +453,7 @@ function parseAdminPayload(payload: unknown): AdminPayload | null {
           seatsFreeAdditional: toNumberValue(value.seatsFreeAdditional),
           billableSeatCount: toNumberValue(value.billableSeatCount),
           capabilities: {
+            modelsAnalytics: capabilities.modelsAnalytics === true,
             installLinks: capabilities.installLinks === true,
             mcpConnections: capabilities.mcpConnections === true,
             coworkerTeams: capabilities.coworkerTeams === true
@@ -825,7 +827,7 @@ function buildFixtureOrganization(index: number): AdminOrganization {
     freeSeatCount: target ? 25 : DEFAULT_FREE_SEAT_COUNT,
     seatsFreeAdditional: target ? 20 : 0,
     billableSeatCount: target ? 103 : 0,
-    capabilities: { installLinks: target, mcpConnections: target, coworkerTeams: false },
+    capabilities: { installLinks: target, mcpConnections: target, modelsAnalytics: false, coworkerTeams: false },
     openworkWebAccess: {
       hasAccess: target,
       accessSource: target ? "complimentary" : null,
@@ -2765,6 +2767,11 @@ export function DenAdminPanel() {
                         Prepared coworker teams (preview)
                       </label>
                     </div>
+                    <label className="mt-3 inline-flex items-center gap-2 text-sm text-slate-700">
+                      <input type="checkbox" checked={org.capabilities.modelsAnalytics} disabled={savingCapabilityOrgId === org.id}
+                        onChange={(event) => void saveOrganizationCapability(org, "modelsAnalytics", event.target.checked)} />
+                      OpenWork Models task analytics (requires admin opt-in)
+                    </label>
                     {capabilityError?.orgId === org.id ? (
                       <p data-testid="admin-capability-error" className="mt-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs leading-5 text-red-700">
                         Save failed — the change was reverted. {capabilityError.message}

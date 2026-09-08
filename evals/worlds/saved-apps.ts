@@ -1,3 +1,4 @@
+import { browserScript } from "@openwork/cdp";
 import type { Seed } from "@openwork/env";
 import { go, runWorkflow, saveWorkflow } from "@openwork/behaviors";
 import { connect, debuggerUrlFor, evaluate, listTargets } from "@openwork/cdp";
@@ -53,13 +54,13 @@ export async function savedAppCreation(seed: Seed) {
   });
   const token = field(tokenResponse.body, "token");
   let requestId = 0;
-  const rpc = async (name: string, args: Record<string, unknown>, session = den.admin) => {
+  const rpc = async (name: string, args: Record<string, unknown>, session = den.admin, method = "tools/call") => {
     const sessionToken = session === den.admin ? token : field((await seed.api(session, "/v1/mcp/token", {
       method: "POST", headers: { "x-openwork-org-id": orgId }, body: JSON.stringify({ scopes: ["mcp:read", "mcp:write"] }),
     })).body, "token");
     const response = await fetch(`${den.ref.apiUrl}/mcp/agent`, {
       method: "POST", headers: { authorization: `Bearer ${sessionToken}`, "content-type": "application/json", accept: "application/json, text/event-stream" },
-      body: JSON.stringify({ jsonrpc: "2.0", id: ++requestId, method: "tools/call", params: { name, arguments: args } }),
+      body: JSON.stringify({ jsonrpc: "2.0", id: ++requestId, method, params: method === "tools/list" ? {} : { name, arguments: args } }),
       signal: AbortSignal.timeout(90_000),
     });
     const raw = await response.text();
@@ -118,21 +119,27 @@ export async function savedAppCreation(seed: Seed) {
     } },
     mcp: { "openwork-cloud": { type: "remote", url: `${den.ref.apiUrl}/mcp/agent`, enabled: true, oauth: false, headers: { Authorization: `Bearer ${token}` } } },
   });
-  const inPreview = async (expression: string) => {
-    // The opaque sandbox is an out-of-process frame; the parent's DOM snapshot excludes it.
+  const inPreview = async (action: "read" | "details") => {
     const targets = await listTargets(app.handle.cdpUrl);
     const target = targets.find((entry) => entry.type === "iframe" && (entry.url === "about:srcdoc" || entry.url.includes("/mcp-apps/sandbox.html")));
     if (!target) return "";
     const client = await connect(debuggerUrlFor(app.handle.cdpUrl, target));
-    try { return await evaluate(client, `(() => { const appDocument = document.querySelector("iframe")?.contentDocument ?? document; return (() => { ${expression} })(); })()`); }
-    finally { client.close(); }
+    try {
+      return await evaluate(client, browserScript((action) => {
+        const appDocument = document.querySelector("iframe")?.contentDocument ?? document;
+        if (action === "read") return appDocument.body.innerText;
+        appDocument.querySelector("button")?.click();
+        return "";
+      }, [action]));
+    } finally { client.close(); }
   };
   return {
     app, den, proxy, resetProxy, workspace, configObjectId, dashboardId, rpc, run,
     open: (path: string) => go(app, path),
-    previewText: async () => String(await inPreview("return appDocument.body.innerText")),
-    showDetails: () => inPreview('appDocument.querySelector("button")?.click()'),
+    previewText: async () => String(await inPreview("read")),
+    showDetails: () => inPreview("details"),
     receiptId: field(firstRun, "receiptId"),
+    listTools: () => rpc("", {}, den.admin, "tools/list"),
     render: () => rpc("render_workflow_artifact", { configObjectId }),
     async revise(appId: string) {
       const result = await rpc("save_artifact_view", { artifactViewId: appId, configObjectId, title: "Uncommitted rename", reactSource: source("Updated overview") });

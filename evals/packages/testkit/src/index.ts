@@ -1,4 +1,6 @@
-export { control, createDesktopHandoffGrant, signInDesktopAs } from "@openwork/behaviors";
+export { browserScript } from "@openwork/cdp";
+export type { BrowserEvaluation, BrowserScript } from "@openwork/cdp";
+export { control, createDesktopHandoffGrant, quitDesktop, signInDesktopAs } from "@openwork/behaviors";
 export { requestDenLoopback } from "@openwork/labs";
 // The packaged Open Coworker journeys drive the app through these; specs import them from
 // the testkit only, so the lower layers stay behind one door.
@@ -21,4 +23,4 @@ export * from "./self-host.ts";
 export * from "./spec/index.ts";
 export * from "./state.ts";
 
-export { observeTranscript } from "./transcript-observer.ts";
+export { observeTranscript, readTranscriptMessages } from "./transcript-observer.ts";
