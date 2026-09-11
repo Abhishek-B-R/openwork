@@ -76,6 +76,8 @@ export function HeaderStatusWord({ activity, engineManaged }: { activity: Cowork
 export type CoworkerHomeRequest =
   | { id: number; kind: "settings"; section: "model" }
   | { id: number; kind: "thread"; threadId: string }
+  | { id: number; kind: "document"; documentId: string }
+  | { id: number; kind: "responsibilities" }
   | { id: number; kind: "turn"; prompt: string };
 
 /**
@@ -214,7 +216,7 @@ export function CoworkerHome({
   const nav = usePanelNavigation<PanelView>({
     initialView: "overview",
     isView: isPanelView,
-    open: !contextPanel.collapsed,
+    open: active && !contextPanel.collapsed,
     onEscapeAtRoot: contextPanel.collapse,
     onRequestOpen: contextPanel.expand,
   });
@@ -252,6 +254,15 @@ export function CoworkerHome({
   /** A request passed from a teammate, to send in the open discussion; the id makes repeats distinct. */
   const [turnRequest, setTurnRequest] = useState<{ id: number; prompt: string } | null>(null);
   const handledRequestRef = useRef(0);
+  const collapseContextPanel = contextPanel.collapse;
+  const toRoot = nav.toRoot;
+  // Reset before applying an incoming document/settings request on this mount.
+  useEffect(() => {
+    collapseContextPanel();
+    toRoot("overview");
+    setBesideDocumentId("");
+    setBesidePath(null);
+  }, [collapseContextPanel, coworker.slug, toRoot]);
   useEffect(() => {
     if (!request || handledRequestRef.current === request.id) return;
     handledRequestRef.current = request.id;
@@ -263,17 +274,17 @@ export function CoworkerHome({
       setTurnRequest({ id: request.id, prompt: request.prompt });
       return;
     }
+    if (request.kind === "document") {
+      setOpenDocumentRequest({ id: request.id, documentId: request.documentId });
+      openActivityLevel("documents");
+      return;
+    }
+    if (request.kind === "responsibilities") {
+      openActivityLevel("assignments");
+      return;
+    }
     openSettingsSection(request.section, request.id);
-  }, [openSettingsSection, request]);
-  const collapseContextPanel = contextPanel.collapse;
-  const toRoot = nav.toRoot;
-  /** Moving to another coworker returns to the conversation; the panel does not follow. */
-  useEffect(() => {
-    collapseContextPanel();
-    toRoot("overview");
-    setBesideDocumentId("");
-    setBesidePath(null);
-  }, [collapseContextPanel, coworker.slug, toRoot]);
+  }, [openActivityLevel, openSettingsSection, request]);
   useEffect(() => {
     const onResize = () => setWindowWidth(window.innerWidth);
     window.addEventListener("resize", onResize);
@@ -403,7 +414,8 @@ export function CoworkerHome({
         if (pick) {
           if (chosen) takeStartingModel();
           else markAutoPicked(coworker.slug, pick.id);
-          // The record says who chose, so the choice reads the same after a relaunch: the person's is never swapped, the app's may be, once.
+          // An app recommendation is only an anchor; absent inheritance stays automatic.
+          // A person's starting choice opts out through the native update handler.
           onCoworkerChanged(await coworkerBridge.coworkers.update(coworker.slug, { model: pick.id, modelVariant: "", modelChosenBy: chosen ? "person" : "app" }));
           return;
         }
@@ -425,7 +437,7 @@ export function CoworkerHome({
   return (
     <div className="glass-main relative flex h-full min-w-0 flex-1">
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="glass-header window-drag flex min-h-[78px] items-center gap-3 border-b border-line px-6 py-2" data-testid="conversation-header">
+        <header className="glass-header window-drag flex min-h-[78px] shrink-0 flex-wrap items-center gap-3 border-b border-line px-4 py-2" data-testid="conversation-header">
           <CoworkerAvatar
             identity={coworker.slug}
             motion="attentive"
@@ -659,6 +671,7 @@ export function CoworkerHome({
                 onCoworkerRemoved={onCoworkerRemoved}
                 onSyncProviders={onSyncProviders}
                 onOpenAccount={() => onOpenOpenWork("account")}
+                onOpenModelDefaults={() => onOpenOpenWork("model-defaults")}
                 onOpenMemory={() => nav.showView("memory")}
                 onOpenAppsTools={() => nav.push(APPS_TOOLS_CRUMB, APPS_TOOLS_CRUMB.id)}
                 focus={settingsFocus}
@@ -877,6 +890,7 @@ function CoworkerSettings({
   onCoworkerRemoved,
   onSyncProviders,
   onOpenAccount,
+  onOpenModelDefaults,
   onOpenMemory,
   onOpenAppsTools,
   focus,
@@ -888,6 +902,7 @@ function CoworkerSettings({
   onCoworkerRemoved: (slug: string) => void;
   onSyncProviders: () => Promise<ProviderSyncRun>;
   onOpenAccount: () => void;
+  onOpenModelDefaults: () => void;
   onOpenMemory: () => void;
   /** Apps & tools is the first level under these settings. */
   onOpenAppsTools: () => void;
@@ -1021,6 +1036,7 @@ function CoworkerSettings({
           onCoworkerChanged={onCoworkerChanged}
           onSyncProviders={onSyncProviders}
           onOpenAccount={onOpenAccount}
+          onOpenModelDefaults={onOpenModelDefaults}
         />
       </section>
 

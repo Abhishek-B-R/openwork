@@ -1,22 +1,10 @@
-export type AllHandsSettings = {
-  enabled: boolean;
-  frequency: "morning" | "twice" | "manual";
-  morning: string;
-  afternoon: string;
-  focus: string;
-  groupId: string;
-  enabledAt: number;
-  lastOccurrence: string;
-  lastRequestedAt: number;
-};
-export type AllHandsPatch = Partial<Pick<AllHandsSettings, "enabled" | "frequency" | "morning" | "afternoon" | "focus">>;
-
 /** Typed access to the Open Coworker main-process bridge. */
 import type { CoworkerDocument, CoworkerDocumentSummary, DocumentRevision, DocumentStatus } from "./documents";
 import type { GroupDocument, GroupDocumentSave, GroupDocumentSaved, GroupDocumentSummary, GroupDocumentsApi } from "./group-documents";
 import type { LocalSchedule } from "./local-schedule.ts";
 import type { EffortStop } from "./effort.ts";
 import type { ModelMode } from "./model-choice.ts";
+import type { ModelDefaults } from "./model-defaults.ts";
 import type { ModelSelectionPreferences } from "./model-intelligence-index.ts";
 import type { Personality } from "./personalities";
 import type { WorkerEvent, WorkerLifespan, WorkerSummary } from "./workers";
@@ -25,12 +13,15 @@ import type { HeadlessThreadModel, HeadlessTurnAcceptance } from "@openwork/head
 import type { ThreadTurnState } from "./thread-queue.ts";
 import type { ExecutionActivity } from "./progress-activity.ts";
 import type { PendingInteractions, PermissionReply } from "./threads.ts";
+import { eventInputSchema, eventArtifactSchema, type EventInput, type WorkplaceEvent, type EventRun, type EventDetail, type EventArtifact } from "./events";
 
 export type GroupInteraction = { executionId: string; slug: string; threadId: string; workspaceId: string; deadline: number; pending: PendingInteractions };
 export type GroupInteractionReply = { groupId: string; executionId: string; slug: string; threadId: string; workspaceId: string; requestId: string } & ({ kind: "permission"; reply: PermissionReply } | { kind: "question"; answers: string[][]; reply?: never } | { kind: "question"; reply: "reject"; answers?: never });
 
 export type CollaborationReceipt = {
   id: string;
+  /** Native event ownership, when this task belongs to an accepted event run. */
+  eventRunId?: string;
   conversationId: string;
   threadId: string;
   messageId: string;
@@ -51,6 +42,7 @@ export type CoworkerTemplateSync = {
 export type CoworkerGroupSummary = {
   schemaVersion: 1;
   id: string;
+  eventId?: string;
   name: string;
   participantSlugs: string[];
   /** The native discussion thread each participant uses for this group, in its own workspace. */
@@ -141,7 +133,9 @@ export type CoworkerSummary = {
   model: string;
   /** Optional reasoning/behavior variant for the preferred model. */
   modelVariant: string;
-  /** Unset means the coworker's standard model and effort; applies to new Workers only. */
+  /** Inherit conversation app defaults without discarding the saved main override. */
+  useAppModelDefaults?: boolean;
+  /** Unset uses app role defaults, then automatic around the owner; new Workers only. */
   thinkingModel?: string;
   thinkingModelVariant?: string;
   deliveryModel?: string;
@@ -282,6 +276,7 @@ export type LocalResponsibility = {
 export type LocalRunStatus = { limit: number; active: number; queued: number };
 
 export type CoworkerSettings = {
+  modelDefaults: ModelDefaults;
   /** How many responsibilities may run at the same time on this Mac (1–8). */
   maxParallelLocalRuns: number;
   /** The least time between two runs of one assignment on this Mac: 15, 30, or 60 minutes. */
@@ -545,7 +540,7 @@ export const coworkerBridge = {
     openFolder: (slug?: string) => invoke<void>("coworkers.openFolder", { slug }),
     create: (input: { name: string; role: string; mission: string; avatarColor: AvatarColor; avatarGlasses: AvatarGlasses; personality: Personality; roleId?: string; firstNote?: string; modelSelectionPreferences?: ModelSelectionPreferences }) =>
       invoke<CoworkerSummary>("coworkers.create", input),
-    update: (slug: string, patch: Partial<Pick<CoworkerSummary, "workspaceId" | "conversationThreadId" | "automations" | "mission" | "role" | "model" | "modelVariant" | "thinkingModel" | "thinkingModelVariant" | "deliveryModel" | "deliveryModelVariant" | "modelChosenBy" | "modelMode" | "modelSelectionPreferences" | "effortPreference" | "avatarColor" | "avatarGlasses" | "personality">>) =>
+    update: (slug: string, patch: Partial<Pick<CoworkerSummary, "workspaceId" | "conversationThreadId" | "automations" | "mission" | "role" | "model" | "modelVariant" | "useAppModelDefaults" | "thinkingModel" | "thinkingModelVariant" | "deliveryModel" | "deliveryModelVariant" | "modelChosenBy" | "modelMode" | "modelSelectionPreferences" | "effortPreference" | "avatarColor" | "avatarGlasses" | "personality">>) =>
       invoke<CoworkerSummary>("coworkers.update", { slug, patch }),
     ensureWorkspace: (slug: string) => invoke<CoworkerSummary>("coworkers.ensureWorkspace", { slug }),
     /** Retire: archive the whole home under `.retired/`; nothing is deleted. */
@@ -687,11 +682,16 @@ export const coworkerBridge = {
     resume: (slug: string, id: string) => invoke<WorkerSummary>("workers.resume", { slug, id }),
     findings: (slug: string, id: string, limit?: number) => invoke<WorkerEvent[]>("workers.findings", { slug, id, limit }),
   },
-  allHands: {
-    get: () => invoke<AllHandsSettings>("allHands.get"),
-    update: (patch: AllHandsPatch) => invoke<AllHandsSettings>("allHands.update", patch),
-    prepare: () => invoke<CoworkerGroupSummary | null>("allHands.prepare"),
-    claim: () => invoke<{ id: string; at: number } | null>("allHands.claim"),
+  events: {
+    document: {
+      read: (id: string, runId: string, artifact: EventArtifact) => invoke<CoworkerDocument | GroupDocument>("events.document.read", { id, runId, artifact: eventArtifactSchema.parse(artifact) }),
+    },
+    list: () => invoke<WorkplaceEvent[]>("events.list", {}),
+    get: (id: string) => invoke<EventDetail>("events.get", { id }),
+    create: (input: EventInput) => invoke<WorkplaceEvent>("events.create", { input: eventInputSchema.parse(input) }),
+    update: (id: string, input: EventInput, expectedRevision: number) => invoke<WorkplaceEvent>("events.update", { id, input: eventInputSchema.parse(input), expectedRevision }),
+    runNow: (id: string, requestId: string) => invoke<EventRun>("events.runNow", { id, requestId }),
+    cancel: (id: string, runId: string) => invoke<EventRun>("events.cancel", { id, runId }),
   },
   settings: {
     get: () => invoke<CoworkerSettings>("settings.get"),
