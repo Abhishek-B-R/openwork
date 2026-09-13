@@ -32,6 +32,27 @@ export const weeklyOutcomes = [
   { summary: "Second research review resolved evidence ownership; draft timing is still open.", decisions: ["Editor will verify the priority evidence."], accomplishments: ["Resolved the evidence-owner question from the first review."], openQuestions: ["When should the next draft be reviewed?"], followUps: ["Ask the person to choose the next draft review time."] },
 ];
 
+export const activityPrompts = {
+  mention: "Review the launch decision with me.",
+  reply: "Keep the launch decision in this discussion.",
+  draft: "Unsent notes for a different discussion.",
+};
+export const activityReplies = {
+  mention: "@you, which launch question should we answer first?",
+  reply: "The launch decision stays in this discussion.",
+};
+export const activityEvent = {
+  title: "Launch decision check-in",
+  objective: "Compare launch readiness and ask me to choose a follow-up.",
+};
+export const activityOutcome = {
+  summary: "@you, please choose the next launch follow-up from this check-in.",
+  decisions: ["Keep the launch review read-only."],
+  accomplishments: ["Scout and Editor compared launch readiness."],
+  openQuestions: ["Which launch follow-up should we review next?"],
+  followUps: ["Wait for the person's choice."],
+};
+
 function messageText(value: unknown): string {
   if (typeof value === "string") return value;
   return Array.isArray(value) ? value.map((part) => record(part) && typeof part.text === "string" ? part.text : "").join("\n") : "";
@@ -40,7 +61,7 @@ function messageText(value: unknown): string {
 /** A local model witness: real engine requests and streaming, no provider spend. */
 export async function allHandsModel() {
   const prompts: string[] = [];
-  const requests: { model: string; speaker: string; phase: string; facilitator: boolean; prompt: string }[] = [];
+  const requests: { model: string; speaker: string; phase: string; facilitator: boolean; prompt: string; activityAction: string }[] = [];
   const calls: Omit<ToolReceipt, "output">[] = [];
   const receipts: ToolReceipt[] = [];
   const errors: string[] = [];
@@ -112,14 +133,18 @@ export async function allHandsModel() {
       const phase = tools.length ? prompt.match(/Phase: (contributions|conclusion)\./)?.[1] ?? "" : "";
       const continuity: unknown = JSON.parse(prompt.match(/^Continuity: (.+)$/m)?.[1] ?? "null");
       const sourceRunId = record(continuity) && typeof continuity.sourceRunId === "string" ? continuity.sourceRunId : "";
-      const conclusionId = weekly ? `weekly-conclusion-${sourceRunId || "first"}` : "event-conclusion";
+      const activityRun = Boolean(phase && prompt.includes(`Scheduled workplace event ${activityEvent.title}.`));
+      const conclusionId = activityRun ? "activity-conclusion" : weekly ? `weekly-conclusion-${sourceRunId || "first"}` : "event-conclusion";
       const conclusion = phase === "conclusion";
-      const outcome = weekly ? weeklyOutcomes[sourceRunId ? 1 : 0]! : eventOutcome;
+      const outcome = activityRun ? activityOutcome : weekly ? weeklyOutcomes[sourceRunId ? 1 : 0]! : eventOutcome;
       const routing = prompt.includes("You are the facilitator of the group chat") || prompt.includes("Your last answer was not accepted");
-      requests.push({ model: body.model, speaker: prompt.match(/You are (Editor|Scout), Launch reviewer, in the group chat/)?.[1] ?? "", phase, facilitator: routing, prompt });
+      const activityAction = tools.length && !phase && !routing ? Object.entries(activityPrompts).find(([, words]) => prompt.includes(words))?.[0] ?? "" : "";
+      requests.push({ model: body.model, speaker: prompt.match(/You are (Editor|Scout), Launch reviewer, in the group chat/)?.[1] ?? "", phase, facilitator: routing, prompt, activityAction });
       let call: Omit<ToolReceipt, "output"> | undefined;
       let reply = "";
-      if (tools.length && action && (action === "create" || action === "pause" || action === "update" || action === "run")) {
+      if (activityAction === "mention" || activityAction === "reply") {
+        reply = activityReplies[activityAction];
+      } else if (tools.length && action && (action === "create" || action === "pause" || action === "update" || action === "run")) {
         const next = plans[action][outputs.length];
         if (next) call = { id: next.id, name: next.name, args: next.args() };
         else reply = weeklyReplies[action];

@@ -5,7 +5,7 @@ import { promisify } from "node:util";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect } from "vitest";
-import { allHandsModel, eventOutcome, weeklyOutcomes, weeklyPrompts, weeklyReplies, weeklyReview } from "../packages/labs/src/mock-all-hands-model.ts";
+import { activityEvent, activityOutcome, activityPrompts, activityReplies, allHandsModel, eventOutcome, weeklyOutcomes, weeklyPrompts, weeklyReplies, weeklyReview } from "../packages/labs/src/mock-all-hands-model.ts";
 import { record } from "../packages/labs/src/scripted-tool-model.ts";
 import { clickCoworkerControl } from "../worlds/coworker.ts";
 
@@ -488,4 +488,129 @@ test("A conversational weekly Event runs on the native clock and carries deliver
     await diagnoseViewAnimation(world.app, () => user.screenshot()).catch((diagnosticError) => console.warn("View animation diagnostic failed", String(diagnosticError)));
     throw error;
   }
+});
+
+test("Activity opens native private and Event mentions without losing another discussion's draft", { timeout: 300_000 }, async ({ world, user, probe, step, evidence }) => {
+  const { invoke, model } = world;
+  const items = async () => records(await invoke("activity.list"));
+  const notification = async (preview: string) => {
+    const matches = (await items()).filter((item) => item.preview === preview);
+    expect(matches).toHaveLength(1);
+    return object(matches[0]);
+  };
+  const editor = async () => object(await invoke("coworkers.get", { slug: "editor" }));
+  const completion = async (threadId: string) => object(records(await invoke("turns.activity", { slug: "editor", threadId }))[0]);
+  const send = async (action: keyof typeof activityReplies) => {
+    await user.type({ role: "textbox", label: "Message Editor" }, activityPrompts[action], { replace: true });
+    await user.click({ label: "Send" });
+    await expect.poll(() => {
+      expect(model.errors).toEqual([]);
+      return model.requests.filter((request) => request.activityAction === action).length;
+    }, { timeout: 60_000 }).toBe(1);
+    await user.see({ testId: "coworker-reply-bubble", label: activityReplies[action] }, { timeoutMs: 30_000 });
+    const threadId = String((await editor()).conversationThreadId);
+    await expect.poll(() => completion(threadId), { timeout: 30_000 }).toMatchObject({ threadId, state: "succeeded", available: true });
+    return threadId;
+  };
+  const privateRow = { role: "button", label: /^Open conversation\..*which launch question/s } satisfies Parameters<User["click"]>[0];
+  const eventRow = { role: "button", label: /^Open conversation\..*Event · Launch decision check-in.*please choose the next launch follow-up/s } satisfies Parameters<User["click"]>[0];
+  const startsAt = Date.now() + 86_400_000;
+  const event = object(await invoke("events.create", { input: { ...activityEvent, description: "Compare notes without external action.", template: "working-session", leadSlug: "editor", participantSlugs: ["editor", "scout"], startsAt, schedule: { kind: "once", at: startsAt, timezone: "UTC" }, durationMinutes: 5, maxReplies: 3, state: "active", artifacts: [] } }));
+  let originalThread = "", draftThread = "";
+  let firstExecution: Record<string, unknown> = {};
+
+  await reloadNativeView(user, probe);
+  await step("A completed private mention appears natively; filtering and read controls leave the other draft unsent", async () => {
+    await user.click({ label: "Chat" });
+    await user.click({ testId: "coworker-rail-row", label: "Editor" });
+    originalThread = await send("mention");
+    expect(originalThread).toMatch(/^ses_/);
+    firstExecution = await completion(originalThread);
+    const owner = await editor();
+    await expect.poll(items, { timeout: 30_000 }).toContainEqual(expect.objectContaining({ id: `activity_${firstExecution.executionId}`, kind: "mention", slug: "editor", workspaceId: owner.workspaceId, coworkerCreatedAt: owner.createdAt, preview: activityReplies.mention, readAt: null, target: { kind: "private", threadId: originalThread } }));
+    await user.click({ testId: "coworker-discussion-switcher" });
+    await user.click({ testId: "coworker-new-discussion" });
+    await user.see({ testId: "coworker-discussion-empty" });
+    await expect.poll(async () => (await editor()).conversationThreadId, { timeout: 15_000 }).not.toBe(originalThread);
+    draftThread = String((await editor()).conversationThreadId);
+    expect(draftThread).toMatch(/^ses_/);
+    await user.type({ label: "Message Editor" }, activityPrompts.draft);
+    await user.click({ testId: "coworker-activity-button" });
+    await user.click({ role: "button", label: /^Mentions\b/ });
+    await user.see(privateRow, { timeoutMs: 15_000 });
+    const unread = await notification(activityReplies.mention);
+    expect(unread.readAt).toBeNull();
+    await user.screenshot();
+    await user.click({ label: "Mark as read: Editor, Private chat" });
+    await expect.poll(async () => (await notification(activityReplies.mention)).readAt, { timeout: 10_000 }).toEqual(expect.any(Number));
+    await user.click({ role: "button", label: /^Unread\b/ });
+    await user.notSee(privateRow);
+    await user.click({ role: "button", label: /^All\b/ });
+    await user.click({ label: "Mark as unread: Editor, Private chat" });
+    await expect.poll(() => notification(activityReplies.mention), { timeout: 10_000 }).toEqual(unread);
+    await user.click({ role: "button", label: /^Unread\b/ });
+    await user.see(privateRow);
+    await user.click({ role: "button", label: "Back to chat" });
+    await user.see({ label: "Message Editor" }, { value: activityPrompts.draft, editable: true });
+    await user.click({ label: "Calendar" });
+    await user.see({ testId: "coworker-calendar" });
+    await user.click({ label: "Chat" });
+    await user.see({ label: "Message Editor" }, { value: activityPrompts.draft, editable: true });
+    expect((await editor()).conversationThreadId).toBe(draftThread);
+  });
+  await step("Opening the private mention restores its native discussion and sends exactly one reply there", async () => {
+    await user.click({ testId: "coworker-activity-button" });
+    await user.click(privateRow);
+    await user.see({ testId: "coworker-reply-bubble" }, { text: activityReplies.mention });
+    await user.see({ label: "Message Editor" }, { value: "", editable: true });
+    await expect.poll(async () => (await editor()).conversationThreadId, { timeout: 15_000 }).toBe(originalThread);
+    await expect.poll(async () => (await notification(activityReplies.mention)).readAt, { timeout: 10_000 }).toEqual(expect.any(Number));
+    expect(await send("reply")).toBe(originalThread);
+    const replied = await completion(originalThread);
+    expect(replied).toMatchObject({ threadId: originalThread, slug: "editor", replies: [expect.objectContaining({ parentId: replied.messageId, parts: [expect.objectContaining({ text: activityReplies.reply })] })] });
+    expect(replied.messageId).not.toBe(firstExecution.messageId);
+    await expect.poll(items, { timeout: 30_000 }).toContainEqual(expect.objectContaining({ id: `activity_${replied.executionId}`, kind: "reply", preview: activityReplies.reply, readAt: null, target: { kind: "private", threadId: originalThread } }));
+    expect(model.requests.filter((request) => request.activityAction === "reply")).toHaveLength(1);
+    await user.click({ testId: "coworker-discussion-switcher" });
+    await user.see({ testId: "coworker-discussion-menu" });
+    const draftLabel = await probe.eval(browserScript((threadId) => document.querySelector<HTMLElement>(`[data-testid="coworker-discussion-menu"] [data-thread-id="${threadId}"]`)?.innerText.trim() ?? "", [draftThread]));
+    expect(draftLabel).not.toBe("");
+    await user.click({ label: draftLabel });
+    await user.see({ label: "Message Editor" }, { value: activityPrompts.draft, editable: true });
+    expect((await editor()).conversationThreadId).toBe(draftThread);
+    expect(await invoke("turns.activity", { slug: "editor", threadId: draftThread })).toEqual([]);
+    evidence.recordAssertionEvidence("Private Activity preserves native thread and draft ownership", "A real completed private reply became an identity-matched mention without seeding Activity. UI read/unread controls changed only readAt; Activity/back and Calendar/Chat kept the second draft. Opening the mention restored the original editable discussion, and one loopback request produced a new native message there, not in the draft discussion.", true);
+  });
+  await step("Run now publishes a real Event mention whose exact source is revealed before acknowledgement", async () => {
+    await user.click({ testId: "group-rail-row", label: activityEvent.title });
+    await user.click({ testId: "event-conversation-backlink" });
+    await user.click({ testId: "event-run-now" });
+    await expect.poll(async () => {
+      expect(model.errors).toEqual([]);
+      return records(object(await invoke("events.get", { id: event.id })).runs);
+    }, { timeout: 150_000, interval: 1_000 }).toEqual([expect.objectContaining({ status: "succeeded", outcome: activityOutcome })]);
+    expect(model.result("activity-conclusion")).toMatchObject({ recorded: true });
+    const source = object(records(await invoke("groups.readTimeline", { id: event.groupId })).find((entry) => entry.kind === "coworker" && entry.text === activityOutcome.summary));
+    expect(source).toMatchObject({ slug: "editor", executionId: expect.any(String), threadId: expect.stringMatching(/^ses_/) });
+    await expect.poll(items, { timeout: 30_000 }).toContainEqual(expect.objectContaining({ id: `activity_${source.executionId}`, kind: "mention", slug: "editor", preview: activityOutcome.summary, readAt: null, target: { kind: "group", groupId: event.groupId, eventId: source.id } }));
+    const otherNotifications = (await items()).filter((item) => item.preview !== activityOutcome.summary);
+    await user.click({ testId: "coworker-activity-button" });
+    await user.click({ role: "button", label: /^Mentions\b/ });
+    await user.see(eventRow, { timeoutMs: 15_000 });
+    await user.notSee({ role: "button", label: /^Open conversation\..*The launch decision stays/s });
+    expect((await notification(activityOutcome.summary)).readAt).toBeNull();
+    await user.click(eventRow);
+    await user.see({ testId: "group-chat" }, { text: /@you, please choose the next launch follow-up from this check-in\./ });
+    await expect.poll(async () => (await probe.dom(`[data-testid="group-chat"] [data-event-id="${source.id}"]:focus`)).elements, { timeout: 15_000 }).toEqual([expect.objectContaining({ text: expect.stringContaining(activityOutcome.summary) })]);
+    await expect.poll(async () => (await notification(activityOutcome.summary)).readAt, { timeout: 10_000 }).toEqual(expect.any(Number));
+    expect((await items()).filter((item) => item.preview !== activityOutcome.summary)).toEqual(otherNotifications);
+    await user.screenshot();
+    await user.click({ testId: "coworker-rail-row", label: "Editor" });
+    await user.see({ label: "Message Editor" }, { value: activityPrompts.draft, editable: true });
+    expect((await editor()).conversationThreadId).toBe(draftThread);
+    expect(await invoke("turns.activity", { slug: "editor", threadId: draftThread })).toEqual([]);
+    expect(model.prompts.some((prompt) => prompt.includes(activityPrompts.draft))).toBe(false);
+    expect(model.errors).toEqual([]);
+    evidence.recordAssertionEvidence("Event Activity opens the published source, not just its group", "Run now completed the seeded definition through native contribution and conclusion tools. Its mention targeted the exact published timeline event/execution. It remained unread in Calendar and Activity; clicking focused that data-event-id before the read acknowledgement was observed, without changing the private mention or sending the other discussion's retained draft.", true);
+  });
 });
