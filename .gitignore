@@ -33,6 +33,7 @@ apps/desktop/server/
 apps/coworker/dist-electron/
 apps/coworker/electron-dist/
 apps/coworker/resources/sidecars/
+apps/coworker/resources/native-plugins/
 apps/coworker/resources/helpers/
 apps/coworker/server/
 

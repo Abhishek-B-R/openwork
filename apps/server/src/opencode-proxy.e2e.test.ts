@@ -286,10 +286,15 @@ async function startV2Proxy() {
   // Hold only execution preparation; requests still cross the real HTTP server,
   // auth/policy checks, native proxy and ownership lookup into a loopback witness.
   const preview = spyOn(engineV2Preview, "createEngineV2Preview").mockReturnValue({
-    start() {}, status, setEnabled: async () => status(), setChatRouting: async () => status(),
+    start: async () => {}, status, setEnabled: async () => status(), setChatRouting: async () => status(),
     connection: () => ({ url: `http://127.0.0.1:${engine.server.port}`, username: "opencode", password: "fixture" }),
-    ensureWorkspaceReady: provider.wait, syncWorkspaceMcp: mcp.wait,
+    ensureWorkspaceReady: provider.wait, syncWorkspaceMcp: (workspaceId, directory) => mcp.wait(workspaceId, directory),
     syncCloudSkills: async () => ({ root: join(workspaceRoot, "cloud-skills"), state: { root: null, skills: [] } }),
+    refresh: async () => {},
+    process: () => ({ pid: null, isAlive: () => true }),
+    assertNativeSkillsScope: async () => {},
+    withNativeSkills: async (_directory, use) => use({ data: [] }, async () => {}),
+    request: async () => { throw new Error("Direct native requests are outside this proxy fixture"); },
     stop: async () => {},
   });
   try {

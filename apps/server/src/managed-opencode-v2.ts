@@ -1,7 +1,6 @@
 import type { EnginePermissionRule } from "./managed-policy-rules.js";
 import { nativeModelVariants } from "@openwork/types/cloud-model-fast";
-// Parallel v2 lane prototype: provider injection is a watched-config write. This module
-// deliberately has no reload/dispose call, unlike managed-opencode.ts and server.ts reloadOpencodeEngine.
+// Provider injection uses v2's watched config, without disposing live sessions.
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { chmod, mkdir, rename, writeFile } from "node:fs/promises";
@@ -32,10 +31,15 @@ export interface OpencodeV2ProviderSpec {
 export interface ManagedOpencodeV2ServerOptions {
   bin: string;
   rootDir: string;
+  /** Mandatory native hosts opt into skill-directory config; previews do not. */
+  nativeSkills?: boolean;
+  cwd?: string;
   hostname?: string;
   port?: number;
   env?: Record<string, string>;
+  config?: Record<string, unknown>;
   bootTimeoutMs?: number;
+  expectedVersion?: string;
   permissions?: () => Promise<EnginePermissionRule[]>;
 }
 
@@ -53,6 +57,7 @@ export interface ManagedOpencodeV2Server {
   readonly exitCode: number | null;
   readonly stdout: string;
   readonly stderr: string;
+  isAlive(): boolean;
   health(): Promise<OpencodeV2Health>;
   fetchJson(path: string, init?: { method?: string; body?: unknown; directory?: string; timeoutMs?: number }): Promise<{ status: number; json: unknown }>;
   injectProvider(spec: OpencodeV2ProviderSpec): Promise<void>;
@@ -157,10 +162,6 @@ export async function createManagedOpencodeV2Server(
     const value = options.env?.[key] ?? process.env[key];
     if (value !== undefined) inherited[key] = value;
   }
-  // A caller may deliberately provide a config file; never inherit the server's
-  // OPENCODE_CONFIG or OPENCODE_PURE settings implicitly.
-  if (options.env?.OPENCODE_CONFIG) inherited.OPENCODE_CONFIG = options.env.OPENCODE_CONFIG;
-
   await mkdir(options.rootDir, { recursive: true, mode: 0o700 });
   await chmod(options.rootDir, 0o700);
   await mkdir(configDir, { recursive: true, mode: 0o700 });
@@ -172,8 +173,12 @@ export async function createManagedOpencodeV2Server(
   // visible until a fresh cloud skill sync succeeds.
   await writeConfig();
   const child = spawn(options.bin, ["serve", "--hostname", hostname, "--port", String(port)], {
+    cwd: options.cwd,
     env: {
       ...inherited,
+      // Only the embedding host can opt additional keys into this child. Engine
+      // identity and state paths below cannot be replaced by that environment.
+      ...options.env,
       OPENCODE_PASSWORD: password,
       OPENCODE_DB: join(options.rootDir, "opencode.db"),
       OPENCODE_CONFIG_DIR: configDir,
@@ -192,6 +197,7 @@ export async function createManagedOpencodeV2Server(
   });
   // A close event, unlike exit, includes the final bytes from both pipes.
   let closed = false;
+  const closedPromise = new Promise<void>((resolve) => child.once("close", () => resolve()));
   child.once("close", () => {
     closed = true;
     lines.stop();
@@ -262,27 +268,43 @@ export async function createManagedOpencodeV2Server(
   async function writeConfigNow(): Promise<void> {
     const target = join(configDir, "opencode.json");
     const temporary = `${target}.tmp-${randomBytes(8).toString("hex")}`;
-    await writeFile(temporary, `${JSON.stringify(renderOpencodeV2Config({
+    const { skills: configuredSkills, ...hostConfig } = options.config ?? {};
+    const generated = renderOpencodeV2Config({
       providers: [...providers.values()],
       ...(options.permissions ? { permissions: await options.permissions() } : {}),
       skills,
-    }), null, 2)}\n`, { mode: 0o600 });
+    });
+    await writeFile(temporary, `${JSON.stringify({
+      ...hostConfig,
+      ...generated,
+      ...((Array.isArray(configuredSkills) && configuredSkills.length) || skills.length
+        ? { skills: [...(Array.isArray(configuredSkills) ? configuredSkills : []), ...skills] } : {}),
+      providers: { ...(isRecord(hostConfig.providers) ? hostConfig.providers : {}), ...(isRecord(generated.providers) ? generated.providers : {}) },
+      ...(options.permissions ? { permissions: [
+        ...(Array.isArray(hostConfig.permissions) ? hostConfig.permissions : []),
+        ...(Array.isArray(generated.permissions) ? generated.permissions : []),
+      ] } : {}),
+    }, null, 2)}\n`, { mode: 0o600 });
     await rename(temporary, target);
   }
 
   async function close(): Promise<void> {
     lines.stop();
     if (child.connected) child.disconnect();
-    if (child.exitCode !== null || child.signalCode !== null) return;
-    const exit = new Promise<void>((resolve) => child.once("exit", () => resolve()));
-    child.kill("SIGTERM");
-    const exited = await Promise.race([
-      exit.then(() => true),
-      sleep(2_000).then(() => false),
-    ]);
-    if (!exited && child.exitCode === null && child.signalCode === null) {
-      child.kill("SIGKILL");
-      await exit;
+    if (closed) return;
+    const waitForClose = async (timeoutMs: number) => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        return await Promise.race([
+          closedPromise.then(() => true),
+          new Promise<boolean>((resolve) => { timer = setTimeout(() => resolve(false), timeoutMs); }),
+        ]);
+      } finally { clearTimeout(timer); }
+    };
+    if (child.pid && child.exitCode === null && child.signalCode === null) child.kill("SIGTERM");
+    if (!await waitForClose(2_000)) {
+      if (child.pid && child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+      if (!await waitForClose(2_000)) throw new Error("OpenCode v2 shutdown did not complete");
     }
   }
 
@@ -300,6 +322,7 @@ export async function createManagedOpencodeV2Server(
     get stderr() {
       return stderr;
     },
+    isAlive: () => !closed && !spawnError && child.pid !== undefined && child.exitCode === null && child.signalCode === null,
     health,
     fetchJson,
     async injectProvider(spec) {
@@ -348,12 +371,17 @@ export async function createManagedOpencodeV2Server(
         throw error;
       }
     }
+    let state: OpencodeV2Health | undefined;
     try {
-      const state = await health();
-      if (state.healthy) return managed;
+      state = await health();
     } catch {
       // The engine can return 503 or refuse connections while booting.
     }
+    if (state && options.expectedVersion && state.version !== options.expectedVersion) {
+      await close();
+      throw new Error(`OpenCode v2 version mismatch: expected ${options.expectedVersion}, received ${state.version}`);
+    }
+    if (state?.healthy) return managed;
     await sleep(250);
   }
 
