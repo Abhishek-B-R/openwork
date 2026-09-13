@@ -1,4 +1,4 @@
-import { ActivityIcon, Button, Tooltip } from "@/ui/kit";
+import { Button, Tooltip } from "@/ui/kit";
 
 export type MainContent = "chat" | "calendar" | "activity";
 
@@ -7,19 +7,12 @@ export function MainContentSwitch({
   onChange,
   chatAvailable = true,
   compact = false,
-  unreadActivity = 0,
-  unreadMentions = 0,
-  activityError = false,
 }: {
   value: MainContent;
   onChange: (value: MainContent) => void;
   chatAvailable?: boolean;
   compact?: boolean;
-  unreadActivity?: number;
-  unreadMentions?: number;
-  activityError?: boolean;
 }) {
-  const activityLabel = `Activity${unreadActivity ? ` · ${unreadActivity} unread` : ""}${unreadMentions ? ` · ${unreadMentions} mentions of you` : ""}${activityError ? " · Refresh unavailable" : ""}`;
   return (
     <div
       role="group"
@@ -51,20 +44,6 @@ export function MainContentSwitch({
           onClick={() => onChange("calendar")}
         >
           {compact ? <CalendarIcon /> : "Calendar"}
-        </Button>
-      </Tooltip>
-      <Tooltip content={activityLabel} side="right">
-        <Button
-          type="button"
-          variant="ghost"
-          aria-label={activityLabel}
-          aria-pressed={value === "activity"}
-          data-testid="coworker-activity-button"
-          className={`relative inline-flex h-7 min-w-0 flex-1 items-center justify-center rounded-md py-0 text-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-spark/60 ${compact ? "px-0" : "px-1"} ${value === "activity" ? "bg-white/8 text-snow" : ""}`}
-          onClick={() => onChange("activity")}
-        >
-          {compact ? <ActivityIcon className="size-4" /> : "Activity"}
-          {unreadActivity > 0 ? <span aria-hidden="true" className={`absolute -right-1 -top-2 flex min-w-4 items-center justify-center rounded-md px-1 text-[10px] font-semibold leading-4 tabular-nums ${unreadMentions ? "bg-spark/20 text-spark" : "bg-white/10 text-snow"}`}>{unreadActivity > 99 ? "99+" : unreadActivity}</span> : activityError ? <span aria-hidden="true" className="absolute right-0 -top-2 text-[10px] text-amber">!</span> : null}
         </Button>
       </Tooltip>
     </div>

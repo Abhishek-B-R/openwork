@@ -218,6 +218,12 @@ export function CoworkerRail({
   const accountInitials = (session?.userName.trim() || session?.userEmail.trim() || "OpenWork")
     .split(/\s+/).slice(0, 2).map((part) => Array.from(part)[0]).join("").toLocaleUpperCase();
   const accountDescription = `${accountName} · ${accountLabel} · Account and settings`;
+  const activityLabel = `Activity${unreadActivity ? ` · ${unreadActivity} unread` : ""}${unreadMentions ? ` · ${unreadMentions} mentions of you` : ""}${activityError ? " · Refresh unavailable" : ""}`;
+  const activityBell = <IconButton label={activityLabel} tooltipSide="right" aria-pressed={mainContent === "activity"} data-testid="coworker-activity-button"
+    className={`window-no-drag relative shrink-0 ${collapsed ? "size-6" : "size-7"} ${mainContent === "activity" ? "bg-white/8 text-snow" : ""}`} onClick={() => onMainContentChange("activity")}>
+    <svg className="size-4" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M7.5 16.5a2.5 2.5 0 0 0 5 0M5 8a5 5 0 0 1 10 0c0 4 1.75 4.5 1.75 6H3.25C3.25 12.5 5 12 5 8ZM10 1.5V3" /></svg>
+    {unreadActivity > 0 ? <span aria-hidden="true" className={`absolute -right-1 -top-1 flex min-w-4 items-center justify-center rounded-md px-1 text-[10px] font-semibold leading-4 tabular-nums ${unreadMentions ? "bg-spark/20 text-spark" : "bg-white/10 text-snow"}`}>{unreadActivity > 99 ? "99+" : unreadActivity}</span> : activityError ? <span aria-hidden="true" className="absolute right-0 -top-1 text-[10px] text-amber">!</span> : null}
+  </IconButton>;
   const filterControl = <IconButton label="Filter group chats and events" tooltipSide="right" aria-haspopup="menu" aria-expanded={showGroupFilters} aria-controls={showGroupFilters ? filterMenuId : undefined} data-testid="group-filter-trigger" className={!groupTypes.groups || !groupTypes.events ? "text-spark" : ""} onClick={(event) => showGroupFilters ? closeGroupFilters(true) : openGroupFilters(event.currentTarget)} onKeyDown={(event) => { if (event.key === "ArrowDown") { event.preventDefault(); openGroupFilters(event.currentTarget); } }}>
     <svg className="size-4" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.25" strokeLinejoin="round" aria-hidden="true"><path d="M2 3h12L9.5 8v4.25l-3 1V8L2 3Z" /></svg>
   </IconButton>;
@@ -230,17 +236,21 @@ export function CoworkerRail({
       data-collapsed={collapsed ? "true" : "false"}
     >
       {/* Keep both navigation rows below the native window controls, including when folded. */}
-      <div className={`glass-header window-drag flex shrink-0 flex-col gap-2 border-b border-line pb-2 pt-10 ${collapsed ? "px-2" : "px-3"}`}>
-        <MainContentSwitch value={mainContent} onChange={onMainContentChange} chatAvailable={chatAvailable} compact={collapsed} unreadActivity={unreadActivity} unreadMentions={unreadMentions} activityError={activityError} />
-        {!calendarMode || !collapsed || coworkers.length === 0 ? <div className={`flex items-center ${collapsed ? "justify-center gap-1" : "gap-2"}`}>
+      <div className={`glass-header window-drag relative flex shrink-0 flex-col gap-2 border-b border-line pb-2 pt-10 ${collapsed ? "px-2" : "px-3"}`}>
+        {/* Use the existing titlebar space; the Chat / Calendar row never moves.
+            In the folded rail the native traffic lights own that space. */}
+        {!collapsed ? <div className="absolute right-3 top-2">{activityBell}</div> : null}
+        <MainContentSwitch value={mainContent} onChange={onMainContentChange} chatAvailable={chatAvailable} compact={collapsed} />
+        <div className={`flex items-center ${collapsed ? "justify-center gap-0" : "gap-2"}`}>
           {collapsed ? <>
-            {!calendarMode ? <IconButton label="Search coworkers" className="window-no-drag" data-testid="coworker-rail-search" onClick={() => { setFocusSearchOnExpand(true); panel.expand(); }}><SearchIcon /></IconButton> : null}
-            <IconButton label="New coworker" className="window-no-drag" onClick={onNewCoworker}><PlusIcon /></IconButton>
+            {!calendarMode ? <IconButton label="Search coworkers" className="window-no-drag size-6" data-testid="coworker-rail-search" onClick={() => { setFocusSearchOnExpand(true); panel.expand(); }}><SearchIcon /></IconButton> : null}
+            <IconButton label="New coworker" className="window-no-drag size-6" onClick={onNewCoworker}><PlusIcon /></IconButton>
+            {activityBell}
           </> : <>
             <input ref={searchRef} aria-label={calendarMode ? "Search calendars" : "Search coworkers"} className="window-no-drag h-8 min-w-0 flex-1 rounded-lg border border-line bg-black/18 px-2.5 text-xs text-snow outline-none placeholder:text-mist/70 focus:border-spark/50 focus:bg-black/28" placeholder={calendarMode ? "Search calendars" : "Search coworkers"} value={calendarMode ? calendarQuery : query} onChange={(event) => calendarMode ? setCalendarQuery(event.target.value) : setQuery(event.target.value)} />
             {!calendarMode || coworkers.length === 0 ? <Button variant="ghost" className="window-no-drag size-8 shrink-0 rounded-lg px-0 py-0 text-lg" onClick={onNewCoworker} title="New coworker" aria-label="New coworker"><span aria-hidden="true">+</span></Button> : null}
           </>}
-        </div> : null}
+        </div>
       </div>
       <div className={calendarMode ? "hidden" : "flex min-h-0 flex-1 flex-col"} data-testid="chat-rail-content">
       {collapsed ? (

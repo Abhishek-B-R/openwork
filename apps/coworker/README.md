@@ -7,8 +7,11 @@ adds no new database concepts.
 
 ## Activity and mentions
 
-**Activity**, above the team list, is a shared inbox for completed private and
-group replies. Filter **All**, **Mentions**, or **Unread**; each row identifies
+The **Activity bell** at the top-right of the team sidebar opens a shared inbox
+for completed private, group and Event replies. It sits above Chat / Calendar
+without shifting those tabs or search. In the folded rail, the bell shares the
+utility row below the tabs to stay clear of native window controls.
+Filter **All**, **Mentions**, or **Unread**; each row identifies
 the coworker, conversation, time, and a short visible-reply preview. The rail
 shows the real unread count. **Happening now** separately projects current work
 and requests for the person, not notification history or inferred progress.
@@ -19,10 +22,10 @@ count; code, quotations, email addresses and source URLs do not. A mention is
 attention, never permission to act or an answer to a pending native request.
 
 Opening Activity keeps the current chat mounted and does not mark anything read.
-Opening a notification marks that item read and returns to its private discussion
-or group; group replies are revealed when present in the loaded recent history.
-Older group targets show an explicit history-limit notice instead of claiming
-an exact jump. Individual read/unread controls and **Mark all read** persist
+Opening a notification returns to its private discussion or group. Read status
+changes only after the private transcript loads or the exact group reply is
+revealed. Older group targets show an explicit history-limit notice and stay
+unread instead of claiming an exact jump. Individual read/unread controls and **Mark all read** persist
 across restarts; the latter acknowledges only the IDs already loaded in the inbox,
 not notifications arriving during the action. Read state is local to this profile.
 
