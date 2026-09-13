@@ -1,5 +1,5 @@
 import { ActionMenu } from "@/ui/kit";
-import { Fragment, memo, useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
+import { Fragment, Suspense, createContext, lazy, memo, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { createOpencodeClient } from "@opencode-ai/sdk/v2/client";
 import { coworkerBridge, type CoworkerSummary, type ProviderSyncRun, type RuntimeInfo } from "@/lib/bridge";
@@ -23,6 +23,7 @@ import {
   gatewayMcpAppLaunch,
   preservedMcpAppResult,
   type CoworkerMcpAppResource,
+  type CoworkerMcpAppContext,
   type CoworkerMcpClient,
   type PreservedMcpAppResult,
 } from "@/lib/mcp";
@@ -53,8 +54,6 @@ import {
 } from "@/lib/discussions";
 import type { EffortStop } from "@/lib/effort";
 import { EffortDial } from "@/ui/effort-dial";
-import { ComputerControl } from "@/ui/computer-control";
-import { DiscussionBrowser } from "@/ui/browser-panel";
 import { PopoverDisclosure, TechnicalText } from "@/ui/details-popover";
 import { carryVariant, chooseFallbackModel, describeModelChoice, markAutoPicked, resolveDiscussionModel, wasAutoPicked, type ModelLane } from "@/lib/model-choice";
 import { usesAppConversationDefault, type ModelDefaults } from "@/lib/model-defaults";
@@ -81,8 +80,11 @@ import {
   loadThreadTurns,
   markStopped,
   removeQueued,
+  runThreadStop,
   saveThreadTurns,
+  subscribeThreadStops,
   takeQueued,
+  threadStop,
   type QueuedMessage,
   type ThreadTurnState,
 } from "@/lib/thread-queue";
@@ -113,11 +115,16 @@ import { DocumentCard } from "@/ui/documents";
 import { documentCardsFromCalls, isDocumentTool, shouldFoldReply, splitReplyLead } from "@/lib/documents";
 import { newcomerLine, teamCardsFromCalls } from "@/lib/team";
 import { TeamCardsForTurn, type TeamHooks } from "@/ui/team-cards";
-import { McpAppFrame } from "@/ui/mcp-app-frame";
 import { WorkPopover, workPopoverPlacement, type WorkPopoverPlacement } from "@/ui/work-popover";
 import { appendVoiceDraft, privateVoiceReply, type VoiceExpectation } from "@/lib/voice";
 import { useVoice, type VoiceActivation, type VoiceController, type VoicePreparation } from "@/ui/use-voice";
 import { VoicePanel, VoiceToggle } from "@/ui/voice";
+
+// Computer, browser and interactive app hosts are discussion-time features;
+// their views (and the MCP app bridge) load when a discussion first needs them.
+const ComputerControl = lazy(() => import("@/ui/computer-control").then((module) => ({ default: module.ComputerControl })));
+const DiscussionBrowser = lazy(() => import("@/ui/browser-panel").then((module) => ({ default: module.DiscussionBrowser })));
+const McpAppFrame = lazy(() => import("@/ui/mcp-app-frame").then((module) => ({ default: module.McpAppFrame })));
 
 type TranscriptToolCall = {
   partId: string;
@@ -356,7 +363,7 @@ export function ThreadsPanel({
   /** A ready-to-send discussion message (for example, "explain this run"); the id makes repeats distinct. */
   discussionDraft?: AssignmentDraft;
   /** Set by the context rail to jump straight into a thread; the id makes repeat requests distinct. */
-  openThreadRequest?: { id: number; threadId: string; kind?: "thread" | "discussion" | "activity" } | null;
+  openThreadRequest?: { id: number; threadId: string; kind?: "thread" | "discussion" | "activity"; onOpened?: () => Promise<void> } | null;
   /** The one-off assignment threads as this column lists them, and what each waits on the person for, so the panel's Assignments show the same ones. */
   onAssignmentsChange?: (items: ThreadListItem[], attention: Record<string, string>) => void;
   /** A message to send in the open discussion as soon as it exists (a request passed from a teammate); the id makes repeats distinct. */
@@ -730,6 +737,7 @@ export function ThreadsPanel({
       coworker={coworker}
       runtime={runtime}
       kind="discussion"
+      activityRequest={openThreadRequest?.kind === "discussion" && openThreadRequest.threadId === discussionThreadId ? openThreadRequest : null}
       preparedVoice={preparedVoice?.threadId === discussionThreadId ? preparedVoice : undefined}
       onVoicePreparedHandled={() => setPreparedVoice((current) => current?.threadId === discussionThreadId ? null : current)}
       browserEligible={registeredDiscussions.includes(discussionThreadId)}
@@ -1078,7 +1086,9 @@ function ThreadView({
   browserEligible = false,
   preparedVoice,
   onVoicePreparedHandled,
+  activityRequest,
 }: {
+  activityRequest?: { id: number; onOpened?: () => Promise<void> } | null;
   active: boolean;
   threads: NonNullable<ReturnType<typeof createCoworkerThreads>>;
   threadId: string;
@@ -1120,6 +1130,17 @@ function ThreadView({
 }) {
   const [messages, setMessages] = useState<TranscriptMessage[]>([]);
   const [transcriptLoaded, setTranscriptLoaded] = useState(false);
+  const [transcriptReadStartedAt, setTranscriptReadStartedAt] = useState(0);
+  const acknowledgedActivity = useRef(0);
+  const [activityOpenError, setActivityOpenError] = useState("");
+  useEffect(() => {
+    if (!active || !activityRequest?.onOpened || acknowledgedActivity.current === activityRequest.id || transcriptReadStartedAt < activityRequest.id) return;
+    acknowledgedActivity.current = activityRequest.id;
+    setActivityOpenError("");
+    void activityRequest.onOpened().catch((cause) => {
+      if (viewMounted.current && acknowledgedActivity.current === activityRequest.id) setActivityOpenError(cause instanceof Error ? cause.message : "The conversation opened, but read status could not be saved.");
+    });
+  }, [active, activityRequest, transcriptReadStartedAt]);
   const [readErrors, setReadErrors] = useState<Record<string, string>>({});
   const refreshGeneration = useRef(0);
   const turnRevision = useRef(0);
@@ -1162,6 +1183,10 @@ function ThreadView({
   /** The turn in flight or left unresolved, and the messages waiting as Next — the record turns.json keeps. */
   const [turnState, setTurnState] = useState<ThreadTurnState>(EMPTY_THREAD_TURNS);
   const turnStateRef = useRef<ThreadTurnState>(EMPTY_THREAD_TURNS);
+  const stopScope = JSON.stringify([coworker.slug, coworker.createdAt, threadId]);
+  const stopAttempt = useSyncExternalStore(subscribeThreadStops, () => threadStop(stopScope));
+  const stopPending = stopAttempt?.state === "pending";
+  const stopLabel = stopPending ? "Stopping..." : stopAttempt ? "Retry stop" : "Stop";
   const [turnsLoaded, setTurnsLoaded] = useState(false);
   const [collaborationReceipts, setCollaborationReceipts] = useState<import("@/lib/bridge").CollaborationReceipt[]>([]);
   const [nativeActivity, setNativeActivity] = useState<{ scope: string; executions: ExecutionActivity[] }>({ scope: "", executions: [] });
@@ -1271,7 +1296,7 @@ function ThreadView({
     const knownTurns = turnStateRef.current;
     const writingTurns = turnWrites.current > 0;
     void observe("turns", () => loadThreadTurns(coworker.slug, threadId), (savedTurns) => {
-      if (!writingTurns && turnWrites.current === 0 && !activeTurnRef.current) {
+      if (!writingTurns && turnWrites.current === 0 && !activeTurnRef.current && (!threadStop(stopScope) || knownTurns === EMPTY_THREAD_TURNS)) {
         turnStateRef.current = savedTurns;
         setTurnState(savedTurns);
         if (knownTurns === EMPTY_THREAD_TURNS) setRecovered(savedTurns.pending !== null);
@@ -1279,7 +1304,7 @@ function ThreadView({
       setTurnsLoaded(true);
     });
     void observe("interactions", () => threads.listThreadInteractions(threadId), setPending);
-    return observe("transcript", () => threads.client.getThreadSnapshot(threadId, { signal: AbortSignal.timeout(10_000) }), (snapshot) => {
+    return observe("transcript", async () => ({ readStartedAt: Date.now(), snapshot: await threads.client.getThreadSnapshot(threadId, { signal: AbortSignal.timeout(10_000) }) }), ({ snapshot, readStartedAt }) => {
       const transcript = toTranscript(snapshot);
       const nativeMessages = new Map(snapshot.messages.map((message) => [message.id, message]));
       for (const message of snapshot.messages) knownMessages.current.set(message.id, { role: message.role, parentId: message.parentId, ended: knownMessages.current.get(message.id)?.ended || message.completedAt !== null || message.error !== null });
@@ -1340,8 +1365,9 @@ function ThreadView({
         })),
       );
       setTranscriptLoaded(true);
+      setTranscriptReadStartedAt(readStartedAt);
     });
-  }, [coworker.slug, refreshReads, refreshScope, threads, threadId, titleDiscussionAfterFirstMessage]);
+  }, [coworker.slug, refreshReads, refreshScope, stopScope, threads, threadId, titleDiscussionAfterFirstMessage]);
 
   useEffect(() => {
     if (kind !== "discussion" || !assignmentDraft) return;
@@ -1419,6 +1445,8 @@ function ThreadView({
   const commitTurnState = useCallback((update: (state: ThreadTurnState) => ThreadTurnState): ThreadTurnState => {
     const previous = turnStateRef.current;
     const next = update(previous);
+    // A completed observer must not release Next while cancellation is unresolved.
+    if (previous.pending && !next.pending && threadStop(stopScope)) return previous;
     if (next === previous) return next;
     turnRevision.current += 1;
     turnStateRef.current = next;
@@ -1426,7 +1454,7 @@ function ThreadView({
     turnWrites.current += 1;
     void saveThreadTurns(coworker.slug, threadId, next, previous).catch((cause) => setError(`Could not keep this turn: ${cause instanceof Error ? cause.message : String(cause)}`)).finally(() => { turnWrites.current -= 1; });
     return next;
-  }, [coworker.slug, threadId]);
+  }, [coworker.slug, stopScope, threadId]);
 
   const pendingTurn = turnState.pending;
   const engineRunning = engineStatus.type === "busy" || engineStatus.type === "retry";
@@ -1439,12 +1467,13 @@ function ThreadView({
    */
   const abortUntilQuiet = useCallback(async (messageId: string) => {
     const deadline = Date.now() + 10_000;
+    const signal = AbortSignal.timeout(10_000);
     while (Date.now() < deadline) {
-      const snapshot = await threads.client.getThreadSnapshot(threadId).catch(() => null);
+      const snapshot = await threads.client.getThreadSnapshot(threadId, { signal }).catch(() => null);
       if (!snapshot) return;
       const reply = snapshot.messages.filter((message) => message.role === "assistant" && message.parentId === messageId).at(-1);
       if (reply && (reply.error !== null || reply.completedAt !== null)) return;
-      if (isRunning(snapshot.status)) await threads.client.abortThread(threadId).catch(() => undefined);
+      if (isRunning(snapshot.status)) await threads.client.abortThread(threadId, { signal }).catch(() => undefined);
       await new Promise<void>((resolveWait) => window.setTimeout(resolveWait, 300));
     }
   }, [threadId, threads]);
@@ -1473,7 +1502,7 @@ function ThreadView({
    * turn without one.
    */
   const submitTurn = useCallback(async (prompt: string, messageId: string, send: TurnSend, modelOverride?: HeadlessThreadModel, failedModels: readonly string[] = [], originalSelection?: TurnModelSelection) => {
-    if (activeTurnRef.current) { voiceRef.current?.abandonReply(send.voice ?? null); return; }
+    if (activeTurnRef.current || threadStop(stopScope) || (send.mode === "retry" && !send.byPerson && turnStateRef.current.pending?.stoppedAt != null)) { voiceRef.current?.abandonReply(send.voice ?? null); return; }
     let voiceIntent = send.voice ?? null;
     let voiceFollowup = false;
     let turnModel: HeadlessThreadModel | undefined = modelOverride;
@@ -1491,18 +1520,21 @@ function ThreadView({
      * is never swapped.
      */
     const fallBack = async (message: string): Promise<boolean> => {
-      if (!viewMounted.current) return false;
+      if (!viewMounted.current || threadStop(stopScope) || turnStateRef.current.pending?.stoppedAt != null) return false;
       if (!selection?.allowFallback || failedModels.length >= 1) return false;
       if (!describeTurnFailure(message, coworker.name).modelRelated) return false;
       try {
         const { owner, defaults, automatic, lane, anchor } = selection;
         const excluded = [...failedModels, turnModelId];
         const catalog = await threads.listModelCatalog();
+        if (threadStop(stopScope) || turnStateRef.current.pending?.stoppedAt != null) return false;
         const next = chooseFallbackModel(catalog, lane, { standard: anchor, exclude: excluded, ...(automatic ? { preferences: owner.modelSelectionPreferences } : {}) });
         const nextModel = next ? parseModelPreference(next.id) : undefined;
         if (!next || !nextModel) return false;
+        const fallbackDecision = resolveDiscussionModel({ models: [next] }, { ...owner, model: next.id }, prompt, defaults);
+        if (!fallbackDecision.model) return false;
+        const variant = fallbackDecision.variant;
         markAutoPicked(coworker.slug, next.id);
-        const variant = resolveDiscussionModel({ models: [next] }, { ...owner, model: next.id }, prompt, defaults).variant;
         // In Automatic mode a lane model that failed is simply not chosen again this turn; the saved standard model changes only when it was the one that failed.
         if (!usesAppConversationDefault(owner) && (!automatic || turnModelId === owner.model || !owner.model)) {
           onCoworkerChanged(await coworkerBridge.coworkers.update(coworker.slug, { model: next.id, modelVariant: carryVariant(owner.modelVariant, next), modelChosenBy: "app", useAppModelDefaults: false }));
@@ -1521,7 +1553,7 @@ function ThreadView({
      * message id. Anything hard waits for the person.
      */
     const retryLater = (message: string, retryable: boolean | null): boolean => {
-      if (!viewMounted.current) return false;
+      if (!viewMounted.current || threadStop(stopScope) || turnStateRef.current.pending?.stoppedAt != null) return false;
       if (classifyFailure(message, retryable) !== "transient") return false;
       const delay = retryDelayMs(attempt + 1);
       if (delay === null) return false;
@@ -1708,7 +1740,7 @@ function ThreadView({
         setActiveTurn(null);
       }
     }
-  }, [abortUntilQuiet, commitTurnState, coworker.effortPreference, coworker.model, coworker.modelChosenBy, coworker.modelMode, coworker.modelSelectionPreferences, coworker.modelVariant, coworker.useAppModelDefaults, coworker.name, coworker.slug, defaultDiscussionTitle, kind, onActivityChange, onCoworkerChanged, refresh, resolution?.messageId, session, threadId, threads, title, titleDiscussionAfterFirstMessage]);
+  }, [abortUntilQuiet, commitTurnState, coworker.effortPreference, coworker.model, coworker.modelChosenBy, coworker.modelMode, coworker.modelSelectionPreferences, coworker.modelVariant, coworker.useAppModelDefaults, coworker.name, coworker.slug, defaultDiscussionTitle, kind, onActivityChange, onCoworkerChanged, refresh, resolution?.messageId, session, stopScope, threadId, threads, title, titleDiscussionAfterFirstMessage]);
 
   /**
    * After a quit or reload the engine may still be on the turn. Follow it to
@@ -1824,12 +1856,12 @@ function ThreadView({
   /** Send what is next in line, one at a time, once nothing is in flight and nothing unresolved holds the queue. */
   const drainNext = useCallback(() => {
     if (backendOwnsTurns()) return;
-    if (activeTurnRef.current || turnStateRef.current.pending) return;
+    if (activeTurnRef.current || turnStateRef.current.pending || threadStop(stopScope)) return;
     const { state, message } = dequeue(turnStateRef.current);
     if (!message) return;
     commitTurnState(() => state);
     void submitTurn(message.text, newMessageId(), { mode: "send" });
-  }, [commitTurnState, submitTurn]);
+  }, [commitTurnState, stopScope, submitTurn]);
 
   useEffect(() => {
     if (!turnsLoaded || activeTurn || pendingTurn || appRetry || turnState.next.length === 0) return;
@@ -1854,7 +1886,7 @@ function ThreadView({
     if (!text) return;
     jumpToLatest();
     acknowledgeCoworker(coworker.slug);
-    if (activeTurnRef.current || turnStateRef.current.pending || appRetry || engineRunning) {
+    if (activeTurnRef.current || turnStateRef.current.pending || appRetry || engineRunning || threadStop(stopScope)) {
       voiceRef.current?.expectReply(null);
       commitTurnState((state) => enqueue(state, { id: newQueuedId(), text, queuedAt: Date.now() }));
       return;
@@ -1862,7 +1894,7 @@ function ThreadView({
     const messageId = newMessageId();
     const voiceIntent = voiceRef.current?.expectReply(messageId);
     void submitTurn(text, messageId, { mode: "send", voice: voiceIntent });
-  }, [appRetry, commitTurnState, coworker.slug, engineRunning, jumpToLatest, submitTurn]);
+  }, [appRetry, commitTurnState, coworker.slug, engineRunning, jumpToLatest, stopScope, submitTurn]);
 
   /** Put a waiting message back in the field to change it. */
   function editQueued(id: string) {
@@ -1875,18 +1907,18 @@ function ThreadView({
 
   /** Stop the reply in progress and send this waiting message right away. */
   async function sendQueuedNow(id: string) {
-    const { state, message } = takeQueued(turnStateRef.current, id);
+    if (threadStop(stopScope)) return;
+    const message = turnStateRef.current.next.find((item) => item.id === id);
     if (!message) return;
     jumpToLatest();
     voice.stop("");
-    commitTurnState(() => state);
     if (activeTurnRef.current || appRetry || engineRunning) {
-      await stop();
+      if (!await stop()) return;
       await untilTurnReleased();
-      await threads.client.waitUntilIdle(threadId, { timeoutMs: 15_000, pollIntervalMs: 300 }).catch(() => undefined);
     }
+    if (!viewMounted.current || threadStop(stopScope) || !turnStateRef.current.next.some((item) => item.id === id)) return;
     // The stopped turn keeps its line in the transcript; the record moves on to this message.
-    commitTurnState(clearPending);
+    commitTurnState((state) => clearPending(removeQueued(state, id)));
     void submitTurn(message.text, newMessageId(), { mode: "send" });
   }
 
@@ -1920,25 +1952,30 @@ function ThreadView({
   }
 
   /** Stop: the engine's turn, an automatic attempt still waiting, or the wait — whichever is going. Next stays. */
-  async function stop() {
-    voice.stop("Audio stopped. Your text conversation is kept.");
-    if (appRetryTimerRef.current !== null) {
-      window.clearTimeout(appRetryTimerRef.current);
-      appRetryTimerRef.current = null;
-    }
-    setAppRetry(null);
-    const stopping = turnStateRef.current.pending;
-    commitTurnState((state) => markStopped(state, Date.now()));
-    waitControllerRef.current?.abort();
-    try {
-      await coworkerBridge.turns.cancel(coworker.slug, threadId, stopping?.messageId);
-      await threads.client.abortThread(threadId);
+  function stop(): Promise<boolean> {
+    const messageId = threadStop(stopScope)?.messageId ?? turnStateRef.current.pending?.messageId ?? activeTurnRef.current?.messageId;
+    return runThreadStop(stopScope, async () => {
+      voice.stop("Audio stopped. Your text conversation is kept.");
+      if (appRetryTimerRef.current !== null) {
+        window.clearTimeout(appRetryTimerRef.current);
+        appRetryTimerRef.current = null;
+      }
+      setAppRetry(null);
+      // This is the durable cancellation intent/queue fence, not confirmation.
+      commitTurnState((state) => state.pending?.messageId === messageId ? markStopped(state, Date.now()) : state);
+      waitControllerRef.current?.abort();
+      if (!messageId) throw new Error("The current message could not be identified. Refresh this conversation before trying Stop again.");
+      const cancelled = await waitForObservation(coworkerBridge.turns.cancel(coworker.slug, threadId, messageId));
+      if (!cancelled.ok) throw new Error("Cancellation was not confirmed. Try Stop again before continuing.");
+      await threads.client.abortThread(threadId, { signal: AbortSignal.timeout(10_000) });
       // The message may still be on its way to the engine's run; keep the stop in force until the turn has ended.
-      if (stopping && activeTurnRef.current?.phase !== "accepting") await abortUntilQuiet(stopping.messageId);
+      if (activeTurnRef.current?.phase !== "accepting") await abortUntilQuiet(messageId);
+      await untilTurnReleased();
+      if (activeTurnRef.current) throw new Error("The pending send has not finished stopping. Try Stop again before continuing.");
+      const result = await threads.client.waitUntilIdle(threadId, { timeoutMs: 10_000, pollIntervalMs: 300, signal: AbortSignal.timeout(10_000) });
+      if (result.outcome !== "settled" || isRunning(result.snapshot.status)) throw new Error("The conversation is still stopping. Try Stop again before continuing.");
       await refresh();
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
-    }
+    }, messageId);
   }
 
   /** Let a cut-off turn go: nothing is sent again, and whatever waited as Next moves on. */
@@ -1948,6 +1985,7 @@ function ThreadView({
   }
 
   function chooseTurnAction(choice: TurnChoice) {
+    if (threadStop(stopScope) && choice.id !== "stop") return;
     switch (choice.id) {
       case "retry":
       case "continue":
@@ -2017,7 +2055,7 @@ function ThreadView({
     recommendedModel: recommendedModel?.modelLabel ?? "",
   });
   const needsContinuation = pendingTurn && messages.some((message) => message.parentId === pendingTurn.messageId && message.toolCalls.length > 0);
-  const outcome = rawOutcome && needsContinuation && ["failed", "stopped-by-you", "cut-off"].includes(rawOutcome.kind)
+  const outcome = stopAttempt ? null : rawOutcome && needsContinuation && ["failed", "stopped-by-you", "cut-off"].includes(rawOutcome.kind)
     ? { ...rawOutcome, detail: "Earlier actions and their history are kept. Continue performs only missing work, using a new message in this discussion.", choices: rawOutcome.choices.map((choice): TurnChoice => choice.id === "retry" || choice.id === "continue" ? { ...choice, id: "continue", label: "Continue" } : choice) }
     : rawOutcome;
   // A reply that landed while this view was not driving the turn (after a reload) settles the record.
@@ -2027,8 +2065,8 @@ function ThreadView({
 
   const turnRunning = outcome?.kind === "working" || outcome?.kind === "slow" || outcome?.kind === "retrying";
   // The engine can be busy on a turn this view never sent (a Worker's review, a scheduled run): still working.
-  const working = turnRunning || (outcome === null && !needsYou && engineRunning) || (activeTurn !== null && outcome === null);
-  const voiceSettled = engineStatus.type === "idle" && !activeTurn && !appRetry && !working && !needsYou && !error && !Object.values(readErrors).some(Boolean);
+  const working = !stopAttempt && (turnRunning || (outcome === null && !needsYou && engineRunning) || (activeTurn !== null && outcome === null));
+  const voiceSettled = !stopAttempt && engineStatus.type === "idle" && !activeTurn && !appRetry && !working && !needsYou && !error && !Object.values(readErrors).some(Boolean);
   const voiceReply = useMemo(() => privateVoiceReply(messages, voiceSettled && !failure && (!outcome || outcome.kind === "replied")), [messages, voiceSettled, failure, outcome?.kind]);
   const voice = useVoice({
     active: active && kind === "discussion" && !assignmentMode && !assignmentBusy,
@@ -2102,7 +2140,7 @@ function ThreadView({
     failedSteps: currentReplies.flatMap((reply) => reply.toolCalls).filter((call) => executionState(call.status) === "failed").length,
   };
 
-  const readableStatus = !transcriptLoaded ? "Loading conversation" : outcome && outcome.kind !== "working" && outcome.kind !== "replied"
+  const readableStatus = stopAttempt ? stopPending ? "Stopping..." : "Stop not confirmed" : !transcriptLoaded ? "Loading conversation" : outcome && outcome.kind !== "working" && outcome.kind !== "replied"
     ? outcome.label
     : working
       ? workingLabel
@@ -2111,6 +2149,10 @@ function ThreadView({
   const failed = outcome?.kind === "failed";
 
   useEffect(() => {
+    if (stopAttempt) {
+      onActivityChange({ state: stopPending ? "working" : "attention", label: stopPending ? "Stopping..." : "Stop not confirmed", detail: "Stopping work in this conversation", summary: stopPending ? "Stopping..." : "Stop not confirmed. Try Stop again before continuing.", updatedAt: Date.now(), threadId });
+      return;
+    }
     if (!transcriptLoaded) return;
     if (needsYou) {
       onActivityChange({
@@ -2154,12 +2196,12 @@ function ThreadView({
     // already announced itself; clearing here would leave the header on Ready for one frame.
     if (activeTurnRef.current) return;
     onActivityChange(null);
-  }, [activeToolLabel, kind, needsYou, onActivityChange, outcome?.kind, outcome?.label, outcome?.line, pending, threadId, title, transcriptLoaded, working, workingLabel]);
+  }, [activeToolLabel, kind, needsYou, onActivityChange, outcome?.kind, outcome?.label, outcome?.line, pending, stopAttempt, stopPending, threadId, title, transcriptLoaded, working, workingLabel]);
 
   const currentDiscussion: ThreadListItem = discussions.find((item) => item.id === threadId)
     ?? { id: threadId, title, createdAt: 0, updatedAt: 0, status: "idle" };
   const freshDiscussion = transcriptLoaded && turnsLoaded && kind === "discussion" && visibleMessages.length === 0 && !working && !needsYou && !error && !outcome;
-  const composerWorking = turnRunning || activeTurn !== null || (engineRunning && !needsYou);
+  const composerWorking = Boolean(stopAttempt) || turnRunning || activeTurn !== null || (engineRunning && !needsYou);
   const [controlStatusSlot, setControlStatusSlot] = useState<HTMLDivElement | null>(null);
   const [floatingSlot, setFloatingSlot] = useState<HTMLDivElement | null>(null);
   const [computerOpenRequest, setComputerOpenRequest] = useState(0);
@@ -2189,18 +2231,18 @@ function ThreadView({
           <>
             {kind !== "discussion" ? <Button variant="ghost" onClick={onBack}>Back</Button> : null}
             {kind !== "worker" ? (
-              <Button variant="ghost" disabled={!active || (!working && !needsYou)} title={working || needsYou ? "Stop work in this conversation" : "No active work to stop"} data-testid="coworker-stop" onClick={() => void stop()}>Stop</Button>
+              <Button variant="ghost" disabled={!active || stopPending || (!working && !needsYou && !stopAttempt)} title={working || needsYou || stopAttempt ? "Stop work in this conversation" : "No active work to stop"} data-testid="coworker-stop" onClick={() => void stop()}>{stopLabel}</Button>
             ) : null}
           </>
         )}
       />
-      {active && kind === "discussion" && browserEligible && headerSlots.tools ? createPortal(<ComputerControl key={`${coworker.slug}:${threadId}`} slug={coworker.slug} threadId={threadId} statusSlot={controlStatusSlot} floatingSlot={floatingSlot} openRequest={computerOpenRequest} onOpenRequestHandled={() => setComputerOpenRequest(0)} onBackToConversation={() => voice.fieldRef.current?.focus()} />, headerSlots.tools) : null}
+      {active && kind === "discussion" && browserEligible && headerSlots.tools ? createPortal(<Suspense fallback={null}><ComputerControl key={`${coworker.slug}:${threadId}`} slug={coworker.slug} threadId={threadId} statusSlot={controlStatusSlot} floatingSlot={floatingSlot} openRequest={computerOpenRequest} onOpenRequestHandled={() => setComputerOpenRequest(0)} onBackToConversation={() => voice.fieldRef.current?.focus()} /></Suspense>, headerSlots.tools) : null}
       {/* Progress and problems show inline in the conversation; this keeps the turn state readable to assistive tech and tests. */}
       <div className="@container/discussion min-h-0 min-w-0 flex-1">
       <div className="flex h-full min-h-0 min-w-0 flex-col @min-[760px]/discussion:flex-row">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col" data-testid="coworker-conversation-column">
-      <p data-testid="coworker-thread-status" className="sr-only" aria-live="polite" data-state={needsYou ? "needs-you" : working ? "working" : "idle"} data-outcome={outcome?.kind ?? ""}>
-        {transcriptLoaded && kind === "discussion" && !working && !needsYou && !failed && !settledWord ? "Ready" : readableStatus}
+      <p data-testid="coworker-thread-status" className="sr-only" aria-live="polite" data-state={stopAttempt ? stopPending ? "stopping" : "stop-unconfirmed" : needsYou ? "needs-you" : working ? "working" : "idle"} data-outcome={outcome?.kind ?? ""}>
+        {transcriptLoaded && kind === "discussion" && !stopAttempt && !working && !needsYou && !failed && !settledWord ? "Ready" : readableStatus}
       </p>
       <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
       <div
@@ -2209,8 +2251,10 @@ function ThreadView({
         style={{ overflowAnchor: "none" }}
       >
         <div ref={contentRef} className="mx-auto max-w-3xl space-y-3">
+          {activityOpenError ? <p role="alert" className="text-xs text-amber">{activityOpenError}</p> : null}
           {!transcriptLoaded && !readErrors.transcript ? <p role="status" className="text-xs text-mist">Loading conversation...</p> : null}
           {freshDiscussion ? <QuietEmptyConversation coworker={coworker} proposerName={team?.coworkers.find((member) => member.slug === coworker.suggestedBy?.slug)?.name ?? ""} /> : null}
+          <TranscriptAppContext.Provider value={{ sessionId: threadId, engine: "v1", readOnly: !active || kind !== "discussion" }}>
           {blocks.map((block) => {
             const retriedWith = block.kind === "message" ? executionsByMessage.get(block.message.id)?.retryLabel : undefined;
             if (block.kind === "actions") {
@@ -2247,6 +2291,7 @@ function ThreadView({
               </div>
             );
           })}
+          </TranscriptAppContext.Provider>
           <CollaborationReceipts receipts={collaborationReceipts} />
           <InteractionCards
             coworker={coworker}
@@ -2288,6 +2333,9 @@ function ThreadView({
               onStop={outcome?.kind === "slow" ? () => void stop() : undefined}
             />
           </LiveRowSlot>
+          {stopAttempt ? <div role="status" aria-live="polite" data-testid="coworker-stop-feedback">
+            <QuietLine outcome={stopPending ? "stopping" : "stop-unconfirmed"} text={stopPending ? "Stopping..." : `Stop not confirmed. ${stopAttempt.error ?? "Try Stop again before continuing."}`} choices={stopPending ? [] : [{ id: "stop", label: "Retry stop" }]} onChoose={chooseTurnAction} />
+          </div> : null}
           {outcome?.kind === "retrying" || outcome?.kind === "stopped-by-you" || outcome?.kind === "cut-off" ? (
             <QuietLine outcome={outcome.kind} text={outcome.line} choices={outcome.choices} onChoose={chooseTurnAction} />
           ) : null}
@@ -2326,6 +2374,8 @@ function ThreadView({
           onCreateAssignment={() => void createAssignmentFromDiscussion()}
           busy={assignmentBusy}
           working={composerWorking}
+          stopPending={stopPending}
+          stopLabel={stopLabel}
           onStop={() => void stop()}
           offerStartingPoints={freshDiscussion}
           coworkerName={coworker.name}
@@ -2345,6 +2395,8 @@ function ThreadView({
           onChange={setReply}
           onSubmit={() => void send()}
           working={composerWorking}
+          stopPending={stopPending}
+          stopLabel={stopLabel}
           onStop={() => void stop()}
           placeholder={`Follow up with ${coworker.name}…`}
           summary={summary}
@@ -2352,7 +2404,7 @@ function ThreadView({
         />
       )}
       </div>
-      {kind === "discussion" && browserEligible ? <DiscussionBrowser key={`${coworker.slug}:${threadId}`} active={active} slug={coworker.slug} threadId={threadId} actionsSlot={headerSlots.tools} statusSlot={controlStatusSlot} floatingSlot={floatingSlot} openRequest={browserOpenRequest} /> : null}
+      {kind === "discussion" && browserEligible ? <Suspense fallback={null}><DiscussionBrowser key={`${coworker.slug}:${threadId}`} active={active} slug={coworker.slug} threadId={threadId} actionsSlot={headerSlots.tools} statusSlot={controlStatusSlot} floatingSlot={floatingSlot} openRequest={browserOpenRequest} /></Suspense> : null}
       </div>
       </div>
     </section>
@@ -2366,7 +2418,7 @@ type ConversationBlock =
   | { kind: "ended"; message: TranscriptMessage; ended: "stopped" | "failed" };
 
 /** Safe conversation-scoped facts only; progress inspection is a separate surface. */
-export function CollaborationReceipts({ receipts }: { receipts: import("@/lib/bridge").CollaborationReceipt[] }) {
+export function CollaborationReceipts({ receipts, canRetry, retryUnavailable }: { receipts: import("@/lib/bridge").CollaborationReceipt[]; canRetry?: (receipt: import("@/lib/bridge").CollaborationReceipt) => boolean; retryUnavailable?: ReactNode }) {
   const [error, setError] = useState("");
   const act = async (action: () => Promise<unknown>) => {
     setError("");
@@ -2381,7 +2433,7 @@ export function CollaborationReceipts({ receipts }: { receipts: import("@/lib/br
         return dependency.groupId ? <button key={dependency.id} type="button" className="underline underline-offset-2" onClick={() => window.dispatchEvent(new CustomEvent("coworker:open-group", { detail: dependency.groupId }))}>{label}</button> : <span key={dependency.id}>{label}</span>;
       })}
       {!["succeeded", "failed", "cancelled"].includes(receipt.state) ? <button type="button" className="underline underline-offset-2" title="Stop this task, its delegated work, and its automatic follow-up" onClick={() => void act(() => coworkerBridge.collaboration.cancel(receipt.id))}>Stop task</button> : null}
-      {receipt.state === "failed" ? <button type="button" className="underline underline-offset-2" onClick={() => void act(() => coworkerBridge.collaboration.retry(receipt.id))}>Continue with available results</button> : null}
+      {receipt.state === "failed" ? canRetry?.(receipt) === false ? retryUnavailable : <button type="button" className="underline underline-offset-2" onClick={() => void act(() => coworkerBridge.collaboration.retry(receipt.id))}>Continue with available results</button> : null}
     </div>)}
     {error ? <p role="alert" className="text-xs text-mist">{error}</p> : null}
   </div>;
@@ -2953,7 +3005,10 @@ function ToolAttachments({ calls, client }: { calls: TranscriptToolCall[]; clien
 }
 
 /** The standard MCP App a tool call returned, mounted in the existing sandboxed host. */
+const TranscriptAppContext = createContext<CoworkerMcpAppContext>({ sessionId: null, engine: "v1", readOnly: true });
+
 function ToolAppFrame({ call, client }: { call: TranscriptToolCall; client: CoworkerMcpClient }) {
+  const { sessionId, engine, readOnly } = useContext(TranscriptAppContext);
   const nextResult = preservedMcpAppResult({ output: call.output, metadata: call.metadata });
   const resultSignature = JSON.stringify(nextResult);
   const resultRef = useRef<{ signature: string; value: PreservedMcpAppResult | null }>({
@@ -2973,36 +3028,55 @@ function ToolAppFrame({ call, client }: { call: TranscriptToolCall; client: Cowo
   if (inputRef.current.signature !== inputSignature) {
     inputRef.current = { signature: inputSignature, value: launch?.arguments ?? call.input };
   }
-  const [app, setApp] = useState<CoworkerMcpAppResource | null>(null);
+  const [resolvedApp, setApp] = useState<{ app: CoworkerMcpAppResource; client: CoworkerMcpClient } | null>(null);
+  const app = resolvedApp?.client === client
+    && resolvedApp.app.context.sessionId === sessionId
+    && resolvedApp.app.context.engine === engine
+    && resolvedApp.app.context.readOnly === readOnly ? resolvedApp.app : null;
   const [appError, setAppError] = useState("");
   const complete = call.status === "completed" || call.status === "success";
+  const releaseRef = useRef<(() => void) | null>(null);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     let cancelled = false;
+    let launchId: string | undefined;
+    const release = () => {
+      if (launchId) void client.releaseApp(launchId).catch(() => undefined);
+      launchId = undefined;
+    };
+    releaseRef.current = release;
     setApp(null);
     setAppError("");
     if (!result || !complete) return;
-    void client.resolveApp(call.tool, launch ?? undefined)
+    void client.resolveApp(call.tool, { sessionId, engine, readOnly }, launch ?? undefined)
       .then(({ app: resolved }) => {
-        if (!cancelled) setApp(resolved);
+        launchId = resolved?.launchId;
+        if (cancelled) release();
+        else setApp(resolved ? { app: resolved, client } : null);
       })
       .catch((cause) => {
         if (!cancelled) setAppError(cause instanceof Error ? cause.message : String(cause));
       });
-    return () => { cancelled = true; };
-  }, [call.tool, client, complete, launch, result]);
+    return () => {
+      cancelled = true;
+      release();
+      if (releaseRef.current === release) releaseRef.current = null;
+    };
+  }, [call.tool, client, complete, launch, result, sessionId, engine, readOnly]);
 
   if (app && result) {
     return (
       <div className="mt-1.5">
-        <McpAppFrame
-          client={client}
-          app={app}
-          toolName={call.tool}
-          input={inputRef.current.value}
-          result={result}
-          onClose={() => setApp(null)}
-        />
+        <Suspense fallback={null}>
+          <McpAppFrame
+            client={client}
+            app={app}
+            toolName={call.tool}
+            input={inputRef.current.value}
+            result={result}
+            onClose={() => { releaseRef.current?.(); setApp(null); }}
+          />
+        </Suspense>
       </div>
     );
   }
@@ -3046,6 +3120,8 @@ function DiscussionComposer({
   onCreateAssignment,
   busy,
   working = false,
+  stopPending = false,
+  stopLabel = "Stop",
   onStop,
   waiting,
   error,
@@ -3071,6 +3147,8 @@ function DiscussionComposer({
   busy: boolean;
   /** A reply is in progress: the field stays open, Enter puts the message on Next, and the round control stops when the field is empty. */
   working?: boolean;
+  stopPending?: boolean;
+  stopLabel?: string;
   onStop?: () => void;
   /** Why sending has to wait a moment (for example, the workspace is still starting); typing stays possible. */
   waiting?: string;
@@ -3145,7 +3223,7 @@ function DiscussionComposer({
               {effortStop && onEffortChange ? <EffortDial stop={effortStop} onChange={onEffortChange} coworkerName={coworkerName} fixedVariant={fixedVariant} /> : null}
             </div>
             {stopping && onStop ? (
-              <SendButton label="Stop" busy={false} disabled={false} stop onClick={onStop} />
+              <SendButton label={stopLabel} busy={stopPending} disabled={stopPending} stop onClick={onStop} />
             ) : (
               <SendButton label={submitLabel} busy={busy} disabled={!canSubmit} title={waiting} onClick={submit} />
             )}
@@ -3238,6 +3316,8 @@ function MessageComposer({
   onChange,
   onSubmit,
   working = false,
+  stopPending = false,
+  stopLabel = "Stop",
   onStop,
   placeholder,
   summary = null,
@@ -3248,6 +3328,8 @@ function MessageComposer({
   onSubmit: () => void;
   /** A reply is in progress: the field stays open, Enter puts the message on Next, and the round control stops when the field is empty. */
   working?: boolean;
+  stopPending?: boolean;
+  stopLabel?: string;
   onStop?: () => void;
   placeholder: string;
   summary?: CoworkerSummaryLine | null;
@@ -3277,7 +3359,7 @@ function MessageComposer({
           />
           <div className="flex justify-end" data-testid="coworker-composer-actions">
             {stopping && onStop ? (
-              <SendButton label="Stop" busy={false} disabled={false} stop onClick={onStop} />
+              <SendButton label={stopLabel} busy={stopPending} disabled={stopPending} stop onClick={onStop} />
             ) : (
               <SendButton label={working ? "Next" : "Send"} busy={false} disabled={!canSubmit} onClick={onSubmit} />
             )}

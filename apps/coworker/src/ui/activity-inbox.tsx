@@ -19,8 +19,9 @@ export type ActivityInboxProps = {
   onMarkRead: (ids: string[], read?: boolean) => Promise<void>;
   onOpen: (item: CoworkerActivityItem) => Promise<void>;
   onOpenCoworker: (slug: string, threadId?: string) => void;
-  onOpenGroup: (groupId: string) => void;
+  onOpenGroup: (groupId: string) => Promise<void>;
   onBack: () => void;
+  backLabel?: string;
 };
 
 type Filter = "all" | "mentions" | "unread";
@@ -79,7 +80,7 @@ function ActivityRow({ item, coworker, group, disabled, onOpen, onMarkRead }: {
 }) {
   const unread = item.readAt === null;
   const name = coworker?.name || item.slug || "Coworker";
-  const location = item.target.kind === "private" ? "Private chat" : `Group · ${group?.name || "Group chat"}`;
+  const location = item.target.kind === "private" ? "Private chat" : `${group?.eventId ? "Event" : "Group"} · ${group?.name || "Group chat"}`;
   const date = new Date(item.at);
   const validDate = Number.isFinite(date.getTime());
   const readAction = unread ? "Mark as read" : "Mark as unread";
@@ -142,6 +143,18 @@ function HappeningNow({ coworkers, groups, activityBySlug, groupLines, groupActi
   ActivityInboxProps, "coworkers" | "groups" | "activityBySlug" | "groupLines" | "groupActiveSlugs" | "onOpenCoworker" | "onOpenGroup"
 >) {
   const [expanded, setExpanded] = useState(false);
+  const [openError, setOpenError] = useState("");
+  const [openingGroup, setOpeningGroup] = useState("");
+  const openingGroupRef = useRef(false);
+  async function openGroup(groupId: string) {
+    if (openingGroupRef.current) return;
+    openingGroupRef.current = true;
+    setOpeningGroup(groupId);
+    setOpenError("");
+    try { await onOpenGroup(groupId); }
+    catch (cause) { setOpenError(cause instanceof Error ? cause.message : "This conversation could not be opened."); }
+    finally { openingGroupRef.current = false; setOpeningGroup(""); }
+  }
   const headingId = useId();
   const contentId = useId();
   const current: CurrentConversation[] = [];
@@ -171,11 +184,11 @@ function HappeningNow({ coworkers, groups, activityBySlug, groupLines, groupActi
     if (activeSlugs.length === 0 && !currentLine) continue;
     current.push({
       id: `group:${group.id}`, name: group.name, label: line || "Working",
-      detail: "Group chat",
+      detail: group.eventId ? "Event conversation" : "Group chat",
       tone: waiting || line === "Activity unavailable" ? "text-amber" : activeSlugs.length ? "text-spark" : "text-mist",
       priority: waiting ? 0 : activeSlugs.length ? 1 : 2,
       members: group.participantSlugs.flatMap((slug) => { const member = bySlug.get(slug); return member ? [member] : []; }),
-      open: () => onOpenGroup(group.id),
+      open: () => void openGroup(group.id),
     });
   }
   current.sort((a, b) => a.priority - b.priority || a.name.localeCompare(b.name));
@@ -192,12 +205,13 @@ function HappeningNow({ coworkers, groups, activityBySlug, groupLines, groupActi
         </div>
         <p className="mt-1.5 text-[11px] leading-4 text-mist">Current status, separate from notifications.</p>
       </div>
+      {openError ? <p role="alert" className="px-4 pb-3 text-xs text-amber">{openError}</p> : null}
       <div id={contentId} className={expanded ? "" : "hidden @min-[960px]/activity:block"}>
       {visible.length ? (
         <ul className="px-1.5 pb-1.5">
           {visible.map((entry) => (
             <li key={entry.id}>
-              <button type="button" onClick={entry.open} className={`flex w-full min-w-0 items-start gap-2.5 rounded-lg px-2.5 py-3 text-left transition-colors hover:bg-white/5 ${FOCUS}`}>
+              <button type="button" onClick={entry.open} disabled={Boolean(openingGroup)} aria-busy={entry.id === `group:${openingGroup}`} className={`flex w-full min-w-0 items-start gap-2.5 rounded-lg px-2.5 py-3 text-left transition-colors hover:bg-white/5 disabled:cursor-wait ${FOCUS}`}>
                 <span aria-hidden="true" className="flex h-8 w-11 shrink-0 items-center justify-center">
                   {entry.coworker ? <CoworkerAvatar identity={entry.coworker.slug} name={entry.coworker.name} color={entry.coworker.avatarColor} glasses={entry.coworker.avatarGlasses} size={30} animated={false} gaze={false} /> : <GroupAvatars members={(entry.members ?? []).slice(0, 2)} size={20} animated={false} />}
                 </span>
@@ -224,7 +238,7 @@ function HappeningNow({ coworkers, groups, activityBySlug, groupLines, groupActi
 }
 
 /** Standalone view. Navigation/acknowledgement of an opened item belongs to onOpen. */
-export function ActivityInbox({ items, loading, error, busy, coworkers, groups, activityBySlug, groupLines, groupActiveSlugs, onRefresh, onMarkRead, onOpen, onOpenCoworker, onOpenGroup, onBack }: ActivityInboxProps) {
+export function ActivityInbox({ items, loading, error, busy, coworkers, groups, activityBySlug, groupLines, groupActiveSlugs, onRefresh, onMarkRead, onOpen, onOpenCoworker, onOpenGroup, onBack, backLabel = "Back to chat" }: ActivityInboxProps) {
   const [filter, setFilter] = useState<Filter>("all");
   const [actionError, setActionError] = useState("");
   const [pending, setPending] = useState(false);
@@ -268,7 +282,7 @@ export function ActivityInbox({ items, loading, error, busy, coworkers, groups, 
           <h1 id={titleId} className="text-lg font-semibold tracking-tight">Activity</h1>
           <p className="mt-1 text-xs leading-4 text-mist">Replies, mentions, and a pulse on your team.</p>
         </div>
-        <Button variant="ghost" onClick={onBack} className={`window-no-drag flex shrink-0 items-center gap-1.5 rounded-lg text-xs ${FOCUS}`}><ChevronIcon direction="left" className="size-3.5" />Back to chat</Button>
+        <Button variant="ghost" onClick={onBack} className={`window-no-drag flex shrink-0 items-center gap-1.5 rounded-lg text-xs ${FOCUS}`}><ChevronIcon direction="left" className="size-3.5" />{backLabel}</Button>
       </header>
 
       <div className="flex shrink-0 flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-line/70 px-3 py-3 @min-[560px]/activity:px-6">

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Suspense, lazy, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { coworkerBridge, type CoworkerSummary, type RuntimeInfo } from "@/lib/bridge";
 import {
@@ -44,6 +44,7 @@ import {
 import { buildDenAccountUrl, type DenSession } from "@/lib/den";
 import {
   createCoworkerMcpClient,
+  createCoworkerMcpAppActions,
   type CoworkerMcpAppCatalogServer,
   type CoworkerMcpAppResource,
   type CoworkerMcpClient,
@@ -53,9 +54,11 @@ import {
 } from "@/lib/mcp";
 import type { PanelCrumb } from "@/lib/panel-route";
 import { AppsIcon, Button, IconButton, StatusDot, ToolIcon, inputClass } from "@/ui/kit";
-import { McpAppFrame } from "@/ui/mcp-app-frame";
 import { PanelLevel, type PanelDirection, type ReturnFocus } from "@/ui/panel-nav";
 import { Fact, GroupLabel, QuietLine, Row, RowList, SkeletonRows, TechnicalDetails, useReturnFocus } from "@/ui/rows";
+
+// The interactive app host (and its MCP app bridge) loads when a tool first shows an app.
+const McpAppFrame = lazy(() => import("@/ui/mcp-app-frame").then((module) => ({ default: module.McpAppFrame })));
 
 /** Remembered per machine once the person asks not to see the full explanation again. */
 export const CONNECT_PITCH_KEY = "open-coworker.connect-pitch";
@@ -168,12 +171,7 @@ async function readSkillIndex(runtime: RuntimeInfo): Promise<ConnectSkill[]> {
 }
 
 async function searchGateway(client: CoworkerMcpClient, query: string) {
-  const result = await client.callAppTool({
-    serverName: CONNECT_MCP_NAME,
-    name: "search_capabilities",
-    resourceUri: "",
-    arguments: { query, limit: 20 },
-  });
+  const result = await client.searchCapabilities(query);
   if (result.isError) throw new Error("Connected app search is temporarily unavailable.");
   return parseSearchMatches(result);
 }
@@ -1156,6 +1154,27 @@ function AppDetail({
   const [resource, setResource] = useState<CoworkerMcpAppResource | null>(null);
   const [result, setResult] = useState<PreservedMcpAppResult | null>(null);
   const [argumentsValue, setArgumentsValue] = useState<Record<string, unknown>>({});
+  const generation = useRef(0);
+  const releaseRef = useRef<(() => void) | null>(null);
+
+  function closeApp() {
+    generation.current += 1;
+    releaseRef.current?.();
+    releaseRef.current = null;
+    setResource(null);
+    setResult(null);
+    setBusy(false);
+    setApprovalArmed(false);
+  }
+
+  useLayoutEffect(() => {
+    closeApp();
+    return () => {
+      generation.current += 1;
+      releaseRef.current?.();
+      releaseRef.current = null;
+    };
+  }, [client, catalog.projectedToolName, catalog.toolName, catalog.resourceUri, catalog.connectionId]);
 
   async function open(approved: boolean) {
     let parsed: unknown;
@@ -1170,6 +1189,8 @@ function AppDetail({
       return;
     }
     const args = Object.fromEntries(Object.entries(parsed));
+    closeApp();
+    const requestGeneration = generation.current;
     setBusy(true);
     setError("");
     setResource(null);
@@ -1181,24 +1202,34 @@ function AppDetail({
         resourceUri: catalog.resourceUri,
         arguments: args,
       };
-      const resolved = await client.resolveApp(catalog.projectedToolName, launch);
+      // A catalog launch is sessionless, not attached to whichever discussion is selected.
+      // "Read only" in the catalog describes the launch tool, not a disabled host.
+      const resolved = await client.resolveApp(catalog.projectedToolName, { sessionId: null, engine: "v1", readOnly: false }, launch);
+      if (requestGeneration !== generation.current) {
+        if (resolved.app?.launchId) void client.releaseApp(resolved.app.launchId).catch(() => undefined);
+        return;
+      }
       if (!resolved.app) throw new Error("This App no longer offers a view.");
-      const called = await client.callAppTool({
-        serverName: resolved.app.serverName,
-        name: resolved.app.toolName,
-        resourceUri: resolved.app.resourceUri,
-        arguments: args,
-        ...(approved ? { approved: true } : {}),
-      });
+      const resource = resolved.app;
+      const actions = createCoworkerMcpAppActions(client, resource, (message) => window.confirm(message));
+      releaseRef.current = () => {
+        actions.dispose();
+        if (resource.launchId) void client.releaseApp(resource.launchId).catch(() => undefined);
+      };
+      const called = await actions.callTool(resource.toolName, args, approved);
+      if (requestGeneration !== generation.current) return;
       if (called.isError) throw new Error(appFailureMessage(called));
       setArgumentsValue(args);
       setResource(resolved.app);
       setResult(called);
       setApprovalArmed(false);
     } catch (cause) {
+      if (requestGeneration !== generation.current) return;
+      releaseRef.current?.();
+      releaseRef.current = null;
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
-      setBusy(false);
+      if (requestGeneration === generation.current) setBusy(false);
     }
   }
 
@@ -1265,17 +1296,16 @@ function AppDetail({
 
       {resource && result ? (
         <div className="px-1">
-          <McpAppFrame
-            client={client}
-            app={resource}
-            toolName={catalog.projectedToolName}
-            input={argumentsValue}
-            result={result}
-            onClose={() => {
-              setResource(null);
-              setResult(null);
-            }}
-          />
+          <Suspense fallback={null}>
+            <McpAppFrame
+              client={client}
+              app={resource}
+              toolName={catalog.projectedToolName}
+              input={argumentsValue}
+              result={result}
+              onClose={closeApp}
+            />
+          </Suspense>
           {beside ? (
             <div className="mt-2 flex justify-end">
               <Button variant="ghost" className="text-xs" onClick={beside} data-testid="apps-tools-open-beside">Open beside</Button>
