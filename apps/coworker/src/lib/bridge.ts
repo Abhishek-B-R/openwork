@@ -154,7 +154,7 @@ export type CoworkerSummary = {
 
 export type ModelChosenBy = "app" | "person" | "";
 
-export type AvatarColor = "blue" | "violet" | "mint" | "orange" | "rose" | "slate" | "sand" | "sage";
+export type AvatarColor = "blue" | "violet" | "mint" | "orange" | "rose" | "slate" | "sand" | "sage" | "sky" | "lagoon" | "lime" | "lemon" | "coral" | "grape";
 export type AvatarGlasses = "round" | "square" | "oval" | "none" | "sunglasses" | "monocle" | "star";
 
 /** One role from the team catalog, as onboarding and the Add screen propose it. */

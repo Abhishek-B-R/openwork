@@ -95,7 +95,7 @@ test("avatar choices survive creation, template export and import, and reload", 
   const dir = await tempCoworkersDir();
   const importedDir = await tempCoworkersDir();
   const install = createTemplateInstaller(importedDir, (input) => createCoworker(importedDir, input));
-  const appearance = { avatarColor: "sage", avatarGlasses: "monocle" };
+  const appearance = { avatarColor: "coral", avatarGlasses: "monocle" };
   const created = await createCoworker(dir, { name: "Classic", ...appearance });
   const template = parseCoworkerTemplateFile(JSON.stringify(await exportCoworkerTemplate(dir, created.slug)));
   const imported = await install({ scope: "file", items: [{ id: created.slug, versionId: "one", template }], installIds: [created.slug] });
