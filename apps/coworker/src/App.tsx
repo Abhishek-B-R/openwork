@@ -2,7 +2,7 @@ import { patternDrafts, workPattern } from "@/lib/work-patterns";
 import { AllHandsOverview, allHandsContext } from "@/ui/all-hands";
 import type { AllHandsSettings } from "@/lib/bridge";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { coworkerBridge, type CoworkerGroupSummary, type CoworkerSummary, type CoworkerTemplateSync, type ProviderSyncRun, type RuntimeInfo } from "@/lib/bridge";
+import { coworkerBridge, type CoworkerActivityItem, type CoworkerGroupSummary, type CoworkerSummary, type CoworkerTemplateSync, type ProviderSyncRun, type RuntimeInfo } from "@/lib/bridge";
 import { acknowledgeCoworker } from "@/ui/coworker-avatar";
 import { publishGroupRun } from "@/lib/group-runs";
 import { describeGroupPresentation } from "@/lib/group-presentation";
@@ -48,6 +48,8 @@ import { OpenWorkSettings, type SettingsSection } from "@/ui/openwork-settings";
 import { FactoryResetScreen } from "@/ui/factory-reset";
 import { OnboardingReplay } from "@/ui/onboarding-replay";
 import { VoiceContext } from "@/ui/use-voice";
+import { ActivityInbox } from "@/ui/activity-inbox";
+import { useActivityInbox } from "@/ui/use-activity-inbox";
 
 /** How long a freshly (re)started workspace may stay silent before it is a problem worth naming. */
 const WORKSPACE_WARMUP_MS = 45_000;
@@ -112,6 +114,9 @@ export default function App() {
   const [globalSettings, setGlobalSettings] = useState<SettingsSection | null>(null);
   const [globalSettingsMounted, setGlobalSettingsMounted] = useState(false);
   const [factoryResetOpen, setFactoryResetOpen] = useState(false);
+  const [activityOpen, setActivityOpen] = useState(false);
+  const [activityGroupRequest, setActivityGroupRequest] = useState<{ id: number; groupId: string; eventId: string } | null>(null);
+  const inbox = useActivityInbox(Boolean(runtime) && coworkers.length > 0 && !factoryResetOpen);
   // A read-only tour, deliberately separate from first-run flags and persisted team drafts.
   const [replayOnboarding, setReplayOnboarding] = useState<"welcome" | "ai" | null>(null);
   const [activityBySlug, setActivityBySlug] = useState<Record<string, CoworkerActivity>>({});
@@ -194,7 +199,7 @@ export default function App() {
     const timer = window.setInterval(() => void refresh().catch(() => undefined), 2000);
     const open = (event: Event) => {
       if (event instanceof CustomEvent && typeof event.detail === "string") {
-        void coworkerBridge.groups.get(event.detail).then((group) => { if (!group.archivedAt) { setGroups((current) => current.some((entry) => entry.id === group.id) ? current : [...current, group]); setSelectedGroupId(group.id); } });
+        void coworkerBridge.groups.get(event.detail).then((group) => { if (!group.archivedAt) { setGroups((current) => current.some((entry) => entry.id === group.id) ? current : [...current, group]); setActivityOpen(false); setSelectedGroupId(group.id); } });
       }
     };
     window.addEventListener("coworker:open-group", open);
@@ -834,9 +839,31 @@ export default function App() {
   /** Open another coworker's conversation, optionally with a message to send there as the person's own. */
   function visitCoworker(slug: string, prompt?: string) {
     acknowledgeCoworker(slug);
+    setActivityOpen(false);
+    setActivityGroupRequest(null);
     setSelectedGroupId("");
     setSelectedSlug(slug);
     if (prompt) setHomeRequest({ id: Date.now(), slug, kind: "turn", prompt });
+  }
+
+  async function openActivityItem(item: CoworkerActivityItem) {
+    // Revalidate the native projection before navigating; retired identities and
+    // archived groups must not send a stale notification into another workspace.
+    const current = (await coworkerBridge.activity.list()).find((entry) => entry.id === item.id);
+    if (!current) throw new Error("This activity is no longer available. Refresh Activity to update the list.");
+    const group = current.target.kind === "group" ? await coworkerBridge.groups.get(current.target.groupId) : null;
+    await inbox.markRead([current.id]);
+    if (current.target.kind === "group" && group) {
+      replaceGroup(group);
+      setSelectedGroupId(group.id);
+      setActivityGroupRequest({ id: Date.now(), groupId: group.id, eventId: current.target.eventId });
+    } else if (current.target.kind === "private") {
+      setSelectedGroupId("");
+      setSelectedSlug(current.slug);
+      setActivityGroupRequest(null);
+      setHomeRequest({ id: Date.now(), slug: current.slug, kind: "discussion", threadId: current.target.threadId });
+    }
+    setActivityOpen(false);
   }
 
   function removeCoworkerFromList(slug: string) {
@@ -879,10 +906,17 @@ export default function App() {
               session={session}
               coworkers={coworkers}
               activityBySlug={visibleActivityBySlug}
-              selectedSlug={selectedGroup ? "" : selectedSlug}
+              selectedSlug={activityOpen || selectedGroup ? "" : selectedSlug}
+              activitySelected={activityOpen}
+              unreadActivity={inbox.items.filter((item) => item.readAt === null).length}
+              unreadMentions={inbox.items.filter((item) => item.readAt === null && item.kind === "mention").length}
+              activityError={Boolean(inbox.error)}
+              onOpenActivity={() => { setActivityOpen(true); void inbox.refresh(); }}
               panel={rail}
               onSelect={(slug) => {
                 acknowledgeCoworker(slug);
+                setActivityOpen(false);
+                setActivityGroupRequest(null);
                 setSelectedGroupId("");
                 setSelectedSlug(slug);
               }}
@@ -891,8 +925,8 @@ export default function App() {
               groups={liveGroups.filter((group) => allHandsSettings?.enabled || group.id !== allHandsSettings?.groupId)}
               groupLines={groupLines}
               groupActiveSlugs={groupActiveSlugs}
-              selectedGroupId={selectedGroup?.id ?? ""}
-              onSelectGroup={setSelectedGroupId}
+              selectedGroupId={activityOpen ? "" : selectedGroup?.id ?? ""}
+              onSelectGroup={(id) => { setActivityOpen(false); setActivityGroupRequest(null); setSelectedGroupId(id); }}
               onNewGroup={() => setCreatingGroup(true)}
             />
             {creatingGroup ? (
@@ -902,6 +936,7 @@ export default function App() {
                 onCreated={(group) => {
                   replaceGroup(group);
                   setCreatingGroup(false);
+                  setActivityOpen(false);
                   setSelectedGroupId(group.id);
                 }}
               />
@@ -921,6 +956,18 @@ export default function App() {
                 }}
               />
             ) : null}
+            {activityOpen ? <ActivityInbox
+              items={inbox.items} loading={inbox.loading} error={inbox.error} busy={inbox.busy}
+              coworkers={coworkers} groups={liveGroups} activityBySlug={visibleActivityBySlug}
+              groupLines={groupLines} groupActiveSlugs={groupActiveSlugs}
+              onRefresh={() => void inbox.refresh()} onMarkRead={inbox.markRead} onOpen={openActivityItem}
+              onOpenCoworker={(slug, threadId) => { visitCoworker(slug); if (threadId) setHomeRequest({ id: Date.now(), slug, kind: "activity", threadId }); }}
+              onOpenGroup={(id) => { setSelectedGroupId(id); setActivityGroupRequest(null); setActivityOpen(false); }}
+              onBack={() => setActivityOpen(false)}
+            /> : null}
+            {/* Keep the conversation mounted: checking Activity must not discard a
+                draft, change selection, or stop work already in progress. */}
+            <div className={activityOpen ? "hidden" : "flex min-w-0 flex-1"}>
             {allHandsGroup && allHandsSettings ? (
               <div className={selectedGroupId === allHandsGroup.id ? "flex min-w-0 flex-1" : "hidden"} data-testid="all-hands-space" data-active={selectedGroupId === allHandsGroup.id}>
                 <GroupChat
@@ -929,7 +976,8 @@ export default function App() {
                   documentsApi={coworkerBridge.groups.documents}
                   coworkers={coworkers}
                   runtime={runtime}
-                  active={selectedGroupId === allHandsGroup.id && workspaceActive && !groupDetailsOpen && !creatingGroup}
+                  active={!activityOpen && selectedGroupId === allHandsGroup.id && workspaceActive && !groupDetailsOpen && !creatingGroup}
+                  activityRequest={activityGroupRequest?.groupId === allHandsGroup.id ? activityGroupRequest : null}
                   briefing={{ enabled: allHandsSettings.enabled, context: allHandsContext(allHandsSettings, coworkers, visibleActivityBySlug), request: briefingRequest }}
                   onRememberFocus={async (focus) => { setAllHandsSettings(await coworkerBridge.allHands.update({ focus })); }}
                   introduction={<AllHandsOverview settings={allHandsSettings} coworkers={coworkers.filter((coworker) => allHandsGroup.participantSlugs.includes(coworker.slug))} activity={visibleActivityBySlug} onSettings={() => openGlobalSettings("all-hands")} onRequest={(text) => setBriefingRequest({ id: `all-hands-manual:${Date.now()}`, text })} onOpenCoworker={(slug, threadId) => { setSelectedGroupId(""); setSelectedSlug(slug); if (threadId) setHomeRequest({ id: Date.now(), slug, kind: "thread", threadId }); }} />}
@@ -947,7 +995,8 @@ export default function App() {
               <GroupChat
                 key={selectedGroup.id}
                 group={selectedGroup}
-                active={workspaceActive && !groupDetailsOpen && !creatingGroup}
+                active={!activityOpen && workspaceActive && !groupDetailsOpen && !creatingGroup}
+                activityRequest={activityGroupRequest?.groupId === selectedGroup.id ? activityGroupRequest : null}
                 documentsApi={coworkerBridge.groups.documents}
                 coworkers={coworkers}
                 runtime={runtime}
@@ -972,7 +1021,7 @@ export default function App() {
             ) : (
             selectedGroupId === allHandsGroup?.id ? null : <CoworkerHome
               key={selected.slug}
-              active={workspaceActive && !creatingGroup}
+              active={!activityOpen && workspaceActive && !creatingGroup}
               runtime={runtime}
               session={session}
               coworkers={coworkers}
@@ -995,6 +1044,7 @@ export default function App() {
               onVisitCoworker={(slug) => visitCoworker(slug)}
             />
             )}
+            </div>
           </div>
         )}
       </div>

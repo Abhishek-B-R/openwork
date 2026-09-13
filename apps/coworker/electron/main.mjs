@@ -23,6 +23,7 @@ import { bindWindowAppearance, windowMaterial } from "./window-appearance.mjs";
 import { globalOpencodeConfigDir, openworkConfigDir } from "@openwork/paths";
 import { createHeadlessThreadClient, isRunning, toTranscript } from "@openwork/headless-threads";
 import { createCollaboration, collaborationId, withAbort } from "./collaboration.mjs";
+import { createActivityInbox } from "./activity-inbox.mjs";
 import { readExecutionActivity } from "../src/lib/progress-activity.ts";
 import { PROGRESS_LIMITS } from "../src/lib/progress-config.ts";
 import { createGroupExecution, repairGroupSelection } from "./group-execution.mjs";
@@ -917,20 +918,24 @@ const collaboration = createCollaboration({
   onSuccess: (entry) => entry.owner.kind === "private" ? captureConversationMemory(entry) : Promise.resolve(),
   publish: (task) => maintenanceAdmission.run(async () => {
     if (!task.groupId) return;
-    await appendGroupEvent(coworkersDir, task.groupId, { id: `evt_${collaborationId(task.id, "answer").slice(5)}`, kind: task.state === "succeeded" ? "coworker" : "status", slug: task.to, threadId: task.owner.threadId, status: task.state, text: task.state === "succeeded" ? task.result : `${task.label}: ${task.error || "The request stopped."}` });
+    const event = await appendGroupEvent(coworkersDir, task.groupId, { id: `evt_${collaborationId(task.id, "answer").slice(5)}`, executionId: task.executionId, kind: task.state === "succeeded" ? "coworker" : "status", slug: task.to, threadId: task.owner.threadId, status: task.state, text: task.state === "succeeded" ? task.result : `${task.label}: ${task.error || "The request stopped."}` });
     if (task.state === "succeeded") {
       const entry = await collaboration.read((state) => state.executions[task.executionId]);
       if (entry) await captureConversationMemory(entry).catch(() => {});
     }
+    return { eventId: event.id, event };
   }),
   publishExecution: (entry) => maintenanceAdmission.run(async () => {
     const task = await collaboration.read((state) => state.tasks[entry.taskId]);
-    if (entry.owner.groupId && task.kind !== "consultation") await appendGroupEvent(coworkersDir, entry.owner.groupId, { id: `evt_${collaborationId(entry.id, "follow-up").slice(5)}`, kind: entry.state === "succeeded" ? "coworker" : "status", slug: entry.owner.slug, threadId: entry.owner.threadId, turnId: entry.owner.turnId, status: entry.state, text: entry.state === "succeeded" ? entry.result : `The follow-up could not finish: ${entry.error}` });
+    let event;
+    if (entry.owner.groupId && task.kind !== "consultation") event = await appendGroupEvent(coworkersDir, entry.owner.groupId, { id: `evt_${collaborationId(entry.id, "follow-up").slice(5)}`, executionId: entry.id, kind: entry.state === "succeeded" ? "coworker" : "status", slug: entry.owner.slug, threadId: entry.owner.threadId, turnId: entry.owner.turnId, status: entry.state, text: entry.state === "succeeded" ? entry.result : `The follow-up could not finish: ${entry.error}` });
     if (entry.owner.groupId && task.kind !== "consultation" && entry.state === "succeeded") await captureConversationMemory(entry).catch(() => {});
     const children = await collaboration.read((state) => state.tasks[entry.taskId].dependencies.map((id) => state.tasks[id]));
     for (const child of children.filter((task) => task.kind === "worker")) await appendWorkerEvent(coworkersDir, child.origin.slug, child.workerId, { id: `evt_${collaborationId(entry.id, child.id, "review").slice(5)}`, kind: "review", reviewThreadId: entry.owner.threadId, text: entry.state === "succeeded" ? "The coworker reviewed this in the original conversation." : "The follow-up did not finish. Its receipt is in the original conversation.", ...(entry.state === "succeeded" ? {} : { error: entry.error }) });
+    return event ? { eventId: event.id, event } : undefined;
   }),
 });
+const activityInbox = createActivityInbox({ collaboration, coworkers: () => listCoworkers(coworkersDir), groups: () => listGroups(coworkersDir) });
 const computerControl = createComputerControl({
   adapters: [createLocalComputerAdapter()],
   discussionFor: computerDiscussion,
@@ -1025,6 +1030,7 @@ async function collaborationClient(slug, { kind = "reply", requestText, model, o
   client.resolvedModel = resolvedModel;
   const interactions = createCoworkerThreads({ serverUrl: handle.url, workspaceId: coworker.workspaceId, token: ownerToken });
   client.workspaceId = coworker.workspaceId;
+  client.coworkerCreatedAt = coworker.createdAt ?? null;
   client.pendingInteractions = interactions.listThreadInteractions;
   client.replyPermission = interactions.replyPermission;
   client.replyQuestion = interactions.replyQuestion;
@@ -1033,11 +1039,11 @@ async function collaborationClient(slug, { kind = "reply", requestText, model, o
 }
 
 async function privateOwner(slug, threadId, kind = "private") {
-  await getCoworker(coworkersDir, slug);
+  const coworker = await getCoworker(coworkersDir, slug);
   const group = (await listGroups(coworkersDir)).find((group) => group.participantThreadIds[slug] === threadId);
   const worker = (await listWorkers(coworkersDir, slug)).find((worker) => worker.threadId === threadId);
   if (group || worker) throw new Error("This thread belongs to group or Worker work, not a private discussion.");
-  return collaboration.registerOwner({ slug, threadId, conversationId: threadId, kind });
+  return collaboration.registerOwner({ slug, threadId, conversationId: threadId, kind, workspaceId: coworker.workspaceId, coworkerCreatedAt: coworker.createdAt });
 }
 
 async function computerDiscussion(slug, threadId) {
@@ -1207,7 +1213,7 @@ async function spawnWorker(slug, input, spawnedBy) {
   const catalog = await workerModelProviders(coworker, !configured && !modelDefaults[purpose].model && !coworker.model);
   const modelSnapshot = resolveWorkerModel(coworker, purpose, catalog.providers, null, catalog, modelDefaults);
   const worker = await createWorker(coworkersDir, slug, { ...input, purpose, modelSnapshot, lifespan, spawnedBy });
-  if (spawnedBy === "person" && worker.spawnedFromThreadId) await collaboration.attachWorker(worker, await privateOwner(slug, worker.spawnedFromThreadId));
+  if (spawnedBy === "person" && worker.spawnedFromThreadId) await collaboration.attachWorker(worker, await privateOwner(slug, worker.spawnedFromThreadId), { activityEligible: true });
   await appendWorkerEvent(coworkersDir, slug, worker.id, {
     kind: "status",
     text: spawnedBy === "coworker" ? `Started by ${coworker.name}` : "Started by you",
@@ -1720,7 +1726,7 @@ async function ensureToolsServer() {
       if (name === "team_consult") {
         const target = (await listCoworkers(coworkersDir)).find((coworker) => coworker.slug === args.to || coworker.name.toLowerCase() === String(args.to).toLowerCase());
         if (!target) throw new Error("Choose a teammate from the team roster.");
-        return collaboration.request(trusted, "consultation", { ...args, to: target.slug });
+        return collaboration.request(trusted, "consultation", { ...args, to: target.slug }, { workspaceId: target.workspaceId, coworkerCreatedAt: target.createdAt });
       }
       if (name === "worker_spawn") {
         if (args.control !== undefined) { assertControlOrigin(trusted.entry); await computerDiscussion(slug, trusted.entry.owner.threadId); trusted.assertActive(); }
@@ -2323,6 +2329,8 @@ function shortDate(at) {
 const installTemplates = createTemplateInstaller(coworkersDir, addCoworker);
 
 const commands = {
+  "activity.list": () => activityInbox.list(),
+  "activity.markRead": ({ ids, read = true }) => activityInbox.markRead(ids, read),
   "browser.bind": (input) => browserControl.bind(input),
   "browser.detach": (input) => browserControl.detach(input),
   "browser.read": (input) => browserControl.read(input),
@@ -2343,7 +2351,7 @@ const commands = {
   },
   "turns.state": async ({ slug, threadId }) => { await getCoworker(coworkersDir, slug); return collaboration.threadState(slug, threadId); },
   "turns.activity": async ({ slug, threadId }) => readCollaborationActivity({ slug, threadId }),
-  "turns.update": async ({ slug, threadId, previous, next }) => { await getCoworker(coworkersDir, slug); return collaboration.updateThread(slug, threadId, previous, next); },
+  "turns.update": async ({ slug, threadId, previous, next }) => { const coworker = await getCoworker(coworkersDir, slug); return collaboration.updateThread(slug, threadId, previous, next, { coworkerCreatedAt: coworker.createdAt }); },
   "turns.send": async ({ slug, threadId, prompt, messageId, model, retry, retryByPerson, retryLabel, kind }) => {
     const owner = await privateOwner(slug, threadId, kind === "assignment" ? "assignment" : "private");
     const entry = await collaboration.submit({ owner, prompt, messageId, model, retry, retryByPerson: retryByPerson === true, retryLabel, track: true });

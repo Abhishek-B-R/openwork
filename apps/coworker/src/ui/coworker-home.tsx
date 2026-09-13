@@ -76,6 +76,8 @@ export function HeaderStatusWord({ activity, engineManaged }: { activity: Cowork
 export type CoworkerHomeRequest =
   | { id: number; kind: "settings"; section: "model" }
   | { id: number; kind: "thread"; threadId: string }
+  | { id: number; kind: "discussion"; threadId: string }
+  | { id: number; kind: "activity"; threadId: string }
   | { id: number; kind: "turn"; prompt: string };
 
 /**
@@ -177,7 +179,7 @@ export function CoworkerHome({
   const [settingsFocus, setSettingsFocus] = useState<{ id: number; section: "model" } | null>(null);
   const [assignmentDraft, setAssignmentDraft] = useState<{ id: number; text: string } | null>(null);
   const [discussionDraft, setDiscussionDraft] = useState<{ id: number; text: string } | null>(null);
-  const [openThreadRequest, setOpenThreadRequest] = useState<{ id: number; threadId: string } | null>(null);
+  const [openThreadRequest, setOpenThreadRequest] = useState<{ id: number; threadId: string; kind?: "thread" | "discussion" | "activity" } | null>(null);
   /** The coworker's one-off assignment threads, as the conversation column lists them, and what each waits on the person for. */
   const [assignmentThreads, setAssignmentThreads] = useState<ThreadListItem[]>([]);
   const [assignmentAttention, setAssignmentAttention] = useState<Record<string, string>>({});
@@ -255,8 +257,8 @@ export function CoworkerHome({
   useEffect(() => {
     if (!request || handledRequestRef.current === request.id) return;
     handledRequestRef.current = request.id;
-    if (request.kind === "thread") {
-      setOpenThreadRequest({ id: request.id, threadId: request.threadId });
+    if (request.kind === "thread" || request.kind === "discussion" || request.kind === "activity") {
+      setOpenThreadRequest({ id: request.id, threadId: request.threadId, kind: request.kind });
       return;
     }
     if (request.kind === "turn") {

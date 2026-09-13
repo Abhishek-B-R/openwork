@@ -29,11 +29,11 @@ export function createGroupExecution({ directory, collaboration, coworkerFor, co
       await updateGroupTurn(directory, group.id, entry.owner.turnId, { speaker: { slug: entry.owner.slug, part: entry.owner.part ?? "reply", status: event.status === "passed" ? "passed" : "succeeded", threadId: entry.owner.threadId, error: "", endedAt: entry.endedAt } });
     }
     // The receipt follows both writes; a crash before it retries the same event, never inference.
-    await collaboration.change((state) => { state.executions[entry.id].groupReply.published = true; });
+    await collaboration.groupReplyPublished(entry.id, event);
     if (event.status !== "passed") await onPublished(entry).catch(() => {});
     return event;
   }
-  async function participant(groupId, slug, signal = AbortSignal.timeout(setupTimeoutMs)) {
+  async function participant(groupId, slug, signal = AbortSignal.timeout(setupTimeoutMs), coworkerCreatedAt = null) {
     if (closed) throw new Error("Group collaboration is closing.");
     const key = `${groupId}:${slug}`;
     const previous = threadLocks.get(key) ?? Promise.resolve();
@@ -41,15 +41,18 @@ export function createGroupExecution({ directory, collaboration, coworkerFor, co
       signal.throwIfAborted();
       const group = await withAbort(getGroup(directory, groupId), signal);
       if (group.archivedAt !== null || !group.participantSlugs.includes(slug)) throw new Error("That coworker is no longer in this active group.");
+      const coworker = await withAbort(coworkerFor(slug), signal);
+      if (coworkerCreatedAt && coworker.createdAt !== coworkerCreatedAt) throw new Error("The original coworker is no longer in this group request.");
       let threadId = group.participantThreadIds[slug];
       if (!threadId) {
         const client = await withAbort(track(clientFor(slug, { signal })), signal);
+        if (coworkerCreatedAt && client.coworkerCreatedAt !== coworkerCreatedAt) throw new Error("The original coworker is no longer available.");
         signal.throwIfAborted();
         const thread = await withAbort(track(client.createThread({ title: `Group chat: ${group.name}`, signal })), signal);
         threadId = thread.id;
         await updateGroup(directory, groupId, { participantThreadIds: { [slug]: threadId } });
       }
-      const owner = { slug, threadId, conversationId: groupId, groupId, kind: "group" };
+      const owner = { slug, threadId, conversationId: groupId, groupId, kind: "group", workspaceId: coworker.workspaceId, coworkerCreatedAt };
       signal.throwIfAborted();
       await withAbort(track(collaboration.registerOwner(owner)), signal);
       return owner;
@@ -83,10 +86,11 @@ export function createGroupExecution({ directory, collaboration, coworkerFor, co
           ? publishReply(await collaboration.read((state) => state.executions[event.executionId]))
           : appendGroupEvent(directory, groupId, { ...event, id: groupEventId(event) }),
         ask: async (slug, prompt, signal, step) => {
-          const owner = { ...await participant(groupId, slug, AbortSignal.any([signal, AbortSignal.timeout(setupTimeoutMs)])), turnId: step.turnId, part: step.part };
-          if (signal.aborted) throw new Error("Stopped.");
           const baseId = collaborationId(groupId, step.turnId, slug, step.part, 0);
           const prior = await collaboration.read((state) => state.executions[baseId] ?? Object.values(state.executions).find((entry) => entry.owner.groupId === groupId && entry.owner.turnId === step.turnId && entry.owner.slug === slug && (entry.owner.part ?? "reply") === step.part));
+          const coworkerCreatedAt = prior ? prior.coworkerCreatedAt ?? null : request.coworkerCreatedAts?.[slug] ?? null;
+          const owner = { ...await participant(groupId, slug, AbortSignal.any([signal, AbortSignal.timeout(setupTimeoutMs)]), coworkerCreatedAt), turnId: step.turnId, part: step.part };
+          if (signal.aborted) throw new Error("Stopped.");
           // A replayed backend request observes its original admission. A person's
           // explicit retry is a NEW follow-up in the same native history, never a deletion/replay.
           const id = request.attempt ? collaborationId(groupId, step.turnId, slug, step.part, "follow-up", request.id) : prior?.id ?? baseId;
@@ -97,7 +101,10 @@ export function createGroupExecution({ directory, collaboration, coworkerFor, co
           }
           executions.add(id);
           const words = request.attempt ? continuationPrompt({ objective: prompt, refs: ["earlier group messages in this native thread"], completedActions: [], resumeInstructions: "Finish only the missing group reply." }, [], "Continue the earlier group request from the work already present in this thread. The person explicitly requested this follow-up.") : prompt;
-          const entry = await collaboration.submit({ id, owner, groupRequestId: request.id, requestText: request.text, groupReply: { name: participants.find((member) => member.slug === slug).name }, prompt: request.context ? `${request.context}\n\n${words}` : words, timeoutMs: replyTimeoutMs, tools: { coworker_team_refer: false } });
+          const activityEligible = request.attempt
+            ? await collaboration.read((state) => state.tasks[prior?.taskId]?.activityEligible === true)
+            : request.activityEligible === true;
+          const entry = await collaboration.submit({ id, owner, activityEligible, groupRequestId: request.id, requestText: request.text, groupReply: { name: participants.find((member) => member.slug === slug).name }, prompt: request.context ? `${request.context}\n\n${words}` : words, timeoutMs: replyTimeoutMs, tools: { coworker_team_refer: false } });
           return { ...await collaboration.wait(entry.id, signal), executionId: entry.id };
         },
         route: async (input) => {
@@ -191,6 +198,7 @@ export function createGroupExecution({ directory, collaboration, coworkerFor, co
       const stored = await getGroup(directory, groupId);
       if (stored.archivedAt !== null) throw new Error("This group is archived.");
       if (typeof input.text !== "string" || !input.text.trim() || input.text.length > 20_000 || typeof input.clientMessageId !== "string" || !input.clientMessageId) throw new Error("A group request needs a message and a stable client id.");
+      const members = input.turnId ? [] : await Promise.all(stored.participantSlugs.map(coworkerFor));
       await collaboration.change((state) => {
         const group = state.groups[groupId] ??= { queue: [] };
         if (group.cancelledRequestIds?.includes(input.clientMessageId)) throw new Error("This group request was cancelled. Send a new request to continue.");
@@ -204,7 +212,7 @@ export function createGroupExecution({ directory, collaboration, coworkerFor, co
           if ((group.retryCounts[input.turnId] ?? 0) >= 2) throw new Error("This group turn reached its follow-up limit. Review the earlier work and send a new request.");
           group.retryCounts[input.turnId] = (group.retryCounts[input.turnId] ?? 0) + 1;
         }
-        const request = queued ?? { id: input.clientMessageId, text: input.text, context: input.context ?? "", turnId: input.turnId ?? "", only: input.only, attempt: input.turnId ? group.retryCounts[input.turnId] : 0 };
+        const request = queued ?? { id: input.clientMessageId, text: input.text, context: input.context ?? "", turnId: input.turnId ?? "", only: input.only, attempt: input.turnId ? group.retryCounts[input.turnId] : 0, activityEligible: !input.turnId, coworkerCreatedAts: Object.fromEntries(members.map((member) => [member.slug, member.createdAt ?? null])) };
         // This acceptance survives dequeue, so an uncertain retry cannot spend another attempt.
         if (request.attempt > 0) group.recoveryRequests.push({ id: request.id, turnId: request.turnId, attempt: request.attempt });
         if (!queued) group.queue.push(request);
@@ -266,6 +274,7 @@ export function createGroupExecution({ directory, collaboration, coworkerFor, co
       await assertLive();
       const from = await withAbort(coworkerFor(task.origin.slug), signal);
       const to = await withAbort(coworkerFor(task.to), signal);
+      if ((task.origin.coworkerCreatedAt && from.createdAt !== task.origin.coworkerCreatedAt) || (task.coworkerCreatedAt && to.createdAt !== task.coworkerCreatedAt)) throw new Error("An original coworker is no longer available for this consultation.");
       let groupId = task.groupId;
       if (!groupId) {
         const groups = (await withAbort(listGroups(directory), signal)).filter((group) => group.archivedAt === null && group.participantSlugs.length === 2 && group.participantSlugs.includes(from.slug) && group.participantSlugs.includes(to.slug));
@@ -282,9 +291,10 @@ export function createGroupExecution({ directory, collaboration, coworkerFor, co
       let owner = await collaboration.read((state) => state.tasks[task.id].answerOwner ?? null);
       if (!owner) {
         const client = await withAbort(track(clientFor(to.slug, { signal })), signal);
+        if (task.coworkerCreatedAt && client.coworkerCreatedAt !== task.coworkerCreatedAt) throw new Error("The original coworker is no longer available for this consultation.");
         await assertLive();
         const thread = await withAbort(track(client.createThread({ title: `Question from ${from.name}`, signal })), signal);
-        owner = { slug: to.slug, threadId: thread.id, conversationId: groupId, groupId, kind: "consultation" };
+        owner = { slug: to.slug, threadId: thread.id, conversationId: groupId, groupId, kind: "consultation", workspaceId: task.workspaceId, coworkerCreatedAt: task.coworkerCreatedAt ?? null };
         await collaboration.change((state) => { signal.throwIfAborted(); if (!state.tasks[task.id].cancelRequested) state.tasks[task.id].answerOwner = owner; });
       }
       await assertLive();

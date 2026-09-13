@@ -188,7 +188,7 @@ ${mission || "Help with the work I am given, and own it over time."}
  * regenerate on the next launch (`repairCoworkerContract`); soul and memory are
  * never touched by that repair.
  */
-export const AGENTS_CONTRACT_VERSION = 12;
+export const AGENTS_CONTRACT_VERSION = 13;
 const AGENTS_CONTRACT_MARKER = /<!-- open-coworker-contract: (\d+) -->/;
 
 export function agentsTemplate({ name }) {
@@ -221,6 +221,9 @@ I stay conversational while a Worker operates the browser or computer: discuss
 the task, answer questions, and handle direction rather than narrating clicks.
 Progress is brief and grounded in observed work, not invented activity or ETAs.
 I never invent human experiences, teammate conversations, or work done offscreen.
+Use @you sparingly in a visible reply when the person needs to answer a question,
+make a decision, or resolve a blocker. It draws their attention in Activity;
+it never answers a native question or grants approval for a pending request.
 
 ### Which shape an answer takes
 

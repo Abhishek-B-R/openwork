@@ -7,6 +7,7 @@ import { assertComputerToolContext, COMPUTER_DENY, COMPUTER_STOP_GUIDANCE } from
 import { completedThinkingBrief, workerPurpose } from "./workers.mjs";
 import { groupReplyEvent } from "./groups.mjs";
 import { assertControlOrigin, workerControlRequest } from "./worker-controls.mjs";
+import { activityReadIds, recordActivity } from "./activity-inbox.mjs";
 
 const terminal = new Set(["succeeded", "failed", "cancelled"]);
 const text = (value, max = 4000) => typeof value === "string" ? value.trim().slice(0, max) : "";
@@ -75,6 +76,8 @@ export function createCollaboration({ directory, clientFor, consult, spawn, canc
       if (parsed.version !== 1 || !parsed.executions || !parsed.tasks || !parsed.threads || !parsed.owners) throw new Error("Unsupported collaboration record. Existing work has been kept.");
       parsed.groups ??= {};
       parsed.settlements ??= {};
+      parsed.activity ??= [];
+      if (!Array.isArray(parsed.activity)) throw new Error("The saved Activity inbox is unreadable. Existing work has been kept.");
       if (typeof parsed.groups !== "object" || Array.isArray(parsed.groups)) throw new Error("The saved group queue is unreadable. Existing work has been kept.");
       for (const group of Object.values(parsed.groups)) {
         if (!group || typeof group !== "object" || (group.queue !== undefined && !Array.isArray(group.queue))) throw new Error("The saved group queue is unreadable. Existing work has been kept.");
@@ -82,6 +85,7 @@ export function createCollaboration({ directory, clientFor, consult, spawn, canc
         group.cancelledRequestIds ??= [];
         group.recoveryRequests ??= [];
         for (const request of group.queue) {
+          request.activityEligible ??= false;
           if (request.attempt > 0 && !group.recoveryRequests.some((receipt) => receipt.id === request.id)) group.recoveryRequests.push({ id: request.id, turnId: request.turnId, attempt: request.attempt });
         }
       }
@@ -90,11 +94,15 @@ export function createCollaboration({ directory, clientFor, consult, spawn, canc
         entry.generatedMessageId ??= entry.continuation;
         if (!entry.sentAt && ["queued", "admitting"].includes(entry.state)) { entry.state = "queued"; entry.deadline = null; }
       }
-      for (const task of Object.values(parsed.tasks)) if (task.state === "starting") task.state = "requested";
+      for (const task of Object.values(parsed.tasks)) {
+        task.activityEligible ??= false;
+        if (task.state === "starting") task.state = "requested";
+      }
+      for (const turns of Object.values(parsed.threads)) for (const message of turns.next ?? []) message.activityEligible ??= false;
       data = parsed;
     } catch (error) {
       if (error.code !== "ENOENT") throw error;
-      data = { version: 1, executions: {}, tasks: {}, threads: {}, owners: {}, groups: {}, settlements: {} };
+      data = { version: 1, executions: {}, tasks: {}, threads: {}, owners: {}, groups: {}, settlements: {}, activity: [] };
     } return data; })();
     try { return await loading; } catch (error) { loading = null; throw error; }
   }
@@ -165,7 +173,14 @@ export function createCollaboration({ directory, clientFor, consult, spawn, canc
     if (input.groupReply) entry.groupReply = { name: input.groupReply.name, published: false };
     if (owner.kind !== "private" || !entry.personRequest || entry.continuation) entry.tools = { ...entry.tools, ...COMPUTER_DENY };
     state.executions[id] = entry;
-    state.tasks[entry.taskId] ??= { id: entry.taskId, owner, state: "running", executionId: id, dependencies: [], parentId: null, depth: 0, lineage: [owner.slug], objective: text(input.prompt), refs: [], completedActions: [], resumeInstructions: "Use the requested results to finish the original task. Do not repeat completed actions.", continuationId: null, generation: 0, createdAt: at, deadline: at + dependencyTimeoutMs, error: "" };
+    state.tasks[entry.taskId] ??= { id: entry.taskId, owner, coworkerCreatedAt: input.owner.coworkerCreatedAt ?? null, state: "running", executionId: id, dependencies: [], parentId: null, depth: 0, lineage: [owner.slug], objective: text(input.prompt), refs: [], completedActions: [], resumeInstructions: "Use the requested results to finish the original task. Do not repeat completed actions.", continuationId: null, generation: 0, createdAt: at, deadline: at + dependencyTimeoutMs, error: "" };
+    const task = state.tasks[entry.taskId];
+    // Existing tasks (including legacy continuations) never gain eligibility.
+    if (entry.taskId === id && !input.continuation) task.activityEligible ??= input.activityEligible !== false;
+    task.workspaceId ??= owner.workspaceId;
+    entry.workspaceId = task.workspaceId ?? null;
+    // Never fill an existing task's missing identity from today's same-slug home.
+    entry.coworkerCreatedAt = task.coworkerCreatedAt ?? null;
     return entry;
   }
   function queueContinuation(state, task) {
@@ -199,13 +214,15 @@ export function createCollaboration({ directory, clientFor, consult, spawn, canc
     queueContinuation(state, task);
   }
   async function settle(id, outcome) {
+    const { activityText, ...result } = outcome;
     const completed = await change((state) => {
       const entry = state.executions[id];
       if (!entry || terminal.has(entry.state) || cancelIntents.has(id) || cancelled(state, state.tasks[entry.taskId])) return;
-      Object.assign(entry, outcome, { endedAt: now() });
+      Object.assign(entry, result, { endedAt: now() });
       const turns = state.threads[threadKey(entry.owner)];
       if (turns?.pending?.messageId === entry.messageId && entry.state === "succeeded") turns.pending = null;
       advance(state, state.tasks[entry.taskId]);
+      recordActivity(state, entry, { text: activityText, at: entry.endedAt });
       if (entry.state === "succeeded" && state.tasks[entry.taskId].state === "succeeded") return entry;
     });
     // Only the bounded local capture is awaited, never background inference.
@@ -240,6 +257,7 @@ export function createCollaboration({ directory, clientFor, consult, spawn, canc
       const client = await withAbort(track(clientFor(entry.owner.slug, { kind: entry.continuation ? "review" : "reply", requestText: entry.requestText, model: entry.model, observationOnly: Boolean(entry.sentAt), signal: setupSignal })), setupSignal);
       running.client = client;
       if (entry.workspaceId && client.workspaceId !== entry.workspaceId) throw new Error("The original workspace is no longer available. This execution will not be moved or replayed.");
+      if (entry.coworkerCreatedAt && client.coworkerCreatedAt !== entry.coworkerCreatedAt) throw new Error("The original coworker is no longer available. This execution will not be moved or replayed.");
       let snapshot = await withAbort(client.getThreadSnapshot(entry.owner.threadId, { signal: setupSignal }), setupSignal);
       const present = snapshot.messages.some((message) => message.id === entry.messageId && message.role === "user");
       let observed = present;
@@ -258,10 +276,12 @@ export function createCollaboration({ directory, clientFor, consult, spawn, canc
           if (turns?.pending?.messageId === previousId) turns.pending.messageId = current.messageId;
         }
         // Queue time is not execution time. A recovered admitted step keeps its deadline.
+        if (present && !current.sentAt && !current.retry) value.tasks[current.taskId].activityEligible = false;
         current.deadline = current.sentAt ? current.deadline ?? current.sentAt + current.timeoutMs : now() + current.timeoutMs;
         current.sentAt ??= now();
         if (current.state !== "waiting-person") current.state = "running";
         current.workspaceId = client.workspaceId ?? current.workspaceId;
+        value.tasks[current.taskId].workspaceId ??= current.workspaceId;
         // Pin the native selection at admission; recovery observes the same model.
         current.model ??= client.resolvedModel ?? null;
         if (current.continuation) value.tasks[current.taskId].state = "resuming";
@@ -336,7 +356,7 @@ export function createCollaboration({ directory, clientFor, consult, spawn, canc
       const last = replies.at(-1);
       if (!last || last.completedAt === null || last.error) throw new Error(last?.error?.message || "The reply stopped before it finished.");
       const answer = replies.map((reply) => reply.text).filter(Boolean).join("\n").slice(0, 20_000);
-      await settle(id, { state: "succeeded", result: answer, error: "" });
+      await settle(id, { state: "succeeded", result: answer, activityText: last.text, error: "" });
       pumpFailures = 0;
     } catch (error) {
       const current = await read((state) => state.executions[id]);
@@ -377,7 +397,7 @@ export function createCollaboration({ directory, clientFor, consult, spawn, canc
           const owner = state.owners[key];
           if (!owner) continue;
           const message = turns.next.shift();
-          const entry = execution(state, { owner, prompt: message.text, messageId: nativeMessageId(), personRequest: true });
+          const entry = execution(state, { owner: { ...owner, coworkerCreatedAt: message.coworkerCreatedAt ?? null }, prompt: message.text, messageId: nativeMessageId(), personRequest: true, activityEligible: message.activityEligible === true });
           turns.pending = { messageId: entry.messageId, prompt: entry.prompt, startedAt: now(), stoppedAt: null };
         }
         return expired;
@@ -455,8 +475,16 @@ export function createCollaboration({ directory, clientFor, consult, spawn, canc
     const entry = await read((state) => state[collection][id]);
     if (entry.published || entry.publicationFailed) return;
     try {
-      await withAbort(track(publishResult(entry)), AbortSignal.timeout(setupTimeoutMs));
-      await change((state) => { state[collection][id].published = true; });
+      const publication = await withAbort(track(publishResult(entry)), AbortSignal.timeout(setupTimeoutMs));
+      await change((state) => {
+        const current = state[collection][id];
+        const source = collection === "tasks" ? state.executions[current.executionId] : current;
+        current.published = true;
+        if (publication?.eventId && publication.eventId === publication.event?.id) {
+          current.publishedEventId = publication.eventId;
+          recordActivity(state, source, { event: publication.event });
+        }
+      });
     } catch {
       await change((state) => {
         const current = state[collection][id];
@@ -493,6 +521,23 @@ export function createCollaboration({ directory, clientFor, consult, spawn, canc
   const api = {
     change,
     read,
+    async listActivity() { return read((state) => state.activity); },
+    async markActivityRead(ids, isRead = true) {
+      const requested = activityReadIds(ids, isRead);
+      return change((state) => {
+        const at = now();
+        for (const item of state.activity) if (requested.has(item.id)) item.readAt = isRead ? item.readAt ?? at : null;
+        return state.activity;
+      });
+    },
+    async groupReplyPublished(id, event) {
+      return change((state) => {
+        const entry = state.executions[id];
+        entry.groupReply.published = true;
+        entry.groupReply.eventId = event.id;
+        recordActivity(state, entry, { event });
+      });
+    },
     async start() { await load(); wake(); },
     async stop({ requireConfirmed = false } = {}) {
       closed = true;
@@ -609,6 +654,7 @@ export function createCollaboration({ directory, clientFor, consult, spawn, canc
         const signal = AbortSignal.timeout(setupTimeoutMs);
         const client = await withAbort(track(clientFor(before.owner.slug, { signal })), signal);
         if (before.workspaceId && client.workspaceId !== before.workspaceId) throw new Error("The original workspace is no longer available. Review the earlier work before continuing.");
+        if (before.coworkerCreatedAt && client.coworkerCreatedAt !== before.coworkerCreatedAt) throw new Error("The original coworker is no longer available. Review the earlier work before continuing.");
         const snapshot = await withAbort(client.getThreadSnapshot(before.owner.threadId, { signal }), signal);
         const toolBearing = snapshot.messages.some((message) => message.parentId === before.messageId && message.parts.some((part) => part.type === "tool"));
         if (toolBearing) {
@@ -628,7 +674,9 @@ export function createCollaboration({ directory, clientFor, consult, spawn, canc
             next.continuedFrom = prior.id;
             next.recoveryDepth = (prior.recoveryDepth ?? 0) + 1;
             prior.followUpId = next.id;
-            Object.assign(state.tasks[next.taskId], { objective: task.objective, refs: task.refs, completedActions: task.completedActions, resumeInstructions: task.resumeInstructions });
+            Object.assign(state.tasks[next.taskId], { objective: task.objective, refs: task.refs, completedActions: task.completedActions, resumeInstructions: task.resumeInstructions, activityEligible: task.activityEligible === true, workspaceId: prior.workspaceId, coworkerCreatedAt: prior.coworkerCreatedAt ?? null });
+            next.workspaceId = prior.workspaceId;
+            next.coworkerCreatedAt = prior.coworkerCreatedAt ?? null;
             const turns = state.threads[threadKey(prior.owner)] ??= emptyTurns();
             turns.pending = { messageId: next.messageId, prompt: next.prompt, startedAt: next.createdAt, stoppedAt: null };
             return next;
@@ -717,7 +765,7 @@ export function createCollaboration({ directory, clientFor, consult, spawn, canc
       if (!["private", "group", "consultation", "assignment"].includes(entry.owner.kind)) throw new Error("Workers cannot manage collaboration.");
       return { entry, callId: context.callID };
     },
-    async request({ entry, callId }, kind, input) {
+    async request({ entry, callId }, kind, input, identity = {}) {
       if (input.control !== undefined) {
         workerControlRequest(input.control);
         assertControlOrigin(entry);
@@ -756,6 +804,10 @@ export function createCollaboration({ directory, clientFor, consult, spawn, canc
         parent.resumeInstructions = text(input.continuation?.resumeInstructions) || parent.resumeInstructions;
         const task = { id, kind, parentId: parent.id, origin: entry.owner, owner: entry.owner, state: "requested", dependencies: [], executionId: null, depth: parent.depth + 1, lineage: [...parent.lineage, to], to, objective, refs: [], completedActions: [], resumeInstructions: "Answer the focused question using the requested results.", label: text(kind === "worker" ? input.name : `Question for ${to}`, 100), input: { ...input, ...(purpose ? { purpose } : {}), question: text(input.question), context: text(input.context, 2000) }, workerId: kind === "worker" ? `wrk_${keyFor(id)}` : null, createdAt: now(), deadline: now() + dependencyTimeoutMs, result: "", error: "", continuationId: null, generation: 0 };
         state.tasks[id] = task;
+        task.coworkerCreatedAt = kind === "consultation" ? identity.coworkerCreatedAt ?? null : entry.coworkerCreatedAt ?? null;
+        task.workspaceId = kind === "consultation" ? identity.workspaceId ?? null : entry.workspaceId;
+        task.origin = { ...entry.owner, coworkerCreatedAt: entry.coworkerCreatedAt ?? null };
+        task.activityEligible = parent.activityEligible === true;
         task.sourceExecutionId = entry.id;
         parent.dependencies.push(id);
         return task;
@@ -795,11 +847,11 @@ export function createCollaboration({ directory, clientFor, consult, spawn, canc
       });
       wake();
     },
-    async attachWorker(worker, owner) {
+    async attachWorker(worker, owner, { activityEligible = false } = {}) {
       await change((state) => {
         const id = collaborationId(worker.slug, worker.id, "origin");
         if (state.tasks[id]) return;
-        const entry = execution(state, { id, owner, prompt: worker.goal, requestText: worker.goal, messageId: nativeMessageId() });
+        const entry = execution(state, { id, owner: { ...owner, coworkerCreatedAt: activityEligible ? owner.coworkerCreatedAt : null }, prompt: worker.goal, requestText: worker.goal, messageId: nativeMessageId(), activityEligible });
         entry.state = "succeeded"; // the person's form submission, not an inference request
         entry.personRequest = true;
         const parent = state.tasks[id];
@@ -902,14 +954,14 @@ export function createCollaboration({ directory, clientFor, consult, spawn, canc
         return state.threads[key];
       });
     },
-    async updateThread(slug, threadId, previous, next) {
+    async updateThread(slug, threadId, previous, next, identity = {}) {
       await api.threadState(slug, threadId);
       const result = await change((state) => {
         const key = `${slug}:${threadId}`;
         const current = state.threads[key];
         const removed = new Set(previous.next.filter((item) => !next.next.some((other) => other.id === item.id)).map((item) => item.id));
         current.next = current.next.filter((item) => !removed.has(item.id));
-        for (const item of next.next) if (!previous.next.some((other) => other.id === item.id) && !current.next.some((other) => other.id === item.id)) current.next.push(item);
+        for (const item of next.next) if (!previous.next.some((other) => other.id === item.id) && !current.next.some((other) => other.id === item.id)) current.next.push({ ...item, activityEligible: true, coworkerCreatedAt: identity.coworkerCreatedAt ?? null });
         const entries = Object.values(state.executions).filter((entry) => threadKey(entry.owner) === key);
         const pending = entries.find((entry) => entry.messageId === current.pending?.messageId);
         const proposed = entries.find((entry) => entry.messageId === next.pending?.messageId);

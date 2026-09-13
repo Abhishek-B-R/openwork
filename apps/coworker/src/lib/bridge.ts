@@ -28,6 +28,17 @@ import type { ExecutionActivity } from "./progress-activity.ts";
 import type { PendingInteractions, PermissionReply } from "./threads.ts";
 
 export type GroupInteraction = { executionId: string; slug: string; threadId: string; workspaceId: string; deadline: number; pending: PendingInteractions };
+export type CoworkerActivityItem = {
+  id: string;
+  kind: "reply" | "mention";
+  at: number;
+  slug: string;
+  workspaceId: string;
+  coworkerCreatedAt: string;
+  preview: string;
+  readAt: number | null;
+  target: { kind: "private"; threadId: string } | { kind: "group"; groupId: string; eventId: string };
+};
 export type GroupInteractionReply = { groupId: string; executionId: string; slug: string; threadId: string; workspaceId: string; requestId: string } & ({ kind: "permission"; reply: PermissionReply } | { kind: "question"; answers: string[][]; reply?: never } | { kind: "question"; reply: "reject"; answers?: never });
 
 export type CollaborationReceipt = {
@@ -488,6 +499,10 @@ async function invoke<T>(command: string, payload?: unknown): Promise<T> {
 }
 
 export const coworkerBridge = {
+  activity: {
+    list: () => invoke<CoworkerActivityItem[]>("activity.list"),
+    markRead: (ids: string[], read = true) => invoke<CoworkerActivityItem[]>("activity.markRead", { ids, read }),
+  },
   maintenance: {
     preview: () => invoke<{ coworkerCount: number; historyCount: number; backupDirectory: string }>("maintenance.preview"),
     factoryReset: async (input: { confirmation: string }): Promise<{ phase: "handoff"; backupDirectory: string }> => {

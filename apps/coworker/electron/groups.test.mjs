@@ -3,7 +3,9 @@ import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { marked } from "marked";
 import { createCollaboration, nativeMessageId } from "./collaboration.mjs";
+import { createActivityInbox, mentionsYou, recordActivity, MAX_ACTIVITY_ITEMS } from "./activity-inbox.mjs";
 import { createConversationMemory } from "./conversation-memory.mjs";
 import { createGroupExecution, repairGroupSelection } from "./group-execution.mjs";
 import { normalizeSettings } from "./settings.mjs";
@@ -251,6 +253,10 @@ test("an action line names its coworker and what it links to", async () => {
   });
 });
 
+const fixtureCreatedAt = "2026-09-11T00:00:00.000Z";
+const fixtureIdentity = { coworkerCreatedAt: fixtureCreatedAt };
+const fixtureCoworker = async (slug) => ({ slug, name: slug, role: "", mission: "", workspaceId: `workspace_${slug}`, createdAt: fixtureCreatedAt });
+
 function nativeFixture(onSend = async () => {}) {
   const histories = new Map();
   const requests = [];
@@ -262,6 +268,7 @@ function nativeFixture(onSend = async () => {}) {
   const snapshot = (threadId) => ({ threadId, title: threadId, status: { type: held.has(threadId) ? "busy" : "idle" }, messages: histories.get(threadId) ?? [], todos: [] });
   return { requests, aborted, histories, held, interactions, decisions, clientFor: async (slug) => ({
     workspaceId: `workspace_${slug}`,
+    coworkerCreatedAt: fixtureCreatedAt,
     pendingInteractions: async (threadId) => interactions.get(threadId) ?? { permissions: [], questions: [] },
     replyPermission: async (request, reply) => { decisions.push({ slug, request, reply }); interactions.delete(request.sessionID); held.delete(request.sessionID); },
     replyQuestion: async (request, answers) => { decisions.push({ slug, request, answers }); interactions.delete(request.sessionID); held.delete(request.sessionID); },
@@ -276,9 +283,9 @@ function nativeFixture(onSend = async () => {}) {
         const reply = { id: `assistant_${++sequence}`, role: "assistant", parentId: input.messageId, completedAt: null, error: null, parts: [{ type: "tool", callId: `call_${sequence}` }] };
         messages.push({ id: input.messageId, role: "user", parentId: null, parts: [...(input.context ? [{ type: "text", text: input.context, synthetic: true }] : []), { type: "text", text: input.prompt }] }, reply);
         histories.set(threadId, messages);
-        await onSend({ slug, threadId, input, reply });
+        const answer = await onSend({ slug, threadId, input, reply });
         reply.completedAt = Date.now();
-        reply.parts.push({ type: "text", text: slug === "editor" ? "CHECKED PUBLIC FACT" : "Original task followed up." });
+        reply.parts.push({ type: "text", text: typeof answer === "string" ? answer : slug === "editor" ? "CHECKED PUBLIC FACT" : "Original task followed up." });
       }
       return { threadId, messageId: input.messageId, messageCountBefore: 0, acceptedAt: Date.now(), alreadyPresent: present };
     },
@@ -295,6 +302,217 @@ async function eventually(check) {
   while (Date.now() < deadline) { if (await check()) return; await new Promise((resolve) => setTimeout(resolve, 10)); }
   assert.fail("The collaboration did not settle within the module check's deadline.");
 }
+
+async function publishFixture(home, source) {
+  const executionId = source.executionId ?? source.id;
+  const event = await appendGroupEvent(home, source.owner.groupId, { id: `evt_${executionId}`, executionId, kind: source.state === "succeeded" ? "coworker" : "status", slug: source.owner.slug, threadId: source.owner.threadId, text: source.result || source.error });
+  return { eventId: event.id, event };
+}
+
+test("Activity mentions require standalone @you in visible prose", () => {
+  for (const value of ["@you", "A decision, @YOU?", "**@You**, choose one.", "(@you)", "Question:@you!", "Hello,@you", "- @you: which option?", "[ask @you](https://example.test)", "```js\n@you\n```\n\nOutside: @you."]) assert.equal(mentionsYou(value), true, value);
+  for (const value of ["you", "@yourself", "@you-two", "@you_two", "@you2", "@youé", "@@you", "name@you", "person@you.test", "@you.test", "https://example.test/@you", "https://example.test/?ask=@you", "www.example.test/@you", "[source](https://example.test/@you)", "<https://example.test/@you>", "`@you`", "``literal ` @you``", "```js\n@you\n```", "~~~\n@you\n~~~", "```\n@you", "    @you", "> @you", "> Quoted person\n@you", "> > @you", "**name**@you", "@you**more**", "\\@you"]) assert.equal(mentionsYou(value), false, value);
+});
+
+test("Activity parsing failures never fail private completion or group publication", async (t) => {
+  await withHome(async (home) => {
+    const parser = t.mock.method(marked, "lexer", () => { throw new Error("Unusual Markdown"); });
+    let service;
+    let groups;
+    let publications = 0;
+    const fixture = nativeFixture(async ({ slug, threadId, input, reply }) => {
+      if (!input.prompt.startsWith("Continue") && input.prompt.includes("Ask the editor once")) {
+        const trusted = await service.context(slug, { sessionID: threadId, messageID: reply.id, callID: reply.parts[0].callId });
+        await service.request(trusted, "consultation", { to: "editor", question: "Check the fact" }, fixtureIdentity);
+      }
+      return "@you, review the result.";
+    });
+    service = createCollaboration({ directory: home, clientFor: fixture.clientFor, pollMs: 5,
+      consult: (task) => groups.consultation(task),
+      publish: (task) => { publications++; return publishFixture(home, task); },
+      publishExecution: (entry) => { publications++; return publishFixture(home, entry); },
+    });
+    groups = createGroupExecution({ directory: home, collaboration: service, clientFor: fixture.clientFor, coworkerFor: fixtureCoworker, coordinator: async () => ({}), catalogFor: async () => ({ models: [] }), pollMs: 5 });
+    try {
+      const privateReply = await service.submit({ owner: { ...fixtureIdentity, slug: "scout", threadId: "private-parser", conversationId: "private-parser", kind: "private" }, prompt: "A normal private reply" });
+      await eventually(async () => (await service.read((state) => state.executions[privateReply.id])).state === "succeeded");
+      const group = await createGroup(home, { name: "Parser check", participantSlugs: ["scout", "editor"] });
+      await groups.start();
+      await groups.submit(group.id, { clientMessageId: "parser-group", text: "@scout Ask the editor once" });
+      await eventually(async () => (await service.listActivity()).length === 4 && !(await groups.status(group.id)).active);
+      assert.ok(parser.mock.callCount() >= 4, "each capture actually encountered the parser failure");
+      assert.ok((await service.listActivity()).every((item) => item.kind === "reply"), "classification falls back without failing the source");
+      assert.equal(publications, 2, "consultation and group continuation publish once, without notification retries");
+      assert.deepEqual(fixture.aborted, []);
+      assert.ok(await service.read((state) => Object.values(state.executions).every((entry) => entry.state === "succeeded" && !entry.publicationAttempts && !entry.publicationFailed && (!entry.groupReply || entry.groupReply.published))));
+      const before = await service.listActivity();
+      await service.change((state) => {
+        const source = { ...state.executions[privateReply.id], activityRecorded: false };
+        recordActivity(state, source, { get text() { throw new Error("Unexpected projection input"); } });
+        assert.equal(source.state, "succeeded");
+      });
+      assert.deepEqual(await service.listActivity(), before, "a recording failure leaves the index intact");
+    } finally { await groups.stop(); await service.stop(); parser.mock.restore(); }
+  });
+});
+
+test("Activity recovery preserves creation identity and never backfills a missing pin", async () => {
+  await withHome(async (home) => {
+    const fixture = nativeFixture();
+    const replacement = "2026-09-12T00:00:00.000Z";
+    const options = { directory: home, pollMs: 5, clientFor: async (slug) => ({ ...await fixture.clientFor(slug), coworkerCreatedAt: replacement }) };
+    let service = createCollaboration({ ...options, pollMs: 60_000 });
+    const owner = { ...fixtureIdentity, slug: "scout", workspaceId: "workspace_scout", threadId: "replacement", conversationId: "replacement", kind: "private" };
+    try {
+      const original = await service.submit({ owner, messageId: "queued-original", prompt: "Do not move this work" });
+      const legacy = await service.submit({ owner: { ...owner, threadId: "legacy-pin", conversationId: "legacy-pin", coworkerCreatedAt: null }, messageId: "missing-pin", prompt: "Legacy work" });
+      const child = await service.request({ entry: legacy, callId: "worker" }, "worker", { name: "Legacy result", goal: "Old check" });
+      await service.completeWorker({ slug: "scout", id: child.structured.worker.id, status: "finished" }, [{ kind: "finding", report: "done", text: "Recovered result" }]);
+      await service.change((state) => {
+        delete state.tasks[legacy.taskId].coworkerCreatedAt;
+        delete state.executions[legacy.id].coworkerCreatedAt;
+      });
+      await service.stop();
+      service = createCollaboration(options);
+      await service.start();
+      await eventually(async () => (await service.read((state) => state.executions[original.id])).state === "failed" && (await service.read((state) => state.tasks[legacy.taskId])).state === "succeeded");
+      assert.equal(fixture.requests.some((request) => request.messageId === original.messageId), false, "same workspace, different creation identity cannot admit old work");
+      assert.equal(await service.read((state) => state.tasks[original.taskId].coworkerCreatedAt), fixtureCreatedAt);
+      const followup = await service.read((state) => state.executions[state.tasks[legacy.taskId].executionId]);
+      assert.equal(followup.continuation, true);
+      assert.equal(followup.coworkerCreatedAt, null, "client admission cannot fill an old task's missing identity");
+      assert.deepEqual(await service.listActivity(), []);
+      await service.submit({ owner: { ...owner, coworkerCreatedAt: replacement }, messageId: "fresh-replacement", prompt: "New request" });
+      await eventually(async () => (await service.listActivity()).length === 1);
+      assert.equal((await service.listActivity())[0].coworkerCreatedAt, replacement);
+      await service.change((state) => { delete state.activity[0].coworkerCreatedAt; });
+      const inbox = createActivityInbox({ collaboration: service, coworkers: async () => [{ ...await fixtureCoworker("scout"), createdAt: replacement }], groups: async () => [] });
+      assert.deepEqual(await inbox.list(), [], "an old index row without creation identity also fails closed");
+    } finally { await service.stop(); }
+  });
+});
+
+test("Activity persists only final private text, explicit read state, and original workspace identity", async () => {
+  await withHome(async (home) => {
+    let clock = 1000;
+    const fixture = nativeFixture(async ({ input, reply, threadId }) => {
+      reply.parts.push({ type: "reasoning", text: "SECRET REASONING @you" }, { type: "text", text: "HIDDEN @you", synthetic: true });
+      reply.parts[0].toolOutput = "SECRET TOOL @you";
+      fixture.histories.get(threadId).splice(-1, 0, { id: `early_${reply.id}`, role: "assistant", parentId: input.messageId, completedAt: 1, parts: [{ type: "text", text: "TOOL ACK @you" }] });
+      if (input.prompt === "fail") reply.error = { message: "Deliberate failure" };
+      return input.prompt === "long" ? `${"Visible result. ".repeat(35)}@YOU, which option?` : "Final visible answer.";
+    });
+    const options = { directory: home, clientFor: fixture.clientFor, pollMs: 5, now: () => clock, onSuccess: async () => { throw new Error("Optional memory capture unavailable"); } };
+    let service = createCollaboration(options);
+    let actors = [await fixtureCoworker("scout")];
+    const inbox = () => createActivityInbox({ collaboration: service, coworkers: async () => actors, groups: () => listGroups(home) });
+    const owner = { ...fixtureIdentity, slug: "scout", threadId: "ses_inbox", conversationId: "ses_inbox", kind: "private" };
+    try {
+      for (const prompt of ["plain", "long", "fail"]) {
+        const entry = await service.submit({ owner, messageId: `msg_${prompt}`, prompt, track: true });
+        await eventually(async () => ["succeeded", "failed"].includes((await service.read((state) => state.executions[entry.id])).state));
+        clock += 100;
+      }
+      const items = await inbox().list();
+      assert.equal(items.length, 2);
+      assert.deepEqual(items.map((item) => item.kind), ["mention", "reply"]);
+      assert.equal(items[0].preview.length, 400, "classification uses the complete final text before clipping");
+      assert.equal(items[1].preview, "Final visible answer.", "no earlier acknowledgements, tool output, synthetic text or reasoning");
+      assert.deepEqual(items[0].target, { kind: "private", threadId: owner.threadId });
+      assert.equal(items[0].workspaceId, "workspace_scout");
+      assert.equal(items[0].coworkerCreatedAt, fixtureCreatedAt);
+      assert.equal(items[0].readAt, null);
+      await inbox().markRead([items[0].id, items[0].id, "unknown"]);
+      clock += 100;
+      let read = await inbox().markRead([items[0].id]);
+      assert.equal(read[0].readAt, 1300, "idempotent Read keeps the first native timestamp");
+      assert.equal(read[1].readAt, null, "unlisted IDs stay unread");
+      assert.deepEqual(await inbox().markRead([]), read);
+      for (const ids of [undefined, [""], [1], Array(301).fill(items[0].id)]) await assert.rejects(inbox().markRead(ids), /300 Activity IDs/);
+      await assert.rejects(inbox().markRead([items[0].id], "yes"), /read or unread/);
+      await service.stop();
+      service = createCollaboration(options);
+      assert.deepEqual(await inbox().list(), read);
+      await service.submit({ owner, messageId: "msg_long", prompt: "long", track: true });
+      assert.deepEqual(await inbox().list(), read, "replaying admission preserves the item and readAt");
+      assert.equal(fixture.requests.length, 3);
+      read = await inbox().markRead([items[0].id], false);
+      assert.equal(read[0].readAt, null);
+      actors = [{ ...await fixtureCoworker("scout"), createdAt: "2026-09-12T00:00:00.000Z" }];
+      assert.deepEqual(await inbox().list(), []);
+      assert.deepEqual(await inbox().markRead([items[0].id]), []);
+      assert.equal((await service.listActivity())[0].readAt, null, "a hidden source cannot be marked by guessing its ID");
+      actors = [];
+      assert.deepEqual(await inbox().list(), []);
+    } finally { await service.stop(); }
+  });
+});
+
+test("Activity source receipts survive bounded pruning and restart", async () => {
+  await withHome(async (home) => {
+    const options = { directory: home, clientFor: nativeFixture().clientFor };
+    let service = createCollaboration(options);
+    try {
+      await service.change((state) => {
+        for (let index = 0; index <= MAX_ACTIVITY_ITEMS; index++) {
+          const id = `source_${index}`;
+          const owner = { slug: "scout", kind: "private", threadId: "private", conversationId: "private" };
+          state.tasks[id] = { id, state: "succeeded", executionId: id, activityEligible: true };
+          const entry = state.executions[id] = { ...fixtureIdentity, id, taskId: id, owner, state: "succeeded", workspaceId: "workspace_scout" };
+          recordActivity(state, entry, { text: "Visible result", at: index });
+        }
+      });
+      const items = await service.listActivity();
+      assert.equal(items.length, MAX_ACTIVITY_ITEMS);
+      assert.deepEqual([items[0].at, items.at(-1).at], [300, 1]);
+      await service.stop();
+      service = createCollaboration(options);
+      await service.change((state) => recordActivity(state, state.executions.source_0, { text: "Replayed result", at: 999 }));
+      assert.deepEqual(await service.listActivity(), items, "a pruned source cannot reappear with a newer timestamp");
+      assert.equal(await service.read((state) => state.executions.source_0.activityRecorded), true);
+    } finally { await service.stop(); }
+  });
+});
+
+test("Activity migration keeps old origins, reconstructed continuations and queued group history silent", async () => {
+  await withHome(async (home) => {
+    const fixture = nativeFixture();
+    const options = { directory: home, clientFor: fixture.clientFor, pollMs: 5 };
+    let service = createCollaboration({ ...options, pollMs: 60_000 });
+    const groupOptions = { directory: home, clientFor: fixture.clientFor, coworkerFor: fixtureCoworker, coordinator: async () => ({}), catalogFor: async () => ({ models: [] }) };
+    let groups = createGroupExecution({ ...groupOptions, collaboration: service, pollMs: 60_000 });
+    const owner = { slug: "scout", threadId: "legacy", conversationId: "legacy", kind: "private" };
+    try {
+      const group = await createGroup(home, { name: "Old group", participantSlugs: ["scout", "editor"] });
+      const root = await service.submit({ owner, messageId: "old_origin", prompt: "Old origin" });
+      const worker = await service.request({ entry: root, callId: "old_child" }, "worker", { name: "Old worker", goal: "Old check" });
+      await service.completeWorker({ id: worker.structured.worker.id, slug: "scout", status: "finished" }, [{ kind: "finding", report: "done", text: "Old findings" }]);
+      await groups.submit(group.id, { clientMessageId: "old_group", text: "@scout Old group turn" });
+      await groups.stop();
+      await service.stop();
+      const file = path.join(home, ".collaboration", "state.json");
+      const legacy = JSON.parse(await readFile(file, "utf8"));
+      delete legacy.activity;
+      for (const task of Object.values(legacy.tasks)) delete task.activityEligible;
+      for (const request of legacy.groups[group.id].queue) { delete request.activityEligible; delete request.coworkerCreatedAts; }
+      await writeFile(file, JSON.stringify(legacy));
+      service = createCollaboration(options);
+      groups = createGroupExecution({ ...groupOptions, collaboration: service, pollMs: 5 });
+      await service.start();
+      await groups.start();
+      await eventually(async () => (await service.read((state) => state.tasks[root.taskId])).state === "succeeded" && !(await groups.status(group.id)).active);
+      assert.ok(fixture.requests.some((request) => request.prompt.startsWith("Continue the original task")));
+      assert.deepEqual(await service.listActivity(), []);
+      const reconstructed = { slug: "scout", id: "wrk_reconstructed", name: "Old Worker", goal: "Old result", status: "finished" };
+      await service.attachWorker(reconstructed, owner);
+      await service.completeWorker(reconstructed, [{ kind: "finding", report: "done", text: "Recovered findings" }]);
+      await eventually(async () => (await service.receipts({ slug: owner.slug, threadId: owner.threadId })).every((receipt) => receipt.state === "succeeded"));
+      assert.deepEqual(await service.listActivity(), []);
+      await service.submit({ owner: { ...owner, ...fixtureIdentity }, messageId: "new_origin", prompt: "New origin" });
+      await eventually(async () => (await service.listActivity()).length === 1);
+    } finally { await groups.stop(); await service.stop(); }
+  });
+});
 
 test("idle collaboration does not copy settled history and still accepts new work", async (t) => {
   await withHome(async (home) => {
@@ -328,7 +546,7 @@ test("idle collaboration does not copy settled history and still accepts new wor
 test("automatic memory captures only terminal private success and recalls raw requests in a new thread", async () => {
   await withHome(async (home) => {
     await mkdir(path.join(home, "scout"));
-    const owner = { slug: "scout", threadId: "private-first", conversationId: "private-first", kind: "private" };
+    const owner = { ...fixtureIdentity, slug: "scout", threadId: "private-first", conversationId: "private-first", kind: "private" };
     const prompt = "My release checklist has exactly 17 items.";
     const captured = [];
     const memory = createConversationMemory({ directory: home });
@@ -352,6 +570,9 @@ test("automatic memory captures only terminal private success and recalls raw re
       const first = await service.submit({ owner, prompt, track: true });
       await eventually(() => captured.length === 1);
       assert.equal(captured[0].continuation, true, "the initial success still awaiting a Worker is not captured");
+      assert.equal((await service.listActivity()).length, 1, "the Worker acknowledgement and raw findings do not enter Activity");
+      assert.equal((await service.listActivity())[0].id, `activity_${captured[0].id}`);
+      assert.equal(captured[0].coworkerCreatedAt, fixtureCreatedAt, "Worker continuations retain the original identity");
       assert.equal(captured[0].requestText, prompt);
       assert.match(captured[0].prompt, /^Continue the original task/);
       assert.equal((await service.read((state) => state.executions[first.id])).prompt, prompt);
@@ -395,13 +616,13 @@ test("automatic memory captures published group replies in only their shared sco
       groupsFor: async (slug) => (await listGroups(home)).filter((group) => group.participantSlugs.includes(slug)).map((group) => group.id),
     });
     const published = [];
-    const fixture = nativeFixture();
+    const fixture = nativeFixture(async ({ input }) => input.prompt.includes("Other group budget") ? "@YOU, which budget applies?" : undefined);
     const service = createCollaboration({ directory: home, clientFor: fixture.clientFor, pollMs: 5,
       memoryContext: (owner) => memory.context(owner),
       onSuccess: (entry) => entry.owner.kind === "private" ? memory.capture(entry) : Promise.resolve(),
     });
     const groups = createGroupExecution({ directory: home, collaboration: service, clientFor: fixture.clientFor, pollMs: 5,
-      coworkerFor: async (slug) => ({ slug, name: slug, role: "", mission: "" }),
+      coworkerFor: fixtureCoworker,
       coordinator: async () => ({}), catalogFor: async () => ({ models: [] }),
       onPublished: async (entry) => {
         const timeline = await readGroupTimeline(home, entry.owner.groupId);
@@ -411,7 +632,7 @@ test("automatic memory captures published group replies in only their shared sco
       },
     });
     try {
-      const privateOwner = { slug: "scout", threadId: "private", conversationId: "private", kind: "private" };
+      const privateOwner = { ...fixtureIdentity, slug: "scout", threadId: "private", conversationId: "private", kind: "private" };
       await service.submit({ owner: privateOwner, prompt: "PRIVATE CHECKLIST", track: true });
       await eventually(async () => (await memory.read(privateOwner)).recent.length === 2);
       await groups.start();
@@ -424,7 +645,20 @@ test("automatic memory captures published group replies in only their shared sco
       for (const { entry, timeline, marked } of published) {
         assert.equal(marked, true);
         assert.ok(timeline.some((event) => event.kind === "coworker" && event.threadId === entry.owner.threadId && event.turnId === entry.owner.turnId && event.text === entry.result), "capture follows actual timeline publication");
+        const item = (await service.listActivity()).find((item) => item.id === `activity_${entry.id}`);
+        assert.equal(item.kind, entry.owner.groupId === other.id ? "mention" : "reply", "group replies and human mentions each produce one row");
+        assert.deepEqual(item.target, { kind: "group", groupId: entry.owner.groupId, eventId: timeline.find((event) => event.executionId === entry.id).id });
       }
+      assert.equal((await service.listActivity()).length, 4, "a group mention does not also create a reply row");
+      let actors = [await fixtureCoworker("scout")];
+      const inbox = createActivityInbox({ collaboration: service, coworkers: async () => actors, groups: () => listGroups(home) });
+      actors = [{ ...actors[0], createdAt: "2026-09-12T00:00:00.000Z" }];
+      assert.deepEqual(await inbox.list(), [], "same path/workspace replacement cannot see private or group sources");
+      actors = [await fixtureCoworker("scout")];
+      await updateGroup(home, other.id, { participantSlugs: ["editor", "ops"] });
+      assert.equal((await inbox.list()).some((item) => item.target.groupId === other.id), false, "removed members cannot reveal old shared Activity");
+      await archiveGroup(home, first.id);
+      assert.equal((await inbox.markRead((await service.listActivity()).map((item) => item.id))).length, 1, "markRead returns the same current membership filters");
       const firstOwner = { slug: "scout", kind: "group", groupId: first.id };
       const store = await memory.read(firstOwner);
       assert.deepEqual(store.recent.filter((entry) => entry.speaker === "user").map((entry) => entry.text), [messages[0], messages[2]], "group prompt wrappers are not user facts");
@@ -497,6 +731,7 @@ test("shutdown retains group participant ownership until a cancelled raw write s
     const signal = new AbortController();
     let started = false;
     const groups = createGroupExecution({ directory: home, setupTimeoutMs: 20,
+      coworkerFor: fixtureCoworker,
       clientFor: async () => ({ createThread: async () => ({ id: "participant" }) }),
       collaboration: { registerOwner: async () => { started = true; await release.promise; await writeFile(path.join(home, "late-owner"), "last write"); } },
     });
@@ -589,8 +824,8 @@ test("a focused consultation and a Worker resume the immutable private origin ex
       await assert.rejects(service.context(slug, { sessionID: threadId, messageID: reply.id, callID: "made-up-call" }), /admitted parent/);
       await assert.rejects(service.request(trusted, "consultation", { to: "scout", question: "self" }), /cannot ask itself/);
       const consultation = { to: "editor", question: "Check the public fact", context: "SHARED FACT", continuation: { objective: "PRIVATE ORIGIN ONLY", completedActions: ["Read the brief"], resumeInstructions: "Use the two results." } };
-      const first = await service.request(trusted, "consultation", consultation);
-      const duplicate = await service.request(trusted, "consultation", consultation);
+      const first = await service.request(trusted, "consultation", consultation, fixtureIdentity);
+      const duplicate = await service.request(trusted, "consultation", consultation, fixtureIdentity);
       assert.equal(first.structured.collaboration.id, duplicate.structured.collaboration.id);
       const worker = await service.request({ ...trusted, callId: "second-native-call" }, "worker", { name: "Bounded check", goal: "Check once", continuation: consultation.continuation });
       workerId = worker.structured.worker.id;
@@ -601,11 +836,11 @@ test("a focused consultation and a Worker resume the immutable private origin ex
         await service.completeWorker({ slug, id: input.id, status: "finished" }, [{ kind: "finding", text: "WORKER RESULT" }]);
         return { id: input.id, status: "finished" };
       }, cancelWorker: async () => {},
-      publish: (task) => task.groupId ? appendGroupEvent(home, task.groupId, { id: `answer_${task.id}`, kind: "coworker", slug: task.to, text: task.result }) : undefined,
+      publish: (task) => task.groupId ? publishFixture(home, task) : undefined,
     });
-    groups = createGroupExecution({ directory: home, collaboration: service, coworkerFor: async (slug) => ({ slug, name: slug, role: "", mission: "" }), clientFor: fixture.clientFor });
+    groups = createGroupExecution({ directory: home, collaboration: service, coworkerFor: fixtureCoworker, clientFor: fixture.clientFor });
     try {
-      const owner = { slug: "scout", threadId: "ses_private", conversationId: "ses_private", kind: "private" };
+      const owner = { ...fixtureIdentity, slug: "scout", threadId: "ses_private", conversationId: "ses_private", kind: "private" };
       await service.registerOwner({ ...owner, threadId: "ses_other", conversationId: "ses_other" });
       await service.submit({ owner, messageId: "msg_request", prompt: "PRIVATE ORIGIN ONLY", track: true });
       await eventually(async () => (await service.receipts({ slug: "scout", threadId: "ses_private" }))[0]?.state === "succeeded");
@@ -624,6 +859,11 @@ test("a focused consultation and a Worker resume the immutable private origin ex
       const events = await readGroupTimeline(home, group.id);
       assert.equal(events.filter((event) => event.slug === "scout").length, 1);
       assert.equal(events.filter((event) => event.slug === "editor").length, 1);
+      const items = await service.listActivity();
+      assert.equal(items.length, 2, "one consultation publication and one final private follow-up");
+      assert.ok(items.every((item) => item.coworkerCreatedAt === fixtureCreatedAt));
+      assert.deepEqual(items.find((item) => item.slug === "editor").target, { kind: "group", groupId: group.id, eventId: events.find((event) => event.slug === "editor").id });
+      assert.deepEqual(items.find((item) => item.slug === "scout").target, { kind: "private", threadId: "ses_private" });
       assert.ok((await service.excludedThreads("editor")).includes(question.threadId));
       await assert.rejects(service.registerOwner({ slug: "editor", threadId: question.threadId, conversationId: question.threadId, kind: "private" }), /another conversation/);
     } finally { await groups.stop(); await service.stop(); }
@@ -916,13 +1156,13 @@ test("group continuations yield to routing and all foreground speakers, includin
         child = await service.request(trusted, "worker", { name: "Group check", goal: "Check result.md" });
       } else if (slug === "editor") fixture.held.add(threadId);
     });
-    service = createCollaboration({ directory: home, pollMs: 5, spawn: async (_slug, input) => ({ id: input.id, status: "running" }), cancelWorker: async () => {}, clientFor: async (slug, options = {}) => {
+    service = createCollaboration({ directory: home, pollMs: 5, publishExecution: (entry) => publishFixture(home, entry), spawn: async (_slug, input) => ({ id: input.id, status: "running" }), cancelWorker: async () => {}, clientFor: async (slug, options = {}) => {
       setups.push({ slug, ...options });
       if (holdSetup && options.kind === "review") { preparing = true; await setupGate; }
       return fixture.clientFor(slug);
     } });
     const groups = createGroupExecution({ directory: home, collaboration: service, clientFor: fixture.clientFor, pollMs: 5,
-      coworkerFor: async (slug) => ({ slug, name: slug, role: "Research and architecture", mission: "Deep analysis", model: "test/model" }),
+      coworkerFor: async (slug) => ({ ...await fixtureCoworker(slug), role: "Research and architecture", mission: "Deep analysis", model: "test/model" }),
       coordinator: async () => { if (child) { routing = true; await routeGate; } return { workspaceId: "coordinator" }; },
       catalogFor: async () => ({ models: [{ id: "test/model", providerId: "test", modelId: "model", variants: [], source: "local", tier: "key", toolCall: true, status: "active", label: "Test", releaseDate: "" }] }),
     });
@@ -943,6 +1183,10 @@ test("group continuations yield to routing and all foreground speakers, includin
       assert.ok(setups.some((entry) => entry.slug === "editor" && entry.requestText === "Hello"), "effort receives the raw request, not role or prompt wrappers");
       fixture.held.clear();
       await eventually(async () => (await service.receipts({ groupId: group.id }))[0]?.state === "succeeded");
+      await eventually(async () => {
+        const parent = await service.read((state) => state.tasks[state.tasks[child.structured.collaboration.id].parentId]);
+        return (await service.listActivity()).some((item) => item.target.eventId === `evt_${parent.executionId}`);
+      });
       assert.equal(setups.find((entry) => entry.kind === "review").requestText, "@scout Delegate the original");
       const origin = await service.read((state) => state.tasks[state.tasks[child.structured.collaboration.id].parentId]);
       holdSetup = true;
@@ -1078,13 +1322,17 @@ test("a dependency-free tool-free retry retains its message ID", async () => {
       return { ...client, retryTurn: async (threadId, input) => { retries++; fixture.histories.set(threadId, []); return client.sendTurn(threadId, input); } };
     } });
     try {
-      const root = await service.submit({ owner: { slug: "scout", threadId: "ses_tool_free", conversationId: "ses_tool_free", kind: "private" }, messageId: "msg_tool_free", prompt: "Reply without tools" });
+      const root = await service.submit({ owner: { ...fixtureIdentity, slug: "scout", threadId: "ses_tool_free", conversationId: "ses_tool_free", kind: "private" }, messageId: "msg_tool_free", prompt: "Reply without tools" });
       await eventually(async () => (await service.read((state) => state.executions[root.id])).state === "failed" && fixture.aborted.length > 0);
       const retry = await service.submit({ ...root, retry: true, retryByPerson: true });
       assert.equal(retry.messageId, root.messageId);
       await eventually(async () => (await service.read((state) => state.executions[root.id])).state === "succeeded");
       assert.equal(retries, 1);
       assert.equal(fixture.histories.get(root.owner.threadId).filter((message) => message.role === "user").length, 1);
+      assert.equal(await service.read((state) => state.tasks[root.taskId].activityEligible), true, "known retry is not a legacy import");
+      assert.deepEqual((await service.listActivity()).map((item) => [item.id, item.coworkerCreatedAt]), [[`activity_${root.id}`, fixtureCreatedAt]]);
+      await service.submit({ ...root, retry: false });
+      assert.equal((await service.listActivity()).length, 1, "same-ID replay still deduplicates the successful retry");
     } finally { await service.stop(); }
   });
 });
@@ -1191,16 +1439,16 @@ test("a nested consultation delivers the final child continuation to its parent 
     const fixture = nativeFixture(async ({ slug, threadId, input, reply }) => {
       if (input.prompt === "Private task" || input.prompt === "Focused B question") {
         const trusted = await service.context(slug, { sessionID: threadId, messageID: reply.id, callID: reply.parts[0].callId });
-        await service.request(trusted, "consultation", { to: slug === "scout" ? "editor" : "ops", question: slug === "scout" ? "Focused B question" : "Focused C question", continuation: { objective: input.prompt, resumeInstructions: "Synthesize the requested answer." } });
+        await service.request(trusted, "consultation", { to: slug === "scout" ? "editor" : "ops", question: slug === "scout" ? "Focused B question" : "Focused C question", continuation: { objective: input.prompt, resumeInstructions: "Synthesize the requested answer." } }, fixtureIdentity);
         reply.parts.push({ type: "text", text: "ACKNOWLEDGEMENT ONLY" });
       } else if (slug === "editor") reply.parts.push({ type: "text", text: "FINAL B SYNTHESIS" });
     });
     service = createCollaboration({ directory: home, clientFor: async (slug, options) => { selections.push({ slug, ...options }); return fixture.clientFor(slug); }, pollMs: 5,
-      consult: async (task) => ({ owner: { slug: task.to, threadId: `ses_${task.to}`, conversationId: "grp_nested", groupId: "grp_nested", kind: "consultation" }, prompt: task.input.question }),
-      publish: async (task) => { published.push({ id: task.id, result: task.result }); },
+      consult: async (task) => ({ owner: { slug: task.to, threadId: `ses_${task.to}`, conversationId: "grp_nested00", groupId: "grp_nested00", kind: "consultation" }, prompt: task.input.question }),
+      publish: async (task) => { published.push({ id: task.id, result: task.result }); return publishFixture(home, task); },
     });
     try {
-      const root = await service.submit({ owner: { slug: "scout", threadId: "ses_private", conversationId: "ses_private", kind: "private" }, messageId: "msg_nested", prompt: "Private task" });
+      const root = await service.submit({ owner: { ...fixtureIdentity, slug: "scout", threadId: "ses_private", conversationId: "ses_private", kind: "private" }, messageId: "msg_nested", prompt: "Private task" });
       await eventually(async () => (await service.read((state) => state.tasks[root.taskId])).state === "succeeded");
       const final = fixture.requests.filter((request) => request.threadId === "ses_private" && request.prompt.startsWith("Continue the original task"));
       assert.equal(final.length, 1);
@@ -1210,6 +1458,12 @@ test("a nested consultation delivers the final child continuation to its parent 
       for (const kind of ["reply", "review"]) assert.equal(selections.find((selection) => selection.slug === "editor" && selection.kind === kind).requestText, "Focused B question", "new consultations and their reviews retain the question, not the continuation wrapper");
       assert.equal(new Set(published.map((entry) => entry.id)).size, 2);
       assert.equal(published.length, 2);
+      const items = await service.listActivity();
+      assert.equal(items.length, 3, "nested publications and the private origin are captured once each");
+      assert.equal(items.filter((item) => item.slug === "editor").length, 1, "consultation continuation publication is not counted twice");
+      assert.ok(items.every((item) => item.coworkerCreatedAt === fixtureCreatedAt), "nested consultation continuations inherit the pinned target identity");
+      assert.match(items.find((item) => item.slug === "editor").preview, /FINAL B SYNTHESIS/);
+      assert.ok(items.every((item) => !item.preview.includes("ACKNOWLEDGEMENT ONLY")));
     } finally { await service.stop(); }
   });
 });
@@ -1295,7 +1549,7 @@ test("projection failure stops after three attempts and retry restores delivery 
     let available = false;
     const service = createCollaboration({ directory: home, clientFor: fixture.clientFor, pollMs: 5,
       consult: async () => ({ owner: { slug: "editor", threadId: "ses_projection", conversationId: "grp_projection", groupId: "grp_projection", kind: "consultation" }, prompt: "Focused question" }),
-      publish: async () => { attempts++; if (!available) throw new Error("Local projection failed"); },
+      publish: async (task) => { attempts++; if (!available) throw new Error("Local projection failed"); return publishFixture(home, task); },
     });
     try {
       const root = await service.submit({ owner: { slug: "scout", threadId: "ses_origin", conversationId: "ses_origin", kind: "private" }, messageId: "msg_projection", prompt: "Original task" });
@@ -1304,6 +1558,7 @@ test("projection failure stops after three attempts and retry restores delivery 
       assert.equal(attempts, 3);
       assert.match((await service.receipts({ slug: "scout", threadId: "ses_origin" }))[0].error, /three attempts|could not be shown/);
       assert.equal(fixture.requests.filter((request) => request.prompt.startsWith("Continue the original task")).length, 0);
+      assert.deepEqual(await service.listActivity(), [], "an unpublished reply has no Activity row");
       available = true;
       await service.retry(root.taskId);
       await eventually(async () => (await service.receipts({ slug: "scout", threadId: "ses_origin" }))[0].state === "succeeded");
@@ -1351,7 +1606,7 @@ test("group retry sends a new follow-up and retains the accepted tool-bearing at
     });
     const options = { directory: home, clientFor: fixture.clientFor, pollMs: 5 };
     let service = createCollaboration(options);
-    const groupOptions = { directory: home, clientFor: fixture.clientFor, pollMs: 5, coworkerFor: async (slug) => ({ slug, name: slug, role: "", mission: "" }) };
+    const groupOptions = { directory: home, clientFor: fixture.clientFor, pollMs: 5, coworkerFor: fixtureCoworker };
     let groups = createGroupExecution({ ...groupOptions, collaboration: service });
     try {
       const group = await createGroup(home, { name: "Pair", participantSlugs: ["scout", "editor"] });
@@ -1382,6 +1637,8 @@ test("group retry sends a new follow-up and retains the accepted tool-bearing at
       assert.deepEqual(await service.read((state) => state.groups[group.id].recoveryRequests), [{ id: followUp.clientMessageId, turnId: failed.id, attempt: 1 }]);
       await repeatAccepted();
       const delivered = (await readGroupTimeline(home, group.id)).find((event) => event.kind === "coworker");
+      const inboxBeforeReplay = await service.markActivityRead((await service.listActivity()).map((item) => item.id));
+      assert.equal(inboxBeforeReplay.length, 1);
       for (const crash of ["before-append", "before-receipt"]) {
         await groups.stop();
         await service.stop();
@@ -1411,6 +1668,7 @@ test("group retry sends a new follow-up and retains the accepted tool-bearing at
         assert.equal(activity.timeline.filter((event) => event.id === delivered.id).length, 1);
         assert.equal(activity.executions.length, 0);
         assert.equal(fixture.requests.length, 2, "delivery recovery does not replay native work");
+        assert.deepEqual(await service.listActivity(), inboxBeforeReplay, "publication replay does not reset readAt or duplicate Activity");
         await eventually(async () => !(await groups.status(group.id)).active);
         await repeatAccepted();
       }

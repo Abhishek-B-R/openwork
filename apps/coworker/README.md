@@ -5,6 +5,37 @@ platform. Open Coworker is a second product client, not a second platform: it
 assembles existing OpenWork primitives into a coworker-centric experience and
 adds no new database concepts.
 
+## Activity and mentions
+
+**Activity**, above the team list, is a shared inbox for completed private and
+group replies. Filter **All**, **Mentions**, or **Unread**; each row identifies
+the coworker, conversation, time, and a short visible-reply preview. The rail
+shows the real unread count. **Happening now** separately projects current work
+and requests for the person, not notification history or inferred progress.
+
+Coworkers can write **@you** sparingly when they need a question answered, a
+decision, or help with a blocker. Only standalone mentions in delivered prose
+count; code, quotations, email addresses and source URLs do not. A mention is
+attention, never permission to act or an answer to a pending native request.
+
+Opening Activity keeps the current chat mounted and does not mark anything read.
+Opening a notification marks that item read and returns to its private discussion
+or group; group replies are revealed when present in the loaded recent history.
+Older group targets show an explicit history-limit notice instead of claiming
+an exact jump. Individual read/unread controls and **Mark all read** persist
+across restarts; the latter acknowledges only the IDs already loaded in the inbox,
+not notifications arriving during the action. Read state is local to this profile.
+
+The native collaboration store owns a bounded newest-300 index. Private capture
+waits for final task success, including reviewed Worker handbacks. Group capture
+follows durable timeline publication. Source receipts prevent duplicate rows or
+reset read state during replay; historical work is not backfilled on upgrade.
+Actor creation identity is pinned alongside slug and workspace ID, so a retired
+coworker's replacement cannot inherit the old inbox. Archived groups and removed
+members are filtered out. Classifier failures fall back to an ordinary reply
+without failing the work itself. No OS push notifications, raw tool-event feed,
+cloud inbox sync, or standalone responsibility-completion notifications are added.
+
 ## Fresh start from Settings
 
 **Settings → Fresh start** has three separate actions:

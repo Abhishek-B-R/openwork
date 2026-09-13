@@ -356,7 +356,7 @@ export function ThreadsPanel({
   /** A ready-to-send discussion message (for example, "explain this run"); the id makes repeats distinct. */
   discussionDraft?: AssignmentDraft;
   /** Set by the context rail to jump straight into a thread; the id makes repeat requests distinct. */
-  openThreadRequest?: { id: number; threadId: string } | null;
+  openThreadRequest?: { id: number; threadId: string; kind?: "thread" | "discussion" | "activity" } | null;
   /** The one-off assignment threads as this column lists them, and what each waits on the person for, so the panel's Assignments show the same ones. */
   onAssignmentsChange?: (items: ThreadListItem[], attention: Record<string, string>) => void;
   /** A message to send in the open discussion as soon as it exists (a request passed from a teammate); the id makes repeats distinct. */
@@ -454,15 +454,6 @@ export function ThreadsPanel({
     if (!discussionDraft) return;
     setOpenThreadId("");
   }, [discussionDraft]);
-
-  useEffect(() => {
-    if (!openThreadRequest?.threadId) return;
-    if (openThreadRequest.threadId === discussionThreadId) {
-      setOpenThreadId("");
-      return;
-    }
-    setOpenThreadId(openThreadRequest.threadId);
-  }, [discussionThreadId, openThreadRequest]);
 
   const refresh = useCallback(async () => {
     if (!threads || !listingActive.current) return;
@@ -592,6 +583,29 @@ export function ThreadsPanel({
       setError(cause instanceof Error ? cause.message : String(cause));
     }
   }, [coworker.slug, discussionThreadId, onCoworkerChanged]);
+
+  const handledThreadRequest = useRef(0);
+  useEffect(() => {
+    if (!openThreadRequest?.threadId || handledThreadRequest.current === openThreadRequest.id) return;
+    handledThreadRequest.current = openThreadRequest.id;
+    if (openThreadRequest.kind === "activity") {
+      // Live status can refer to a discussion or an assignment. Resolve the saved
+      // registry instead of changing the native ownership when the person replies.
+      void loadDiscussionRegistry(coworker.slug).then((ids) => {
+        if (handledThreadRequest.current !== openThreadRequest.id) return;
+        if (ids.includes(openThreadRequest.threadId) || discussionThreadId === openThreadRequest.threadId) void openDiscussion(openThreadRequest.threadId);
+        else setOpenThreadId(openThreadRequest.threadId);
+      }).catch((cause) => setError(cause instanceof Error ? cause.message : String(cause)));
+      return;
+    }
+    if (openThreadRequest.kind === "discussion") {
+      // Activity knows this is a private discussion. Use its existing registry
+      // and selection path, never the generic assignment viewer.
+      void openDiscussion(openThreadRequest.threadId);
+      return;
+    }
+    setOpenThreadId(openThreadRequest.threadId === discussionThreadId ? "" : openThreadRequest.threadId);
+  }, [coworker.slug, discussionThreadId, openDiscussion, openThreadRequest]);
 
   const createAssignment = useCallback(async (outcome: string, messages: ReadonlyArray<DiscussionMessage>) => {
     if (!threads) throw new Error("This coworker needs a workspace before it can take an assignment.");

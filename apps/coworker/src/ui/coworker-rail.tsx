@@ -5,7 +5,7 @@ import type { DenSession } from "@/lib/den";
 import type { CoworkerActivity } from "@/lib/threads";
 import { CoworkerMark } from "@/ui/brand";
 import { CoworkerAvatar, GroupAvatars } from "@/ui/coworker-avatar";
-import { Button, IconButton, PlusIcon, SearchIcon, SlidersIcon, StatusDot, Tooltip } from "@/ui/kit";
+import { ActivityIcon, Button, IconButton, PlusIcon, SearchIcon, SlidersIcon, StatusDot, Tooltip } from "@/ui/kit";
 import type { ResizablePanel } from "@/ui/use-resizable-panel";
 
 /** Identity keeps its personality; execution status only describes observed work. */
@@ -59,6 +59,11 @@ export function CoworkerRail({
   selectedGroupId = "",
   onSelectGroup,
   onNewGroup,
+  activitySelected = false,
+  unreadActivity = 0,
+  unreadMentions = 0,
+  activityError = false,
+  onOpenActivity,
 }: {
   coworkers: CoworkerSummary[];
   runtime: RuntimeInfo;
@@ -78,6 +83,11 @@ export function CoworkerRail({
   selectedGroupId?: string;
   onSelectGroup?: (id: string) => void;
   onNewGroup?: () => void;
+  activitySelected?: boolean;
+  unreadActivity?: number;
+  unreadMentions?: number;
+  activityError?: boolean;
+  onOpenActivity?: () => void;
 }) {
   const bySlug = new Map(coworkers.map((coworker) => [coworker.slug, coworker]));
   const membersOf = (group: CoworkerGroupSummary) => group.participantSlugs.map((slug) => bySlug.get(slug)).filter((member): member is CoworkerSummary => Boolean(member));
@@ -104,6 +114,18 @@ export function CoworkerRail({
   const accountInitials = (session?.userName.trim() || session?.userEmail.trim() || "OpenWork")
     .split(/\s+/).slice(0, 2).map((part) => Array.from(part)[0]).join("").toLocaleUpperCase();
   const accountDescription = `${accountName} · ${accountLabel} · Account and settings`;
+  const activityLabel = `Activity${unreadActivity ? ` · ${unreadActivity} unread` : ""}${unreadMentions ? ` · ${unreadMentions} mentions of you` : ""}${activityError ? " · Refresh unavailable" : ""}`;
+  const activityButton = onOpenActivity ? (
+    <Tooltip content={collapsed ? activityLabel : ""} side="right">
+      <button type="button" onClick={onOpenActivity} aria-label={activityLabel} aria-current={activitySelected ? "page" : undefined}
+        data-testid="coworker-activity-button"
+        className={`window-no-drag relative flex min-h-10 items-center gap-2.5 rounded-lg px-3 py-2 text-left text-xs transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-spark/60 ${collapsed ? "mx-auto w-14 justify-center" : "w-full"} ${activitySelected ? "bg-white/8 font-semibold text-snow ring-1 ring-inset ring-white/10" : "text-mist hover:bg-white/5 hover:text-snow"}`}>
+        <ActivityIcon className="size-4 shrink-0" />
+        {!collapsed ? <span className="min-w-0 flex-1">Activity</span> : null}
+        {unreadActivity > 0 ? <span aria-hidden="true" className={`flex min-w-5 items-center justify-center rounded-md px-1 py-0.5 text-[10px] font-semibold tabular-nums ${unreadMentions ? "bg-spark/20 text-spark" : "bg-white/10 text-snow"} ${collapsed ? "absolute -right-1 -top-1" : ""}`}>{unreadActivity > 99 ? "99+" : unreadActivity}</span> : activityError ? <span aria-hidden="true" className="text-amber">!</span> : null}
+      </button>
+    </Tooltip>
+  ) : null;
 
   return (
     <aside
@@ -132,6 +154,7 @@ export function CoworkerRail({
               <PlusIcon />
             </IconButton>
           </div>
+          {activityButton ? <div className="shrink-0 px-2 pb-1 pt-3">{activityButton}</div> : null}
           <nav aria-label="Coworkers" className="flex flex-1 flex-col items-center gap-1 overflow-y-auto px-1 pb-4 pt-3">
             {coworkers.map((coworker) => {
               const activity = activityBySlug[coworker.slug];
@@ -241,6 +264,7 @@ export function CoworkerRail({
               <span aria-hidden="true">+</span>
             </Button>
           </div>
+          {activityButton ? <div className="shrink-0 px-2 pb-1 pt-3">{activityButton}</div> : null}
           <p className="px-4 pb-1 pt-3 text-[10px] font-semibold uppercase tracking-[0.14em] text-mist">Coworkers</p>
           <nav aria-label="Coworkers" className="flex-1 space-y-0.5 overflow-y-auto px-2 pb-5">
             {visibleCoworkers.map((coworker) => {

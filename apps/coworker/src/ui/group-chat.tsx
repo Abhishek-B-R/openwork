@@ -209,7 +209,9 @@ function GroupChatView({
   briefing,
   onRememberFocus,
   documentsApi,
+  activityRequest,
 }: {
+  activityRequest?: { id: number; eventId: string } | null;
   documentsApi?: GroupDocumentsApi;
   active?: boolean;
   introduction?: ReactNode;
@@ -231,6 +233,7 @@ function GroupChatView({
 }) {
   const [sharedDocument, setSharedDocument] = useState<{ groupId: string; id: string } | null>(null);
   const [observed, setObserved] = useState(() => groupObservations.get(group.id) ?? { groupId: "", timeline: [], executions: [] });
+  const [activityReadStartedAt, setActivityReadStartedAt] = useState(0);
   const events = observed.groupId === group.id ? observed.timeline : [];
   const executions = observed.groupId === group.id ? observed.executions : [];
   const [humanWaits, setHumanWaits] = useState<{ groupId: string; entries: GroupInteraction[] }>({ groupId: "", entries: [] });
@@ -271,7 +274,21 @@ function GroupChatView({
   coworkersRef.current = coworkers;
   const eventsRef = useRef(events);
   eventsRef.current = events;
-  const { scrollRef, contentRef, away, jumpToLatest } = useConversationScroll(`group:${group.id}`, active && !pendingAssignment, observed.groupId === group.id);
+  const { scrollRef, contentRef, away, jumpToLatest, reveal } = useConversationScroll(`group:${group.id}`, active && !pendingAssignment, observed.groupId === group.id);
+  const revealedActivity = useRef(0);
+  const [activityNotice, setActivityNotice] = useState("");
+  const [highlightedEvent, setHighlightedEvent] = useState("");
+  useEffect(() => {
+    if (!active || pendingAssignment || !activityRequest || revealedActivity.current === activityRequest.id || observed.groupId !== group.id) return;
+    const event = events.find((entry) => entry.id === activityRequest.eventId);
+    // A cached timeline can predate the notification. Only a read started after
+    // this navigation can establish that its target is outside recent history.
+    if (!event && activityReadStartedAt < activityRequest.id) return;
+    if (event && !reveal(groupMessageKey(event))) return;
+    revealedActivity.current = activityRequest.id;
+    setHighlightedEvent(event?.id ?? "");
+    setActivityNotice(event ? "" : "Opened from Activity. This reply is older than the recent messages shown here.");
+  }, [active, activityRequest, activityReadStartedAt, events, group.id, observed.groupId, pendingAssignment, reveal]);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const changedRef = useRef(onGroupChanged);
   changedRef.current = onGroupChanged;
@@ -326,11 +343,12 @@ function GroupChatView({
         }));
         publishGroupRun({ groupId: group.id, active: status.active, ...(status.turn ? { turn: status.turn } : {}), done: !status.active });
       }),
-      poll("activity", () => coworkerBridge.groups.activity(group.id), (activity) => {
+      poll("activity", async () => ({ readStartedAt: Date.now(), activity: await coworkerBridge.groups.activity(group.id) }), ({ activity, readStartedAt }) => {
         const speakerOrder = [...(groupRef.current.turns.at(-1)?.speakers ?? [])].sort((a, b) => a.order - b.order).map((speaker) => speaker.slug);
         const next = { groupId: group.id, ...reconcileGroupActivity(groupObservations.get(group.id) ?? { timeline: [], executions: [] }, activity, speakerOrder) };
         groupObservations.set(group.id, next);
         setObserved(next);
+        setActivityReadStartedAt(readStartedAt);
         changeGroupSends(group.id, (items) => items.filter((item) => item.turnId || !next.timeline.some((event) => event.kind === "user" && event.clientMessageId === item.clientMessageId)));
       }),
       poll("group", () => coworkerBridge.groups.get(group.id), (updated) => {
@@ -658,6 +676,7 @@ function GroupChatView({
       <div ref={scrollRef} style={{ overflowAnchor: "none" }} className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
         <div ref={contentRef} className="mx-auto max-w-3xl space-y-3">
           {introduction}
+          {activityNotice ? <p role="status" className="rounded-lg border border-line px-3 py-2 text-xs text-mist">{activityNotice}<button type="button" className="ml-2 underline" onClick={() => setActivityNotice("")}>Dismiss</button></p> : null}
           {observed.groupId !== group.id && !activityError ? <p role="status" className="text-xs text-mist">Loading conversation…</p> : null}
           {loaded && observed.groupId === group.id && rows.length === 0 && !introduction ? (
             <div className="mx-auto flex h-full max-w-md flex-col items-center justify-center py-10 text-center" data-testid="group-chat-empty">
@@ -735,7 +754,7 @@ function GroupChatView({
             // In a group, each reply is signed: a small avatar at the tail and the name once per run.
             const speaker = coworkers.find((coworker) => coworker.slug === event.slug);
             return (
-              <div key={key} data-scroll-anchor={key} data-execution-id={event.executionId}>
+              <div key={key} data-scroll-anchor={key} data-event-id={event.id} data-execution-id={event.executionId} tabIndex={-1} className={highlightedEvent === event.id ? "rounded-lg bg-spark/5 outline-none ring-1 ring-spark/35" : "outline-none"}>
                 {label ? <p className="pb-1 pt-2 text-center text-[11px] font-medium text-mist/80" data-testid="group-time-label">{label}</p> : null}
                 <div className={`flex items-end gap-2 ${continued ? "-mt-1.5" : ""}`} data-message-role="assistant" data-speaker={event.slug} data-continued={continued ? "true" : "false"}>
                   <span className="w-6 shrink-0">
