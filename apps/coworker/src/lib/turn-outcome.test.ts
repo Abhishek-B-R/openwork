@@ -5,6 +5,7 @@ import {
   WAIT_BUDGET_MS,
   choiceNavigates,
   cutOffLine,
+  deriveTurnActivity,
   deriveTurnOutcome,
   failureChoices,
   retryLine,
@@ -62,10 +63,14 @@ test("the wait budget passing while the engine is still busy is slow, not failed
   }))?.kind, "slow");
 });
 
-test("a reply that landed is replied", () => {
-  const outcome = deriveTurnOutcome(facts({ engine: { type: "idle" }, reply: { state: "complete", error: "", retryable: null, aborted: false } }));
+test("a landed reply stays working until its observer settles", () => {
+  const outcome = deriveTurnOutcome(facts({ engine: { type: "idle" }, reply: { state: "complete", error: "", retryable: null, aborted: false }, attemptActive: true }));
   assert.equal(outcome?.kind, "replied");
   assert.deepEqual(outcome?.choices, []);
+  const activity = { outcome, stopping: false, attemptActive: true, engineRunning: false, needsYou: false };
+  assert.deepEqual(deriveTurnActivity(activity), { working: true, composerWorking: true });
+  assert.deepEqual(deriveTurnActivity({ ...activity, attemptActive: false }), { working: false, composerWorking: false });
+  assert.deepEqual(deriveTurnActivity({ ...activity, outcome: null, stopping: true }), { working: false, composerWorking: true });
 });
 
 test("the engine's own retry is trying again, live, with the count in the line", () => {
@@ -230,6 +235,10 @@ test("a permission or question waiting on the person comes first, whatever else 
   assert.equal(outcome?.tone, "amber");
   assert.deepEqual(outcome?.choices, []);
   assert.equal(deriveTurnOutcome(facts({ needsYou: true, turn: null }))?.kind, "waiting-on-you");
+  const activity = { outcome, stopping: false, attemptActive: false, engineRunning: true, needsYou: true };
+  assert.deepEqual(deriveTurnActivity(activity), { working: false, composerWorking: false });
+  assert.deepEqual(deriveTurnActivity({ ...activity, attemptActive: true }), { working: true, composerWorking: true });
+  assert.deepEqual(deriveTurnActivity({ ...activity, stopping: true }), { working: false, composerWorking: true });
 });
 
 test("a finished step while the engine is still busy is still working, not replied", () => {

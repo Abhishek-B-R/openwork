@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
@@ -23,7 +23,7 @@ import { PROGRESS_PLUGIN, installProgressPlugin } from "./progress-plugin.mjs";
 import { MEMORY_PLUGIN, installMemoryPlugin } from "./memory-model.mjs";
 import { coordinatorConfig } from "./coordinator.mjs";
 import { nativeConfig, updateNativeConfig } from "./native-config.mjs";
-import { NATIVE_PLUGIN_DEPENDENCIES, NATIVE_PLUGIN_VERSION, configureNativePluginBundles, validateNativePluginManifest, verifyNativePluginBundles } from "./native-plugin.mjs";
+import { NATIVE_PLUGIN_DEPENDENCIES, NATIVE_PLUGIN_VERSION, configureNativePluginBundles, validateNativePluginManifest, verifyNativePluginBundles, installNativePlugins } from "./native-plugin.mjs";
 import { TURN_ROLES_PLUGIN, prepareNativeTurnRoles } from "./turn-roles-plugin.mjs";
 import { NATIVE_TURN_ROLES } from "./native-turns.mjs";
 import { createCoworkerToolsServer } from "./coworker-tools.mjs";
@@ -107,7 +107,8 @@ test("native launch scripts finish prerequisite builds before loading plugin pre
     ensureToolsServer: async () => ({}), installNativeCoworkerPlugins: async () => undefined,
     ensurePlatformServer: async () => handle, registerCoworkerTools: async () => undefined,
     toolsRegistered: new Set(), serverHandle: handle, warmedCoworkerWorkspaces, prepareNativeTurnRoles,
-    AbortSignal, warmedCoworkerScopes: new Map(), workspaceReadinessScope: () => generation,
+    AbortSignal, warmedCoworkerScopes: new Map(), workspaceReadinessScope: () => generation, readinessKey: () => generation,
+    workspaceAdmissions: { read: async () => ({}), matches: () => false, same: () => true, forget: () => {}, record: () => "fixture" },
     nativeWorkspaceRequest: async (_handle, _workspaceId, method, route, body) => {
       calls.push({ method, route, body });
       if (route === "/api/plugin") return { data: ["collaboration", "computer", "browser", "group-documents", "turn-roles", "events", "abilities"].map((id) => ({ id: `coworker.${id}`, state: { status: "active" } })) };
@@ -730,9 +731,8 @@ test(`generated config is strict native ${NATIVE_PLUGIN_VERSION}, migrates once 
     assert.throws(() => validateNativePluginManifest(incomplete), /manifest/);
   }
   const home = { path: root, createdAt: "fixture-created", workspaceId: "ws_fixture" };
-  const installers = [installBrowserPlugin, installComputerPlugin, installGroupDocumentPlugin, installEventPlugin, installProgressPlugin, installMemoryPlugin, (home) => installAbilitiesPlugin(home, connection)];
-  await installCollaborationPlugin(home, connection);
-  for (const install of installers) await install(home);
+  const installers = [(home, configure) => installCollaborationPlugin(home, connection, configure), installComputerPlugin, installBrowserPlugin, installGroupDocumentPlugin, installEventPlugin, installProgressPlugin, installMemoryPlugin, (home, configure) => installAbilitiesPlugin(home, connection, configure)];
+  assert.equal(await installNativePlugins(home, installers), true);
   const first = await readFile(path.join(root, "opencode.json"), "utf8");
   const config = JSON.parse(first);
   Schema.decodeUnknownSync(Config.Info, { onExcessProperty: "error" })(config);
@@ -741,6 +741,11 @@ test(`generated config is strict native ${NATIVE_PLUGIN_VERSION}, migrates once 
   assert.equal(await readFile(path.join(root, "soul.md"), "utf8"), "Keep this identity.");
   assert.equal(await readFile(path.join(root, ".opencode", "package.json"), "utf8"), userPackage);
   assert.deepEqual(config.instructions, ["memory/custom.md"]);
+  assert.deepEqual(config.permissions, [
+    { action: "*", resource: "*", effect: "ask" }, { action: "shell", resource: "git *", effect: "allow" },
+    { action: "read", resource: "*", effect: "deny" },
+    ...["computer_*", "browser_*", "webmcp_*"].map((action) => ({ action, resource: "*", effect: "deny" })),
+  ]);
   assert.deepEqual(config.agents.personal.permissions, [{ action: "question", resource: "*", effect: "deny" }]);
   assert.equal(config.mcp.servers.notes.disabled, false);
   assert.equal(config.mcp.servers.notes.codemode, false);
@@ -757,8 +762,22 @@ test(`generated config is strict native ${NATIVE_PLUGIN_VERSION}, migrates once 
     [{ ...nativeOld.mcp.servers.coworker, headers: { ...generated.headers, "X-User": "custom" } }, connection],
   ]) assert.equal(nativeConfig({ mcp: { servers: { coworker: candidate } } }, { coworkerConnection: broker }).mcp.servers.coworker.codemode, false);
   assert.equal(nativeConfig({ mcp: { servers: { user: nativeOld.mcp.servers.coworker } } }, { coworkerConnection: connection }).mcp.servers.user.codemode, false);
-  for (const install of installers) await install(home);
-  assert.equal(await readFile(path.join(root, "opencode.json"), "utf8"), first);
+  const target = path.join(root, "opencode.json");
+  await utimes(target, 1, 1);
+  const settled = await stat(target, { bigint: true });
+  const abilitiesPath = path.join(root, ".opencode", "coworker-abilities.json");
+  const abilitiesState = await stat(abilitiesPath, { bigint: true });
+  assert.equal(await installNativePlugins(home, installers), false);
+  assert.equal((await stat(abilitiesPath, { bigint: true })).ctimeNs, abilitiesState.ctimeNs);
+  assert.equal(await readFile(target, "utf8"), first);
+  const repeated = await stat(target, { bigint: true });
+  assert.equal(repeated.mtimeNs, settled.mtimeNs, "unchanged preparation must not rewrite config even transiently");
+  assert.equal(repeated.ino, settled.ino);
+  const installedBrowser = path.join(root, ".opencode", "coworker-plugins", "coworker-browser", "server.js");
+  await writeFile(installedBrowser, "Changed local bundle");
+  assert.equal(await installNativePlugins(home, installers), true, "a repaired bundle requires activation even when config is unchanged");
+  assert.deepEqual(await readFile(installedBrowser), await readFile(path.join(bundleRoot, manifest.entries["coworker-browser.js"].file)));
+  assert.equal((await stat(target, { bigint: true })).mtimeNs, settled.mtimeNs);
   await writeFile(path.join(root, "opencode.json"), JSON.stringify({ ...config, mcp: { ...config.mcp, servers: { ...config.mcp.servers, coworker: nativeOld.mcp.servers.coworker } } }));
   assert.equal(await updateNativeConfig(root), true, "already-native app-owned false also migrates");
   assert.equal(await readFile(path.join(root, "opencode.json"), "utf8"), first);

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, test } from "node:test";
@@ -53,6 +53,13 @@ test("abilities persist per identity without losing profile edits or widening em
   assert.deepEqual(reloaded.abilities, { ...selected, revision: 1 });
   assert.equal(reloaded.mission, "Keep this concurrent profile change.");
   assert.deepEqual((await getCoworker(dir, beta.slug)).abilities, defaultCoworkerAbilities());
+  const file = path.join(alpha.path, "coworker.md");
+  await utimes(file, 1, 1);
+  const before = await stat(file, { bigint: true });
+  const unchanged = await updateCoworkerAbilities(dir, alpha.slug, { createdAt: alpha.createdAt, expectedRevision: 1, abilities: reloaded.abilities });
+  assert.equal(unchanged.abilities.revision, 1);
+  const after = await stat(file, { bigint: true });
+  assert.deepEqual([after.ino, after.mtimeNs], [before.ino, before.mtimeNs]);
   await assert.rejects(updateCoworkerAbilities(dir, alpha.slug, { createdAt: alpha.createdAt, expectedRevision: 0, abilities: selected }), /changed elsewhere/);
   await updateCoworker(dir, alpha.slug, { abilities: defaultCoworkerAbilities() });
   assert.deepEqual((await getCoworker(dir, alpha.slug)).abilities, reloaded.abilities, "the generic patch cannot replace the dedicated selection");

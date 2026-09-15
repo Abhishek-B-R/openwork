@@ -1466,6 +1466,9 @@ importers:
 
   packages/headless-threads:
     dependencies:
+      '@opencode-ai/client':
+        specifier: 0.0.0-beta-19271
+        version: 0.0.0-beta-19271(effect@4.0.0-rc.112)
       '@opencode-ai/sdk':
         specifier: ^1.18.15
         version: 1.18.18
@@ -3207,6 +3210,17 @@ packages:
   '@open-draft/until@2.1.0':
     resolution: {integrity: sha512-U69T3ItWHvLwGg5eJ0n3I62nWuE6ilHlmz7zM0npLBRvPRd7e6NYmg54vvRtP5mZG7kZqZCFVdsTWo7BPtBujg==}
 
+  '@opencode-ai/client@0.0.0-beta-19271':
+    resolution: {integrity: sha512-hx9aWS6B6CptcQvasmEjfYzSKcl1XsWNQIA2g53MKXVfmx9jdk7+sQWR3FunxMXvFSUSTPNAUTt0RDzO8O8Ylg==}
+    peerDependencies:
+      effect: 4.0.0-rc.112
+      solid-js: '>=1.9.0'
+    peerDependenciesMeta:
+      effect:
+        optional: true
+      solid-js:
+        optional: true
+
   '@opencode-ai/plugin@1.18.25':
     resolution: {integrity: sha512-Kb34zFqYosFNiMd1IuYiZGjX17z+18Srm7tHZMCz+uMVRTYNkEw1FTrfAK2FLbggwYdgzifGwKMNF1slLT8eLw==}
     peerDependencies:
@@ -3220,6 +3234,12 @@ packages:
         optional: true
       '@opentui/solid':
         optional: true
+
+  '@opencode-ai/protocol@0.0.0-beta-19271':
+    resolution: {integrity: sha512-pmOrj34z1wK+EwWDI27ymtUR1sDDGvWTYRyl4m66yllQuqsohW1webLIi6J4+UwNqnjKsGVeXIgZJBqblqR2tQ==}
+
+  '@opencode-ai/schema@0.0.0-beta-19271':
+    resolution: {integrity: sha512-5i2EnveTUMB277O5JrMxdVLDi8K8JnSYm6rn1KdBrgJEAQmy182nOQBkZ3X7eBQTK6FDxz+byuiXksz0pmQptQ==}
 
   '@opencode-ai/sdk@1.18.18':
     resolution: {integrity: sha512-zJlwXskIR47V1dkPJqeKBgq7nejG1uU8lJaGIGqbX3MWRCT8vKn0fEotbxuPCKnTdmWsDyNGNg9q1qIliDSMDA==}
@@ -6921,6 +6941,9 @@ packages:
 
   effect@4.0.0-beta.83:
     resolution: {integrity: sha512-0wsak8RtgGAr9UWSbVDgJHZcUqMSvicHcvaZv1MbMM7MCGgW4Rn/137J1MHQbwYPcwYGxT/IqehFd+UbYuj78w==}
+
+  effect@4.0.0-rc.112:
+    resolution: {integrity: sha512-wXxwuh1Ywnv4cPRM3Wfa0vDwuOHnZ1TsTgHJkG9XgzND6inhBH9n1vBxhg3iIXOia/OrpmvVmd3lrD4vq6bF3A==}
 
   ejs@3.1.10:
     resolution: {integrity: sha512-UeJmFfOrAQS8OJWPZ4qtgHyWExa088/MtK5UEyoJGFH67cDEXkZSviOiKRCZ4Xij0zxI3JECgYs3oKx+AizQBA==}
@@ -12651,12 +12674,29 @@ snapshots:
 
   '@open-draft/until@2.1.0': {}
 
+  '@opencode-ai/client@0.0.0-beta-19271(effect@4.0.0-rc.112)':
+    dependencies:
+      '@opencode-ai/protocol': 0.0.0-beta-19271
+      '@opencode-ai/schema': 0.0.0-beta-19271
+    optionalDependencies:
+      effect: 4.0.0-rc.112
+
   '@opencode-ai/plugin@1.18.25':
     dependencies:
       '@ai-sdk/provider': 3.0.8
       '@opencode-ai/sdk': 1.18.25
       effect: 4.0.0-beta.83
       zod: 4.1.8
+
+  '@opencode-ai/protocol@0.0.0-beta-19271':
+    dependencies:
+      '@opencode-ai/schema': 0.0.0-beta-19271
+      effect: 4.0.0-rc.112
+
+  '@opencode-ai/schema@0.0.0-beta-19271':
+    dependencies:
+      '@standard-schema/spec': 1.1.0
+      effect: 4.0.0-rc.112
 
   '@opencode-ai/sdk@1.18.18':
     dependencies:
@@ -16393,6 +16433,11 @@ snapshots:
       toml: 4.3.0
       uuid: 14.0.1
       yaml: 2.9.0
+
+  effect@4.0.0-rc.112:
+    dependencies:
+      fast-check: 4.9.0
+      msgpackr: 2.0.5
 
   ejs@3.1.10:
     dependencies:

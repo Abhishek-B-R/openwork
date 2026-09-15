@@ -128,7 +128,16 @@ import path from "node:path";
 ${brokerTool.toString()}
 `;
 
-export async function installNativePlugin(home, filename, transform = (config) => config) {
+export async function installNativePlugins(home, installers, transform = (config) => config) {
+  const transforms = [transform];
+  let filesChanged = false;
+  const configure = async (_directory, apply, changed) => { transforms.push(apply); filesChanged ||= changed === true; };
+  for (const install of installers) await install(home, configure);
+  const configChanged = await updateNativeConfig(home.path, (config) => transforms.reduce((current, apply) => apply(current), config));
+  return filesChanged || configChanged;
+}
+
+export async function installNativePlugin(home, filename, transform = (config) => config, configure = updateNativeConfig) {
   const manifest = await readBundleManifest();
   if (!NATIVE_PLUGIN_FILES.includes(filename)) throw new Error("Unknown native Coworker plugin.");
   const entry = manifest.entries[filename];
@@ -140,15 +149,19 @@ export async function installNativePlugin(home, filename, transform = (config) =
   await mkdir(pluginRoot, { recursive: true });
   const target = path.join(pluginRoot, "server.js");
   const current = await readFile(target).catch((error) => { if (error.code !== "ENOENT") throw error; return null; });
-  if (!current?.equals(source)) {
+  let filesChanged = !current?.equals(source);
+  if (filesChanged) {
     const temporary = `${target}.${randomUUID()}.tmp`;
     await writeFile(temporary, source, { mode: 0o600 });
     await rename(temporary, target);
   }
   const descriptor = path.join(pluginRoot, "package.json");
   const pkg = '{"private":true,"type":"module"}\n';
-  if (await readFile(descriptor, "utf8").catch((error) => { if (error.code !== "ENOENT") throw error; return null; }) !== pkg) await writeFile(descriptor, pkg, { mode: 0o600 });
-  return updateNativeConfig(home.path, (config) => {
+  if (await readFile(descriptor, "utf8").catch((error) => { if (error.code !== "ENOENT") throw error; return null; }) !== pkg) {
+    await writeFile(descriptor, pkg, { mode: 0o600 });
+    filesChanged = true;
+  }
+  const configChanged = await configure(home.path, (config) => {
     const updated = transform(config);
     const plugin = pathToFileURL(pluginRoot).href;
     const old = [pathToFileURL(path.join(root, filename)).href, pathToFileURL(path.join(root, entry.file)).href];
@@ -157,5 +170,6 @@ export async function installNativePlugin(home, filename, transform = (config) =
     const plugins = (updated.plugins ?? []).filter((entry) => !old.includes(typeof entry === "string" ? entry : entry.package));
     return plugins.some((entry) => (typeof entry === "string" ? entry : entry.package) === plugin)
       ? { ...updated, plugins } : { ...updated, plugins: [...plugins, plugin] };
-  });
+  }, filesChanged);
+  return filesChanged || configChanged;
 }

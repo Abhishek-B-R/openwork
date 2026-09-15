@@ -494,7 +494,7 @@ export type CoworkerThreads = {
    * `onStream`, when given, also receives the words of a reply as they arrive
    * (the engine writes a text or reasoning part only once it has ended).
    */
-  subscribe: (onEvent: () => void, onStream?: (event: StreamEvent) => void, onConfigurationChange?: () => void) => () => void;
+  subscribe: (onEvent: () => void, onStream?: (event: StreamEvent) => void, onConfigurationChange?: () => void, hostPresentation?: boolean) => () => void;
 };
 
 function normalizeV2Permission(value: NativeV2Permission): PendingPermission {
@@ -587,7 +587,7 @@ async function waitForWorkspaceWork<T>(work: Promise<T>, signal: AbortSignal): P
 
 export type WorkspaceReadinessScope = {
   readiness: ReturnType<typeof createWorkspaceReadiness>;
-  expected: { workspaceId: string; createdAt: string; readinessKey: string };
+  expected: { workspaceId: string; createdAt: string; readinessKey: string; workspaceKey?: string };
 };
 
 export async function prepareCurrentWorkspace<T>(current: () => WorkspaceReadinessScope, prepare: (signal: AbortSignal) => Promise<T>, signal: AbortSignal) {
@@ -901,7 +901,7 @@ export function createCoworkerThreads(options: {
     return (await listModelCatalog()).models;
   }
 
-  function subscribe(onEvent: () => void, onStream?: (event: StreamEvent) => void, onConfigurationChange?: () => void): () => void {
+  function subscribe(onEvent: () => void, onStream?: (event: StreamEvent) => void, onConfigurationChange?: () => void, hostPresentation = false): () => void {
     const controller = new AbortController();
     // A streaming reply raises a message event for every part update; each one
     // used to trigger a full transcript re-read. Message events now collapse into
@@ -913,6 +913,7 @@ export function createCoworkerThreads(options: {
         for await (const event of native.events(controller.signal)) {
           if (controller.signal.aborted) return;
           if (event.type === "catalog.updated" || event.type === "integration.updated") onConfigurationChange?.();
+          if (hostPresentation && /^session\.(text|reasoning)\.(started|delta|ended)$/.test(event.type)) continue;
           if (onStream && /^session\.(text|reasoning)\.(started|delta|ended)$/.test(event.type)) {
             const part = z.object({ sessionID: z.string(), assistantMessageID: z.string(), ordinal: z.number().int().nonnegative(), delta: z.string().optional(), text: z.string().optional() }).parse(event.data);
             const identity = { threadId: part.sessionID, messageId: part.assistantMessageID, partId: nativeV2PartId(part.assistantMessageID, part.ordinal, event.type.includes(".reasoning.") ? "reasoning" : "text") };

@@ -439,35 +439,43 @@ test("paired context keeps its own uncertainty and cannot replay after preflight
     assert.equal(state.seen.filter((item) => item.path.endsWith("/synthetic")).length, 1);
     assert.equal(state.seen.filter((item) => item.path.endsWith("/prompt")).length, 0);
   }
-  const { options, state } = await fixture(t);
-  let release = () => {}, entered = () => {};
-  const held = new Promise<void>((resolve) => { release = resolve; });
-  const reached = new Promise<void>((resolve) => { entered = resolve; });
-  let generation = 1, boundaries = 0, intents = 0;
-  const client = createHeadlessThreadClientV2({ ...options, onIntent: () => { intents++; }, fetch: async (url, init) => {
-    const response = await fetch(url, init);
-    if (init?.method === "POST" && new URL(url).pathname.endsWith("/synthetic")) { entered(); await held; }
-    return response;
-  } });
-  const input = { messageId: "msg_context_generation", prompt: "Hello", context: "Reference", beforeInput: async () => {
-    boundaries++;
-    if (generation !== 1) throw Object.assign(new Error("Generation changed"), { code: "readiness_changed" });
-  } };
-  const sending = assert.rejects(client.sendTurn(sid, input), { code: "readiness_changed" });
-  await reached;
-  assert.equal(boundaries, 1);
-  assert.equal(state.seen.filter((item) => item.path.endsWith("/prompt")).length, 0);
-  generation = 2;
-  release();
-  await sending;
-  assert.equal(boundaries, 2);
-  assert.equal(intents, 1);
-  assert.deepEqual(state.inbox.map((item) => item.id), ["msg_context_generation_context"]);
-  const observer = createHeadlessThreadClientV2(options);
-  await assert.rejects(observer.sendTurn(sid, input), { code: "admission_unknown" });
-  await assert.rejects(observer.retryTurn(sid, input), { code: "admission_unknown" });
-  assert.equal(state.seen.filter((item) => item.path.endsWith("/synthetic")).length, 1);
-  assert.equal(state.seen.filter((item) => item.path.endsWith("/prompt")).length, 0);
+  for (const change of ["configuration", "stop"]) {
+    const { options, state } = await fixture(t);
+    let release = () => {}, entered = () => {};
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    const reached = new Promise<void>((resolve) => { entered = resolve; });
+    const abort = new AbortController();
+    let generation = 1, boundaries = 0, intents = 0;
+    const client = createHeadlessThreadClientV2({ ...options, onIntent: () => { intents++; }, fetch: async (url, init) => {
+      const response = await fetch(url, init);
+      if (init?.method === "POST" && new URL(url).pathname.endsWith("/synthetic")) { entered(); await held; }
+      return response;
+    } });
+    const input = { messageId: "msg_context_generation", prompt: "Hello", context: "Reference", signal: abort.signal, beforeInput: async () => {
+      boundaries++;
+      if (generation !== 1) throw Object.assign(new Error("Generation changed"), { code: "readiness_changed" });
+    } };
+    const sending = assert.rejects(client.sendTurn(sid, input), change === "configuration" ? { code: "readiness_changed" } : (error: unknown) => abort.signal.aborted && error instanceof Error);
+    await reached;
+    assert.equal(boundaries, 1);
+    assert.equal(state.seen.filter((item) => item.path.endsWith("/prompt")).length, 0);
+    if (change === "configuration") generation = 2;
+    else abort.abort();
+    release();
+    await sending;
+    assert.equal(boundaries, change === "configuration" ? 2 : 1);
+    assert.equal(intents, 1);
+    assert.deepEqual(state.inbox.map((item) => item.id), ["msg_context_generation_context"]);
+    const observer = createHeadlessThreadClientV2(options);
+    if (change === "stop") {
+      assert.equal((await observer.abortThread(sid)).accepted, true);
+      assert.equal(state.inbox.length, 0);
+    }
+    await assert.rejects(observer.sendTurn(sid, { ...input, signal: undefined }), { code: "admission_unknown" });
+    await assert.rejects(observer.retryTurn(sid, { ...input, signal: undefined }), { code: "admission_unknown" });
+    assert.equal(state.seen.filter((item) => item.path.endsWith("/synthetic")).length, 1);
+    assert.equal(state.seen.filter((item) => item.path.endsWith("/prompt")).length, 0);
+  }
 });
 
 test("unknown admission stays blocked, recovery never resends, and unsupported masks perform no writes", async (t) => {
@@ -498,9 +506,11 @@ test("unknown admission stays blocked, recovery never resends, and unsupported m
 });
 
 test("idle is not settled while pending; Stop cancels only the inbox and verifies it is empty", async (t) => {
-  const { client, native, state, options } = await fixture(t);
+  const { native, state, options } = await fixture(t);
+  let now = 0;
+  const client = createHeadlessThreadClientV2({ ...options, now: () => now, sleep: async (ms) => { now += ms; } });
   await native.admitInput(sid, { id: "msg_pending", type: "synthetic", text: "Pending" });
-  assert.equal((await client.waitUntilIdle(sid, { timeoutMs: 100, pollIntervalMs: 5 })).outcome, "timeout");
+  assert.equal((await client.waitUntilIdle(sid, { timeoutMs: 2000, pollIntervalMs: 1000 })).outcome, "timeout");
   const stopped = await Promise.all([client.abortThread(sid), createHeadlessThreadClientV2(options).abortThread(sid)]);
   assert.ok(stopped.every((result) => result.accepted));
   assert.equal(state.seen.filter((item) => item.path.endsWith("/interrupt")).length, 1);
@@ -510,7 +520,9 @@ test("idle is not settled while pending; Stop cancels only the inbox and verifie
 });
 
 test("concurrent client instances share admission; idle placeholders do not settle and native failure does", async (t) => {
-  const { client, options, state } = await fixture(t);
+  const { options, state } = await fixture(t);
+  let now = 0;
+  const client = createHeadlessThreadClientV2({ ...options, now: () => now, sleep: async (ms) => { now += ms; } });
   state.finish = false;
   const other = createHeadlessThreadClientV2(options);
   const results = await Promise.allSettled([
@@ -520,7 +532,7 @@ test("concurrent client instances share admission; idle placeholders do not sett
   assert.equal(results.filter((result) => result.status === "fulfilled").length, 1);
   assert.equal(state.seen.filter((item) => item.path.endsWith("/prompt")).length, 1);
   state.active = false;
-  assert.equal((await client.waitForThread(sid, { since: { messageId: "msg_first", messageCountBefore: 0 }, timeoutMs: 100, pollIntervalMs: 5 })).outcome, "timeout");
+  assert.equal((await client.waitForThread(sid, { since: { messageId: "msg_first", messageCountBefore: 0 }, timeoutMs: 2000, pollIntervalMs: 1000 })).outcome, "timeout");
   const reply = state.history.at(-1);
   assert.ok(reply?.type === "assistant");
   reply.error = { type: "fixture_failure", message: "Fixture provider refused" };

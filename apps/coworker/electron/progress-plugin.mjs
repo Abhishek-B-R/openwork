@@ -27,6 +27,6 @@ function validateProgress(text) {
 
 export const PROGRESS_PLUGIN = isolatedModelSource(policy, validateProgress.toString());
 
-export async function installProgressPlugin(coordinator) {
-  await installNativePlugin(coordinator, "progress-summary.js", (config) => withoutIsolatedAgent(config, policy));
+export async function installProgressPlugin(coordinator, configure) {
+  await installNativePlugin(coordinator, "progress-summary.js", (config) => withoutIsolatedAgent(config, policy), configure);
 }

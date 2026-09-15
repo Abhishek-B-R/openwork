@@ -92,8 +92,18 @@ whole contract against fixtures with no wall-clock dependency.
 
 `@openwork/headless-threads/v2` exports `createNativeV2Client` and
 `createHeadlessThreadClientV2`. This Node/browser-compatible implementation
-targets OpenCode `0.0.0-beta-19271` through the authenticated
-`/workspace/:id/opencode2/api` proxy. It never calls v1.
+uses the published network client `@opencode-ai/client@0.0.0-beta-19271`
+through the authenticated `/workspace/:id/opencode2/api` proxy, preserving any
+server URL prefix. It never calls v1 or embeds an engine. The engine pin is separate.
+The official client owns endpoint serialization, success-envelope decoding and SSE
+parsing. Runtime DTO validation, host catalog/policy overlays, exact-ID recovery
+and paired-input guards remain here. Native errors retain method/path/status but
+never include response bodies or transport causes.
+
+Event subscribers share one lazy official stream. Disconnect ends subscriptions;
+only a later subscription opens a new connection. There is no automatic reconnect,
+durable replay or resume cursor. A late subscriber can receive the official
+client's cached `server.connected` notification for the current connection only.
 
 Import native inputs, snapshots and clients from `/v2` under their familiar
 names (`CreateThreadInput`, `HeadlessThreadTurnInput`, `HeadlessThreadSnapshot`,

@@ -1,9 +1,4 @@
-/**
- * Native beta-19271 transport. The domain execution adapter is exported by /v2.
- * Wire contracts: @opencode-ai/{protocol,schema}@0.0.0-beta-19271,
- * including prompt-input.js (IDs) versus prompt.js (resolved receipts).
- * No v1 SDK, fabricated parentID, execution attribution, or tool authority.
- */
+import { ClientError, OpenCode } from "@opencode-ai/client";
 import { z } from "zod";
 import { HeadlessThreadError } from "./errors.ts";
 import type { HeadlessFetch } from "./v2-types.ts";
@@ -11,6 +6,7 @@ import type { HeadlessFetch } from "./v2-types.ts";
 const sessionID = z.string().startsWith("ses_").min(5);
 const messageID = z.string().startsWith("msg_").min(5);
 const fields = z.record(z.string(), z.unknown());
+const jsonFields = z.record(z.string(), z.json());
 const time = z.object({ created: z.number(), ran: z.number().optional(), completed: z.number().optional() }).passthrough();
 const location = z.object({ directory: z.string().min(1), workspaceID: z.string().optional() }).passthrough();
 const model = z.object({ providerID: z.string().min(1), id: z.string().min(1), variant: z.string().min(1).optional() });
@@ -231,49 +227,87 @@ export function createNativeV2Client(options: NativeV2ClientOptions) {
   const headers = { Authorization: `Bearer ${options.token}`, ...(options.hostToken === undefined ? {} : { "X-OpenWork-Host-Token": options.hostToken }) };
   const bounded = (signal?: AbortSignal) => AbortSignal.any([AbortSignal.timeout(timeoutMs), ...[options.signal, signal].filter((value): value is AbortSignal => value !== undefined)]);
   const sessionPath = (id: string) => `/session/${encodeURIComponent(sessionID.parse(id))}`;
-  const failure = (code: string, method: string, path: string, message: string, status?: number) => new HeadlessThreadError({ code, method, path: `${mount}${path}`, message, status });
+  const safeErrors = new WeakSet<HeadlessThreadError>();
+  const failure = (code: string, method: string, path: string, message: string, status?: number) => {
+    const error = new HeadlessThreadError({ code, method, path: `${mount}${path}`, message, status });
+    safeErrors.add(error);
+    return error;
+  };
 
-  async function request<T>(method: string, path: string, schema: z.ZodType<T>, signal?: AbortSignal, body?: unknown, status = 200, beforeWrite?: () => void | Promise<void>): Promise<T> {
-    let response: Response;
+  const responses = new WeakMap<AbortSignal, { path: string; status?: number }>();
+  const sdk = OpenCode.make({
+    baseUrl: url.origin,
+    fetch: Object.assign(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const target = new URL(input instanceof Request ? input.url : input);
+      const method = init?.method ?? "GET";
+      const path = `${target.pathname.slice(4)}${target.search}`;
+      if (target.origin !== url.origin || target.username || target.password || target.hash || !target.pathname.startsWith("/api/")
+        || target.pathname.split("/").slice(2).some((part) => !part || [".", ".."].includes(decodeURIComponent(part)) || /[\\/\u0000]/.test(decodeURIComponent(part)))
+        || (init?.body !== undefined && typeof init.body !== "string")) {
+        throw failure("invalid_request", method, "", "Native request is outside the workspace proxy boundary.");
+      }
+      const observed: { path: string; status?: number } = { path };
+      if (init?.signal) responses.set(init.signal, observed);
+      const response = await fetchImpl(`${baseUrl}${mount}${path}`, {
+        ...init, method, body: init?.body, signal: init?.signal ?? undefined,
+        headers: { ...Object.fromEntries(new Headers(init?.headers)), ...headers, ...(target.pathname === "/api/event" ? { Accept: "text/event-stream" } : {}) },
+        redirect: "error", ...(method === "GET" ? {} : { keepalive: false }),
+      });
+      observed.status = response.status;
+      if (!response.ok) {
+        await response.body?.cancel().catch(() => {});
+        throw failure("request_failed", method, path, `OpenWork returned HTTP ${response.status}.`, response.status);
+      }
+      if (target.pathname === "/api/event" && response.body && init?.signal) {
+        return new Response(response.body.pipeThrough(new TransformStream<Uint8Array, Uint8Array>(), { signal: init.signal }), {
+          status: response.status, headers: response.headers,
+        });
+      }
+      return response;
+    }, { preconnect: () => {} }),
+  });
+
+  function normalize(error: unknown, method: string, path: string, status?: number): HeadlessThreadError {
+    if (error instanceof HeadlessThreadError && safeErrors.has(error)) return error;
+    if (error instanceof ClientError) {
+      if (error.reason === "Transport" && error.cause instanceof HeadlessThreadError && safeErrors.has(error.cause)) return error.cause;
+      if (error.reason === "UnexpectedStatus") {
+        const status = z.object({ status: z.number().int().min(100).max(599) }).safeParse(error.cause);
+        return failure("invalid_response", method, path, "OpenWork returned an unexpected native v2 status.", status.success ? status.data.status : undefined);
+      }
+      if (error.reason === "Transport") return failure("request_failed", method, path, method === "GET" ? "Native v2 observation failed. Execution status is unavailable." : "Native v2 request failed; a write may have been admitted.");
+    }
+    return failure("invalid_response", method, path, "OpenWork returned an invalid native v2 response.", status);
+  }
+
+  async function request<T>(method: string, path: string, schema: z.ZodType<T>, invoke: (requestOptions: OpenCode.RequestOptions) => Promise<unknown>, signal?: AbortSignal, beforeWrite?: () => void | Promise<void>): Promise<T> {
     const requestSignal = bounded(signal);
     requestSignal.throwIfAborted();
     if (beforeWrite) await beforeWrite();
+    requestSignal.throwIfAborted();
     try {
-      response = await fetchImpl(`${baseUrl}${mount}${path}`, {
-        method, headers: { ...headers, ...(body === undefined ? {} : { "Content-Type": "application/json" }) },
-        ...(body === undefined ? {} : { body: JSON.stringify(body) }), redirect: "error", signal: requestSignal,
-        // Bun otherwise retries reset pooled sockets, including POSTs.
-        ...(method === "GET" ? {} : { keepalive: false }),
-      });
-    } catch {
-      throw failure("request_failed", method, path, method === "GET" ? "Native v2 observation failed. Execution status is unavailable." : "Native v2 request failed; a write may have been admitted.");
-    }
-    if (!response.ok) {
-      await response.body?.cancel();
-      throw failure("request_failed", method, path, `OpenWork returned HTTP ${response.status}.`, response.status);
-    }
-    try {
-      if (response.status !== status) throw new Error("Unexpected status");
-      const payload: unknown = status === 204 ? undefined : await response.json();
-      const parsed = schema.safeParse(payload);
-      if (!parsed.success) throw failure("invalid_response", method, path, `Invalid native v2 fields: ${parsed.error.issues.map((issue) => issue.path.join(".")).join(", ")}.`, response.status);
+      const parsed = schema.safeParse(await invoke({ signal: requestSignal }));
+      const observed = responses.get(requestSignal);
+      if (!parsed.success) throw failure("invalid_response", method, observed?.path ?? path, "OpenWork returned invalid native v2 fields.", observed?.status);
       return parsed.data;
     } catch (error) {
-      if (error instanceof HeadlessThreadError) throw error;
-      throw failure("invalid_response", method, path, "OpenWork returned an invalid native v2 response.", response.status);
+      const observed = responses.get(requestSignal);
+      throw normalize(error, method, observed?.path ?? path, observed?.status);
+    } finally {
+      responses.delete(requestSignal);
     }
   }
 
   async function getSession(id: string, signal?: AbortSignal): Promise<NativeV2Session> {
     const path = sessionPath(id);
-    const result = await request("GET", path, z.object({ data: session }), signal);
-    if (result.data.id !== id) throw failure("invalid_response", "GET", path, "Native session identity did not match.");
-    return result.data;
+    const result = await request("GET", path, session, (requestOptions) => sdk.session.get({ sessionID: id }, requestOptions), signal);
+    if (result.id !== id) throw failure("invalid_response", "GET", path, "Native session identity did not match.");
+    return result;
   }
 
   /** Bind explicitly at creation. Persist the chosen ID before calling; never recreate after an uncertain response. */
   async function createSession(input: { id: string; title?: string; model: NativeV2Model; agent: string; metadata?: Record<string, unknown> }, signal?: AbortSignal): Promise<NativeV2Session> {
-    const body = z.object({ id: sessionID, title: z.string().optional(), model: model.strict(), agent: z.string().min(1), metadata: fields.optional() }).strict().parse(input);
+    const body = z.object({ id: sessionID, title: z.string().optional(), model: model.strict(), agent: z.string().min(1), metadata: jsonFields.optional() }).strict().parse(input);
     const key = `session:${body.id}`;
     let result: NativeV2Session;
     if (attempted.has(key)) result = await getSession(body.id, signal);
@@ -282,8 +316,8 @@ export function createNativeV2Client(options: NativeV2ClientOptions) {
       // Native create can return an existing ID before applying location. Only
       // the scoped GET checks that the resulting session belongs to this workspace.
       try {
-        const created = await request("POST", "/session", z.object({ data: session }), signal, body);
-        if (created.data.id !== body.id) throw failure("binding_unconfirmed", "POST", "/session", "Created session identity did not match. Do not recreate it.");
+        const created = await request("POST", "/session", session, (requestOptions) => sdk.session.create(body, requestOptions), signal);
+        if (created.id !== body.id) throw failure("binding_unconfirmed", "POST", "/session", "Created session identity did not match. Do not recreate it.");
       } catch (error) {
         if (error instanceof HeadlessThreadError && [400, 401, 403, 422].includes(error.status ?? 0)) throw error;
         // The stable ID is reconciled below, never replaced after a lost response.
@@ -299,16 +333,15 @@ export function createNativeV2Client(options: NativeV2ClientOptions) {
 
   async function readInbox(id: string, signal?: AbortSignal): Promise<NativeV2InboxItem[]> {
     const path = `${sessionPath(id)}/inbox`;
-    const result = await request("GET", path, z.object({ data: z.array(inboxItem) }), signal);
-    if (result.data.some((item) => item.sessionID !== id) || new Set(result.data.map((item) => item.id)).size !== result.data.length) throw failure("invalid_response", "GET", path, "Inbox identities did not match.");
-    return result.data;
+    const result = await request("GET", path, z.array(inboxItem), (requestOptions) => sdk.session.inbox.list({ sessionID: id }, requestOptions), signal);
+    if (result.some((item) => item.sessionID !== id) || new Set(result.map((item) => item.id)).size !== result.length) throw failure("invalid_response", "GET", path, "Inbox identities did not match.");
+    return result;
   }
 
   async function readHistoryPage(id: string, input: { cursor?: string; signal?: AbortSignal } = {}) {
-    const query = new URLSearchParams({ limit: "200" });
-    if (input.cursor !== undefined) query.set("cursor", z.string().min(1).parse(input.cursor));
-    else query.set("order", "asc");
-    return request("GET", `${sessionPath(id)}/message?${query}`, historyPage, input.signal);
+    return request("GET", `${sessionPath(id)}/message`, historyPage, (requestOptions) => sdk.message.list({
+      sessionID: id, limit: 200, ...(input.cursor === undefined ? { order: "asc" } : { cursor: z.string().min(1).parse(input.cursor) }),
+    }, requestOptions), input.signal);
   }
 
   /** Read only. Recovery must use this method, never a new admission based on an unobserved result. */
@@ -380,16 +413,18 @@ export function createNativeV2Client(options: NativeV2ClientOptions) {
     options.signal?.throwIfAborted();
     preparing.add(key);
     try {
-      const result = await request("POST", path, z.object({ data: z.union([userReceipt, syntheticReceipt]) }), signal, {
-        id: input.id, text: input.text, delivery: input.delivery ?? "queue", resume: input.resume ?? input.type === "user",
-        ...(input.metadata === undefined ? {} : { metadata: input.metadata }),
-        ...(input.skills?.length ? { skills: input.skills } : {}),
-      }, 200, async () => {
+      const body = {
+        sessionID: id, id: input.id, text: input.text, delivery: input.delivery ?? "queue", resume: input.resume ?? input.type === "user",
+        ...(input.metadata === undefined ? {} : { metadata: jsonFields.parse(input.metadata) }),
+      };
+      const result = await request("POST", path, z.union([userReceipt, syntheticReceipt]), (requestOptions) => input.type === "user"
+        ? sdk.session.prompt({ ...body, ...(input.skills?.length ? { skills: input.skills } : {}) }, requestOptions)
+        : sdk.session.synthetic(body, requestOptions), signal, async () => {
         await beforeWrite?.();
         attempted.add(key);
       });
-      if (result.data.sessionID !== id || result.data.delivery !== (input.delivery ?? "queue")) throw failure("invalid_response", "POST", path, "Admission receipt scope or delivery did not match.");
-      return matching({ state: "accepted", receipt: result.data }, input, path);
+      if (result.sessionID !== id || result.delivery !== (input.delivery ?? "queue")) throw failure("invalid_response", "POST", path, "Admission receipt scope or delivery did not match.");
+      return matching({ state: "accepted", receipt: result }, input, path);
     } catch (error) {
       if (!attempted.has(key)) throw error;
       if (error instanceof HeadlessThreadError && (error.code === "input_conflict" || [400, 401, 403, 404, 422].includes(error.status ?? 0))) throw error;
@@ -423,11 +458,11 @@ export function createNativeV2Client(options: NativeV2ClientOptions) {
   async function stop(id: string, signal?: AbortSignal): Promise<NativeV2Stop> {
     signal = bounded(signal);
     const path = sessionPath(id);
-    const receipt = await request("POST", `${path}/interrupt?continue=false`, z.object({ interrupted: z.boolean() }), signal);
-    await request("POST", `${path}/wait`, z.undefined(), signal, undefined, 204);
+    const receipt = await request("POST", `${path}/interrupt`, z.object({ interrupted: z.boolean() }), (requestOptions) => sdk.session.interrupt({ sessionID: id, continue: false }, requestOptions), signal);
+    await request("POST", `${path}/wait`, z.undefined(), (requestOptions) => sdk.session.wait({ sessionID: id }, requestOptions), signal);
     const pending = await readInbox(id, signal);
-    const active = await request("GET", "/session/active", z.object({ data: z.record(sessionID, z.object({ type: z.literal("running") })) }), signal);
-    if (Object.hasOwn(active.data, id)) throw failure("stop_unconfirmed", "POST", `${path}/interrupt`, "Native execution is still active after waiting; stop is unconfirmed.");
+    const active = await readActive(signal);
+    if (Object.hasOwn(active, id)) throw failure("stop_unconfirmed", "POST", `${path}/interrupt`, "Native execution is still active after waiting; stop is unconfirmed.");
     return { interrupted: receipt.interrupted, idle: true, pending };
   }
 
@@ -452,71 +487,51 @@ export function createNativeV2Client(options: NativeV2ClientOptions) {
     throw failure("history_limit", "GET", sessionPath(id), "Native history did not reach its boundary.");
   }
 
-  async function* stream(path: string, signal: AbortSignal): AsyncGenerator<unknown> {
-    const response = await fetchImpl(`${baseUrl}${mount}${path}`, { headers: { ...headers, Accept: "text/event-stream" }, redirect: "error", signal });
-    if (!response.ok || !response.body || !response.headers.get("content-type")?.includes("text/event-stream")) {
-      await response.body?.cancel();
-      throw failure("invalid_response", "GET", path, "Native event stream unavailable.", response.status);
-    }
-    const reader = response.body.getReader();
-    // A transport may deliver headers yet leave a pending read after abort.
-    // Close the reader explicitly so cancelling a quiet event stream settles.
-    const cancel = () => { void reader.cancel().catch(() => {}); };
-    signal.addEventListener("abort", cancel, { once: true });
-    if (signal.aborted) cancel();
-    const decoder = new TextDecoder();
-    let buffer = "", data: string[] = [], dataSize = 0;
-    try {
-      for (;;) {
-        const chunk = await reader.read();
-        if (chunk.done) break;
-        buffer += decoder.decode(chunk.value, { stream: true });
-        if (buffer.length > 4_194_304) throw failure("invalid_response", "GET", path, "Native event exceeded the read bound.");
-        let end: number;
-        while ((end = buffer.indexOf("\n")) !== -1) {
-          const line = buffer.slice(0, end).replace(/\r$/, "");
-          buffer = buffer.slice(end + 1);
-          if (line === "") {
-            if (data.length) yield JSON.parse(data.join("\n"));
-            data = []; dataSize = 0;
-          } else if (line.startsWith("data:")) {
-            dataSize += line.length;
-            if (dataSize > 4_194_304) throw failure("invalid_response", "GET", path, "Native event exceeded the read bound.");
-            data.push(line.slice(5).replace(/^ /, ""));
-          }
-        }
-      }
-    } finally { signal.removeEventListener("abort", cancel); cancel(); reader.releaseLock(); }
-  }
-
-  async function* events(signal?: AbortSignal): AsyncGenerator<NativeV2Event> {
+  function events(signal?: AbortSignal) {
     const signals = [options.signal, signal].filter((item): item is AbortSignal => item !== undefined);
-    for await (const value of stream("/event", AbortSignal.any(signals))) yield eventSchema.parse(value);
+    const iterator = sdk.event.subscribe({ signal: AbortSignal.any(signals) })[Symbol.asyncIterator]();
+    return {
+      [Symbol.asyncIterator]() { return this; },
+      async next(): Promise<IteratorResult<NativeV2Event>> {
+        try {
+          const item = await iterator.next();
+          return item.done ? { done: true, value: undefined } : { done: false, value: eventSchema.parse(item.value) };
+        } catch (error) {
+          await iterator.return?.();
+          throw normalize(error, "GET", "/event", 200);
+        }
+      },
+      async return(): Promise<IteratorResult<NativeV2Event>> {
+        await iterator.return?.();
+        return { done: true, value: undefined };
+      },
+    };
   }
-  const readActive = async (signal?: AbortSignal) => (await request("GET", "/session/active", z.object({ data: z.record(sessionID, z.object({ type: z.literal("running") })) }), signal)).data;
+  const readActive = (signal?: AbortSignal) => request("GET", "/session/active", z.record(sessionID, z.object({ type: z.literal("running") })), (requestOptions) => sdk.session.active(requestOptions), signal);
   async function listSessions(signal?: AbortSignal) {
     signal = bounded(signal);
     const result: NativeV2Session[] = [];
-    let path = "/session?limit=200&order=desc";
+    let cursor: string | undefined;
     const cursors = new Set<string>();
     for (let page = 0; page < 100; page++) {
-      const next = await request("GET", path, z.object({ data: z.array(session), cursor: z.object({ next: cursorValue }) }), signal);
+      const next = await request("GET", "/session", z.object({ data: z.array(session), cursor: z.object({ next: cursorValue }) }),
+        (requestOptions) => sdk.session.list(cursor === undefined ? { limit: 200, order: "desc" } : { cursor }, requestOptions), signal);
       result.push(...next.data);
-      if (new Set(result.map((item) => item.id)).size !== result.length) throw failure("invalid_response", "GET", path, "Session listing repeated an identity.");
+      if (new Set(result.map((item) => item.id)).size !== result.length) throw failure("invalid_response", "GET", "/session", "Session listing repeated an identity.");
       if (!next.cursor.next) return result;
       if (cursors.has(next.cursor.next)) break;
-      cursors.add(next.cursor.next);
-      path = `/session?cursor=${encodeURIComponent(next.cursor.next)}`;
+      cursor = next.cursor.next;
+      cursors.add(cursor);
     }
-    throw failure("history_limit", "GET", path, "Session listing did not reach its boundary.");
+    throw failure("history_limit", "GET", "/session", "Session listing did not reach its boundary.");
   }
-  const renameSession = (id: string, title: string, signal?: AbortSignal) => request("POST", `${sessionPath(id)}/rename`, z.undefined(), signal, { title }, 204);
-  const switchModel = (id: string, value: NativeV2Model, signal?: AbortSignal) => request("POST", `${sessionPath(id)}/model`, z.undefined(), signal, { model: model.parse(value) }, 204);
-  const switchAgent = (id: string, agent: string, signal?: AbortSignal) => request("POST", `${sessionPath(id)}/agent`, z.undefined(), signal, { agent: z.string().min(1).parse(agent) }, 204);
-  const getAgent = async (id: string, signal?: AbortSignal) => (await request("GET", `/agent/${encodeURIComponent(id)}`, z.object({ data: agentSchema }), signal)).data;
-  const defaultModel = async (signal?: AbortSignal) => (await request("GET", "/model/default", z.object({ data: catalogModel.nullish() }), signal)).data ?? undefined;
+  const renameSession = (id: string, title: string, signal?: AbortSignal) => request("POST", `${sessionPath(id)}/rename`, z.undefined(), (requestOptions) => sdk.session.rename({ sessionID: id, title }, requestOptions), signal);
+  const switchModel = (id: string, value: NativeV2Model, signal?: AbortSignal) => request("POST", `${sessionPath(id)}/model`, z.undefined(), (requestOptions) => sdk.session.switchModel({ sessionID: id, model: model.parse(value) }, requestOptions), signal);
+  const switchAgent = (id: string, agent: string, signal?: AbortSignal) => request("POST", `${sessionPath(id)}/agent`, z.undefined(), (requestOptions) => sdk.session.switchAgent({ sessionID: id, agent: z.string().min(1).parse(agent) }, requestOptions), signal);
+  const getAgent = async (id: string, signal?: AbortSignal) => (await request("GET", `/agent/${encodeURIComponent(id)}`, z.object({ data: agentSchema }), (requestOptions) => sdk.agent.get({ agentID: id }, requestOptions), signal)).data;
+  const defaultModel = async (signal?: AbortSignal) => (await request("GET", "/model/default", z.object({ data: catalogModel.nullish() }), (requestOptions) => sdk.model.default(undefined, requestOptions), signal)).data ?? undefined;
   async function listSkills(signal?: AbortSignal): Promise<NativeV2Skill[]> {
-    const { data } = await request("GET", "/skill", z.object({ data: z.array(skillSchema).max(10_000) }), signal);
+    const { data } = await request("GET", "/skill", z.object({ data: z.array(skillSchema).max(10_000) }), (requestOptions) => sdk.skill.list(undefined, requestOptions), signal);
     if (new Set(data.map((skill) => skill.id)).size !== data.length) throw failure("invalid_response", "GET", "/skill", "Native skill catalog repeated an identity.");
     return data;
   }
@@ -534,46 +549,49 @@ export function createNativeV2Client(options: NativeV2ClientOptions) {
     // Keep an existing native ask visible. Never approve it or turn it into a grant.
     const pending = await listPermissions(id, signal);
     if (pending.some((item) => item.action === "skill" && item.resources.some((resource) => resources.includes(resource)))) throw failure("skill_permission_required", "POST", path, "Selected skills have a pending native permission request. Nothing was submitted.");
-    const result = await request("POST", path, z.object({ data: z.object({ id: z.string().startsWith("per"), effect: z.enum(["allow", "deny", "ask"]) }) }), signal,
-      { action: "skill", resources, save: resources, agent: current.agent });
-    if (result.data.effect !== "allow") throw failure(result.data.effect === "ask" ? "skill_permission_required" : "skill_denied", "POST", path, "Selected skills were not allowed by native session permission. Nothing was submitted.");
+    const result = await request("POST", path, z.object({ id: z.string().startsWith("per"), effect: z.enum(["allow", "deny", "ask"]) }),
+      (requestOptions) => sdk.permission.create({ sessionID: id, action: "skill", resources, save: resources, agent: current.agent }, requestOptions), signal);
+    if (result.effect !== "allow") throw failure(result.effect === "ask" ? "skill_permission_required" : "skill_denied", "POST", path, "Selected skills were not allowed by native session permission. Nothing was submitted.");
     const confirmed = await getSession(id, signal);
     if (confirmed.agent !== current.agent) throw failure("binding_unconfirmed", "POST", path, "The native agent changed during skill permission evaluation.");
   }
   async function readCatalog(signal?: AbortSignal): Promise<NativeV2Catalog> {
     const [providers, models, integrations] = await Promise.all([
-      request("GET", "/provider", z.object({ data: z.array(provider) }), signal),
-      request("GET", "/model", z.object({ data: z.array(catalogModel) }), signal),
-      request("GET", "/integration", z.object({ data: z.array(z.object({ id: z.string(), connections: z.array(connection) })) }), signal),
+      request("GET", "/provider", z.object({ data: z.array(provider) }), (requestOptions) => sdk.provider.list(undefined, requestOptions), signal),
+      request("GET", "/model", z.object({ data: z.array(catalogModel) }), (requestOptions) => sdk.model.list(undefined, requestOptions), signal),
+      request("GET", "/integration", z.object({ data: z.array(z.object({ id: z.string(), connections: z.array(connection) })) }), (requestOptions) => sdk.integration.list(undefined, requestOptions), signal),
     ]);
     const connectedProviderIds = providers.data.filter((item) => item.activation !== "disabled" && (item.activation === "enabled" || integrations.data.some((integration) => integration.id === (item.integrationID ?? item.id) && integration.connections.length > 0))).map((item) => item.id);
     return { providers: providers.data, models: models.data, connectedProviderIds };
   }
   const listPermissions = async (id: string, signal?: AbortSignal) => {
-    const data = (await request("GET", `${sessionPath(id)}/permission`, z.object({ data: z.array(permission) }), signal)).data;
+    const data = await request("GET", `${sessionPath(id)}/permission`, z.array(permission), (requestOptions) => sdk.permission.list({ sessionID: id }, requestOptions), signal);
     if (data.some((item) => item.sessionID !== id)) throw failure("invalid_response", "GET", sessionPath(id), "Permission scope mismatch.");
     return data;
   };
   const listForms = async (id: string, signal?: AbortSignal) => {
-    const data = (await request("GET", `${sessionPath(id)}/form`, z.object({ data: z.array(form) }), signal)).data;
+    const data = await request("GET", `${sessionPath(id)}/form`, z.array(form), (requestOptions) => sdk.form.list({ sessionID: id }, requestOptions), signal);
     if (data.some((item) => item.sessionID !== id)) throw failure("invalid_response", "GET", sessionPath(id), "Form scope mismatch.");
     return data;
   };
   async function replyPermission(value: NativeV2Permission, reply: "once" | "always" | "reject", signal?: AbortSignal) {
     const expected = permission.parse(value);
     const path = `${sessionPath(expected.sessionID)}/permission/${encodeURIComponent(expected.id)}`;
-    const current = (await request("GET", path, z.object({ data: permission }), signal)).data;
+    const target = { sessionID: expected.sessionID, requestID: expected.id };
+    const current = await request("GET", path, permission, (requestOptions) => sdk.permission.get(target, requestOptions), signal);
     if (JSON.stringify(current) !== JSON.stringify(expected) || (reply === "always" && !current.save?.length)) throw failure("stale_request", "POST", path, "Permission changed or cannot be saved. Read it again.");
-    return request("POST", `${path}/reply`, z.undefined(), signal, { reply: z.enum(["once", "always", "reject"]).parse(reply) }, 204);
+    return request("POST", `${path}/reply`, z.undefined(), (requestOptions) => sdk.permission.reply({ ...target, reply: z.enum(["once", "always", "reject"]).parse(reply) }, requestOptions), signal);
   }
   async function replyForm(value: NativeV2Form, answer: Record<string, string | string[] | number | boolean> | null, signal?: AbortSignal) {
     const expected = form.parse(value);
     const path = `${sessionPath(expected.sessionID)}/form/${encodeURIComponent(expected.id)}`;
-    const current = (await request("GET", path, z.object({ data: form }), signal)).data;
+    const target = { sessionID: expected.sessionID, formID: expected.id };
+    const current = await request("GET", path, form, (requestOptions) => sdk.form.get(target, requestOptions), signal);
     if (JSON.stringify(current) !== JSON.stringify(expected)) throw failure("stale_request", "POST", path, "Form changed. Read it again.");
-    return request("POST", `${path}/${answer === null ? "cancel" : "reply"}`, z.undefined(), signal, answer === null ? undefined : { answer }, 204);
+    return request("POST", `${path}/${answer === null ? "cancel" : "reply"}`, z.undefined(), (requestOptions) => answer === null
+      ? sdk.form.cancel(target, requestOptions) : sdk.form.reply({ ...target, answer }, requestOptions), signal);
   }
-  const cancelInput = (id: string, inputID: string, signal?: AbortSignal) => request("DELETE", `${sessionPath(id)}/inbox/${encodeURIComponent(messageID.parse(inputID))}`, z.undefined(), signal, undefined, 204);
+  const cancelInput = (id: string, inputID: string, signal?: AbortSignal) => request("DELETE", `${sessionPath(id)}/inbox/${encodeURIComponent(messageID.parse(inputID))}`, z.undefined(), (requestOptions) => sdk.session.inbox.cancel({ sessionID: id, inboxID: inputID }, requestOptions), signal);
   return { createSession, getSession, readInbox, readHistoryPage, readHistory, reconcileAdmission, reconcileInput, admitInput, stop, cancelInput, events, readActive, listSessions, renameSession, switchModel, switchAgent, getAgent, defaultModel, readCatalog, listSkills, checkSkills, listPermissions, listForms, replyPermission, replyForm };
 }
 

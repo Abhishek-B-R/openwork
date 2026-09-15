@@ -39,6 +39,15 @@ if (process.isMainFrame) {
       ipcRenderer.on("coworker:runtime-changed", handler);
       return () => ipcRenderer.removeListener("coworker:runtime-changed", handler);
     },
+    onPresentationChanged: (listener) => {
+      const handler = (_event, change) => {
+        if (typeof change?.workspaceId === "string" && typeof change?.createdAt === "string" && typeof change?.generation === "string") {
+          listener({ workspaceId: change.workspaceId, createdAt: change.createdAt, generation: change.generation });
+        }
+      };
+      ipcRenderer.on("coworker:presentation-changed", handler);
+      return () => ipcRenderer.removeListener("coworker:presentation-changed", handler);
+    },
     onReactionsChanged: (listener) => {
       const handler = (_event, change) => {
         const scope = change?.scope;

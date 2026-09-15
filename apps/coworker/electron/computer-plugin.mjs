@@ -42,8 +42,8 @@ export default Plugin.define({ id: "coworker.computer", effect: (ctx) => Effect.
 }) });
 `;
 
-export async function installComputerPlugin(coworker) {
+export async function installComputerPlugin(coworker, configure) {
   await installNativePlugin(coworker, "coworker-computer.js", (config) => ({
     ...config, permissions: [...(config.permissions ?? []).filter((rule) => rule.action !== "computer_*"), { action: "computer_*", resource: "*", effect: "deny" }],
-  }));
+  }), configure);
 }

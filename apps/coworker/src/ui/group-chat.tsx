@@ -22,6 +22,7 @@ import {
   type GroupParticipant,
 } from "@/lib/groups";
 import { createCoworkerThreads } from "@/lib/threads";
+import { presentationStream } from "@/lib/live-stream";
 import { executionProgress, type ExecutionActivity } from "@/lib/progress-activity";
 import { describeGroupPresentation } from "@/lib/group-presentation";
 import { changeGroupSends, groupConversationRows, groupMessageKey, groupReplyParts, groupSends, mergeGroupReplyParts, reconcileGroupActivity, runGroupAction, submitGroupSend, subscribeGroupSends, waitForGroup, type GroupActionAttempt, type GroupReplyPart, type GroupSend } from "@/lib/group-continuity";
@@ -123,26 +124,28 @@ const GroupExecutionRow = memo(function GroupExecutionRow({ activity, coworker, 
   const [streamed, setStreamed] = useState<GroupReplyPart[]>([]);
   useEffect(() => {
     if (!coworker.workspaceId || !runtime.engineManaged) return;
-    let parts: GroupReplyPart[] = [];
+    let cancelled = false, reading = false, again = false;
     setStreamed([]);
     const threads = createCoworkerThreads({ serverUrl: runtime.serverUrl, workspaceId: coworker.workspaceId, token: runtime.ownerToken });
-    const keep = (part: GroupReplyPart) => {
-      parts = mergeGroupReplyParts(parts, [part]);
-      setStreamed(parts);
+    const refresh = async () => {
+      if (cancelled || !currentRef.current.available) return;
+      if (reading) { again = true; return; }
+      reading = true;
+      try {
+        const { snapshot, presentation } = await coworkerBridge.turns.presentation({ slug: coworker.slug, threadId: activity.threadId, workspaceId: coworker.workspaceId, createdAt: coworker.createdAt, generation: runtime.readinessKey?.split(":")[0] ?? "" });
+        if (cancelled) return;
+        const stream = presentationStream(snapshot, presentation, activity.messageId);
+        setStreamed((stream?.parts ?? []).filter((part) => part.type === "text").map((part) => ({ messageId: part.messageId, id: part.partId, text: part.text, ended: part.ended })));
+      } catch {} finally { reading = false; if (again && !cancelled) { again = false; void refresh(); } }
     };
-    return threads.subscribe(() => {}, (event) => {
-      // Only the host's verified history projection can attribute a reply.
-      if (!currentRef.current.available) return;
-      const reply = currentRef.current.replies.find((item) => item.id === event.messageId && item.parentId === activity.messageId);
-      if (event.threadId !== activity.threadId || !reply) return;
-      if (event.kind === "part") {
-        if (event.type === "text" && !event.synthetic && !event.ignored) keep({ messageId: event.messageId, id: event.partId, text: event.text, ended: event.ended });
-      } else {
-        const known = parts.find((item) => item.messageId === event.messageId && item.id === event.partId) ?? reply.parts.find((item) => item.id === event.partId);
-        if (known && !known.ended) keep({ messageId: event.messageId, id: event.partId, text: known.text + event.delta });
-      }
+    const unsubscribePresentation = coworkerBridge.turns.onPresentationChanged((change) => {
+      if (change.workspaceId === coworker.workspaceId && change.createdAt === coworker.createdAt) void refresh();
     });
-  }, [activity.executionId, activity.messageId, activity.threadId, coworker.workspaceId, runtime.engineManaged, runtime.ownerToken, runtime.serverUrl]);
+    void refresh();
+    const unsubscribe = threads.subscribe(() => void refresh(), undefined, undefined, true);
+    const timer = window.setInterval(() => void refresh(), 5000);
+    return () => { cancelled = true; unsubscribe(); unsubscribePresentation(); window.clearInterval(timer); };
+  }, [activity.executionId, activity.messageId, activity.threadId, coworker.slug, coworker.createdAt, coworker.workspaceId, runtime.engineManaged, runtime.ownerToken, runtime.serverUrl, runtime.readinessKey]);
 
   const parts = mergeGroupReplyParts(streamed, groupReplyParts(activity)).filter((part) => activity.replies.some((reply) => reply.id === part.messageId && reply.parentId === activity.messageId));
   let text = "";

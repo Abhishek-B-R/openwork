@@ -735,8 +735,8 @@ test("selected-skill main admission waits for the actual Den handoff and leaves 
   await assert.rejects(client.validateSkills(selected), /account revision changed/);
   context.denSession = { ...second, orgId: "org_third" };
   const changing = context.applyDenSession(handle, "fixture-host", context.denSession);
-  assert.throws(() => client.transport(`${handle.url}/api/session/ses_fixture/prompt`, { method: "POST" }), /connection is changing/);
-  await client.transport(`${handle.url}/api/session/ses_fixture/interrupt`, { method: "POST", headers: { "x-openwork-native-skills-scope": "caller-override" } });
+  await assert.rejects(client.transport(`${handle.url}/api/session/ses_fixture/prompt`, { method: "POST" }), /connection is changing/);
+  await client.transport(`${handle.url}/api/session/ses_fixture/interrupt?continue=false`, { method: "POST", headers: { "x-openwork-native-skills-scope": "caller-override" } });
   assert.equal(admissions.at(-1).headers.get("x-openwork-native-skills-scope"), null, "Stop neither inherits nor trusts a skill scope header");
   await changing;
   await assert.rejects(client.validateSkills(selected), /organization.*changed/);

@@ -9,6 +9,7 @@ import { z } from "zod";
 import { createCollaboration, nativeMessageId, withAbort } from "./collaboration.mjs";
 import { nativeTurnAgent } from "./native-turns.mjs";
 import { dispatchNativeTurn, nativeAdmissionRefusal } from "./native-recovery.mjs";
+import { createWorkspaceAdmission } from "./workspace-admission.mjs";
 import { HeadlessThreadError } from "@openwork/headless-threads/v2";
 import { createActivityInbox, mentionsYou, recordActivity, MAX_ACTIVITY_ITEMS, EVENT_REMINDER_LEAD_MS } from "./activity-inbox.mjs";
 import { createConversationMemory } from "./conversation-memory.mjs";
@@ -535,11 +536,11 @@ test("turn submission preserves definitive refusal and generation checks without
   let submissions = 0;
   const ownership = Promise.withResolvers();
   const expectedSource = source.slice(source.indexOf("function assertExpectedReadiness("), source.indexOf("function invalidateWorkspaceReadiness("));
-  const assertExpectedReadiness = runInNewContext(`${expectedSource}\nassertExpectedReadiness`, { readinessKey: () => generation, workspaceReadinessChanges: new Set(), serverHandle: { managedOpencodeV2: { isAlive: () => true } } });
+  const assertExpectedReadiness = runInNewContext(`${expectedSource}\nassertExpectedReadiness`, { readinessKey: () => generation, workspaceReadinessChanges: new Set(), workspaceConfigurationChanges: new Map(), serverHandle: { managedOpencodeV2: { isAlive: () => true } } });
   const receipt = { threadId: "ses_fixture", messageId: "msg_fixture", acceptedAt: 1, messageCountBefore: 0 };
   const acceptedEntry = { id: "exec_fixture", prompt: "Hello", acceptance: receipt };
   const guardedSend = runInNewContext(`(${source.slice(start, end)}\n})`, {
-    privateTurnIntents: new Map(), assertExpectedReadiness,
+    privateTurnIntents: new Map(), workspaceAdmissions: { assert: assertExpectedReadiness }, waitForWorkspaceReadinessChanges: async () => {},
     privateOwner: async () => { await ownership.promise; return { workspaceId: "ws_fixture", coworkerCreatedAt: fixtureCreatedAt }; },
     collaboration: { submit: async () => { submissions++; return acceptedEntry; }, acceptance: async () => { throw new Error("Late acknowledgement"); }, read: async (read) => read({ executions: { exec_fixture: acceptedEntry } }) },
   });
@@ -603,14 +604,204 @@ test("turn submission preserves definitive refusal and generation checks without
   });
 });
 
+test("authorization readiness keeps refusals stable and fences applied or uncertain credential changes", async () => {
+  const source = await readFile(new URL("./main.mjs", import.meta.url), "utf8");
+  const readinessSource = source.slice(source.indexOf("const warmedCoworkerWorkspaces ="), source.indexOf("async function runCoworkerWorkspaceWarmup("));
+  const requestSource = source.slice(source.indexOf("async function nativeWorkspaceRequest("), source.indexOf("async function patchRuntimeProviders("));
+  const handle = { url: "http://127.0.0.1:1", managedOpencodeV2: { pid: 100, isAlive: () => true } };
+  let status = 200, result = {}, transportFailure = false;
+  const api = runInNewContext(`${readinessSource}\n${requestSource}\n({ key: readinessKey, request: nativeWorkspaceRequest })`, {
+    serverHandle: handle, mainWindow: null, ownerToken: "fixture-only", AbortSignal, createWorkspaceAdmission,
+    signInAttempts: new Set(["attempt_fixture"]),
+    fetch: async () => {
+      if (transportFailure) throw new Error("Fixture transport unconfirmed");
+      return new Response(status === 204 ? null : JSON.stringify(result), { status });
+    },
+  });
+  let before = api.key();
+  await api.request(handle, "ws_fixture", "GET", "/api/integration");
+  status = 400;
+  await assert.rejects(api.request(handle, "ws_fixture", "POST", "/api/integration/fixture/connect/key"), /HTTP 400/);
+  assert.equal(api.key(), before);
+  status = 204;
+  await api.request(handle, "ws_fixture", "POST", "/api/integration/fixture/connect/key");
+  assert.equal(api.key(), before, "confirmed native credentials are versioned by native observations, not UI commands");
+  before = api.key();
+  status = 500;
+  await assert.rejects(api.request(handle, "ws_fixture", "DELETE", "/api/credential/fixture"), /HTTP 500/);
+  assert.notEqual(api.key(), before);
+  before = api.key();
+  transportFailure = true;
+  await assert.rejects(api.request(handle, "ws_fixture", "POST", "/api/integration/fixture/connect/key"), /could not be confirmed/);
+  assert.notEqual(api.key(), before);
+  transportFailure = false;
+  status = 200;
+  before = api.key();
+  result = { data: { status: "pending" } };
+  await api.request(handle, "ws_fixture", "GET", "/api/integration/fixture/connect/oauth/attempt_fixture");
+  assert.equal(api.key(), before);
+  result = { data: { status: "complete" } };
+  await api.request(handle, "ws_fixture", "GET", "/api/integration/fixture/connect/oauth/attempt_fixture");
+  assert.equal(api.key(), before, "UI polling must not count the same credential change again");
+  before = api.key();
+  await api.request(handle, "ws_fixture", "GET", "/api/integration/fixture/connect/oauth/attempt_fixture");
+  assert.equal(api.key(), before);
+});
+
+test("workspace preparation shares one pass, validates warm files, and retries unconfirmed activation", { timeout: 5000 }, async (t) => {
+  const root = await mkdtemp(path.join(tmpdir(), "coworker-preparation-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await mkdir(path.join(root, ".opencode"));
+  for (const name of ["opencode.json", ".opencode/coworker-abilities.json", ".opencode/coworker-context.json"]) await writeFile(path.join(root, name), "{}");
+  const source = await readFile(new URL("./main.mjs", import.meta.url), "utf8");
+  const readinessSource = source.slice(source.indexOf("const warmedCoworkerWorkspaces ="), source.indexOf("// Coworker tools: the app's own MCP server"));
+  const clientSource = source.slice(source.indexOf("async function collaborationClient("), source.indexOf("async function collaborationCleanupClient("));
+  const coworker = { slug: "scout", name: "Scout", workspaceId: "ws_fixture", path: root, createdAt: fixtureCreatedAt };
+  const handle = { managedOpencodeV2: { pid: 100, configurationRevision: 1, isAlive: () => true, workspaceReadiness: (directory) => readFile(path.join(directory, "opencode.json"), "utf8") } };
+  const gate = Promise.withResolvers();
+  let preparations = 0, activations = 0, changed = false, failActivation = false;
+  const api = runInNewContext(`${readinessSource}\n${clientSource}\n({ warm: warmCoworkerWorkspace, client: collaborationClient, admissions: workspaceAdmissions })`, {
+    serverHandle: handle, mainWindow: null, path, AbortSignal, withAbort, createWorkspaceAdmission, coworkersDir: "/fixture", ownerToken: "fixture-only",
+    maintenanceAdmission: { assertOpen: () => {} }, getCoworker: async () => coworker, coworkerIdentity: () => ({}),
+    skillAwareClient: () => ({}), createCoworkerThreads: () => ({}),
+    ensurePlatformServer: async () => handle, ensureToolsServer: async () => ({}),
+    toolsRegistered: new Set([coworker.slug]),
+    installNativeCoworkerPlugins: async () => { preparations++; await gate.promise; return changed; },
+    prepareNativeTurnRoles: async () => {},
+    nativeWorkspaceRequest: async (_handle, _workspaceId, _method, route) => {
+      if (route === "/api/plugin/await-activation") {
+        activations++;
+        if (failActivation) throw new Error("Fixture activation failed");
+        return null;
+      }
+      return { data: ["collaboration", "computer", "browser", "group-documents", "events", "abilities", "turn-roles"].map((id) => ({ id: `coworker.${id}`, state: { status: "active" } })) };
+    },
+  });
+  const first = api.warm(coworker);
+  assert.equal(api.warm(coworker), first);
+  gate.resolve();
+  await first;
+  await api.client("scout", { model: { providerId: "fixture", modelId: "first" } });
+  assert.equal(preparations, 2);
+  assert.equal(activations, 1);
+  await api.client("scout", { observationOnly: true });
+  assert.equal(preparations, 2);
+  changed = true;
+  failActivation = true;
+  await assert.rejects(api.warm(coworker), /activation failed/);
+  changed = false;
+  failActivation = false;
+  await api.warm(coworker);
+  assert.equal(activations, 3, "a no-op install cannot erase an owed activation retry");
+  const expected = await api.warm(coworker);
+  let syntheticPosts = 0, userPosts = 0, markers = 0;
+  await assert.rejects(dispatchNativeTurn({
+    threadId: "ses_fixture", turn: { messageId: "msg_fixture", prompt: "Hello", context: "Reference", agent: "build", nativeAdmission: "prepared" },
+    client: {
+      getThreadSnapshot: async () => ({ threadId: "ses_fixture", messages: [], native: { engine: "v2", pendingInputIds: [], turnOutcomes: {} } }),
+      assertAdmission: () => api.admissions.assert(expected, { slug: "scout", workspaceId: coworker.workspaceId, coworkerCreatedAt: coworker.createdAt }),
+      sendTurn: async (_id, input) => {
+        await input.beforeInput(); syntheticPosts++;
+        await writeFile(path.join(root, "opencode.json"), JSON.stringify({ agents: { build: { permissions: [{ action: "*", resource: "*", effect: "deny" }] } } }));
+        await input.beforeInput(); userPosts++;
+      },
+    },
+    markAttempted: async () => { markers++; },
+  }), { code: "readiness_changed", inputNotSent: false });
+  assert.equal(markers, 1);
+  assert.equal(syntheticPosts, 1);
+  assert.equal(userPosts, 0);
+});
+
+test("readiness joins mutations without invalidating no-ops or another coworker's turn choices", { timeout: 5000 }, async () => {
+  const source = await readFile(new URL("./main.mjs", import.meta.url), "utf8");
+  const commandSource = (name, next) => source.slice(source.indexOf(`  "${name}": `) + `  "${name}": `.length, source.indexOf(`\n  },\n  "${next}"`)) + "\n}";
+  const readinessSource = source.slice(source.indexOf("const warmedCoworkerWorkspaces ="), source.indexOf("async function runCoworkerWorkspaceWarmup("));
+  const ipcSource = source.slice(source.indexOf("function registerIpc()"), source.indexOf("function installApplicationMenu()"));
+  const owner = { slug: "scout", workspaceId: "ws_fixture", coworkerCreatedAt: fixtureCreatedAt };
+  const coworker = { slug: owner.slug, path: "/fixture/scout", workspaceId: owner.workspaceId, createdAt: fixtureCreatedAt, model: "fixture/original" };
+  const native = { pid: 100, configurationRevision: 1, configurationPending: false, isAlive: () => true, whenConfigurationSettled: async () => {} };
+  const handle = { managedOpencodeV2: native };
+  let invoke, ownership, ownershipEntered, mutation;
+  let submissions = 0;
+  const receipt = { threadId: "ses_fixture", messageId: "msg_fixture", acceptedAt: 1, messageCountBefore: 0 };
+  const commands = {
+    "den.providers.sync": async () => { await mutation.promise; return { status: "no_session" }; },
+    "localProviders.saveKey": async () => { await mutation.promise; throw new Error("Fixture validation failed before mutation"); },
+    "coworkers.update": async ({ slug, patch }) => ({ slug, ...patch }),
+    "settings.update": async (patch) => patch,
+    "abilities.update": async () => { await mutation.promise; return {}; },
+    "localProviders.custom.add": async () => { await mutation.promise; native.configurationRevision++; return { status: "connected" }; },
+  };
+  const api = runInNewContext(`${readinessSource}\n${ipcSource}
+    commands["turns.send"] = (${commandSource("turns.send", "turns.cancel")});
+    commands["coworkers.ensureWorkspace"] = (${commandSource("coworkers.ensureWorkspace", "coworkers.update")});
+    registerIpc();
+    ({ key: readinessKey, assert: assertExpectedReadiness });`, {
+    commands, serverHandle: handle, mainWindow: null, coworkersDir: "/fixture", path, AbortSignal, withAbort,
+    createWorkspaceAdmission: ({ assertRuntime }) => ({ current: () => true, assert: async (expected, owner) => assertRuntime(expected, owner) }),
+    ipcMain: { handle: (_name, handler) => { const frame = {}; invoke = (command, payload = {}) => handler({ senderFrame: frame, sender: { mainFrame: frame } }, { command, payload }); } },
+    maintenanceAdmission: { run: (work) => work() }, resetInProgress: false,
+    ensurePlatformServer: async () => handle, getCoworker: async () => coworker,
+    warmCoworkerWorkspace: async () => ({ readinessKey: api.key(), workspaceKey: "fixture", workspaceId: coworker.workspaceId, createdAt: coworker.createdAt }), prepareCoworker: () => {},
+    privateTurnIntents: new Map(),
+    privateOwner: async () => { ownershipEntered.resolve(); await ownership.promise; return owner; },
+    collaboration: { submit: async () => { submissions++; return { id: "exec_fixture", prompt: "Hello" }; }, acceptance: async () => receipt },
+  });
+  const expected = () => ({ readinessKey: api.key(), workspaceId: owner.workspaceId, createdAt: fixtureCreatedAt });
+  for (const command of ["den.providers.sync", "localProviders.saveKey", "coworkers.update", "settings.update", "abilities.update", "localProviders.custom.add"]) {
+    ownership = Promise.withResolvers();
+    ownershipEntered = Promise.withResolvers();
+    mutation = Promise.withResolvers();
+    const before = expected();
+    const count = submissions;
+    const sending = invoke("turns.send", { slug: "scout", threadId: "ses_fixture", messageId: "msg_fixture", prompt: "Hello", expectedReadiness: before });
+    await ownershipEntered.promise;
+    const changing = invoke(command, { slug: "editor", patch: { model: "fixture/other" }, modelDefaults: {} });
+    const preparing = invoke("coworkers.ensureWorkspace", { slug: "scout", expected: before });
+    ownership.resolve();
+    mutation.resolve();
+    const changed = await changing;
+    assert.equal(changed.ok, command !== "localProviders.saveKey");
+    const [sent, prepared] = await Promise.all([sending, preparing]);
+    if (command === "localProviders.custom.add") {
+      assert.equal(sent.result.code, "readiness_changed");
+      assert.equal(sent.result.notSubmitted, true);
+      assert.equal(prepared.ok, false);
+      assert.equal(submissions, count);
+    } else {
+      assert.equal(sent.result.messageId, receipt.messageId);
+      assert.equal(sent.result.rejected, undefined);
+      assert.equal(prepared.ok, true, prepared.error);
+      assert.equal(prepared.result.readinessKey, before.readinessKey);
+      assert.equal(submissions, count + 1);
+      assert.equal(api.key(), before.readinessKey);
+    }
+  }
+  for (const changed of [false, true]) {
+    const before = expected();
+    mutation = Promise.withResolvers();
+    mutation.resolve();
+    let posts = 0;
+    const dispatch = dispatchNativeTurn({
+      threadId: "ses_fixture", turn: { messageId: "msg_fixture", prompt: "Hello", agent: "build", nativeAdmission: "prepared" },
+      client: { getThreadSnapshot: async () => ({ threadId: "ses_fixture", messages: [], native: { engine: "v2", pendingInputIds: [], turnOutcomes: {} } }),
+        sendTurn: async (_id, input) => { await input.beforeInput(); posts++; return receipt; } },
+      markAttempted: async () => { await invoke(changed ? "localProviders.custom.add" : "den.providers.sync"); },
+      validateAdmission: () => api.assert(before, owner),
+    });
+    if (changed) await assert.rejects(dispatch, { code: "readiness_changed", inputNotSent: true });
+    else assert.equal((await dispatch).messageId, receipt.messageId);
+    assert.equal(posts, changed ? 0 : 1);
+  }
+});
+
 test("foreground submission wakes dispatch without waiting for the periodic tick", async (t) => {
   await withHome(async (home) => {
     const fixture = nativeFixture();
     const source = await readFile(new URL("./main.mjs", import.meta.url), "utf8");
     const setupTimeoutMs = Number(source.match(/const collaboration = createCollaboration\(\{[\s\S]*?setupTimeoutMs: ([\d_]+)/)?.[1].replaceAll("_", ""));
     assert.equal(setupTimeoutMs, 120_000);
-    const coldClient = source.slice(source.indexOf("async function collaborationClient("), source.indexOf("async function collaborationCleanupClient("));
-    assert.match(coldClient, /registerCoworkerTools\(coworker, 120_000\)/);
     const entered = Promise.withResolvers();
     const prepared = Promise.withResolvers();
     let setupSignal;

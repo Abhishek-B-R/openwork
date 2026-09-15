@@ -43,12 +43,12 @@ export function withInteractiveQuestionDefault(config) {
   return { ...config, permissions: [...permissions, { action: "question", resource: "*", effect: "allow" }] };
 }
 
-export async function installCollaborationPlugin(coworker, config) {
+export async function installCollaborationPlugin(coworker, config, configure) {
   const root = path.join(coworker.path, ".opencode");
   await mkdir(root, { recursive: true });
   const connectionFile = path.join(root, "coworker-context.json");
   const connection = JSON.stringify(config);
   if (await readFile(connectionFile, "utf8").catch(() => "") !== connection) await writeFile(connectionFile, connection, { mode: 0o600 });
-  await installNativePlugin(coworker, "coworker-collaboration.js", withInteractiveQuestionDefault);
-  await installTurnRolesPlugin(coworker);
+  await installNativePlugin(coworker, "coworker-collaboration.js", withInteractiveQuestionDefault, configure);
+  await installTurnRolesPlugin(coworker, configure);
 }

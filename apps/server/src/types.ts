@@ -93,6 +93,7 @@ export interface EmbeddedOpencodeV2Options {
   /** Explicit child-only environment, including native plugin bridge settings. */
   env?: Record<string, string>;
   bootTimeoutMs?: number;
+  beforeInput?: (input: { workspaceId: string; directory: string; receipt: string | null; signal?: AbortSignal }) => Promise<void>;
 }
 
 export interface ServerConfig {

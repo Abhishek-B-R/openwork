@@ -40,8 +40,8 @@ function memoryInput(text, { limits, system }) {
 
 export const MEMORY_PLUGIN = isolatedModelSource(policy, `(text) => (${memoryInput.toString()})(text, policy)`);
 
-export async function installMemoryPlugin(coordinator) {
-  await installNativePlugin(coordinator, "auto-memory.js", (config) => withoutIsolatedAgent(config, policy));
+export async function installMemoryPlugin(coordinator, configure) {
+  await installNativePlugin(coordinator, "auto-memory.js", (config) => withoutIsolatedAgent(config, policy), configure);
 }
 
 /** Fresh native session; returns validated JSON text, never writes memory. */

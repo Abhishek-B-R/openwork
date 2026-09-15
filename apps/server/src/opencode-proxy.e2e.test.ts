@@ -76,7 +76,7 @@ function startMockOpencode(input?: { holdCommand?: Promise<void>; foreignSession
         if (/^\/api\/session\/ses_[^/]+\/interrupt$/.test(url.pathname)) return Response.json({ interrupted: true });
         if (/^\/api\/session\/ses_[^/]+\/(?:wait|inbox\/msg_[^/]+)$/.test(url.pathname)) return new Response(null, { status: 204 });
         if (/^\/api\/session\/ses_[^/]+\/(?:inbox|permission|form)$/.test(url.pathname)) return Response.json({ data: [] });
-        if (["/api/mcp", "/api/skill", "/api/session"].includes(url.pathname)) return Response.json({ data: [] });
+        if (["/api/mcp", "/api/skill", "/api/session", "/api/provider"].includes(url.pathname)) return Response.json({ data: [] });
         if (url.pathname === "/api/session/ses_1/instructions/entries/openwork.context"
           || url.pathname === "/api/session/ses_1/prompt") return Response.json({ data: { accepted: true } });
         return Response.json({ code: "not_found" }, { status: 404 });
@@ -295,7 +295,7 @@ async function startV2Proxy() {
     ensureWorkspaceReady: provider.wait, syncWorkspaceMcp: (workspaceId, directory) => mcp.wait(workspaceId, directory),
     syncCloudSkills: async () => ({ root: join(workspaceRoot, "cloud-skills"), state: { root: null, skills: [] } }),
     refresh: async () => {},
-    process: () => ({ pid: null, isAlive: () => true }),
+    process: () => ({ pid: null, generation: "fixture", isAlive: () => true, configurationRevision: 0, configurationPending: false, whenConfigurationSettled: async () => {}, workspaceReadiness: async () => "fixture" }),
     assertNativeSkillsScope: async () => {},
     withNativeSkills: async (_directory, use) => use({ data: [] }, async () => {}),
     request: async () => { throw new Error("Direct native requests are outside this proxy fixture"); },
@@ -412,12 +412,13 @@ describe("workspace OpenCode proxy", () => {
       ];
       for (const [method, path] of guarded) {
         const response = await fixture.request(path, { method });
-        expect({ method, path, status: response.status }).toEqual({ method, path, status: 503 });
-        if (method !== "HEAD") await expect(response.json()).resolves.toMatchObject({ code: "fixture_readiness_failed" });
+        const metadata = failingGate === "mcp" && method === "GET" && path === "/api/provider";
+        expect({ method, path, status: response.status }).toEqual({ method, path, status: metadata ? 200 : 503 });
+        if (method !== "HEAD") await expect(response.json()).resolves.toMatchObject(metadata ? { data: [] } : { code: "fixture_readiness_failed" });
       }
-      expect(fixture.engine.requests).toEqual([]);
+      expect(fixture.engine.requests.map((entry) => `${entry.method} ${entry.pathname}`)).toEqual(failingGate === "mcp" ? ["GET /api/provider"] : []);
       expect(fixture.provider.calls).toHaveLength(guarded.length);
-      expect(fixture.mcp.calls).toHaveLength(failingGate === "provider" ? 0 : guarded.length);
+      expect(fixture.mcp.calls).toHaveLength(failingGate === "provider" ? 0 : guarded.length - 1);
       for (const suffix of ["", "/message", "/message/msg_1"]) {
         const response = await fixture.request(`/api/session/ses_1${suffix}`);
         expect(response.status).toBe(200);
@@ -429,7 +430,7 @@ describe("workspace OpenCode proxy", () => {
         await response.body?.cancel();
       }
       expect(fixture.provider.calls).toHaveLength(guarded.length);
-      expect(fixture.mcp.calls).toHaveLength(failingGate === "provider" ? 0 : guarded.length);
+      expect(fixture.mcp.calls).toHaveLength(failingGate === "provider" ? 0 : guarded.length - 1);
     });
   }
 

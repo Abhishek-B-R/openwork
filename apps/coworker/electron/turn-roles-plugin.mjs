@@ -87,10 +87,10 @@ export async function prepareNativeTurnRoles(request) {
   if (result?.output?.ready !== true) throw new Error("Native turn role inheritance is not ready.");
 }
 
-export async function installTurnRolesPlugin(coworker) {
+export async function installTurnRolesPlugin(coworker, configure) {
   await installNativePlugin(coworker, "coworker-turn-roles.js", (config) => {
     const agents = { ...config.agents };
     for (const role of NATIVE_TURN_ROLES) if (Object.hasOwn(agents, role.id)) throw new Error(`The reserved native turn role ${role.id} is already configured. Its settings were not overwritten.`);
     return { ...config, agents };
-  });
+  }, configure);
 }

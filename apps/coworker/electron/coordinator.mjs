@@ -10,7 +10,7 @@
  */
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { updateNativeConfig } from "./native-config.mjs";
+import { installNativePlugins } from "./native-plugin.mjs";
 
 export const COORDINATOR_DIR = ".coordinator";
 export const COORDINATOR_SCHEMA_VERSION = 1;
@@ -62,19 +62,17 @@ async function writeRecord(coworkersDir, record) {
   return record;
 }
 
-/**
- * Make sure the coordinator home exists with its locked-down configuration.
- * The configuration files are rewritten every time so a hand edit can never
- * quietly hand the facilitator a tool; the record (its workspace id) is kept.
- */
-export async function ensureCoordinatorHome(coworkersDir) {
+export async function ensureCoordinatorHome(coworkersDir, installers = []) {
   const root = coordinatorPath(coworkersDir);
   await mkdir(root, { recursive: true });
-  await updateNativeConfig(root, () => coordinatorConfig());
-  await writeFile(path.join(root, "AGENTS.md"), coordinatorContract(), "utf8");
+  const configChanged = await installNativePlugins({ path: root }, installers, () => coordinatorConfig());
+  const target = path.join(root, "AGENTS.md");
+  const contract = coordinatorContract();
+  const current = await readFile(target, "utf8").catch((error) => { if (error.code !== "ENOENT") throw error; return null; });
+  if (current !== contract) await writeFile(target, contract, "utf8");
   const existing = await readRecord(coworkersDir);
   const record = existing ?? (await writeRecord(coworkersDir, { workspaceId: "" }));
-  return { path: root, name: "Coordinator", workspaceId: record.workspaceId };
+  return { path: root, name: "Coordinator", workspaceId: record.workspaceId, configChanged };
 }
 
 export async function readCoordinator(coworkersDir) {

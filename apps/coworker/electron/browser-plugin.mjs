@@ -31,9 +31,9 @@ export default Plugin.define({ id: "coworker.browser", effect: (ctx) => Effect.g
 }) });
 `;
 
-export async function installBrowserPlugin(coworker) {
+export async function installBrowserPlugin(coworker, configure) {
   await installNativePlugin(coworker, "coworker-browser.js", (config) => ({
     ...config, permissions: [...(config.permissions ?? []).filter((rule) => !["browser_*", "webmcp_*"].includes(rule.action)),
       ...["browser_*", "webmcp_*"].map((action) => ({ action, resource: "*", effect: "deny" }))],
-  }));
+  }), configure);
 }

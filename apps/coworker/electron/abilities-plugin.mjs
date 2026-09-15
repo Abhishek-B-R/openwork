@@ -1,4 +1,4 @@
-import { chmod, mkdir, readFile, realpath, rename, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, realpath, rename, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { readCoworkerAbilities } from "../src/lib/abilities.ts";
 import { installNativePlugin } from "./native-plugin.mjs";
@@ -97,7 +97,7 @@ export default Plugin.define({ id: "coworker.abilities", effect: (ctx) => Effect
 }) });
 `;
 
-export async function installAbilitiesPlugin(coworker, { url, token }) {
+export async function installAbilitiesPlugin(coworker, { url, token }, configure) {
   const directory = await realpath(coworker.path);
   const root = path.join(directory, ".opencode");
   if (typeof coworker.createdAt !== "string" || !coworker.createdAt || typeof coworker.workspaceId !== "string"
@@ -110,6 +110,6 @@ export async function installAbilitiesPlugin(coworker, { url, token }) {
     await chmod(`${connectionFile}.tmp`, 0o600);
     await rename(`${connectionFile}.tmp`, connectionFile);
   }
-  await chmod(connectionFile, 0o600);
-  await installNativePlugin(coworker, "coworker-abilities.js");
+  if (((await stat(connectionFile)).mode & 0o777) !== 0o600) await chmod(connectionFile, 0o600);
+  await installNativePlugin(coworker, "coworker-abilities.js", undefined, configure);
 }

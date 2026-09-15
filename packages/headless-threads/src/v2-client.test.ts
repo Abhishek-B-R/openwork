@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { createServer, type IncomingHttpHeaders } from "node:http";
 import { test, type TestContext } from "node:test";
 import { createNativeV2Client } from "./v2-client.ts";
+import { HeadlessThreadError } from "./errors.ts";
 import type { HeadlessFetch } from "./v2-types.ts";
 
 const mount = "/workspace/ws_fixture/opencode2/api";
@@ -35,7 +36,7 @@ type BoundaryState = {
   skills: typeof skill[];
 };
 
-async function boundary(t: TestContext) {
+async function boundary(t: TestContext, prefix = "") {
   const state: BoundaryState = {
     requests: [], pages: [[]], inbox: [], active: {}, interrupted: false,
     persist: "inbox", fail: "none", overrides: new Map(), skills: [skill],
@@ -53,6 +54,10 @@ async function boundary(t: TestContext) {
         response.writeHead(status, { "Content-Type": "application/json" });
         response.end(status === 204 ? undefined : JSON.stringify(value));
       };
+      if (prefix) {
+        if (!url.pathname.startsWith(`${prefix}/`)) return send({}, 404);
+        url.pathname = url.pathname.slice(prefix.length);
+      }
       const override = state.overrides.get(`${method} ${url.pathname}`);
       if (override) {
         if (override.status === 302) response.setHeader("Location", "/must-not-follow");
@@ -103,7 +108,7 @@ async function boundary(t: TestContext) {
   }));
   const address = server.address();
   assert.ok(address && typeof address !== "string");
-  const options = { baseUrl: `http://127.0.0.1:${address.port}///`, workspaceId: "ws_fixture", token: "fixture-client-token", requestTimeoutMs: 2_000 };
+  const options = { baseUrl: `http://127.0.0.1:${address.port}${prefix}///`, workspaceId: "ws_fixture", token: "fixture-client-token", requestTimeoutMs: 2_000 };
   return { state, options, client: createNativeV2Client(options) };
 }
 
@@ -132,7 +137,45 @@ test("native create binding, workspace mount and existing token headers; no v1 f
   const creations = state.requests.filter((request) => request.method === "POST").length;
   await assert.rejects(nextClient.createSession({ id: sid, agent: "fixture", model: selection }), { status: 403 });
   assert.equal(state.requests.filter((request) => request.method === "POST").length, creations);
+  state.overrides.set(`GET ${mount}/session`, { status: 200, body: { data: [nativeSession], cursor: { next: null } } });
+  assert.deepEqual(await client.listSessions(), [nativeSession]);
+  const listing = new URL(state.requests.at(-1)?.path ?? "", options.baseUrl);
+  assert.equal(listing.searchParams.get("limit"), "200");
+  assert.equal(listing.searchParams.get("order"), "desc");
   assert.ok(state.requests.every((request) => request.path.startsWith(mount)));
+});
+
+test("official requests preserve the prefixed proxy, bearer, body, redirects and both cancellation scopes", { timeout: 2000 }, async (t) => {
+  const { state, options } = await boundary(t, "/gateway");
+  const client = createNativeV2Client({ ...options, fetch: async (url, init) => {
+    assert.equal(init?.redirect, "error");
+    if (init?.method !== "GET") assert.equal(init?.keepalive, false);
+    return fetch(url, init);
+  } });
+  const metadata = { marker: "durable", nested: { value: [1, true, null] } };
+  await client.admitInput(sid, { ...input, metadata });
+  assert.ok(state.requests.every((request) => request.path.startsWith(`/gateway${mount}/`) && request.headers.authorization === "Bearer fixture-client-token"));
+  assert.deepEqual(state.requests.find((request) => request.method === "POST")?.body, { id: input.id, text: input.text, delivery: "queue", resume: true, metadata });
+  const count = state.requests.length;
+  for (const id of ["..", "../session", "https://foreign.invalid/path"]) await assert.rejects(client.getAgent(id), { code: "invalid_request" });
+  assert.equal(state.requests.length, count);
+  for (const scope of ["client", "call"]) {
+    const global = new AbortController(), local = new AbortController();
+    const reached = Promise.withResolvers<AbortSignal>();
+    const observing = createNativeV2Client({ ...options, signal: global.signal, fetch: async (url, init) => {
+      assert.equal(new URL(url).pathname, `/gateway${mount}/session/${sid}`);
+      assert.ok(init?.signal);
+      const signal = init.signal;
+      reached.resolve(signal);
+      return new Promise<Response>((resolve, reject) => signal.addEventListener("abort", () => reject(new Error("private transport detail")), { once: true }));
+    } }).getSession(sid, local.signal);
+    const rejected = assert.rejects(observing, { code: "request_failed", method: "GET", path: `${mount}/session/${sid}`, status: null });
+    const signal = await reached.promise;
+    assert.equal(signal.aborted, false);
+    (scope === "client" ? global : local).abort();
+    assert.equal(signal.aborted, true);
+    await rejected;
+  }
 });
 
 test("exact-ID replay is read-only across cursor pages; messages retain native kinds and evidence", async (t) => {
@@ -276,6 +319,68 @@ test("malformed history, cross-session inbox, repeated cursor, redirect and canc
   assert.ok(state.requests.every((request) => !request.path.includes("must-not-follow")));
 });
 
+test("native errors retain method, path and status without exposing declared bodies or transport causes", async (t) => {
+  const { state, client, options } = await boundary(t);
+  const privateDetail = "Bearer must-not-escape";
+  const safeError = (method: string, path: string, status: number | null, code = "request_failed") => (error: unknown) => {
+    assert.ok(error instanceof HeadlessThreadError);
+    assert.deepEqual({ method: error.method, path: error.path, status: error.status, code: error.code }, { method, path, status, code });
+    assert.equal(error.body, undefined);
+    assert.equal(error.cause, undefined);
+    assert.equal(`${error.message}${JSON.stringify(error)}`.includes(privateDetail), false);
+    return true;
+  };
+  for (const status of [400, 401, 403, 404, 422, 503]) {
+    state.overrides.set(`GET ${mount}/session/${sid}`, { status, body: { _tag: "Unauthorized", message: privateDetail, status: 200 } });
+    await assert.rejects(client.getSession(sid), safeError("GET", `${mount}/session/${sid}`, status));
+  }
+  for (const status of [200, 201]) {
+    state.overrides.set(`GET ${mount}/session/${sid}`, { status, body: { data: privateDetail } });
+    await assert.rejects(client.getSession(sid), safeError("GET", `${mount}/session/${sid}`, status, "invalid_response"));
+  }
+  state.overrides.delete(`GET ${mount}/session/${sid}`);
+  state.overrides.set(`POST ${mount}/session/${sid}/prompt`, { status: 403, body: { message: privateDetail } });
+  await assert.rejects(client.admitInput(sid, input), safeError("POST", `${mount}/session/${sid}/prompt`, 403));
+  await assert.rejects(client.admitInput(sid, input), { code: "admission_unknown" });
+  assert.equal(postCount(state), 1);
+  const failingTransport = createNativeV2Client({ ...options, fetch: async () => {
+    throw new HeadlessThreadError({ code: "provider_failure", method: "POST", path: "/private", status: 403, message: privateDetail, body: { token: privateDetail } });
+  } });
+  await assert.rejects(failingTransport.getSession(sid), safeError("GET", `${mount}/session/${sid}`, null));
+});
+
+test("native permission and form replies use current session-scoped requests and reject stale decisions", async (t) => {
+  const { client, state } = await boundary(t);
+  const permission = { id: "per_fixture", sessionID: sid, action: "read", resources: ["fixture.txt"] };
+  const form = { id: "frm_fixture", sessionID: sid, title: "Choose", fields: [{ key: "choice", type: "string", options: [{ value: "exact-value", label: "Friendly label" }] }] } satisfies Awaited<ReturnType<typeof client.listForms>>[number];
+  const permissionPath = `${mount}/session/${sid}/permission/${permission.id}`;
+  const formPath = `${mount}/session/${sid}/form/${form.id}`;
+  state.overrides.set(`GET ${mount}/session/${sid}/permission`, { status: 200, body: { data: [permission] } });
+  state.overrides.set(`GET ${mount}/session/${sid}/form`, { status: 200, body: { data: [form] } });
+  assert.deepEqual(await client.listPermissions(sid), [permission]);
+  assert.deepEqual(await client.listForms(sid), [form]);
+  state.overrides.set(`GET ${permissionPath}`, { status: 200, body: { data: { ...permission, resources: ["changed.txt"] } } });
+  state.overrides.set(`GET ${formPath}`, { status: 200, body: { data: { ...form, sessionID: "ses_other" } } });
+  await assert.rejects(client.replyPermission(permission, "once"), { code: "stale_request" });
+  await assert.rejects(client.replyForm(form, { choice: "exact-value" }), { code: "stale_request" });
+  state.overrides.set(`GET ${permissionPath}`, { status: 200, body: { data: permission } });
+  state.overrides.set(`GET ${formPath}`, { status: 200, body: { data: form } });
+  await assert.rejects(client.replyPermission(permission, "always"), { code: "stale_request" });
+  assert.equal(state.requests.filter((request) => request.method === "POST").length, 0);
+  for (const path of [`${permissionPath}/reply`, `${formPath}/reply`, `${formPath}/cancel`]) state.overrides.set(`POST ${path}`, { status: 204 });
+  assert.equal(await client.replyPermission(permission, "once"), undefined);
+  assert.equal(await client.replyForm(form, { choice: "exact-value" }), undefined);
+  assert.equal(await client.replyForm(form, null), undefined);
+  assert.deepEqual(state.requests.filter((request) => request.method === "POST").map((request) => [request.path, request.body]), [
+    [`${permissionPath}/reply`, { reply: "once" }], [`${formPath}/reply`, { answer: { choice: "exact-value" } }], [`${formPath}/cancel`, undefined],
+  ]);
+  state.overrides.set(`GET ${permissionPath}`, { status: 404, body: {} });
+  state.overrides.set(`GET ${formPath}`, { status: 404, body: {} });
+  await assert.rejects(client.replyPermission(permission, "reject"), { status: 404, method: "GET" });
+  await assert.rejects(client.replyForm(form, null), { status: 404, method: "GET" });
+  assert.equal(state.requests.filter((request) => request.method === "POST").length, 3);
+});
+
 test("native skill catalog and ID-only inputs validate strictly; missing or revoked IDs never submit", async (t) => {
   const { client, state } = await boundary(t);
   assert.deepEqual(await client.listSkills(), [skill]);
@@ -381,17 +486,67 @@ test("lost skill acknowledgement reconciles frozen resolved inbox/history attach
   }
 });
 
-test("cancelling a quiet native event stream closes a pending reader even when transport abort stalls", { timeout: 2000 }, async () => {
-  let cancelled = false;
-  const client = createNativeV2Client({ baseUrl: "http://fixture.invalid", workspaceId: "ws_fixture", token: "fixture", fetch: async () => new Response(new ReadableStream({
-    start(controller) { controller.enqueue(new TextEncoder().encode('data: {"id":"evt_fixture","type":"server.connected","data":{}}\n\n')); },
-    cancel() { cancelled = true; },
-  }), { headers: { "content-type": "text/event-stream" } }) });
-  const controller = new AbortController();
-  const events = client.events(controller.signal);
-  assert.equal((await events.next()).value?.type, "server.connected");
-  const pending = events.next();
-  controller.abort();
+test("official events share one lazy stream, dispose pending readers and reconnect only on a later subscription without replay", { timeout: 2000 }, async () => {
+  let connections = 0;
+  let opened = Promise.withResolvers<ReadableStreamDefaultController<Uint8Array>>();
+  const cancelled = Promise.withResolvers<void>();
+  const client = createNativeV2Client({ baseUrl: "http://fixture.invalid/gateway", workspaceId: "ws_fixture", token: "fixture", fetch: async (url, init) => {
+    connections++;
+    assert.equal(new URL(url).pathname, `/gateway${mount}/event`);
+    assert.equal(init?.headers?.Authorization, "Bearer fixture");
+    assert.equal(new Headers(init?.headers).get("accept"), "text/event-stream");
+    assert.equal(new Headers(init?.headers).has("last-event-id"), false);
+    return new Response(new ReadableStream<Uint8Array>({ start(controller) { opened.resolve(controller); }, cancel() { cancelled.resolve(); } }), { headers: { "content-type": "text/event-stream" } });
+  } });
+  const emit = (source: ReadableStreamDefaultController<Uint8Array>, id: string) => {
+    source.enqueue(new TextEncoder().encode(`: keepalive\r\ndata: {"id":"${id}",\r`));
+    source.enqueue(new TextEncoder().encode('\ndata: "type":"session.updated","data":{}}\r\n\r\n'));
+  };
+  const first = client.events();
+  assert.equal(connections, 0);
+  const firstRead = first.next();
+  const source = await opened.promise;
+  emit(source, "evt_prior");
+  assert.equal((await firstRead).value?.id, "evt_prior");
+  const second = client.events();
+  const nextFirst = first.next(), nextSecond = second.next();
+  emit(source, "evt_shared");
+  assert.deepEqual((await Promise.all([nextFirst, nextSecond])).map((item) => item.value?.id), ["evt_shared", "evt_shared"]);
+  assert.equal(connections, 1);
+  const pendingFirst = first.next();
+  await first.return();
+  assert.equal((await pendingFirst).done, true);
+  const pendingSecond = second.next();
+  source.close();
+  assert.equal((await pendingSecond).done, true);
+  assert.equal(connections, 1);
+  opened = Promise.withResolvers<ReadableStreamDefaultController<Uint8Array>>();
+  const abort = new AbortController();
+  const later = client.events(abort.signal);
+  const laterRead = later.next();
+  const laterSource = await opened.promise;
+  emit(laterSource, "evt_fresh");
+  assert.equal((await laterRead).value?.id, "evt_fresh");
+  assert.equal(connections, 2);
+  const pending = later.next();
+  abort.abort();
   assert.equal((await pending).done, true);
-  assert.equal(cancelled, true);
+  await cancelled.promise;
+});
+
+test("official stream decoding errors are sanitized and terminate without automatic reconnect", { timeout: 2000 }, async () => {
+  let connections = 0;
+  const client = createNativeV2Client({ baseUrl: "http://fixture.invalid", workspaceId: "ws_fixture", token: "fixture", fetch: async () => {
+    connections++;
+    return new Response('data: Bearer private-stream-detail\n\n', { headers: { "content-type": "text/event-stream" } });
+  } });
+  await assert.rejects(client.events().next(), (error: unknown) => {
+    assert.ok(error instanceof HeadlessThreadError);
+    assert.deepEqual({ code: error.code, method: error.method, path: error.path, status: error.status }, { code: "invalid_response", method: "GET", path: `${mount}/event`, status: 200 });
+    assert.equal(error.cause, undefined);
+    assert.equal(error.body, undefined);
+    assert.equal(error.message.includes("private-stream-detail"), false);
+    return true;
+  });
+  assert.equal(connections, 1);
 });

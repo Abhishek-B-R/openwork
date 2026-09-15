@@ -10,7 +10,7 @@ import type { GeneratedArtifactViewBuildInput } from "../../ee/apps/den-api/src/
 import { addInitScript, browserScript, clickAt, evaluate, evaluateOnSurface, pressKey, waitForLocated, type Surface, type Target } from "@openwork/cdp";
 import { coworker, localHost } from "@openwork/hosts";
 import { SkipError, type Place, type Seed } from "@openwork/env";
-import { access, cp, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
+import { access, cp, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { constants } from "node:fs";
 import { createHash, randomUUID } from "node:crypto";
 import { createServer, type ServerResponse } from "node:http";
@@ -36,7 +36,8 @@ function nativeRows(value: unknown): Record<string, unknown>[] {
 
 async function nativeConversationModel() {
   const nonce = randomUUID();
-  const calls: Array<{ id: number; model: unknown; stream: unknown; userTexts: string[]; chunks: string[]; released: number; finished: boolean; aborted: boolean; expired: boolean }> = [];
+  let credential: "initial" | "rotated" = "initial";
+  const calls: Array<{ id: number; model: unknown; stream: unknown; credential: "initial" | "rotated"; userTexts: string[]; chunks: string[]; released: number; finished: boolean; aborted: boolean; expired: boolean }> = [];
   const streams = new Map<number, ServerResponse>();
   const errors: string[] = [];
   const chunk = (id: number, delta: Record<string, string>, finish: string | null = null) =>
@@ -58,9 +59,10 @@ async function nativeConversationModel() {
         raw += String(part);
         if (raw.length > 2_097_152) throw new Error("Model request exceeded the fixture bound.");
       }
+      if (request.headers.authorization !== `Bearer fixture-only-${credential}`) throw new Error("Native model did not use the current dummy credential.");
       const body = nativeRecord(JSON.parse(raw));
       const id = calls.length + 1;
-      const call = { id, model: body.model, stream: body.stream,
+      const call = { id, model: body.model, stream: body.stream, credential,
         userTexts: nativeRows(body.messages).filter((message) => message.role === "user").map((message) => typeof message.content === "string" ? message.content
           : nativeRows(message.content).map((part) => typeof part.text === "string" ? part.text : "").join("\n")),
         chunks: [`Plan ${nonce}-${id}-opening: clarify the goal. `, `Plan ${nonce}-${id}-middle: pick a small first step. `, `Plan ${nonce}-${id}-final: review the outcome.`],
@@ -98,6 +100,7 @@ async function nativeConversationModel() {
     url: `http://127.0.0.1:${address.port}`,
     requests: () => calls.map((call) => ({ ...call, userTexts: [...call.userTexts], chunks: [...call.chunks] })),
     errors: () => [...errors],
+    expectCredential(value: "initial" | "rotated") { credential = value; },
     release(id: number) {
       const { call, response } = held(id);
       const text = call.chunks[call.released];
@@ -116,6 +119,112 @@ async function nativeConversationModel() {
       for (const response of streams.values()) response.destroy();
       server.closeAllConnections();
       await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    },
+  };
+}
+
+async function nativeDiscussionEvents(app: Surface, origin: string) {
+  const endpoint = app.client.webSocketDebuggerUrl;
+  if (!endpoint || new URL(endpoint).hostname !== "127.0.0.1") throw new Error("Native SSE observation requires this app's loopback CDP target.");
+  const socket = new WebSocket(endpoint);
+  const ready = Promise.withResolvers<void>();
+  const streams = new Map<string, { id: string; workspaceId: string; status: number | null; closed: boolean; observing: boolean; deltas: Array<{ sessionId: string; text: string }> }>();
+  const buffers = new Map<string, string>();
+  const pending = new Map<number, string>();
+  const deadlines = new Map<number, ReturnType<typeof setTimeout>>();
+  const errors: string[] = [];
+  let sequence = 1;
+  let disposed = false;
+  const consume = (id: string, encoded: string) => {
+    const stream = streams.get(id);
+    if (!stream) return;
+    let buffer = ((buffers.get(id) ?? "") + Buffer.from(encoded, "base64").toString("utf8")).replace(/\r\n/g, "\n");
+    if (buffer.length > 262_144) throw new Error("Native SSE observation exceeded its frame bound.");
+    let end;
+    while ((end = buffer.indexOf("\n\n")) >= 0) {
+      const frame = buffer.slice(0, end);
+      buffer = buffer.slice(end + 2);
+      const data = frame.split("\n").filter((line) => line.startsWith("data:")).map((line) => line.slice(5).trimStart()).join("\n");
+      if (!data) continue;
+      const event = nativeRecord(JSON.parse(data));
+      if (event.type !== "session.text.delta") continue;
+      const detail = nativeRecord(event.data);
+      if (typeof detail.sessionID !== "string" || typeof detail.delta !== "string") throw new Error("Native SSE text delta lacked its session identity.");
+      if (stream.deltas.length >= 500) throw new Error("Native SSE observation exceeded its delta bound.");
+      stream.deltas.push({ sessionId: detail.sessionID, text: detail.delta });
+    }
+    buffers.set(id, buffer);
+  };
+  const fail = () => {
+    if (disposed) return;
+    errors.push("Native SSE observer lost its CDP connection.");
+    ready.reject(new Error(errors.at(-1)));
+  };
+  socket.addEventListener("open", () => socket.send(JSON.stringify({ id: 1, method: "Network.enable" })));
+  socket.addEventListener("error", fail);
+  socket.addEventListener("close", fail);
+  socket.addEventListener("message", (message) => {
+    try {
+      const event = nativeRecord(JSON.parse(String(message.data)));
+      if (event.id === 1) {
+        if (event.error) throw new Error("Native SSE observer could not enable Network events.");
+        ready.resolve();
+        return;
+      }
+      if (typeof event.id === "number" && pending.has(event.id)) {
+        const id = pending.get(event.id)!;
+        pending.delete(event.id);
+        clearTimeout(deadlines.get(event.id));
+        deadlines.delete(event.id);
+        if (event.error) throw new Error("Native SSE byte observation is unavailable; polling is not stream proof.");
+        const result = nativeRecord(event.result);
+        if (typeof result.bufferedData === "string") consume(id, result.bufferedData);
+        streams.get(id)!.observing = true;
+        return;
+      }
+      if (!isNativeRecord(event.params) || typeof event.params.requestId !== "string") return;
+      const params = event.params;
+      const id = params.requestId;
+      if (typeof id !== "string") return;
+      if (event.method === "Network.requestWillBeSent") {
+        const request = nativeRecord(params.request);
+        if (typeof request.url !== "string" || request.method !== "GET") return;
+        const url = new URL(request.url);
+        const match = /^\/workspace\/([^/]+)\/opencode2\/api\/event$/.exec(url.pathname);
+        if (url.origin !== origin || !match) return;
+        if (streams.size >= 100) throw new Error("Native SSE subscription count exceeded the fixture bound.");
+        streams.set(id, { id, workspaceId: decodeURIComponent(match[1]!), status: null, closed: false, observing: false, deltas: [] });
+      }
+      const stream = streams.get(id);
+      if (!stream) return;
+      if (event.method === "Network.responseReceived") {
+        const response = nativeRecord(params.response);
+        stream.status = typeof response.status === "number" ? response.status : null;
+        const commandId = ++sequence;
+        pending.set(commandId, id);
+        deadlines.set(commandId, setTimeout(() => { errors.push("Native SSE byte observation timed out."); pending.delete(commandId); deadlines.delete(commandId); }, 10_000));
+        socket.send(JSON.stringify({ id: commandId, method: "Network.streamResourceContent", params: { requestId: id } }));
+      }
+      if (event.method === "Network.dataReceived" && typeof params.data === "string") consume(id, params.data);
+      if (event.method === "Network.loadingFailed" || event.method === "Network.loadingFinished") stream.closed = true;
+    } catch (error) {
+      errors.push(error instanceof Error ? error.message : "Native SSE observation failed.");
+      ready.reject(new Error(errors.at(-1)));
+    }
+  });
+  const timeout = setTimeout(() => ready.reject(new Error("Native SSE observer did not attach.")), 10_000);
+  try { await ready.promise; }
+  catch (error) { disposed = true; socket.close(); throw error; }
+  finally { clearTimeout(timeout); }
+  return {
+    read() {
+      if (errors.length) throw new Error(errors.join("\n"));
+      return [...streams.values()].map((stream) => ({ ...stream, deltas: stream.deltas.map((delta) => ({ ...delta })) }));
+    },
+    async [Symbol.asyncDispose]() {
+      disposed = true;
+      for (const timeout of deadlines.values()) clearTimeout(timeout);
+      socket.close();
     },
   };
 }
@@ -171,8 +280,8 @@ export async function nativePackagedDiscussion(seed: Seed, { place }: { place: P
       OLLAMA_HOST: "127.0.0.1:9", LMSTUDIO_HOST: "127.0.0.1:9",
     } }));
     if (diagnosticsDir) await writeFile(join(diagnosticsDir, "launch.json"), JSON.stringify({ binary, profileDir, modelUrl: model.url, pid: app.handle.pid, cdpUrl: app.handle.cdpUrl, hostKind: app.handle.hostKind }, null, 2), { mode: 0o600, flag: "wx" });
-    const invoke = async (command: string, payload: unknown = {}) => {
-      const response = nativeRecord(await seed.evalIn(app, browserScript((command, payload) => window.__COWORKER__.invoke(command, payload), [command, payload]), { timeoutMs: 120_000 }));
+    const invoke = async (command: "runtime.info" | "coworkers.get", payload: unknown = {}) => {
+      const response = nativeRecord(await evaluateOnSurface(app, browserScript((command, payload) => window.__COWORKER__.invoke(command, payload), [command, payload]), { timeoutMs: 15_000 }));
       if (response.ok !== true) throw new Error(`Native fixture setup failed: ${command}: ${String(response.error ?? "unknown error")}`);
       return nativeRecord(response.result);
     };
@@ -187,22 +296,94 @@ export async function nativePackagedDiscussion(seed: Seed, { place }: { place: P
       if (!response.ok) throw new Error(`Native fixture ${method} ${route}: HTTP ${response.status}`);
       return response.json();
     };
-    const created = await invoke("coworkers.create", { name: "Editor", role: "Writing partner", mission: "Help shape clear product writing.", avatarColor: "blue", avatarGlasses: "round" });
-    if (typeof created.workspaceId !== "string" || !created.workspaceId) throw new Error("No native coworker workspace.");
-    const workspace = `/workspace/${encodeURIComponent(created.workspaceId)}`;
-    await request("PATCH", `${workspace}/config`, { opencode: { provider: {
-      "eval-native-discussion": { npm: "@ai-sdk/openai-compatible", name: "Discussion fixture", options: { baseURL: `${model.url}/v1`, apiKey: "fixture-only" }, models: { reply: { name: "Discussion fixture", tool_call: true } } },
-    } } });
-    await request("POST", `${workspace}/engine/reload`, {});
-    await invoke("coworkers.update", { slug: "editor", patch: { model: "eval-native-discussion/reply", modelVariant: "" } });
-    const native = (route: string) => request("GET", `${workspace}/opencode2/api${route}`);
-    const models = nativeRows(nativeRecord(await native("/model")).data);
-    const available = models.filter((model) => model.enabled === true).map((model) => `${model.providerID}/${model.id}`);
-    if (JSON.stringify(available) !== JSON.stringify(["eval-native-discussion/reply"])) throw new Error(`Fixture must be the only enabled native model: ${JSON.stringify(available)}`);
-    const engine = nativeRecord(await request("GET", "/experimental/engine-v2-preview/status"));
-    await seed.evalIn(app, () => { location.reload(); return true; });
+    const tokens = nativeRecord(JSON.parse(await readFile(join(profileDir, "electron-userdata", "coworker-server-tokens.json"), "utf8")));
+    if (typeof tokens.hostToken !== "string" || !tokens.hostToken) throw new Error("Isolated host credential is unavailable.");
+    const hostToken = tokens.hostToken;
+    const providerWorkspace = join(profileDir, "provider-bootstrap");
+    await mkdir(providerWorkspace);
+    const registered = await fetch(`${baseUrl}/workspaces/local`, {
+      method: "POST", headers: { "x-openwork-host-token": hostToken, "Content-Type": "application/json" },
+      body: JSON.stringify({ folderPath: providerWorkspace, name: "Fixture provider bootstrap", preset: "minimal" }),
+      redirect: "error", signal: AbortSignal.timeout(60_000),
+    });
+    if (!registered.ok) throw new Error(`Isolated provider workspace registration returned HTTP ${registered.status}.`);
+    await registered.body?.cancel();
+    const configureCredential = async (credential: "initial" | "rotated") => {
+      model.expectCredential(credential);
+      const response = await fetch(`${baseUrl}/runtime-config/providers`, {
+        method: "PATCH", headers: { "x-openwork-host-token": hostToken, "Content-Type": "application/json" },
+        body: JSON.stringify({ provider: {
+          "eval-native-discussion": { npm: "@ai-sdk/openai-compatible", name: "Discussion fixture", options: { baseURL: `${model.url}/v1`, apiKey: `fixture-only-${credential}` }, models: { reply: { name: "Discussion fixture", tool_call: true } } },
+        } }), redirect: "error", signal: AbortSignal.timeout(60_000),
+      });
+      if (!response.ok) throw new Error(`Dummy provider configuration returned HTTP ${response.status}.`);
+      const result = nativeRecord(await response.json());
+      return { changed: result.changed, reload: result.reload };
+    };
+    await configureCredential("initial");
+    const workspaceInfo = async () => {
+      const current = await invoke("coworkers.get", { slug: "editor" });
+      if (typeof current.workspaceId !== "string" || !current.workspaceId || current.path !== join(profileDir, "coworkers", "editor")) throw new Error("Editor is not in the isolated workspace.");
+      return { id: current.workspaceId, path: current.path };
+    };
+    const native = async (route: string) => request("GET", `/workspace/${encodeURIComponent((await workspaceInfo()).id)}/opencode2/api${route}`);
+    const engineState = async () => nativeRecord(await request("GET", "/experimental/engine-v2-preview/status"));
+    const engine = await engineState();
+    const events = stack.use(await nativeDiscussionEvents(app, baseUrl));
+    function observePreparation() {
+      window.__coworkerPreparation?.observer.disconnect();
+      const samples: Window["__coworkerPreparation"]["samples"] = [];
+      const record = () => {
+        const send = document.querySelector<HTMLButtonElement>('[data-testid="coworker-send"]');
+        const sample = {
+          top: document.querySelector('[data-testid="coworker-top-status"]')?.textContent?.trim() ?? "",
+          warming: Boolean(document.querySelector('[data-testid="coworker-workspace-warming"]')),
+          problem: Boolean(document.querySelector('[data-testid="coworker-workspace-problem"]')),
+          composer: Boolean(document.querySelector('textarea[aria-label="Message Editor"]')),
+          send: send?.getAttribute("aria-label") ?? "", disabled: send?.disabled ?? true,
+        };
+        if (JSON.stringify(samples.at(-1)?.state) !== JSON.stringify(sample)) {
+          if (samples.length >= 500) { window.__coworkerPreparation.overflow = true; return; }
+          samples.push({ atMs: performance.now(), state: sample });
+        }
+      };
+      const observer = new MutationObserver(record);
+      window.__coworkerPreparation = { samples, observer, overflow: false };
+      const start = () => {
+        observer.observe(document.body, { subtree: true, childList: true, characterData: true, attributes: true });
+        record();
+      };
+      if (document.body) start();
+      else document.addEventListener("DOMContentLoaded", start, { once: true });
+    }
+    stack.use(await addInitScript(app.client, observePreparation));
+    await evaluateOnSurface(app, observePreparation);
     return {
-      app, model, cold, engine,
+      app, model, cold, engine, engineState, workspaceInfo, events,
+      configureCredential,
+      preparation: () => evaluateOnSurface(app, () => ({ samples: window.__coworkerPreparation.samples, overflow: window.__coworkerPreparation.overflow })),
+      async readinessKey() {
+        const info = await invoke("runtime.info");
+        if (typeof info.readinessKey !== "string" || !info.readinessKey) throw new Error("Native readiness generation is unavailable.");
+        return info.readinessKey;
+      },
+      async availableModels() {
+        return nativeRows(nativeRecord(await native("/model")).data).filter((model) => model.enabled === true).map((model) => `${model.providerID}/${model.id}`);
+      },
+      async configuration() {
+        const workspace = await workspaceInfo();
+        const files = [
+          ["native", join(profileDir, "electron-userdata-opencode2", "config", "opencode.json")],
+          ...["opencode.json", ".opencode/coworker-abilities.json", ".opencode/coworker-context.json"].map((name) => [name, join(workspace.path, name)]),
+        ];
+        return Promise.all(files.map(async ([name, file]) => {
+          const before = await stat(file!, { bigint: true });
+          const digest = createHash("sha256").update(await readFile(file!)).digest("hex");
+          const after = await stat(file!, { bigint: true });
+          if (before.ino !== after.ino || before.mtimeNs !== after.mtimeNs || before.ctimeNs !== after.ctimeNs) throw new Error("Native configuration changed during observation.");
+          return { name, digest, inode: after.ino.toString(), mtimeNs: after.mtimeNs.toString(), ctimeNs: after.ctimeNs.toString(), bytes: Number(after.size) };
+        }));
+      },
       uiState: () => evaluateOnSurface(app, () => ({
         draft: document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message Editor"]')?.value ?? null,
         working: document.querySelector('[data-testid="coworker-composer"]')?.getAttribute("data-working") ?? null,
@@ -431,17 +612,45 @@ export const voiceMp3 = Buffer.concat(Array.from({ length: 10 }, () => Buffer.fr
   + "/+MYxAAOEPaoAYbIAKo6f/7vYkjRL/+MuyRpEA//7EZNQ8kMFlRa5rX0M4CECKa9nTwgZuSbi8zLaXK1W2d5QMZURBUFUxBA"
   + "/+MYxAAOuO6cAcwQAZta1rWtata1rWta2ta1rWtata1rVlatXLly46MhCBICRNYJQNgbA2EYnGQCAgICAgoKFBQUFBIKCgoK", "base64")));
 
+type CoworkerProductBridge = typeof import("../../apps/coworker/src/lib/bridge.ts").coworkerBridge;
+
+type CoworkerTestResults = {
+  "runtime.info": Awaited<ReturnType<CoworkerProductBridge["runtimeInfo"]>>;
+  "coworkers.get": Awaited<ReturnType<CoworkerProductBridge["coworkers"]["get"]>>;
+  "coworkers.list": Awaited<ReturnType<CoworkerProductBridge["coworkers"]["list"]>>;
+  "coworkers.create": Awaited<ReturnType<CoworkerProductBridge["coworkers"]["create"]>>;
+  "coworkers.files.read": { content: Awaited<ReturnType<CoworkerProductBridge["files"]["read"]>> };
+  "settings.progressModels": Awaited<ReturnType<CoworkerProductBridge["settings"]["progressModels"]>>;
+  "turns.activity": Awaited<ReturnType<CoworkerProductBridge["turns"]["activity"]>>;
+  "turns.state": Awaited<ReturnType<CoworkerProductBridge["turns"]["state"]>>;
+  "localResponsibilities.list": Awaited<ReturnType<CoworkerProductBridge["localResponsibilities"]["list"]>>;
+  "localResponsibilities.status": Awaited<ReturnType<CoworkerProductBridge["localResponsibilities"]["status"]>>;
+  "collaboration.receipts": Awaited<ReturnType<CoworkerProductBridge["collaboration"]["receipts"]>>;
+  "workers.get": Awaited<ReturnType<CoworkerProductBridge["workers"]["get"]>>;
+};
+
+type CoworkerTestResponse<T> = { ok: true; result: T } | { ok: false; result?: never; error: string; maintenanceRetryable?: boolean };
+
 /** Read-result shapes at the native IPC type boundary; never installs or replaces the bridge. */
 export interface CoworkerTestBridge {
-  invoke(command: "runtime.info"): Promise<{ ok: boolean; result: { serverUrl: string; ownerToken: string } }>;
-  invoke(command: "coworkers.get", payload: { slug: string }): Promise<{ ok: boolean; result: { model: string; workspaceId: string } }>;
-  invoke(command: "coworkers.list"): Promise<{ ok: boolean; result: Array<{ slug: string; name: string; model: string; automations: unknown[] }> }>;
-  invoke(command: "coworkers.files.read", payload: { slug: string; path: string }): Promise<{ ok: boolean; result: { content: string } }>;
-  invoke(command: string, payload?: unknown): Promise<unknown>;
+  invoke(command: "runtime.info"): Promise<{ ok: boolean; result: CoworkerTestResults["runtime.info"] }>;
+  invoke(command: "coworkers.get", payload: { slug: string }): Promise<{ ok: boolean; result: CoworkerTestResults["coworkers.get"] }>;
+  invoke(command: "coworkers.list"): Promise<{ ok: boolean; result: CoworkerTestResults["coworkers.list"] }>;
+  invoke(command: "coworkers.files.read", payload: { slug: string; path: string }): Promise<{ ok: boolean; result: CoworkerTestResults["coworkers.files.read"] }>;
+  invoke<C extends string>(command: C, payload?: unknown): Promise<C extends keyof CoworkerTestResults ? CoworkerTestResponse<CoworkerTestResults[C]> : unknown>;
 }
 
 declare global {
   interface Window {
+    __coworkerPreparation: {
+      samples: Array<{ atMs: number; state: { top: string; warming: boolean; problem: boolean; composer: boolean; send: string; disabled: boolean } }>;
+      observer: MutationObserver;
+      overflow: boolean;
+    };
+    __COWORKER_CHAT_TRACE__?: {
+      trace: Array<{ userVisible: boolean; assistantReady: boolean; threadStatus: string; topStatus: string; working: boolean }>;
+      observer: MutationObserver;
+    };
     __coworkerVoiceCapture: {
       calls: number;
       tracks: MediaStreamTrack[];

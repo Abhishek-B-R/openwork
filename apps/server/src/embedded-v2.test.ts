@@ -1,5 +1,5 @@
 import { expect, spyOn, test } from "bun:test";
-import { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, realpath, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -14,7 +14,7 @@ if (!process.env.OPENWORK_EMBEDDED_V2_TEST_ROOT) {
     try {
       const env = Object.fromEntries(Object.entries(process.env).filter(([key]) =>
         !/^(OPENWORK_|OPENCODE_|COWORKER_|SENTRY_|XDG_|HOME$)/.test(key)));
-      const child = Bun.spawn([process.execPath, "--conditions=development", "test", fileURLToPath(import.meta.url),
+      const child = Bun.spawn([process.execPath, "--conditions=development", "test", ...(process.env.OPENWORK_NATIVE_PRESENTATION_CHECK === "1" ? ["--test-name-pattern", "native live presentation"] : process.env.OPENWORK_NATIVE_CONFIG_CHECK === "1" ? ["--test-name-pattern", "native canonical configuration"] : []), fileURLToPath(import.meta.url),
         fileURLToPath(new URL("./engine-v2-preview.test.ts", import.meta.url)),
         ...(nativeBinary ? [fileURLToPath(new URL("./embedded-v2-native.test.ts", import.meta.url))] : [])], {
         env: { ...env, HOME: root, XDG_CONFIG_HOME: join(root, "config"), XDG_DATA_HOME: join(root, "data"),
@@ -35,9 +35,11 @@ if (!process.env.OPENWORK_EMBEDDED_V2_TEST_ROOT) {
   }, nativeBinary ? 115_000 : 45_000);
 } else {
   const { startEmbeddedServer } = await import("./embedded.js");
+  const { proxyOpencodeV2Request } = await import("./server.js");
   const managedModule = await import("./managed-opencode-v2.js");
   const v1Module = await import("./managed-opencode.js");
-  const { writeRuntimeOpencodeConfig, writeGlobalRuntimeOpencodeConfig } = await import("./runtime-opencode-config-store.js");
+  const { writeRuntimeOpencodeConfig, writeGlobalRuntimeOpencodeConfig, writeManagedDesktopPolicy } = await import("./runtime-opencode-config-store.js");
+  const { desktopConfigSchema } = await import("@openwork/types/den/desktop-policies");
   const { engineV2ByConfig } = await import("./engine-v2-preview.js");
   const { default: constants } = await import("../../../constants.json", { with: { type: "json" } });
   const { default: nativeRuntime } = await import("../../coworker/native-runtime.json", { with: { type: "json" } });
@@ -52,8 +54,8 @@ if (!process.env.OPENWORK_EMBEDDED_V2_TEST_ROOT) {
     const workspace = join(root, "workspace");
     await mkdir(workspace);
     await writeFile(bin, `#!${process.execPath}
-import { appendFileSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { appendFileSync, existsSync, readFileSync, realpathSync } from "node:fs";
+import { dirname, join } from "node:path";
 const log = (value) => appendFileSync(process.env.FIXTURE_LOG, JSON.stringify(value) + "\\n");
 const config = () => JSON.parse(readFileSync(join(process.env.OPENCODE_CONFIG_DIR, "opencode.json"), "utf8"));
 log({ spawn: true, args: process.argv.slice(2), serverUrl: process.env.OPENWORK_SERVER_URL,
@@ -68,6 +70,17 @@ const server = Bun.serve({ hostname: "127.0.0.1", port: 0, async fetch(request) 
   log({ method: request.method, path: url.pathname, query: Object.fromEntries(url.searchParams) });
   if (request.headers.get("authorization") !== "Basic " + Buffer.from("opencode:" + process.env.OPENCODE_PASSWORD).toString("base64")) return new Response(null, { status: 401 });
   if (url.pathname === "/api/health") return Response.json({ healthy: true, pid: process.pid, version: process.env.FIXTURE_VERSION });
+  const directory = realpathSync(url.searchParams.get("location[directory]") ?? process.cwd());
+  const project = realpathSync(dirname(process.env.FIXTURE_LOG));
+  if (url.pathname === "/api/location") return Response.json({ directory, project: { id: "fixture", directory: project, canonical: project } });
+  if (url.pathname === "/api/config") {
+    const files = [join(process.env.OPENCODE_CONFIG_DIR, "opencode.json")];
+    for (let folder = directory; ; folder = dirname(folder)) {
+      files.push(join(folder, "opencode.json"), join(folder, "opencode.jsonc"));
+      if (folder === project || dirname(folder) === folder) break;
+    }
+    return Response.json([...new Set(files)].filter((file) => existsSync(file)).map((file) => ({ type: "document", path: realpathSync(file), info: JSON.parse(readFileSync(file, "utf8")) })));
+  }
   if (url.pathname === "/api/plugin/await-activation") return new Response(null, { status: 204 });
   if (url.pathname === "/api/plugin") return Response.json({ data: [] });
   if (url.pathname === "/api/provider" || url.pathname.startsWith("/api/provider/")) {
@@ -84,7 +97,9 @@ const server = Bun.serve({ hostname: "127.0.0.1", port: 0, async fetch(request) 
     const preferred = config().model;
     return Response.json({ data: url.pathname === "/api/model" ? models : models.find((model) => model.providerID === preferred?.providerID && model.id === preferred?.model) ?? null });
   }
-  if (url.pathname === "/api/integration") return Response.json({ data: [{ id: "fixture-integration", connections: [{ type: "env", name: "FIXTURE_CONNECTED" }] }] });
+  if (url.pathname === "/api/integration") return Response.json(existsSync(join(process.env.OPENCODE_CONFIG_DIR, "fixture-connections.json"))
+    ? JSON.parse(readFileSync(join(process.env.OPENCODE_CONFIG_DIR, "fixture-connections.json"), "utf8"))
+    : { data: [{ id: "fixture-integration", connections: [{ type: "env", name: "FIXTURE_CONNECTED" }] }] });
   if (url.pathname === "/api/mcp") return Response.json({ data: [...mcps.keys()].map((name) => ({ name, status: { status: "connected" } })) });
   if (url.pathname.startsWith("/api/mcp/")) {
     const name = decodeURIComponent(url.pathname.slice("/api/mcp/".length));
@@ -121,7 +136,7 @@ const server = Bun.serve({ hostname: "127.0.0.1", port: 0, async fetch(request) 
     if (action === "wait" && request.method === "POST") return new Response(null, { status: active.has(id) ? 409 : 204 });
   }
   if (url.pathname.includes("/instructions/entries/") && request.method === "PUT") { log({ instruction: await request.json() }); return new Response(null, { status: 204 }); }
-  if (url.pathname.endsWith("/prompt") && request.method === "POST") { const data = await request.json(); log({ prompt: data }); return Response.json({ data }); }
+  if ((url.pathname.endsWith("/prompt") || url.pathname.endsWith("/synthetic")) && request.method === "POST") { const data = await request.json(); log({ prompt: data }); return Response.json({ data }); }
   return Response.json({ error: "unexpected route" }, { status: 404 });
 } });
 console.log("server listening on http://127.0.0.1:" + server.port);
@@ -347,6 +362,12 @@ process.on("SIGTERM", () => { log({ stopped: true }); server.stop(true); process
   test("v2 is exclusive, ready on return, hot-updated and stopped once", async () => {
     const item = await fixture();
     const v1 = spyOn(v1Module, "createManagedOpencodeServer");
+    let managed: Awaited<ReturnType<typeof managedModule.createManagedOpencodeV2Server>> | undefined;
+    const createManaged = managedModule.createManagedOpencodeV2Server;
+    const captureManaged = spyOn(managedModule, "createManagedOpencodeV2Server").mockImplementation(async (options) => {
+      managed = await createManaged(options);
+      return managed;
+    });
     process.env.OPENWORK_OPENCODE_BASE_URL = "http://127.0.0.1:1/v1-must-not-be-probed";
     process.env.OPENWORK_OPENCODE_BIN = "/missing/v1-must-not-be-spawned";
     process.env.OPENWORK_OPENCODE2_BIN = "/missing/ambient-v2-must-not-win";
@@ -381,6 +402,58 @@ process.on("SIGTERM", () => { log({ stopped: true }); server.stop(true); process
       const session = await fetch(mount + "/api/session", { method: "POST", headers,
         body: JSON.stringify({ location: { directory: "/wrong" }, title: "Isolated" }) });
       expect(await session.json()).toMatchObject({ data: { location: { directory: item.options.workspaces[0] } } });
+      await fetch(mount + "/api/session", { method: "POST", headers, body: JSON.stringify({ id: "ses_prepared" }) });
+      let checked = false;
+      let refuse = true;
+      handle.config.opencodeV2!.beforeInput = async (input) => {
+        expect(input).toMatchObject({ workspaceId: id, directory: item.options.workspaces[0], receipt: "prepared-fixture" });
+        expect(input.signal).toBeInstanceOf(AbortSignal);
+        checked = true;
+        if (refuse) throw new Error("Fixture configuration changed during preparation");
+      };
+      try {
+        const refused = await fetch(mount + "/api/session/ses_prepared/prompt", { method: "POST",
+          headers: { ...headers, "x-openwork-native-readiness": "prepared-fixture" }, body: JSON.stringify({ id: "msg_prepared", text: "Keep this draft" }) });
+        expect(refused.status).toBe(400);
+        expect((await refused.json()).code).toBe("readiness_changed");
+        expect(checked).toBe(true);
+        expect(await readFile(item.log, "utf8")).not.toContain('"prompt":');
+        refuse = false;
+        for (const route of ["prompt", "synthetic"]) {
+          const accepted = await fetch(mount + `/api/session/ses_prepared/${route}`, { method: "POST",
+            headers: { ...headers, "x-openwork-native-readiness": "prepared-fixture" }, body: JSON.stringify({ id: `msg_${route}`, text: "Body retained for late policy" }) });
+          expect(accepted.status).toBe(200);
+        }
+        for (const route of ["/api/generate", "/api/session/ses_prepared/skill", "/api/session/ses_prepared/compact", "/api/session/ses_prepared/inbox/msg_pending/steer", "/api/session/ses_prepared/interrupt?continue=true"]) {
+          expect((await fetch(mount + route, { method: "POST", headers, body: "{}" })).status).toBe(403);
+        }
+        const beforeLogs = await readFile(item.log, "utf8");
+        for (const route of ["/api/experimental/session/ses_foreign/log", "/experimental/session/ses_foreign/log", "/api/%65xperimental/session/ses_foreign/log/"]) {
+          expect((await fetch(mount + route, { headers })).status).toBe(403);
+        }
+        expect(await readFile(item.log, "utf8")).toBe(beforeLogs);
+      } finally { delete handle.config.opencodeV2!.beforeInput; }
+      for (const reason of ["abort", "revoked"]) {
+        let enter = () => {}, release = () => {};
+        const entered = new Promise<void>((resolve) => { enter = resolve; });
+        const gate = new Promise<void>((resolve) => { release = resolve; });
+        const controller = new AbortController();
+        let authorized = true;
+        handle.config.opencodeV2!.beforeInput = async () => { enter(); await gate; };
+        const engine = engineV2ByConfig.get(handle.config)!;
+        const url = new URL(mount + "/api/session/ses_prepared/synthetic");
+        const pending = proxyOpencodeV2Request({ actor: { type: "remote", scope: "owner" }, config: handle.config,
+          workspace: handle.config.workspaces[0]!, connection: engine.connection()!, proxyPath: "/opencode2/api/session/ses_prepared/synthetic", url,
+          request: new Request(url, { method: "POST", body: JSON.stringify({ id: `msg_late_${reason}`, text: "Do not dispatch late" }), signal: controller.signal }),
+          syncCloudSkills: engine.syncCloudSkills, assertCallerCurrent: async () => { if (!authorized) throw new Error("Fixture token revoked"); } });
+        try {
+          await entered;
+          if (reason === "abort") controller.abort(); else authorized = false;
+          release();
+          await expect(pending).rejects.toThrow(reason === "abort" ? "abort" : "revoked");
+          expect(await readFile(item.log, "utf8")).not.toContain(`msg_late_${reason}`);
+        } finally { release(); delete handle.config.opencodeV2!.beforeInput; await pending.catch(() => undefined); }
+      }
 
       const patch = await fetch(handle.url + "/runtime-config/providers", { method: "PATCH",
         headers: { ...headers, "x-openwork-host-token": item.options.hostToken },
@@ -390,17 +463,85 @@ process.on("SIGTERM", () => { log({ stopped: true }); server.stop(true); process
       expect((await native()).agents.coworker.sources).toContain("tools");
       expect((await native()).plugins).toEqual(item.options.opencodeV2.config.plugins);
       const hostHeaders = { ...headers, "x-openwork-host-token": item.options.hostToken };
+      const engine = engineV2ByConfig.get(handle.config)!;
+      await engine.ensureWorkspaceReady(item.options.workspaces[0]!);
+      const activationCount = async () => (await readFile(item.log, "utf8")).match(/"path":"\/api\/plugin\/await-activation"/g)?.length ?? 0;
+      const activations = await activationCount();
+      await utimes(nativePath, 1, 1);
+      const settled = await stat(nativePath, { bigint: true });
+      const unchanged = await fetch(handle.url + "/runtime-config/providers", { method: "PATCH", headers: hostHeaders,
+        body: JSON.stringify({ provider: { fixture: { models: { fixture: { name: "Fixture" } }, options: { apiKey: "synthetic-key" }, npm: "@ai-sdk/openai" } } }) });
+      expect(unchanged.status).toBe(200);
+      expect((await unchanged.json()).reload).toBe("skipped");
+      for (const token of ["fixture-mcp-token", "fixture-mcp-rotated"]) {
+        await writeGlobalRuntimeOpencodeConfig(handle.config, (current) => ({ ...current,
+          mcp: { "token-fixture": { type: "remote", url: "http://127.0.0.1:1/unused", headers: { Authorization: token } } } }));
+        await engine.refresh();
+      }
+      await engine.ensureWorkspaceReady(item.options.workspaces[0]!);
+      const repeated = await stat(nativePath, { bigint: true });
+      expect(repeated.mtimeNs).toBe(settled.mtimeNs);
+      expect(repeated.ino).toBe(settled.ino);
+      expect(await activationCount()).toBe(activations);
       const setCredential = (value: string) => fetch(handle.url + "/env", { method: "PUT", headers: hostHeaders,
         body: JSON.stringify({ key: "FIXTURE_API_KEY", value }) });
       expect((await setCredential("first-key")).status).toBe(200);
       expect((await fetch(handle.url + "/runtime-config/providers", { method: "PATCH", headers: hostHeaders,
         body: JSON.stringify({ provider: { fixture: { npm: "@ai-sdk/openai", env: ["FIXTURE_API_KEY"], models: {} } } }) })).status).toBe(200);
       expect((await native()).providers.fixture.settings.apiKey).toBe("first-key");
-      expect((await setCredential("rotated-key")).status).toBe(200);
-      await waitFor(async () => (await native()).providers.fixture.settings.apiKey === "rotated-key");
+      const active = managed!;
+      const activatedBeforeRotation = handle.managedOpencodeV2!.configurationRevision;
+      const fetchJson = active.fetchJson;
+      const failProvider = spyOn(active, "fetchJson").mockImplementation(async (path, init) => {
+        if (path === "/api/provider") throw new Error("Fixture provider confirmation unavailable");
+        return fetchJson(path, init);
+      });
+      try {
+        expect((await setCredential("rotated-key")).status).toBe(200);
+        await waitFor(async () => engine.status().lastError === "Fixture provider confirmation unavailable");
+        expect((await native()).providers.fixture.settings.apiKey).toBe("rotated-key");
+        expect(handle.managedOpencodeV2?.configurationPending).toBe(true);
+        expect(handle.managedOpencodeV2?.configurationRevision).toBe(activatedBeforeRotation);
+        await expect(engine.ensureWorkspaceReady(item.options.workspaces[0]!)).rejects.toThrow("provider confirmation");
+      } finally { failProvider.mockRestore(); }
+      const rotated = await stat(nativePath, { bigint: true });
+      const retried = await fetch(handle.url + "/runtime-config/providers", { method: "PATCH", headers: hostHeaders,
+        body: JSON.stringify({ provider: { fixture: { npm: "@ai-sdk/openai", env: ["FIXTURE_API_KEY"], models: {} } } }) });
+      expect(retried.status).toBe(200);
+      expect((await retried.json()).reload).toBe("reloaded");
+      expect(handle.managedOpencodeV2?.configurationPending).toBe(false);
+      expect(handle.managedOpencodeV2?.configurationRevision).toBe(activatedBeforeRotation + 1);
+      expect((await stat(nativePath, { bigint: true })).mtimeNs).toBe(rotated.mtimeNs);
+      await engine.ensureWorkspaceReady(item.options.workspaces[0]!);
+      expect(await activationCount()).toBeGreaterThan(activations);
+      const skillDirectory = join(item.root, "owned-skills");
+      await mkdir(skillDirectory);
+      const beforeSkills = handle.managedOpencodeV2!.configurationRevision;
+      await active.setSkills([skillDirectory]);
+      await engine.refresh();
+      expect(handle.managedOpencodeV2?.configurationRevision).toBe(beforeSkills);
+      await writeManagedDesktopPolicy(handle.config, desktopConfigSchema.parse({ execution: { commands: "deny", blockedCommands: [] } }));
+      await engine.refresh();
+      expect((await native()).skills).toEqual([skillDirectory]);
+      expect((await native()).permissions).toContainEqual({ action: "shell", resource: "*", effect: "deny" });
+      const policyRevision = active.configurationRevision;
+      await active.setSkills([skillDirectory]);
+      await engine.refresh();
+      expect(active.configurationRevision).toBe(policyRevision);
+      expect((await native()).providers.fixture.settings.apiKey).toBe("rotated-key");
       expect((await fetch(handle.url + "/env/FIXTURE_API_KEY", { method: "DELETE", headers: hostHeaders })).status).toBe(200);
       await waitFor(async () => !(await native()).providers.fixture);
       expect((await fetch(mount + "/api/provider", { headers })).status).toBe(200);
+      const beforeCredential = handle.managedOpencodeV2!.configurationRevision;
+      const beforeCredentialKey = await handle.managedOpencodeV2!.workspaceReadiness(item.options.workspaces[0]!);
+      await writeFile(join(item.options.opencodeV2.rootDir, "config", "fixture-connections.json"), JSON.stringify({ data: [
+        { id: "fixture-integration", connections: [{ type: "credential", id: "cred_fixture_new", label: "Fixture" }] },
+      ] }));
+      const afterCredentialKey = await handle.managedOpencodeV2!.workspaceReadiness(item.options.workspaces[0]!);
+      expect(afterCredentialKey).not.toBe(beforeCredentialKey);
+      expect(handle.managedOpencodeV2!.configurationRevision).toBe(beforeCredential + 1);
+      expect(await handle.managedOpencodeV2!.workspaceReadiness(item.options.workspaces[0]!)).toBe(afterCredentialKey);
+      expect(handle.managedOpencodeV2!.configurationRevision).toBe(beforeCredential + 1);
       await writeRuntimeOpencodeConfig(handle.config, id, (current) => ({ ...current,
         mcp: { fixture: { type: "local", command: ["unused-fixture-command"] } } }));
       await waitFor(async () => (await readFile(item.log, "utf8")).includes('"method":"PUT","path":"/api/mcp/fixture"'));
@@ -422,11 +563,85 @@ process.on("SIGTERM", () => { log({ stopped: true }); server.stop(true); process
       expect(v1).not.toHaveBeenCalled();
     } finally {
       v1.mockRestore();
+      captureManaged.mockRestore();
       try { await stop?.(); } finally {
         // Setup and shutdown failures must not contaminate later test cases.
         for (const key of ["OPENWORK_OPENCODE_BASE_URL", "OPENWORK_OPENCODE_BIN", "OPENWORK_OPENCODE2_BIN", "OPENWORK_ENGINE_V2_PREVIEW", "OPENWORK_ENCRYPTION_KEY"]) delete process.env[key];
       }
     }
+  }, 15_000);
+
+  test("native source readiness rejects changes across credential waits and undiscovered root candidates", async () => {
+    const item = await fixture();
+    const directory = item.options.workspaces[0]!;
+    const local = join(directory, "opencode.json");
+    await writeFile(local, JSON.stringify({ permissions: [{ action: "shell", resource: "*", effect: "ask" }] }));
+    let managed: Awaited<ReturnType<typeof managedModule.createManagedOpencodeV2Server>> | undefined;
+    const create = managedModule.createManagedOpencodeV2Server;
+    const capture = spyOn(managedModule, "createManagedOpencodeV2Server").mockImplementation(async (options) => {
+      managed = await create(options);
+      return managed;
+    });
+    const handle = await startEmbeddedServer(item.options).finally(() => capture.mockRestore());
+    const engine = engineV2ByConfig.get(handle.config)!;
+    const current = handle.managedOpencodeV2!;
+    const active = managed!;
+    const nativeRead = active.fetchJson;
+    let frozen: Awaited<ReturnType<typeof nativeRead>> | undefined;
+    let release = () => {}, enter = () => {};
+    const entered = new Promise<void>((resolve) => { enter = resolve; });
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    let held = true;
+    const intercepted = spyOn(active, "fetchJson").mockImplementation(async (route, options) => {
+      if (route === "/api/config" && frozen && options?.directory === directory) return structuredClone(frozen);
+      if (route === "/api/integration" && held) { enter(); await gate; }
+      return nativeRead(route, options);
+    });
+    try {
+      held = false;
+      let expected = await current.workspaceReadiness(directory);
+      const original = expected;
+      const workspace = handle.config.workspaces[0]!;
+      await nativeRead("/api/session", { directory, method: "POST", body: { id: "ses_source_race", location: { directory } } });
+      handle.config.opencodeV2!.beforeInput = async (input) => {
+        if (await current.workspaceReadiness(directory, input.signal) !== expected) throw new Error("Stale native receipt");
+      };
+      const submit = () => {
+        const url = new URL(`${handle.url}/workspace/${workspace.id}/opencode2/api/session/ses_source_race/synthetic`);
+        return proxyOpencodeV2Request({ actor: { type: "remote", scope: "owner" }, config: handle.config, workspace,
+          connection: engine.connection()!, proxyPath: "/opencode2/api/session/ses_source_race/synthetic", url,
+          request: new Request(url, { method: "POST", body: JSON.stringify({ id: "msg_source_race", text: "Do not send stale input" }) }), syncCloudSkills: engine.syncCloudSkills });
+      };
+      frozen = await nativeRead("/api/config", { directory });
+      held = true;
+      const pending = submit();
+      await entered;
+      await writeFile(local, JSON.stringify({ permissions: [{ action: "shell", resource: "*", effect: "deny" }] }));
+      held = false;
+      release();
+      await expect(pending).rejects.toMatchObject({ code: "readiness_changed" });
+      await expect(current.workspaceReadiness(directory)).rejects.toThrow("not been confirmed");
+      await expect(engine.ensureWorkspaceReady(directory)).rejects.toThrow("not been confirmed");
+      expect(await readFile(item.log, "utf8")).not.toContain("msg_source_race");
+      frozen = undefined;
+      await engine.ensureWorkspaceReady(directory);
+      expected = await current.workspaceReadiness(directory);
+      expect(expected).not.toBe(original);
+      for (const candidate of [join(directory, "opencode.jsonc"), join(item.root, "opencode.jsonc")]) {
+        frozen = await nativeRead("/api/config", { directory });
+        await writeFile(candidate, JSON.stringify({ model: "fixture/added" }));
+        await expect(current.workspaceReadiness(directory)).rejects.toThrow("discovery has not settled");
+        await expect(engine.ensureWorkspaceReady(directory)).rejects.toThrow("discovery has not settled");
+        await expect(submit()).rejects.toMatchObject({ code: "readiness_changed" });
+        expect(await readFile(item.log, "utf8")).not.toContain("msg_source_race");
+        frozen = undefined;
+        await engine.ensureWorkspaceReady(directory);
+        const next = await current.workspaceReadiness(directory);
+        expect(next).not.toBe(expected);
+        expected = next;
+      }
+      expect((await submit()).status).toBe(200);
+    } finally { held = false; release(); intercepted.mockRestore(); await handle.stop(); }
   }, 15_000);
 
   test("host-only cleanup survives readiness failure without admitting work or crossing native ownership", async () => {

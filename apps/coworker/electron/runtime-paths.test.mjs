@@ -11,8 +11,25 @@ import { test } from "node:test";
 import YAML from "yaml";
 import { resolveBundledOpencodeV2Binary, resolveUserDataDir } from "./runtime-paths.mjs";
 import { beforePack, stageNativeServer } from "../scripts/electron-build.mjs";
+import { prepareNativePluginBundles } from "./prepare-native-plugins.mjs";
 import nativeRuntime from "../native-runtime.json" with { type: "json" };
 import { NATIVE_PLUGIN_DEPENDENCIES, configureNativePluginBundles, verifyNativePluginBundles } from "./native-plugin.mjs";
+
+test("native build staging accepts pnpm script approvals without admitting another workspace", async (t) => {
+  const root = await mkdtemp(path.join(tmpdir(), "coworker-sdk-workspace-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const dependencyDirectory = path.join(root, "sdk");
+  await mkdir(dependencyDirectory);
+  await writeFile(path.join(dependencyDirectory, "package.json"), JSON.stringify({ dependencies: NATIVE_PLUGIN_DEPENDENCIES }));
+  const prepare = () => prepareNativePluginBundles({ dependencyDirectory, outputDirectory: path.join(root, "bundles"), installDependencies: false });
+  const workspace = path.join(dependencyDirectory, "pnpm-workspace.yaml");
+  await writeFile(workspace, YAML.stringify({ packages: [], allowBuilds: { protobufjs: true, "msgpackr-extract": true } }));
+  await assert.rejects(prepare(), /dependencies are unavailable in read-only staging/);
+  for (const invalid of [{ packages: ["../*"] }, { packages: [], allowBuilds: { protobufjs: "set this to true or false" } }]) {
+    await writeFile(workspace, YAML.stringify(invalid));
+    await assert.rejects(prepare(), /must not reuse another pnpm workspace/);
+  }
+});
 
 test("packaging selects only the pinned native target without changing staging and rejects invalid inputs", async (t) => {
   const root = await mkdtemp(path.join(tmpdir(), "coworker-sidecars-"));

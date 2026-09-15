@@ -10,7 +10,8 @@ import type { ModelSelectionPreferences } from "./model-intelligence-index.ts";
 import type { Personality } from "./personalities";
 import type { WorkerEvent, WorkerLifespan, WorkerSummary } from "./workers";
 import type { AssignedCoworkerTemplate } from "@openwork/types/coworker-template";
-import type { HeadlessThreadModel, HeadlessTurnAcceptance } from "@openwork/headless-threads/v2";
+import type { HeadlessThreadModel, HeadlessThreadSnapshot, HeadlessTurnAcceptance } from "@openwork/headless-threads/v2";
+import type { LivePresentation } from "./live-stream.ts";
 import type { ThreadTurnState } from "./thread-queue.ts";
 import type { ExecutionActivity } from "./progress-activity.ts";
 import type { PendingInteractions, PermissionReply } from "./threads.ts";
@@ -514,6 +515,7 @@ type BridgeWindow = Window & {
     invoke: (command: string, payload?: unknown) => Promise<BridgeResponse>;
     onDeepLink?: (listener: (urls: string[]) => void) => () => void;
     onRuntimeChanged?: (listener: (runtime: RuntimeInfo) => void) => () => void;
+    onPresentationChanged?: (listener: (change: { workspaceId: string; createdAt: string; generation: string }) => void) => () => void;
     onReactionsChanged?: (listener: (change: { scope: MessageReactionScope; revision: number }) => void) => () => void;
   };
 };
@@ -583,13 +585,18 @@ export const coworkerBridge = {
     excludedThreads: (slug: string) => invoke<string[]>("collaboration.excludedThreads", { slug }),
   },
   turns: {
+    onPresentationChanged: (listener: (change: { workspaceId: string; createdAt: string; generation: string }) => void) => {
+      const host: BridgeWindow = window;
+      return host.__COWORKER__?.onPresentationChanged?.(listener) ?? (() => undefined);
+    },
+    presentation: (input: { slug: string; threadId: string; workspaceId: string; createdAt: string; generation: string }) => invoke<{ snapshot: HeadlessThreadSnapshot; presentation: LivePresentation }>("turns.presentation", input),
     activity: (slug: string, threadId: string) => invoke<ExecutionActivity[]>("turns.activity", { slug, threadId }),
     state: (slug: string, threadId: string) => invoke<ThreadTurnState>("turns.state", { slug, threadId }),
     update: (slug: string, threadId: string, previous: ThreadTurnState, next: ThreadTurnState) => invoke<ThreadTurnState>("turns.update", { slug, threadId, previous, next }),
     /** Explicit person recovery may return a NEW messageId and continuation prompt after tool work. */
     selectSkill: (input: { slug: string; uri: string; label: string; account: { baseUrl: string; orgId: string; email: string } }) => invoke<import("./skill-selection.ts").SelectedSkill>("turns.selectSkill", input),
     validateSkills: (slug: string, fields: import("./skill-selection.ts").SkillFields) => invoke<void>("turns.validateSkills", { slug, ...fields }),
-    send: (input: import("./skill-selection.ts").SkillFields & { slug: string; threadId: string; prompt: string; messageId: string; model?: HeadlessThreadModel; expectedReadiness?: { workspaceId: string; createdAt: string; readinessKey: string }; retry?: boolean; retryByPerson?: boolean; retryLabel?: string; kind: "discussion" | "assignment" | "worker" }) => invoke<(HeadlessTurnAcceptance & { prompt: string; rejected?: false }) | { rejected: true; messageId: string; error: string; notSubmitted: boolean; code: string; status?: number }>("turns.send", input),
+    send: (input: import("./skill-selection.ts").SkillFields & { slug: string; threadId: string; prompt: string; messageId: string; model?: HeadlessThreadModel; expectedReadiness?: { workspaceId: string; createdAt: string; readinessKey: string; workspaceKey?: string }; retry?: boolean; retryByPerson?: boolean; retryLabel?: string; kind: "discussion" | "assignment" | "worker" }) => invoke<(HeadlessTurnAcceptance & { prompt: string; rejected?: false }) | { rejected: true; messageId: string; error: string; notSubmitted: boolean; code: string; status?: number }>("turns.send", input),
     cancel: (slug: string, threadId: string, messageId?: string) => invoke<{ ok: boolean }>("turns.cancel", { slug, threadId, messageId }),
   },
   templates: {
@@ -612,7 +619,7 @@ export const coworkerBridge = {
       invoke<CoworkerSummary>("coworkers.create", input),
     update: (slug: string, patch: Partial<Pick<CoworkerSummary, "workspaceId" | "conversationThreadId" | "automations" | "mission" | "role" | "model" | "modelVariant" | "useAppModelDefaults" | "thinkingModel" | "thinkingModelVariant" | "deliveryModel" | "deliveryModelVariant" | "modelChosenBy" | "modelMode" | "modelSelectionPreferences" | "effortPreference" | "avatarColor" | "avatarGlasses" | "personality">>) =>
       invoke<CoworkerSummary>("coworkers.update", { slug, patch }),
-    ensureWorkspace: (slug: string, expected?: { workspaceId: string; createdAt: string; readinessKey: string }) => invoke<CoworkerSummary & { readinessKey: string }>("coworkers.ensureWorkspace", { slug, expected }),
+    ensureWorkspace: (slug: string, expected?: { workspaceId: string; createdAt: string; readinessKey: string }) => invoke<CoworkerSummary & { readinessKey: string; workspaceKey: string }>("coworkers.ensureWorkspace", { slug, expected }),
     /** Retire: archive the whole home under `.retired/`; nothing is deleted. */
     remove: (slug: string) => invoke<{ ok: boolean; archiveId: string }>("coworkers.delete", { slug }),
     listRetired: () => invoke<RetiredCoworker[]>("coworkers.retired.list"),

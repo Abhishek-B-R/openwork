@@ -1,4 +1,6 @@
 import { build } from "esbuild";
+import YAML from "yaml";
+import { z } from "zod";
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
@@ -32,7 +34,7 @@ export async function prepareNativePluginBundles({ outputDirectory, dependencyDi
   else throw new Error("Native plugin build dependencies are unavailable in read-only staging.");
   const workspaceFile = path.join(dependencyDirectory, "pnpm-workspace.yaml");
   const workspace = await readFile(workspaceFile, "utf8").catch((error) => { if (error.code !== "ENOENT") throw error; return null; });
-  if (workspace !== null && workspace.trim() !== "packages: []") throw new Error("Native plugin staging must not reuse another pnpm workspace.");
+  if (workspace !== null && !z.object({ packages: z.array(z.never()), allowBuilds: z.record(z.string(), z.boolean()).optional() }).strict().safeParse(YAML.parse(workspace)).success) throw new Error("Native plugin staging must not reuse another pnpm workspace.");
   if (workspace === null && installDependencies) await writeFile(workspaceFile, "packages: []\n");
   const installed = async () => {
     for (const [name, version] of Object.entries(NATIVE_PLUGIN_DEPENDENCIES)) {

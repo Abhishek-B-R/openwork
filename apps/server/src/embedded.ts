@@ -74,7 +74,7 @@ export type EmbeddedServerHandle = {
   /** Liveness for the managed OpenCode child process, when spawned. */
   managedOpencode: { pid: number | null; isAlive: () => boolean } | null;
   /** The single mandatory v2 process owned by startServer, not a second sidecar. */
-  managedOpencodeV2: { pid: number | null; isAlive: () => boolean } | null;
+  managedOpencodeV2: Awaited<ReturnType<typeof startServer>>["managedOpencodeV2"];
   nativeCleanupRequest: (input: NativeCleanupRequest) => Promise<Response>;
   /** Current managed-engine generations for desktop diagnostics and acceptance checks. */
   managedOpencodePool: () => EnginePoolSnapshot | null;

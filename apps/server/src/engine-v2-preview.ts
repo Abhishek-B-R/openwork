@@ -1,8 +1,12 @@
 import { executionRules } from "./managed-policy-rules.js";
 import { execFile } from "node:child_process";
 import { readFileSync } from "node:fs";
-import { mkdir, realpath, writeFile } from "node:fs/promises";
-import { isAbsolute, join, sep } from "node:path";
+import { mkdir, readdir, realpath, writeFile } from "node:fs/promises";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { parse as parseJsonc } from "jsonc-parser";
+import { isDeepStrictEqual } from "node:util";
+import { createHash, randomUUID } from "node:crypto";
+import { readBoundedRegularTextFile } from "./jsonc.js";
 import { loopbackFetch } from "./server-fetch.js";
 
 import { resolveOpencodeV2Version } from "./opencode-v2-binary.js";
@@ -79,7 +83,7 @@ export interface NativeCleanupRequest {
 export interface EngineV2Preview {
   start(): Promise<void>;
   refresh(): Promise<void>;
-  process(): { pid: number | null; isAlive(): boolean };
+  process(): { pid: number | null; generation: string; isAlive(): boolean; readonly configurationRevision: number; readonly configurationPending: boolean; whenConfigurationSettled(): Promise<void>; workspaceReadiness(directory: string, signal?: AbortSignal): Promise<string> };
   status(): EngineV2PreviewStatus;
   setEnabled(enabled: boolean): Promise<EngineV2PreviewStatus>;
   setChatRouting(chatRouting: boolean): Promise<EngineV2PreviewStatus>;
@@ -370,6 +374,25 @@ function nativeCleanupRoute(method: string, path: string) {
   return { pathname, query, sessionId };
 }
 
+function configSourceFingerprint(file: string, text: string): string {
+  if (!/\.jsonc?$/.test(file)) return createHash("sha256").update(text).digest("hex");
+  const errors: { error: number; offset: number; length: number }[] = [];
+  const value: unknown = parseJsonc(text, errors, { allowTrailingComma: true });
+  const model = (input: unknown) => {
+    const match = typeof input === "string" ? /^([^/#]+)\/([^#]+)(?:#([^#]+))?$/.exec(input) : null;
+    return match ? { providerID: match[1], model: match[2], ...(match[3] ? { variant: match[3] } : {}) } : input;
+  };
+  if (!errors.length && isRecord(value)) {
+    if (Object.hasOwn(value, "model")) value.model = model(value.model);
+    for (const group of [value.agents, value.commands]) if (isRecord(group)) {
+      for (const entry of Object.values(group)) if (isRecord(entry) && Object.hasOwn(entry, "model")) entry.model = model(entry.model);
+    }
+  }
+  const ordered = (input: unknown): unknown => Array.isArray(input) ? input.map(ordered)
+    : isRecord(input) ? Object.fromEntries(Object.keys(input).sort().map((key) => [key, ordered(input[key])])) : input;
+  return createHash("sha256").update(!errors.length && value !== undefined ? JSON.stringify(ordered(value)) : text).digest("hex");
+}
+
 export function createEngineV2Preview(options: { config: ServerConfig; env?: Pick<EnvService, "list" | "onChange">; deferStart?: boolean }): EngineV2Preview {
   const { config } = options;
   const mandatory = config.engine === "v2";
@@ -396,7 +419,16 @@ export function createEngineV2Preview(options: { config: ServerConfig; env?: Pic
   let mirrorInFlight: Promise<void> | undefined;
   let mirrorDirty = false;
   let mirrorError: unknown;
-  const workspaceReadiness = new Map<string, Promise<void>>();
+  type NativeConfiguration = { entries: Record<string, unknown>[]; sources: unknown[]; connections: unknown[] };
+  const workspaceReadiness = new Map<string, { revision: number; configuration: NativeConfiguration; ready: Promise<void> }>();
+  const workspaceSnapshots = new Map<string, { key: string; configuration: NativeConfiguration }>();
+  const sourceObservations = new Map<string, Pick<NativeConfiguration, "entries" | "sources">>();
+  let mirroredConfigRevision: number | undefined;
+  let activatedRevision = 0;
+  let activatedConfiguration: Record<string, unknown> | undefined;
+  let activatedPolicy: unknown;
+  let nativeConnections: unknown[] | undefined;
+  let credentialReads: Promise<unknown> = Promise.resolve();
   let mirroredSpecs: OpencodeV2ProviderSpec[] = [];
   const workspaceMcp = new Map<string, Map<string, string>>();
   const mcpInFlight = new Map<string, Promise<void>>();
@@ -410,6 +442,7 @@ export function createEngineV2Preview(options: { config: ServerConfig; env?: Pic
       const active = sidecar;
       if (!active) throw new CloudNativeSkillSyncError("cloud_skill_engine_unavailable", "OpenCode v2 is not running");
       await active.setSkills(directory ? [directory] : []);
+      if (active.configurationRevision !== mirroredConfigRevision) scheduleMirror();
     },
   });
 
@@ -580,17 +613,19 @@ export function createEngineV2Preview(options: { config: ServerConfig; env?: Pic
   async function mirrorProviders(): Promise<void> {
     const active = sidecar;
     if (!active) return;
-    const providerMap = runtimeProviderMap(await readGlobalRuntimeOpencodeConfig(config));
+    const runtime = await readGlobalRuntimeOpencodeConfig(config);
+    const providerMap = runtimeProviderMap(runtime);
     const credentials = new Map((await options.env?.list() ?? []).map((entry) => [entry.key, entry.value]));
     const mapped = mapRuntimeProvidersToV2Specs(providerMap, credentials);
     const nextMirroredProviderIds = mapped.specs.map((spec) => spec.id);
     await active.setProviders(mapped.specs);
     mirroredSpecs = mapped.specs;
-    workspaceReadiness.clear();
+    const revision = active.configurationRevision;
     removedProviderIds = [...new Set([...removedProviderIds, ...mirroredProviderIds])]
       .filter((id) => !nextMirroredProviderIds.includes(id));
     mirroredProviderIds = nextMirroredProviderIds;
     skippedProviderIds = [...mapped.skippedProviderIds];
+    if (revision === mirroredConfigRevision && !mirrorError && isDeepStrictEqual(activatedPolicy, runtime.managedPolicy)) return;
     lastMirroredAt = new Date().toISOString();
     const expectedModelIds = mapped.specs.flatMap((spec) => spec.models.map((model) => model.id));
     const deadline = Date.now() + CATALOG_MIRROR_TIMEOUT_MS;
@@ -613,6 +648,21 @@ export function createEngineV2Preview(options: { config: ServerConfig; env?: Pic
     if (mandatory && (catalog.status !== 200 || lastError)) {
       throw new Error(lastError ?? `OpenCode v2 catalog returned HTTP ${catalog.status}`);
     }
+    if (mandatory) {
+      const configurationState = await prepareWorkspace(workspaceDir);
+      if (active.configurationRevision !== revision) throw new Error("OpenCode v2 configuration changed during activation");
+      const globalPath = await realpath(join(rootDir, "config", "opencode.json")).catch(() => resolve(rootDir, "config", "opencode.json"));
+      const document = configurationState.entries.find((entry) => entry.type === "document" && entry.path === globalPath)?.info;
+      if (!isRecord(document)) throw new Error("OpenCode v2 configuration is unavailable");
+      const { skills: _managedSkills, ...configuration } = document;
+      const next = { configuration: { ...configuration, skills: config.opencodeV2?.config?.skills }, policy: runtime.managedPolicy };
+      if (!isDeepStrictEqual(activatedConfiguration, next)) {
+        activatedConfiguration = structuredClone(next);
+        activatedRevision += 1;
+      }
+    } else activatedRevision = revision;
+    activatedPolicy = structuredClone(runtime.managedPolicy);
+    mirroredConfigRevision = revision;
   }
 
   function scheduleMirror(): void {
@@ -648,6 +698,10 @@ export function createEngineV2Preview(options: { config: ServerConfig; env?: Pic
   async function closeSidecar(): Promise<void> {
     const active = sidecar;
     workspaceReadiness.clear();
+    workspaceSnapshots.clear();
+    sourceObservations.clear();
+    nativeConnections = undefined;
+    mirroredConfigRevision = undefined;
     workspaceMcp.clear();
     mcpWorkspaces.clear();
     if (!active) return;
@@ -979,30 +1033,191 @@ export function createEngineV2Preview(options: { config: ServerConfig; env?: Pic
   }
 
   async function ensureWorkspaceReady(directory: string): Promise<void> {
-    if (mirrorInFlight) await mirrorInFlight;
+    do { if (mirrorInFlight) await mirrorInFlight; } while (mirrorInFlight);
     if (mandatory && mirrorError) throw mirrorError;
+    await prepareWorkspace(directory);
+  }
+
+  async function captureNativeSources(active: ManagedOpencodeV2Server, directory: string, signal?: AbortSignal): Promise<Pick<NativeConfiguration, "entries" | "sources">> {
+    const location = await active.fetchJson("/api/location", { directory, timeoutMs: 5_000, signal });
+    if (location.status !== 200 || !isRecord(location.json) || typeof location.json.directory !== "string"
+      || !isRecord(location.json.project) || typeof location.json.project.directory !== "string") throw new Error("Native configuration discovery scope is unavailable");
+    const root = await realpath(location.json.project.directory);
+    const current = await realpath(directory);
+    const within = relative(root, current);
+    if (await realpath(location.json.directory) !== current || isAbsolute(within) || within === ".." || within.startsWith(`..${sep}`)) throw new Error("Native configuration discovery scope changed");
+    const configuration = await active.fetchJson("/api/config", { directory, timeoutMs: 5_000, signal });
+    if (configuration.status !== 200 || !Array.isArray(configuration.json)) throw new Error("Native configuration is unavailable");
+    const entries: Record<string, unknown>[] = [];
+    const sources: unknown[] = [];
+    const globalPath = await realpath(join(rootDir, "config", "opencode.json")).catch(() => resolve(rootDir, "config", "opencode.json"));
+    let inspected = 0;
+    const digest = async (file: string) => {
+      if (++inspected > 512) throw new Error("Native configuration source limit exceeded");
+      file = await realpath(file).catch(() => resolve(file));
+      if (file === globalPath) return;
+      try {
+        const text = await readBoundedRegularTextFile(file, { maxBytes: 4 * 1024 * 1024, signal });
+        sources.push([file, configSourceFingerprint(file, text)]);
+      } catch (error) {
+        if (isRecord(error) && error.code === "ENOENT") sources.push([file, null]);
+        else throw error;
+      }
+    };
+    const inspectDirectory = async (source: string, kind: string, depth = 0): Promise<void> => {
+      if (++inspected > 512 || depth > 8) throw new Error("Native configuration source limit exceeded");
+      const names = await readdir(source, { withFileTypes: true }).catch((error: unknown) => {
+        if (isRecord(error) && error.code === "ENOENT") return null;
+        throw error;
+      });
+      if (!names) { sources.push([source, null]); return; }
+      const selected = names.filter((entry) => entry.isDirectory()
+        ? kind === "agents" || ["config", "agent", "agents", "command", "commands"].includes(entry.name)
+        : entry.name === "opencode.json" || entry.name === "opencode.jsonc" || entry.name.endsWith(".config") || (kind === "agents" && /\.(md|jsonc?)$/.test(entry.name)))
+        .sort((a, b) => a.name.localeCompare(b.name));
+      sources.push([source, selected.map((entry) => entry.name)]);
+      for (const entry of selected) {
+        const file = join(source, entry.name);
+        if (entry.isDirectory()) await inspectDirectory(file, ["agent", "agents", "command", "commands"].includes(entry.name) ? "agents" : kind, depth + 1);
+        else await digest(file);
+      }
+    };
+    for (const entry of configuration.json) {
+      if (!isRecord(entry) || !["document", "directory", "agents", "claude"].includes(String(entry.type))
+        || (entry.type === "document" ? !isRecord(entry.info) : typeof entry.path !== "string")
+        || (entry.path !== undefined && (typeof entry.path !== "string" || !isAbsolute(entry.path)))) throw new Error("Invalid native configuration source");
+      const source = typeof entry.path === "string" ? await realpath(entry.path).catch(() => resolve(String(entry.path))) : undefined;
+      entries.push({ ...entry, ...(source ? { path: source } : {}) });
+      if (!source) continue;
+      if (entry.type === "document") await digest(source);
+      else await inspectDirectory(source, String(entry.type));
+    }
+    const documents = new Set(entries.filter((entry) => entry.type === "document").map((entry) => entry.path));
+    for (let folder = current; ; folder = dirname(folder)) {
+      for (const name of ["opencode.json", "opencode.jsonc"]) {
+        const candidate = join(folder, name);
+        const canonical = await realpath(candidate).catch((error: unknown) => {
+          if (isRecord(error) && error.code === "ENOENT") return null;
+          throw error;
+        });
+        sources.push(["discovery", candidate, canonical]);
+        if (canonical ? !documents.has(canonical) : documents.has(candidate)) throw new Error("Native configuration discovery has not settled");
+        await digest(candidate);
+      }
+      if (folder === root) break;
+      if (dirname(folder) === folder) throw new Error("Native configuration discovery scope changed");
+    }
+    signal?.throwIfAborted();
+    return { entries, sources };
+  }
+
+  function assertSourceAgreement(previous: Pick<NativeConfiguration, "entries" | "sources"> | undefined, current: Pick<NativeConfiguration, "entries" | "sources">): void {
+    if (!previous) return;
+    const fingerprint = (snapshot: Pick<NativeConfiguration, "entries" | "sources">, path: unknown) => snapshot.sources.find((entry) =>
+      Array.isArray(entry) && entry[0] === path && (typeof entry[1] === "string" || entry[1] === null));
+    for (const entry of current.entries) {
+      if (entry.type !== "document" || typeof entry.path !== "string") continue;
+      const before = previous.entries.find((item) => item.type === "document" && item.path === entry.path);
+      if (before && isDeepStrictEqual(before.info, entry.info) && !isDeepStrictEqual(fingerprint(previous, entry.path), fingerprint(current, entry.path))) {
+        throw new Error("Native configuration source change has not been confirmed");
+      }
+    }
+  }
+
+  async function readNativeConfiguration(active: ManagedOpencodeV2Server, directory: string, signal?: AbortSignal): Promise<NativeConfiguration> {
+    const before = await captureNativeSources(active, directory, signal);
+    const previous = sourceObservations.get(directory);
+    assertSourceAgreement(previous, before);
+    if (!previous) sourceObservations.set(directory, before);
+    const observation = credentialReads.catch(() => undefined).then(async () => {
+      signal?.throwIfAborted();
+      const scoped = await active.fetchJson("/api/integration", { directory, timeoutMs: 5_000, signal });
+      const global = directory === workspaceDir ? scoped : await active.fetchJson("/api/integration", { directory: workspaceDir, timeoutMs: 5_000, signal });
+      const identitiesOf = (integrations: { status: number; json: unknown }) => {
+        const connections = isRecord(integrations.json) ? integrations.json.data : undefined;
+        if (integrations.status !== 200 || !Array.isArray(connections)) throw new Error("Native credential state is unavailable");
+        return connections.map((entry: unknown) => {
+          if (!isRecord(entry) || typeof entry.id !== "string" || !Array.isArray(entry.connections)) throw new Error("Invalid native credential state");
+          return { id: entry.id, connections: entry.connections.map((connection: unknown) => {
+            if (!isRecord(connection) || (connection.type === "credential" ? typeof connection.id !== "string" : connection.type !== "env" || typeof connection.name !== "string")) throw new Error("Invalid native credential identity");
+            return connection.type === "credential" ? { type: connection.type, id: connection.id } : { type: connection.type, name: connection.name };
+          }) };
+        }).filter((entry) => entry.connections.length > 0).sort((a, b) => a.id.localeCompare(b.id));
+      };
+      const identities = identitiesOf(global);
+      const scopedIdentities = identitiesOf(scoped);
+      signal?.throwIfAborted();
+      if (active !== sidecar || !active.isAlive()) throw new Error("OpenCode v2 changed during credential observation");
+      if (nativeConnections && !isDeepStrictEqual(nativeConnections, identities)) activatedRevision += 1;
+      nativeConnections = identities;
+      return scopedIdentities;
+    });
+    credentialReads = observation;
+    const connections = await observation;
+    const after = await captureNativeSources(active, directory, signal);
+    if (!isDeepStrictEqual(before, after)) throw new Error("Native configuration changed during credential observation");
+    assertSourceAgreement(sourceObservations.get(directory), after);
+    if (active !== sidecar || !active.isAlive()) throw new Error("OpenCode v2 changed during configuration observation");
+    signal?.throwIfAborted();
+    sourceObservations.set(directory, after);
+    return { ...after, connections };
+  }
+
+  async function workspaceReadinessKey(directory: string, signal?: AbortSignal): Promise<string> {
     const active = sidecar;
     if (!active?.isAlive()) throw new Error("OpenCode v2 is not running");
+    const globalPath = await realpath(join(rootDir, "config", "opencode.json")).catch(() => resolve(rootDir, "config", "opencode.json"));
+    const configuration = await readNativeConfiguration(active, directory, signal);
+    configuration.entries = configuration.entries.map((entry) => {
+      if (entry.path !== globalPath || !isRecord(entry.info)) return entry;
+      const { skills: _managedSkills, ...info } = entry.info;
+      return { ...entry, info: { ...info, skills: config.opencodeV2?.config?.skills } };
+    });
+    if (sidecar !== active || !active.isAlive()) throw new Error("OpenCode v2 changed during configuration observation");
+    if (!isDeepStrictEqual(workspaceSnapshots.get(directory)?.configuration, configuration)) {
+      workspaceSnapshots.set(directory, { key: randomUUID(), configuration });
+    }
+    return workspaceSnapshots.get(directory)!.key;
+  }
+
+  async function prepareWorkspace(directory: string): Promise<NativeConfiguration> {
+    const active = sidecar;
+    if (!active?.isAlive()) throw new Error("OpenCode v2 is not running");
+    await active.whenConfigurationSettled();
+    const revision = active.configurationRevision;
+    const configuration = mandatory ? await readNativeConfiguration(active, directory) : { entries: [], sources: [], connections: [] };
     const existing = workspaceReadiness.get(directory);
-    if (existing) return existing;
+    if (existing?.revision === revision && isDeepStrictEqual(existing.configuration, configuration)) {
+      await existing.ready;
+      return existing.configuration;
+    }
     // V2 discovers configuration asynchronously for each new location. Its
     // initial catalog can be empty even after the preview location is ready.
-    const pending = (async () => {
-      if (mandatory) {
-        const activated = await active.fetchJson("/api/plugin/await-activation", { method: "POST", directory, timeoutMs: 30_000 });
-        if (activated.status !== 204) throw new Error("OpenCode v2 plugin activation did not settle");
-        const plugins = await active.fetchJson("/api/plugin", { directory, timeoutMs: 5_000 });
-        const entries = isRecord(plugins.json) ? plugins.json.data : undefined;
-        if (plugins.status !== 200 || !Array.isArray(entries)
-          || entries.some((entry) => !isRecord(entry) || !isRecord(entry.state) || entry.state.status !== "active")) {
-          throw new Error("OpenCode v2 has an inactive or failed configured plugin");
-        }
+    const activate = async () => {
+      const activated = await active.fetchJson("/api/plugin/await-activation", { method: "POST", directory, timeoutMs: 30_000 });
+      if (activated.status !== 204) throw new Error("OpenCode v2 plugin activation did not settle");
+      const plugins = await active.fetchJson("/api/plugin", { directory, timeoutMs: 5_000 });
+      const entries = isRecord(plugins.json) ? plugins.json.data : undefined;
+      if (plugins.status !== 200 || !Array.isArray(entries)
+        || entries.some((entry) => !isRecord(entry) || !isRecord(entry.state) || entry.state.status !== "active")) {
+        throw new Error("OpenCode v2 has an inactive or failed configured plugin");
       }
+    };
+    const pending = (async () => {
+      if (mandatory) await activate();
+      const expectedRules = executionRules((await readGlobalRuntimeOpencodeConfig(config)).managedPolicy?.execution);
+      const hostRules = Array.isArray(config.opencodeV2?.config?.permissions) ? config.opencodeV2.config.permissions : [];
+      const globalPath = await realpath(join(rootDir, "config", "opencode.json")).catch(() => resolve(rootDir, "config", "opencode.json"));
       const deadline = Date.now() + 8_000;
       do {
+        const observed = mandatory ? await readNativeConfiguration(active, directory) : configuration;
+        const global = observed.entries.find((entry) => entry.type === "document" && entry.path === globalPath);
+        const permissions = global && isRecord(global.info) && Array.isArray(global.info.permissions) ? global.info.permissions : [];
+        const policyReady = !mandatory || (Boolean(global) && permissions.length === hostRules.length + expectedRules.length
+          && (expectedRules.length === 0 || isDeepStrictEqual(permissions.slice(-expectedRules.length), expectedRules)));
         const response = await active.fetchJson("/api/provider", { directory, timeoutMs: 5_000 });
         const payload = isRecord(response.json) ? response.json.data : undefined;
-        if (response.status === 200 && Array.isArray(payload)
+        if (policyReady && response.status === 200 && Array.isArray(payload)
           && (!mandatory || removedProviderIds.every((id) => !payload.some((provider) => {
             if (!isRecord(provider) || provider.id !== id) return false;
             // A host-authored native provider may legitimately reappear after
@@ -1017,17 +1232,31 @@ export function createEngineV2Preview(options: { config: ServerConfig; env?: Pic
           })))
           && mirroredSpecs.every((spec) =>
           payload.some((provider) => isRecord(provider) && provider.id === spec.id
-            && isRecord(provider.settings) && provider.settings.apiKey === spec.apiKey)
-        )) return;
+            && isRecord(provider.settings) && provider.settings.apiKey === spec.apiKey
+            && (!mandatory || (provider.package === (spec.package ?? "@opencode-ai/ai/providers/openai-compatible")
+              && (spec.baseUrl === undefined || provider.settings.baseURL === spec.baseUrl)
+              && Object.entries(spec.settings ?? {}).every(([key, value]) => isRecord(provider.settings) && isDeepStrictEqual(provider.settings[key], value))
+              && (spec.headers === undefined || isDeepStrictEqual(provider.headers, spec.headers)))))
+        )) return observed;
         await new Promise((resolve) => setTimeout(resolve, 100));
       } while (Date.now() < deadline);
       throw new Error("OpenCode v2 workspace provider configuration did not become ready");
     })();
-    workspaceReadiness.set(directory, pending);
-    try { await pending; } catch (error) {
-      if (workspaceReadiness.get(directory) === pending) workspaceReadiness.delete(directory);
+    const readiness = { revision, configuration, ready: pending.then(async (observed) => {
+      await active.whenConfigurationSettled();
+      if (mandatory && !isDeepStrictEqual(configuration.entries, observed.entries)) await activate();
+      const confirmed = !mandatory || isDeepStrictEqual(observed, await readNativeConfiguration(active, directory));
+      if (!confirmed || sidecar !== active || !active.isAlive() || active.configurationRevision !== revision || active.configurationPending) {
+        throw new Error("OpenCode v2 configuration changed during workspace preparation");
+      }
+      readiness.configuration = observed;
+    }) };
+    workspaceReadiness.set(directory, readiness);
+    try { await readiness.ready; } catch (error) {
+      if (workspaceReadiness.get(directory) === readiness) workspaceReadiness.delete(directory);
       throw error;
     }
+    return readiness.configuration;
   }
 
   async function stop(): Promise<void> {
@@ -1053,7 +1282,24 @@ export function createEngineV2Preview(options: { config: ServerConfig; env?: Pic
     },
     process: () => {
       const managed = sidecar;
-      return { pid: managed?.childPid ?? null, isAlive: () => managed?.isAlive() === true };
+      return {
+        pid: managed?.childPid ?? null,
+        generation: managed?.generation ?? "stopped",
+        isAlive: () => managed?.isAlive() === true,
+        workspaceReadiness: async (directory: string, signal?: AbortSignal) => {
+          if (managed !== sidecar || !managed?.isAlive()) throw new Error("OpenCode v2 is not running");
+          return workspaceReadinessKey(directory, signal);
+        },
+        get configurationRevision() { return activatedRevision; },
+        get configurationPending() { return Boolean(mirrorInFlight || mirrorError || managed?.configurationPending || managed?.configurationRevision !== mirroredConfigRevision); },
+        async whenConfigurationSettled() {
+          if (managed === sidecar && managed?.configurationRevision !== mirroredConfigRevision && !mirrorInFlight) scheduleMirror();
+          do { if (mirrorInFlight) await mirrorInFlight; } while (mirrorInFlight);
+          if (mirrorError) throw mirrorError;
+          if (managed !== sidecar || !managed?.isAlive()) throw new Error("OpenCode v2 is not running");
+          await managed.whenConfigurationSettled();
+        },
+      };
     },
     status, setEnabled, setChatRouting, connection, ensureWorkspaceReady, syncWorkspaceMcp, syncCloudSkills, assertNativeSkillsScope, withNativeSkills, createNativeCleanupRequest, stop };
 }

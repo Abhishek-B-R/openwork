@@ -35,6 +35,6 @@ export default Plugin.define({ id: "coworker.events", effect: (ctx) => Effect.ge
 }) });
 `;
 
-export async function installEventPlugin(coworker) {
-  await installNativePlugin(coworker, "coworker-events.js");
+export async function installEventPlugin(coworker, configure) {
+  await installNativePlugin(coworker, "coworker-events.js", undefined, configure);
 }

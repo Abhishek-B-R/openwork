@@ -34,6 +34,6 @@ export default Plugin.define({ id: "coworker.group-documents", effect: (ctx) => 
 `;
 
 /** Install after the collaboration transport, before opening the native workspace. */
-export async function installGroupDocumentPlugin(coworker) {
-  await installNativePlugin(coworker, "coworker-group-documents.js");
+export async function installGroupDocumentPlugin(coworker, configure) {
+  await installNativePlugin(coworker, "coworker-group-documents.js", undefined, configure);
 }

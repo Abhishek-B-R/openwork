@@ -1,6 +1,30 @@
+import type { HeadlessThreadSnapshot } from "@openwork/headless-threads/v2";
+
 /** Visible reply parts in native ID order. Hidden parts keep only a tombstone. */
 export type LivePart = { messageId: string; partId: string; type: string; text: string; ended: boolean };
 export type LiveStream = LivePart & { parts: LivePart[] };
+export type LivePresentation = { generation: string; revision: number; parts: (LivePart & { parentId: string; revision: number; gap: boolean })[] };
+
+export function presentationStream(snapshot: HeadlessThreadSnapshot, presentation: LivePresentation | undefined, parentId: string | null | undefined, retired: ReadonlySet<string> = new Set()): LiveStream | null {
+  if (!parentId || !snapshot.messages.some((message) => message.id === parentId && message.role === "user")) return null;
+  let stream: LiveStream | null = null;
+  const messages = new Map(snapshot.messages.map((message) => [message.id, message]));
+  for (const message of snapshot.messages) {
+    if (message.role !== "assistant" || message.parentId !== parentId || retired.has(message.id)) continue;
+    for (const part of message.parts) {
+      if (part.type !== "text") continue;
+      stream = applyStreamEvent(stream, { kind: "part", threadId: snapshot.threadId, messageId: message.id, partId: part.id,
+        type: "text", text: part.text ?? "", ended: message.completedAt != null || message.error != null, synthetic: part.synthetic, ignored: part.ignored }, snapshot.threadId);
+    }
+  }
+  for (const part of presentation?.parts ?? []) {
+    const message = messages.get(part.messageId);
+    if (message?.role !== "assistant" || message.parentId !== parentId || part.parentId !== parentId
+      || message.completedAt != null || message.error != null || retired.has(part.messageId) || snapshot.native?.turnOutcomes?.[parentId]) continue;
+    stream = applyStreamEvent(stream, { kind: "part", threadId: snapshot.threadId, ...part }, snapshot.threadId);
+  }
+  return stream;
+}
 
 export type StreamEvent =
   | { kind: "delta"; threadId: string; messageId: string; partId: string; delta: string }

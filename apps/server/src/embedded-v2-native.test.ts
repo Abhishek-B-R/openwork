@@ -1,12 +1,12 @@
 import { expect, spyOn, test } from "bun:test";
-import { mkdir, mkdtemp, readFile, readdir, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { startEmbeddedServer } from "./embedded.js";
 import { engineV2ByConfig } from "./engine-v2-preview.js";
 import { envServiceForConfig } from "./server.js";
 import { CloudProviderSync } from "./cloud-provider-sync.js";
-import { createNativeV2Client, nativeCatalogProviders } from "@openwork/headless-threads/v2";
+import { createHeadlessThreadClientV2, createNativeV2Client, nativeCatalogProviders } from "@openwork/headless-threads/v2";
 import nativeRuntime from "../../coworker/native-runtime.json" with { type: "json" };
 import { CLOUD_NATIVE_SKILLS_SCOPE_HEADER, cloudNativeSkillId } from "./cloud-native-skills.js";
 import { isRecord } from "./connect-mcp-transport.js";
@@ -14,6 +14,134 @@ import { writeGlobalRuntimeOpencodeConfig } from "./runtime-opencode-config-stor
 
 const binary = process.env.OPENWORK_TEST_NATIVE_V2_BIN;
 const ownedRoot = process.env.OPENWORK_EMBEDDED_V2_TEST_ROOT;
+
+test.skipIf(!binary || !ownedRoot)("native canonical configuration accepts normalized models and versions added and removed sources", async () => {
+  if (!binary || !ownedRoot) throw new Error("Native fixture requires an isolated process and binary");
+  const root = await mkdtemp(join(ownedRoot, "configuration-"));
+  const parent = join(root, "project");
+  const workspace = join(parent, "workspace");
+  await mkdir(join(workspace, ".opencode"), { recursive: true });
+  const ancestor = join(parent, "opencode.jsonc");
+  await writeFile(ancestor, '// Native ancestor configuration\n{"model":"{env:FIXTURE_MODEL}"}\n');
+  const handle = await startEmbeddedServer({ engine: "v2", manageOpencode: true, opencodeV2Bin: binary,
+    configPath: join(root, "server.json"), workspaces: [workspace], host: "127.0.0.1", port: 0,
+    token: "configuration-fixture", hostToken: "configuration-host", logRequests: false,
+    opencodeV2: { version: nativeRuntime.opencodeV2Version, rootDir: join(root, "engine"),
+      config: { model: "fixture/global", warming: false, providers: { fixture: {
+        name: "Fixture", package: "@opencode-ai/ai/providers/openai-compatible", settings: { apiKey: "fixture-only", baseURL: "http://127.0.0.1:1/v1" },
+        models: Object.fromEntries(["global", "ancestor", "local", "replacement"].map((id) => [id, { name: id, variants: [{ id: "high", settings: {} }] }])),
+      } } }, env: { OPENCODE_MODELS_URL: "http://127.0.0.1:1/unused", FIXTURE_MODEL: "fixture/ancestor" } } });
+  try {
+    const engine = engineV2ByConfig.get(handle.config)!;
+    const current = handle.managedOpencodeV2!;
+    const sourcePath = await realpath(ancestor);
+    const documents = await engine.request(workspace, "/api/config");
+    if (!Array.isArray(documents.json)) throw new Error("Native config entries were not returned");
+    const paths = await Promise.all(documents.json.map(async (entry) => isRecord(entry) && typeof entry.path === "string" ? await realpath(entry.path).catch(() => entry.path) : null));
+    const inherited = documents.json[paths.indexOf(sourcePath)];
+    expect(inherited?.info.model).toEqual({ providerID: "fixture", model: "ancestor" });
+    const initial = await current.workspaceReadiness(workspace);
+    expect(await current.workspaceReadiness(workspace)).toBe(initial);
+    const confirmedChange = async (previous: string) => {
+      const deadline = Date.now() + 8_000;
+      do {
+        try {
+          const next = await current.workspaceReadiness(workspace);
+          expect(next).not.toBe(previous);
+          await engine.ensureWorkspaceReady(workspace);
+          return next;
+        } catch (error) {
+          if (!(error instanceof Error) || !/configuration (?:source change has not been confirmed|discovery has not settled|changed during)/.test(error.message)) throw error;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      } while (Date.now() < deadline);
+      throw new Error("Native configuration did not confirm the edited source");
+    };
+    const local = join(workspace, "opencode.jsonc");
+    await writeFile(local, '{"model":"fixture/local#high"}\n');
+    const added = await confirmedChange(initial);
+    await rm(local);
+    const removed = await confirmedChange(added);
+    await writeFile(ancestor, '{"model":{"providerID":"fixture","model":"replacement"}}\n');
+    const replaced = await confirmedChange(removed);
+    await writeFile(ancestor, '{ "model": "fixture/replacement" }\n');
+    expect(await current.workspaceReadiness(workspace)).toBe(replaced);
+  } finally { await handle.stop(); }
+}, 30_000);
+
+test.skipIf(!binary || !ownedRoot)("native live presentation retains partial text across a fresh viewer without replay", async () => {
+  if (!binary || !ownedRoot) throw new Error("Native fixture requires an isolated process and binary");
+  const { createLivePresentation } = await import(new URL("../../coworker/electron/live-presentation.mjs", import.meta.url).href);
+  const { presentationStream, replyText } = await import(new URL("../../coworker/src/lib/live-stream.ts", import.meta.url).href);
+  const root = await mkdtemp(join(ownedRoot, "presentation-"));
+  const workspace = join(root, "workspace");
+  await mkdir(workspace);
+  let extra = () => {}, finish = () => {};
+  const extraChunk = new Promise<void>((resolve) => { extra = resolve; });
+  const finishReply = new Promise<void>((resolve) => { finish = resolve; });
+  let providerRequests = 0;
+  const provider = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch(request) {
+    if (new URL(request.url).pathname !== "/v1/chat/completions") return new Response(null, { status: 404 });
+    const number = ++providerRequests;
+    const encoder = new TextEncoder();
+    return new Response(new ReadableStream({ async start(controller) {
+      const emit = (text: string, ended = false) => controller.enqueue(encoder.encode(`data: ${JSON.stringify({ id: "fixture-response", object: "chat.completion.chunk", created: 1, model: "display", choices: [{ index: 0, delta: { content: text }, finish_reason: ended ? "stop" : null }] })}\n\n`));
+      try {
+        emit(number === 1 ? "First completed reply" : "Second first chunk");
+        if (number === 2) { await extraChunk; emit(" plus next chunk"); await finishReply; }
+        emit("", true); controller.enqueue(encoder.encode("data: [DONE]\n\n")); controller.close();
+      } catch {}
+    } }), { headers: { "content-type": "text/event-stream" } });
+  } });
+  const handle = await startEmbeddedServer({ engine: "v2", manageOpencode: true, opencodeV2Bin: binary,
+    configPath: join(root, "server.json"), workspaces: [workspace], host: "127.0.0.1", port: 0,
+    token: "presentation-fixture", hostToken: "presentation-host", logRequests: false,
+    opencodeV2: { version: nativeRuntime.opencodeV2Version, rootDir: join(root, "engine"),
+      config: { model: "fixture/display", warming: false, providers: { fixture: {
+        name: "Fixture", package: "@opencode-ai/ai/providers/openai-compatible", settings: { apiKey: "fixture-only", baseURL: `http://127.0.0.1:${provider.port}/v1` },
+        models: { display: { name: "Display", capabilities: { tools: true, input: ["text"], output: ["text"] }, limit: { context: 128000, output: 8192 } } },
+      } } }, env: { OPENCODE_MODELS_URL: "http://127.0.0.1:1/unused" } } });
+  const id = handle.config.workspaces[0]!.id;
+  const scope = { generation: handle.managedOpencodeV2!.generation, serverUrl: handle.url, workspaceId: id, slug: "fixture", createdAt: "fixture", directory: await realpath(workspace), sourceDirectory: workspace };
+  const host = createLivePresentation({ isCurrent: (current: { generation: string }) => current.generation === handle.managedOpencodeV2?.generation,
+    createClient: (current: { workspaceId: string }, connected: (response: Response) => void) => createNativeV2Client({ baseUrl: handle.url, workspaceId: current.workspaceId, token: handle.config.token,
+      fetch: async (url, init) => { const response = await fetch(url, init); connected(response); return response; } }) });
+  host.register(scope);
+  handle.config.opencodeV2!.beforeInput = (input) => host.beforeInput(input.workspaceId, scope.generation, input.directory, input.signal);
+  const options = { baseUrl: handle.url, workspaceId: id, token: handle.config.token, defaultModel: { providerId: "fixture", modelId: "display" }, defaultAgent: "build" };
+  const client = createHeadlessThreadClientV2(options);
+  const threadId = "ses_live_presentation";
+  try {
+    await client.createThread({ threadId, title: "Live presentation fixture" });
+    const first = await client.sendTurn(threadId, { messageId: "msg_first_display", prompt: "First request" });
+    expect((await client.waitForThread(threadId, { since: first, timeoutMs: 10000, pollIntervalMs: 50 })).outcome).toBe("settled");
+    const second = await client.sendTurn(threadId, { messageId: "msg_second_display", prompt: "Second request" });
+    if (!second.messageId) throw new Error("Native input receipt did not retain its message ID");
+    const read = async (viewer = client) => {
+      const snapshot = await viewer.getThreadSnapshot(threadId);
+      return { snapshot, text: replyText(presentationStream(snapshot, host.snapshot(scope, snapshot), second.messageId), null) };
+    };
+    const until = async (text: string) => {
+      const deadline = Date.now() + 5000;
+      do { const view = await read(); if (view.text === text) return view; await new Promise((resolve) => setTimeout(resolve, 50)); } while (Date.now() < deadline);
+      throw new Error("The retained display did not reach the expected text");
+    };
+    const held = await until("Second first chunk");
+    expect(held.snapshot.messages.filter((message) => message.role === "assistant" && message.parentId === second.messageId)
+      .flatMap((message) => message.parts.filter((part) => part.type === "text").map((part) => part.text ?? "")).join("")).toBe("");
+    const freshViewer = createHeadlessThreadClientV2(options);
+    expect((await read(freshViewer)).text).toBe("Second first chunk");
+    extra();
+    const partial = await until("Second first chunk plus next chunk");
+    expect(partial.snapshot.native?.turnOutcomes?.[second.messageId]).toBeUndefined();
+    expect(providerRequests).toBe(2);
+    expect((await client.abortThread(threadId, { signal: AbortSignal.timeout(5000) })).accepted).toBe(true);
+    const stopped = await client.getThreadSnapshot(threadId);
+    expect(stopped.native?.turnOutcomes?.[second.messageId]).toBe("interrupted");
+    expect(host.snapshot(scope, stopped).parts).toEqual([]);
+    expect(providerRequests).toBe(2);
+  } finally { extra(); finish(); host.stop(); await handle.stop(); provider.stop(true); }
+}, 30_000);
 
 // Executed only by embedded-v2.test.ts after HOME/XDG isolation, with an
 // explicitly selected real binary. No download, real account or model call.

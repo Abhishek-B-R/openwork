@@ -13,6 +13,7 @@
  */
 import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import { updateNativeConfig } from "./native-config.mjs";
 import { openworkConfigDir } from "@openwork/paths";
 import { DOCUMENTS_INDEX_FILE, documentsIndexTemplate } from "./documents.mjs";
@@ -746,6 +747,7 @@ export function updateCoworkerAbilities(coworkersDir, slug, { createdAt, expecte
     if (!Number.isSafeInteger(expectedRevision) || expectedRevision !== current.revision || next.revision !== expectedRevision) {
       throw new Error("Abilities changed elsewhere. Reopen the editor before saving.");
     }
+    if (isDeepStrictEqual(current, next)) return readCoworkerRecord(coworkersDir, slug);
     data.abilities = { ...next, revision: current.revision + 1 };
     await writeAtomic(configPath, serializeFrontmatter(data, body));
     return readCoworkerRecord(coworkersDir, slug);

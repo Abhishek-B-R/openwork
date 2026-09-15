@@ -3,7 +3,8 @@ import { nativeModelVariants } from "@openwork/types/cloud-model-fast";
 // Provider injection uses v2's watched config, without disposing live sessions.
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { chmod, mkdir, rename, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { isDeepStrictEqual } from "node:util";
 import { join } from "node:path";
 import { appendEngineOutputTail, createEngineStartupLineReader } from "./engine-output.js";
 
@@ -109,12 +110,16 @@ export interface ManagedOpencodeV2Server {
   username: string;
   password: string;
   childPid: number | undefined;
+  readonly generation: string;
+  readonly configurationRevision: number;
+  readonly configurationPending: boolean;
+  whenConfigurationSettled(): Promise<void>;
   readonly exitCode: number | null;
   readonly stdout: string;
   readonly stderr: string;
   isAlive(): boolean;
   health(): Promise<OpencodeV2Health>;
-  fetchJson(path: string, init?: { method?: string; body?: unknown; directory?: string; timeoutMs?: number }): Promise<{ status: number; json: unknown }>;
+  fetchJson(path: string, init?: { method?: string; body?: unknown; directory?: string; timeoutMs?: number; signal?: AbortSignal }): Promise<{ status: number; json: unknown }>;
   injectProvider(spec: OpencodeV2ProviderSpec): Promise<void>;
   setProviders(specs: OpencodeV2ProviderSpec[]): Promise<void>;
   /** Extra absolute skill directories registered through native config `skills`. */
@@ -205,6 +210,8 @@ export async function createManagedOpencodeV2Server(
   const providers = new Map<string, OpencodeV2ProviderSpec>();
   let skills: string[] = [];
   let writes: Promise<void> = Promise.resolve();
+  let configurationRevision = 0;
+  let pendingWrites = 0;
   const opencodeModelsUrl = (options.env?.OPENCODE_MODELS_URL ?? process.env.OPENCODE_MODELS_URL)?.replace(/\/+$/, "");
   // The engine needs OS paths and locale settings, not the server's provider,
   // cloud, database, or control-plane credentials. Unknown keys stay private.
@@ -275,7 +282,7 @@ export async function createManagedOpencodeV2Server(
 
   async function fetchJson(
     path: string,
-    init: { method?: string; body?: unknown; directory?: string; timeoutMs?: number } = {},
+    init: { method?: string; body?: unknown; directory?: string; timeoutMs?: number; signal?: AbortSignal } = {},
   ): Promise<{ status: number; json: unknown }> {
     if (!url) throw new Error("OpenCode v2 has not announced its listener");
     const separator = path.includes("?") ? "&" : "?";
@@ -289,7 +296,7 @@ export async function createManagedOpencodeV2Server(
         "content-type": "application/json",
       },
       body: init.body === undefined ? undefined : JSON.stringify(init.body),
-      signal: init.timeoutMs === undefined ? undefined : AbortSignal.timeout(init.timeoutMs),
+      signal: AbortSignal.any([...(init.signal ? [init.signal] : []), ...(init.timeoutMs === undefined ? [] : [AbortSignal.timeout(init.timeoutMs)])]),
     });
     const text = await response.text();
     let json: unknown = text;
@@ -317,7 +324,8 @@ export async function createManagedOpencodeV2Server(
   // Every rewrite (providers, permissions, skills) serializes through one
   // queue and emits the whole current state, so no writer drops another's keys.
   function writeConfig(): Promise<void> {
-    const next = writes.catch(() => undefined).then(writeConfigNow);
+    pendingWrites += 1;
+    const next = writes.catch(() => undefined).then(writeConfigNow).finally(() => { pendingWrites -= 1; });
     writes = next;
     return next;
   }
@@ -332,7 +340,7 @@ export async function createManagedOpencodeV2Server(
       ...(options.permissions ? { permissions: await options.permissions() } : {}),
       skills,
     });
-    await writeFile(temporary, `${JSON.stringify({
+    const next = JSON.stringify({
       ...hostConfig,
       ...generated,
       ...((Array.isArray(configuredSkills) && configuredSkills.length) || skills.length
@@ -342,8 +350,17 @@ export async function createManagedOpencodeV2Server(
         ...(Array.isArray(hostConfig.permissions) ? hostConfig.permissions : []),
         ...(Array.isArray(generated.permissions) ? generated.permissions : []),
       ] } : {}),
-    }, null, 2)}\n`, { mode: 0o600 });
+    }, null, 2) + "\n";
+    const current = await readFile(target, "utf8").catch((error: unknown) => {
+      if (!isRecord(error) || error.code !== "ENOENT") throw error;
+      return null;
+    });
+    if (current !== null) {
+      try { if (isDeepStrictEqual(JSON.parse(current), JSON.parse(next))) return; } catch {}
+    }
+    await writeFile(temporary, next, { mode: 0o600 });
     await rename(temporary, target);
+    configurationRevision += 1;
   }
 
   async function close(): Promise<void> {
@@ -371,6 +388,12 @@ export async function createManagedOpencodeV2Server(
     username,
     password,
     childPid: child.pid,
+    generation: randomBytes(16).toString("hex"),
+    get configurationRevision() { return configurationRevision; },
+    get configurationPending() { return pendingWrites > 0; },
+    async whenConfigurationSettled() {
+      do { await writes; } while (pendingWrites > 0);
+    },
     get exitCode() {
       return child.exitCode;
     },

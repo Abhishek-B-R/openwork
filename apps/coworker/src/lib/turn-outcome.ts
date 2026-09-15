@@ -66,6 +66,18 @@ export type TurnOutcome = {
   modelRelated: boolean;
 };
 
+export function deriveTurnActivity(input: {
+  outcome: TurnOutcome | null;
+  stopping: boolean;
+  attemptActive: boolean;
+  engineRunning: boolean;
+  needsYou: boolean;
+}): { working: boolean; composerWorking: boolean } {
+  const turnRunning = input.outcome?.kind === "working" || input.outcome?.kind === "slow" || input.outcome?.kind === "retrying";
+  const composerWorking = input.stopping || turnRunning || input.attemptActive || (input.engineRunning && !input.needsYou);
+  return { working: !input.stopping && composerWorking, composerWorking };
+}
+
 export type TurnEngineStatus =
   | { type: "idle" }
   | { type: "busy" }

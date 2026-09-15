@@ -79,9 +79,14 @@ export async function dispatchNativeTurn({ client, threadId, turn, markAttempted
   const { messageId, prompt, agent, model, context, skills } = turn;
   let marked = false;
   const beforeInput = async () => {
-    if (!marked) await markAttempted();
-    try { validateAdmission(); }
-    catch (error) { if (error?.code === "readiness_changed") error.inputNotSent = !marked; throw error; }
+    try {
+      await client.assertAdmission?.(signal);
+      if (!marked) {
+        await markAttempted();
+        await client.assertAdmission?.(signal);
+      }
+      validateAdmission();
+    } catch (error) { if (error?.code === "readiness_changed") error.inputNotSent = !marked; throw error; }
     marked = true;
   };
   const acceptance = await client.sendTurn(threadId, { messageId, prompt, agent, ...(skills !== undefined ? { skills } : {}), ...(model ? { model } : {}), ...(context ? { context } : {}), beforeInput, signal });

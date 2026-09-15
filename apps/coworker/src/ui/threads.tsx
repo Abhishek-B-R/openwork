@@ -97,6 +97,7 @@ import {
   NO_REPLY,
   WAIT_BUDGET_MS,
   choiceNavigates,
+  deriveTurnActivity,
   deriveTurnOutcome,
   retrySummary,
   type TurnChoice,
@@ -108,7 +109,7 @@ import { describeTurnFailure, failureText } from "@/lib/turn-failure";
 import { composerDraftStore, useComposerDraft, useSelectedComposerDraft } from "@/ui/use-composer-draft";
 import { mergeSkillSelections, sameSkillFields, selectionFields, type ComposerDraftSnapshot, type ComposerDraftSubmission, type SelectedSkill } from "@/lib/skill-selection";
 import { classifyFailure, retryDelayMs } from "@/lib/turn-retry";
-import { applyStreamEvent, type LivePart, type LiveStream } from "@/lib/live-stream";
+import { presentationStream, type LivePart, type LiveStream } from "@/lib/live-stream";
 import { waitForGroup as waitForObservation } from "@/lib/group-continuity";
 import { useAutoGrow } from "@/ui/use-auto-grow";
 import { JumpToLatest, useConversationScroll } from "@/ui/use-conversation-scroll";
@@ -420,22 +421,27 @@ export function ThreadsPanel({
     [runtime.serverUrl, runtime.ownerToken, coworker.workspaceId, coworker.model, coworker.modelVariant, discussionThreadId, discussionThreadIds, workerThreadIds],
   );
   const [preparationAttempt, setPreparationAttempt] = useState(0);
-  const readiness = useMemo(() => createWorkspaceReadiness(async (signal) => {
-    if (!runtime.engineManaged || !coworker.workspaceId || !runtime.readinessKey) throw new Error("AI is unavailable. Restart AI in Settings. Your draft is kept.");
-    const expected = { workspaceId: coworker.workspaceId, createdAt: coworker.createdAt, readinessKey: runtime.readinessKey };
-    const prepared = await coworkerBridge.coworkers.ensureWorkspace(coworker.slug, expected);
-    signal.throwIfAborted();
-    if (prepared.readinessKey !== expected.readinessKey || prepared.workspaceId !== expected.workspaceId || prepared.createdAt !== expected.createdAt) throw new Error("The AI workspace changed. Retry preparation; your draft is kept.");
-    await createCoworkerThreads({ serverUrl: runtime.serverUrl, token: runtime.ownerToken, workspaceId: coworker.workspaceId, model: coworker.model, modelVariant: coworker.modelVariant }).prepare(signal);
-  }), [runtime.serverUrl, runtime.ownerToken, runtime.engineManaged, runtime.readinessKey, coworker.slug, coworker.createdAt, coworker.workspaceId, coworker.model, coworker.modelVariant, preparationAttempt]);
+  const readinessScopeValue = useMemo(() => {
+    const expected = { workspaceId: coworker.workspaceId, createdAt: coworker.createdAt, readinessKey: runtime.readinessKey ?? "", workspaceKey: "" };
+    const readiness = createWorkspaceReadiness(async (signal) => {
+      if (!runtime.engineManaged || !coworker.workspaceId || !runtime.readinessKey) throw new Error("AI is unavailable. Restart AI in Settings. Your draft is kept.");
+      const prepared = await coworkerBridge.coworkers.ensureWorkspace(coworker.slug, expected);
+      signal.throwIfAborted();
+      if (prepared.readinessKey !== expected.readinessKey || prepared.workspaceId !== expected.workspaceId || prepared.createdAt !== expected.createdAt) throw new Error("The AI workspace changed. Retry preparation; your draft is kept.");
+      await createCoworkerThreads({ serverUrl: runtime.serverUrl, token: runtime.ownerToken, workspaceId: coworker.workspaceId, model: coworker.model, modelVariant: coworker.modelVariant }).prepare(signal);
+      expected.workspaceKey = prepared.workspaceKey;
+    });
+    return { readiness, expected };
+  }, [runtime.serverUrl, runtime.ownerToken, runtime.engineManaged, runtime.readinessKey, coworker.slug, coworker.createdAt, coworker.workspaceId, coworker.model, coworker.modelVariant, coworker.abilities?.revision, coworker.role, coworker.mission, coworker.personality, preparationAttempt]);
+  const { readiness } = readinessScopeValue;
   const preparation = useSyncExternalStore(readiness.subscribe, readiness.snapshot);
   useEffect(() => { if (active) void readiness.wait().catch(() => undefined); }, [active, readiness]);
   useEffect(() => readiness.retain(), [readiness]);
   const latestActivity = useRef<CoworkerActivity | null>(null);
   const currentReadiness = useRef(readiness);
   currentReadiness.current = readiness;
-  const readinessScope = useRef<WorkspaceReadinessScope>({ readiness, expected: { workspaceId: coworker.workspaceId, createdAt: coworker.createdAt, readinessKey: runtime.readinessKey ?? "" } });
-  readinessScope.current = { readiness, expected: { workspaceId: coworker.workspaceId, createdAt: coworker.createdAt, readinessKey: runtime.readinessKey ?? "" } };
+  const readinessScope = useRef<WorkspaceReadinessScope>(readinessScopeValue);
+  readinessScope.current = readinessScopeValue;
   const readReadiness = useCallback(() => readinessScope.current, []);
   const reportActivity = useCallback((activity: CoworkerActivity | null) => {
     if (currentReadiness.current !== readiness) return;
@@ -1401,7 +1407,7 @@ function ThreadView({
       setTurnsLoaded(true);
     });
     void observe("interactions", () => threads.listThreadInteractions(threadId), setPending);
-    return observe("transcript", async () => ({ readStartedAt: Date.now(), snapshot: await threads.client.getThreadSnapshot(threadId, { signal: AbortSignal.timeout(10_000) }) }), ({ snapshot, readStartedAt }) => {
+    return observe("transcript", async () => ({ readStartedAt: Date.now(), ...await coworkerBridge.turns.presentation({ slug: coworker.slug, threadId, workspaceId: coworker.workspaceId, createdAt: coworker.createdAt, generation: runtime.readinessKey?.split(":")[0] ?? "" }) }), ({ snapshot, presentation, readStartedAt }) => {
       const transcript = toTranscript(snapshot);
       setNativeState(snapshot.native);
       const nativeMessages = new Map(snapshot.messages.map((message) => [message.id, message]));
@@ -1413,19 +1419,7 @@ function ThreadView({
       }
       const target = activeTurnRef.current?.messageId ?? turnStateRef.current.pending?.messageId ?? observedTurn.current;
       if (streamTurn.current !== target) { streamTurn.current = target; setLiveStream(null); }
-      setLiveStream((current) => {
-        const parts = current?.parts.filter((part) => knownMessages.current.get(part.messageId)?.parentId === target) ?? [];
-        const latest = parts.at(-1);
-        let next = latest ? { ...latest, parts } : null;
-        for (const message of snapshot.messages) {
-          if (message.role !== "assistant" || message.parentId !== target || retiredReplies.current.has(message.id)) continue;
-          for (const part of message.parts) {
-            if (part.type !== "text") continue;
-            next = applyStreamEvent(next, { kind: "part", threadId, messageId: message.id, partId: part.id, type: "text", text: part.text ?? "", ended: message.completedAt !== null || message.error !== null, synthetic: part.synthetic, ignored: part.ignored }, threadId);
-          }
-        }
-        return next;
-      });
+      setLiveStream(presentationStream(snapshot, presentation, target, retiredReplies.current));
       const loadedTitle = transcript.title ?? "Work thread";
       titleLoadedRef.current = true;
       setTitle(titleDiscussionAfterFirstMessage(loadedTitle) ?? loadedTitle);
@@ -1467,7 +1461,7 @@ function ThreadView({
       setTranscriptLoaded(true);
       setTranscriptReadStartedAt(readStartedAt);
     });
-  }, [coworker.slug, refreshReads, refreshScope, stopScope, threads, threadId, titleDiscussionAfterFirstMessage]);
+  }, [coworker.slug, coworker.workspaceId, coworker.createdAt, runtime.readinessKey, refreshReads, refreshScope, stopScope, threads, threadId, titleDiscussionAfterFirstMessage]);
 
   useEffect(() => {
     if (kind !== "discussion" || !assignmentDraft) return;
@@ -1494,25 +1488,21 @@ function ThreadView({
     viewMounted.current = true;
     refreshScope.active = true;
     const generation = ++refreshGeneration.current;
-    void refresh();
-    const unsubscribe = threads.subscribe(() => void refresh(), (event) => {
-      const target = activeTurnRef.current?.messageId ?? turnStateRef.current.pending?.messageId ?? observedTurn.current;
-      const owner = knownMessages.current.get(event.messageId);
-      if (event.threadId !== threadId || !target || owner?.role !== "assistant" || owner.parentId !== target || retiredReplies.current.has(event.messageId)) return;
-      if (streamTurn.current !== target) { streamTurn.current = target; setLiveStream(null); }
-      if (event.kind === "part" ? event.type === "text" : !owner.ended) {
-        setLiveStream((current) => applyStreamEvent(current, event, threadId));
-      }
+    const unsubscribePresentation = coworkerBridge.turns.onPresentationChanged((change) => {
+      if (change.workspaceId === coworker.workspaceId && change.createdAt === coworker.createdAt) void refresh();
     });
+    void refresh();
+    const unsubscribe = threads.subscribe(() => void refresh(), undefined, undefined, true);
     const timer = window.setInterval(() => void refresh(), 5_000);
     return () => {
       refreshScope.active = false;
       if (refreshGeneration.current === generation) refreshGeneration.current += 1;
       refreshReads.clear();
       unsubscribe();
+      unsubscribePresentation();
       window.clearInterval(timer);
     };
-  }, [refresh, refreshReads, refreshScope, threadId, threads]);
+  }, [refresh, refreshReads, refreshScope, threadId, threads, coworker.workspaceId, coworker.createdAt]);
 
   useEffect(() => {
     viewMounted.current = true;
@@ -2252,9 +2242,14 @@ function ThreadView({
     if (outcome?.kind === "replied" && !activeTurnRef.current) commitTurnState(clearPending);
   }, [commitTurnState, outcome?.kind]);
 
-  const turnRunning = outcome?.kind === "working" || outcome?.kind === "slow" || outcome?.kind === "retrying";
   // The engine can be busy on a turn this view never sent (a Worker's review, a scheduled run): still working.
-  const working = !stopAttempt && (turnRunning || (outcome === null && !needsYou && engineRunning) || (activeTurn !== null && outcome === null));
+  const { working, composerWorking } = deriveTurnActivity({
+    outcome,
+    stopping: Boolean(stopAttempt),
+    attemptActive: activeTurn !== null,
+    engineRunning,
+    needsYou,
+  });
   const voiceSettled = !stopAttempt && engineStatus.type === "idle" && !activeTurn && !appRetry && !working && !needsYou && !error && !Object.values(readErrors).some(Boolean);
   const voiceReply = useMemo(() => privateVoiceReply(messages, voiceSettled && !failure && (!outcome || outcome.kind === "replied")), [messages, voiceSettled, failure, outcome?.kind]);
   const voice = useVoice({
@@ -2394,7 +2389,6 @@ function ThreadView({
   const currentDiscussion: ThreadListItem = discussions.find((item) => item.id === threadId)
     ?? { id: threadId, title, createdAt: 0, updatedAt: 0, status: "idle" };
   const freshDiscussion = transcriptLoaded && turnsLoaded && kind === "discussion" && visibleMessages.length === 0 && !working && !needsYou && !error && !outcome;
-  const composerWorking = Boolean(stopAttempt) || turnRunning || activeTurn !== null || (engineRunning && !needsYou);
   const [controlStatusSlot, setControlStatusSlot] = useState<HTMLDivElement | null>(null);
   const [floatingSlot, setFloatingSlot] = useState<HTMLDivElement | null>(null);
   const [computerOpenRequest, setComputerOpenRequest] = useState(0);

@@ -214,40 +214,32 @@ describe("serve", () => {
     }
   });
 
-  test("aborts the Web request signal when the client cancels", async () => {
-    let markStarted: () => void = () => undefined;
-    const started = new Promise<void>((resolve) => {
-      markStarted = resolve;
-    });
-    let observedAbort: unknown;
-    const server = await serve({
-      hostname: "127.0.0.1",
-      port: 0,
-      fetch: (request) => new Promise<Response>((_resolve, reject) => {
-        markStarted();
-        const onAbort = () => {
-          observedAbort = request.signal.reason;
-          reject(request.signal.reason);
-        };
-        if (request.signal.aborted) onAbort();
-        else request.signal.addEventListener("abort", onAbort, { once: true });
-      }),
-    });
-    const controller = new AbortController();
-    const pending = fetch(`http://127.0.0.1:${server.port}/cancel`, { signal: controller.signal });
-
+  test("aborts the Web request signal when the client cancels after the Node request body is consumed", async () => {
+    const script = `import assert from "node:assert/strict";
+      import { serve } from ${JSON.stringify(new URL("./serve-node.ts", import.meta.url).href)};
+      const entered = Promise.withResolvers();
+      const aborted = Promise.withResolvers();
+      const server = await serve({ hostname: "127.0.0.1", port: 0, fetch: async (request) => {
+        assert.equal(await request.text(), "complete body");
+        entered.resolve();
+        await new Promise(resolve => request.signal.addEventListener("abort", () => {
+          assert.equal(request.signal.reason.name, "AbortError");
+          aborted.resolve(); resolve();
+        }, { once: true }));
+        return new Response(null);
+      } });
+      const controller = new AbortController();
+      const pending = fetch("http://127.0.0.1:" + server.port, { method: "POST", body: "complete body", signal: controller.signal }).catch(() => {});
+      try {
+        await entered.promise; controller.abort(); await pending;
+        await Promise.race([aborted.promise, new Promise((_, reject) => setTimeout(() => reject(new Error("No post-body abort")), 1000).unref())]);
+      } finally { await server.stop(); }`;
+    const child = Bun.spawn(["node", "--input-type=module", "-e", script], { stdout: "pipe", stderr: "pipe" });
+    const timeout = setTimeout(() => child.kill(), 5000);
     try {
-      await started;
-      controller.abort();
-      await pending.catch(() => undefined);
-      for (let attempt = 0; attempt < 20 && observedAbort === undefined; attempt += 1) {
-        await delay(10);
-      }
-
-      expect(observedAbort).toBeInstanceOf(DOMException);
-      expect(observedAbort).toMatchObject({ name: "AbortError" });
-    } finally {
-      await server.stop();
-    }
+      const [code, stderr] = await Promise.all([child.exited, new Response(child.stderr).text()]);
+      if (code !== 0) throw new Error(stderr);
+      expect(code).toBe(0);
+    } finally { clearTimeout(timeout); child.kill(); await child.exited; }
   });
 });
