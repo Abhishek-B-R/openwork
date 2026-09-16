@@ -324,6 +324,16 @@ nativeDiscussionTest("native-v2 packaged discussion preserves streaming, drafts,
   const removed = "Also draft a launch announcement.";
   const draft = "Keep this thought for my next message.";
   const texts = async (selector: string) => (await probe.dom(selector)).elements.map((element) => element.text);
+  const retiredStreams: ReturnType<typeof world.events.read> = [];
+  const expectRetiredStreamsQuiet = () => {
+    const current = world.events.read();
+    for (const retired of retiredStreams) {
+      const stream = current.find((item) => item.id === retired.id);
+      expect(stream?.owner).toEqual(retired.owner);
+      expect(stream?.dataEvents, "retired renderer request must receive no further network data").toBe(retired.dataEvents);
+      expect(stream?.deltas, "retired renderer request must receive no later text delta").toEqual(retired.deltas);
+    }
+  };
   const seeStream = async (prefix: string) => {
     await user.see({ text: prefix.trim() }, { text: prefix.trim(), timeoutMs: 30_000 });
     expect((await texts('[data-message-role="assistant"]')).join("\n").split(prefix.trim()).length - 1).toBe(1);
@@ -338,6 +348,7 @@ nativeDiscussionTest("native-v2 packaged discussion preserves streaming, drafts,
     expect(await texts('[data-testid="coworker-top-status"]')).not.toEqual(["Ready"]);
     expect(await texts('[data-testid="coworker-turn-failed"], [data-outcome="failed"]')).toEqual([]);
     expect(world.model.errors()).toEqual([]);
+    expectRetiredStreamsQuiet();
   };
 
   await step("cold UI creation prepares the selected workspace without fixture reload or inference", async () => {
@@ -408,6 +419,7 @@ nativeDiscussionTest("native-v2 packaged discussion preserves streaming, drafts,
     expect(await world.configuration(), "no native or selected-workspace config rewrite/replacement").toEqual(stable);
     expect((await world.engineState()).pid).toBe(world.engine.pid);
     expect(await world.readinessKey()).toBe(stableKey);
+    expectRetiredStreamsQuiet();
   };
   await step("reapplying the identical dummy provider is a no-op", async () => {
     expect(await world.configureCredential("initial")).toEqual({ changed: false, reload: "skipped" });
@@ -463,18 +475,32 @@ nativeDiscussionTest("native-v2 packaged discussion preserves streaming, drafts,
     const replacement = await probe.eventually(() => world.events.read().filter((stream) => stream.workspaceId === workspaceId && !oldIds.includes(stream.id) && stream.status === 200 && stream.observing && !stream.closed), {
       within: 30_000, label: "reload established a genuinely new SSE subscription", until: (items) => items.length > 0,
     });
-    await probe.eventually(() => world.events.read(), { within: 15_000, label: "reload closed the previous renderer subscription", until: (items) => streams.every((old) => items.some((item) => item.id === old.id && item.closed)) });
+    expect(replacement.every((stream) => streams.every((old) => stream.owner.loaderId !== old.owner.loaderId && stream.owner.contextUniqueId !== old.owner.contextUniqueId))).toBe(true);
+    const retired = await probe.eventually(() => world.events.read().filter((stream) => streams.some((old) => old.id === stream.id)), {
+      within: 15_000, label: "previous renderer subscription has direct closure or destroyed-context and replaced-loader witnesses",
+      until: (items) => items.length === streams.length && items.every((stream) => (stream.closed && stream.terminal !== null)
+        || (stream.contextEndedBy !== null && stream.documentReplacedBy !== null && replacement.some((next) => next.owner.frameId === stream.owner.frameId
+          && next.owner.loaderId === stream.documentReplacedBy?.loaderId))),
+    });
+    retiredStreams.push(...retired);
     expect((await world.state(sessionId)).messages).toEqual(before.messages);
     expect(world.model.requests()).toHaveLength(2);
     expect(await world.sessionIds()).toEqual([sessionId]);
     world.model.release(2);
-    const received = await probe.eventually(() => world.events.read().filter((stream) => replacement.some((item) => item.id === stream.id)), {
+    const received = await probe.eventually(() => {
+      expectRetiredStreamsQuiet();
+      return world.events.read().filter((stream) => replacement.some((item) => item.id === stream.id));
+    }, {
       within: 30_000, label: "post-reload text delta arrived on the new SSE, not a history poll", until: (items) => items.some((stream) => stream.deltas.some((delta) => delta.sessionId === sessionId && delta.text.includes(second.chunks[1]!.trim()))),
     });
     await seeStream(second.chunks.slice(0, 2).join(""));
     await expectWorking();
     await user.see(composer, { value: draft });
-    evidence.recordJsonArtifact("Reload-only SSE recovery", { before: streams, after: received });
+    expect(world.model.requests()).toHaveLength(2);
+    evidence.recordJsonArtifact("Reload-only SSE recovery", {
+      before: streams, retired: world.events.read().filter((stream) => retired.some((old) => old.id === stream.id)), after: received,
+      closureScope: "Network terminal events alone set closed; destroyed execution context plus replaced document loader establish renderer retirement when no terminal event is reported. No old request receives subsequent data. Host presentation stays alive. Automatic reconnect is not covered.",
+    });
     await expectStable();
   });
 

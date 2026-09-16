@@ -128,12 +128,22 @@ async function nativeDiscussionEvents(app: Surface, origin: string) {
   if (!endpoint || new URL(endpoint).hostname !== "127.0.0.1") throw new Error("Native SSE observation requires this app's loopback CDP target.");
   const socket = new WebSocket(endpoint);
   const ready = Promise.withResolvers<void>();
-  const streams = new Map<string, { id: string; workspaceId: string; status: number | null; closed: boolean; observing: boolean; deltas: Array<{ sessionId: string; text: string }> }>();
+  const streams = new Map<string, {
+    id: string; workspaceId: string; status: number | null; closed: boolean; observing: boolean;
+    owner: { frameId: string; loaderId: string; contextId: number; contextUniqueId: string; resourceType: "Fetch" };
+    terminal: { event: "Network.loadingFailed" | "Network.loadingFinished"; canceled: boolean; errorText: string | null } | null;
+    documentReplacedBy: { event: "Page.frameNavigated"; frameId: string; loaderId: string } | null;
+    dataEvents: number;
+    deltas: Array<{ sessionId: string; text: string }>;
+  }>();
+  const contexts = new Map<string, { id: number; frameId: string; endedBy: "Runtime.executionContextDestroyed" | "Runtime.executionContextsCleared" | null }>();
+  let mainFrame: { id: string; loaderId: string } | null = null;
+  const setup = new Map([[1, "Network.enable"], [2, "Page.enable"], [3, "Runtime.enable"], [4, "Page.getFrameTree"]]);
   const buffers = new Map<string, string>();
   const pending = new Map<number, string>();
   const deadlines = new Map<number, ReturnType<typeof setTimeout>>();
   const errors: string[] = [];
-  let sequence = 1;
+  let sequence = 4;
   let disposed = false;
   const consume = (id: string, encoded: string) => {
     const stream = streams.get(id);
@@ -160,15 +170,23 @@ async function nativeDiscussionEvents(app: Surface, origin: string) {
     errors.push("Native SSE observer lost its CDP connection.");
     ready.reject(new Error(errors.at(-1)));
   };
-  socket.addEventListener("open", () => socket.send(JSON.stringify({ id: 1, method: "Network.enable" })));
+  socket.addEventListener("open", () => {
+    for (const [id, method] of setup) socket.send(JSON.stringify({ id, method }));
+  });
   socket.addEventListener("error", fail);
   socket.addEventListener("close", fail);
   socket.addEventListener("message", (message) => {
     try {
       const event = nativeRecord(JSON.parse(String(message.data)));
-      if (event.id === 1) {
-        if (event.error) throw new Error("Native SSE observer could not enable Network events.");
-        ready.resolve();
+      if (typeof event.id === "number" && setup.has(event.id)) {
+        if (event.error) throw new Error(`Native SSE observer could not enable ${setup.get(event.id)}.`);
+        if (setup.get(event.id) === "Page.getFrameTree") {
+          const frame = nativeRecord(nativeRecord(nativeRecord(event.result).frameTree).frame);
+          if (typeof frame.id !== "string" || typeof frame.loaderId !== "string" || !frame.loaderId) throw new Error("Native SSE observer could not identify the document loader.");
+          mainFrame = { id: frame.id, loaderId: frame.loaderId };
+        }
+        setup.delete(event.id);
+        if (setup.size === 0) ready.resolve();
         return;
       }
       if (typeof event.id === "number" && pending.has(event.id)) {
@@ -182,8 +200,36 @@ async function nativeDiscussionEvents(app: Surface, origin: string) {
         streams.get(id)!.observing = true;
         return;
       }
-      if (!isNativeRecord(event.params) || typeof event.params.requestId !== "string") return;
+      if (!isNativeRecord(event.params)) return;
       const params = event.params;
+      if (event.method === "Runtime.executionContextCreated") {
+        const context = nativeRecord(params.context);
+        const auxiliary = nativeRecord(context.auxData);
+        if (auxiliary.isDefault !== true) return;
+        if (typeof auxiliary.frameId !== "string" || typeof context.id !== "number" || typeof context.uniqueId !== "string") throw new Error("Native SSE observer could not identify the default execution context.");
+        if (contexts.size >= 200) throw new Error("Native SSE execution context count exceeded the fixture bound.");
+        contexts.set(context.uniqueId, { id: context.id, frameId: auxiliary.frameId, endedBy: null });
+        return;
+      }
+      if (event.method === "Runtime.executionContextDestroyed" || event.method === "Runtime.executionContextsCleared") {
+        for (const [uniqueId, context] of contexts) {
+          if (context.endedBy === null && (event.method === "Runtime.executionContextsCleared"
+            || (typeof params.executionContextUniqueId === "string" ? params.executionContextUniqueId === uniqueId : params.executionContextId === context.id))) context.endedBy = event.method;
+        }
+        return;
+      }
+      if (event.method === "Page.frameNavigated") {
+        const frame = nativeRecord(params.frame);
+        if (frame.parentId !== undefined) return;
+        if (typeof frame.id !== "string" || typeof frame.loaderId !== "string" || !frame.loaderId) throw new Error("Native SSE navigation lacked its document loader.");
+        mainFrame = { id: frame.id, loaderId: frame.loaderId };
+        for (const stream of streams.values()) {
+          if (!stream.documentReplacedBy && stream.owner.frameId === frame.id && stream.owner.loaderId !== frame.loaderId) {
+            stream.documentReplacedBy = { event: "Page.frameNavigated", frameId: frame.id, loaderId: frame.loaderId };
+          }
+        }
+        return;
+      }
       const id = params.requestId;
       if (typeof id !== "string") return;
       if (event.method === "Network.requestWillBeSent") {
@@ -193,7 +239,16 @@ async function nativeDiscussionEvents(app: Surface, origin: string) {
         const match = /^\/workspace\/([^/]+)\/opencode2\/api\/event$/.exec(url.pathname);
         if (url.origin !== origin || !match) return;
         if (streams.size >= 100) throw new Error("Native SSE subscription count exceeded the fixture bound.");
-        streams.set(id, { id, workspaceId: decodeURIComponent(match[1]!), status: null, closed: false, observing: false, deltas: [] });
+        if (!mainFrame || params.type !== "Fetch" || params.frameId !== mainFrame.id || params.loaderId !== mainFrame.loaderId) throw new Error("Native SSE request is not owned by the current renderer document.");
+        const frameId = mainFrame.id;
+        const owners = [...contexts.entries()].filter(([, context]) => context.frameId === frameId && context.endedBy === null);
+        if (owners.length !== 1) throw new Error("Native SSE request has no unambiguous live execution context.");
+        const [contextUniqueId, context] = owners[0]!;
+        streams.set(id, {
+          id, workspaceId: decodeURIComponent(match[1]!), status: null, closed: false, observing: false,
+          owner: { frameId: mainFrame.id, loaderId: mainFrame.loaderId, contextId: context.id, contextUniqueId, resourceType: "Fetch" },
+          terminal: null, documentReplacedBy: null, dataEvents: 0, deltas: [],
+        });
       }
       const stream = streams.get(id);
       if (!stream) return;
@@ -205,8 +260,14 @@ async function nativeDiscussionEvents(app: Surface, origin: string) {
         deadlines.set(commandId, setTimeout(() => { errors.push("Native SSE byte observation timed out."); pending.delete(commandId); deadlines.delete(commandId); }, 10_000));
         socket.send(JSON.stringify({ id: commandId, method: "Network.streamResourceContent", params: { requestId: id } }));
       }
-      if (event.method === "Network.dataReceived" && typeof params.data === "string") consume(id, params.data);
-      if (event.method === "Network.loadingFailed" || event.method === "Network.loadingFinished") stream.closed = true;
+      if (event.method === "Network.dataReceived") {
+        stream.dataEvents++;
+        if (typeof params.data === "string") consume(id, params.data);
+      }
+      if (event.method === "Network.loadingFailed" || event.method === "Network.loadingFinished") {
+        stream.closed = true;
+        stream.terminal = { event: event.method, canceled: params.canceled === true, errorText: typeof params.errorText === "string" ? params.errorText.slice(0, 128) : null };
+      }
     } catch (error) {
       errors.push(error instanceof Error ? error.message : "Native SSE observation failed.");
       ready.reject(new Error(errors.at(-1)));
@@ -219,7 +280,12 @@ async function nativeDiscussionEvents(app: Surface, origin: string) {
   return {
     read() {
       if (errors.length) throw new Error(errors.join("\n"));
-      return [...streams.values()].map((stream) => ({ ...stream, deltas: stream.deltas.map((delta) => ({ ...delta })) }));
+      return [...streams.values()].map((stream) => ({
+        ...stream, owner: { ...stream.owner }, terminal: stream.terminal ? { ...stream.terminal } : null,
+        documentReplacedBy: stream.documentReplacedBy ? { ...stream.documentReplacedBy } : null,
+        contextEndedBy: contexts.get(stream.owner.contextUniqueId)?.endedBy ?? null,
+        deltas: stream.deltas.map((delta) => ({ ...delta })),
+      }));
     },
     async [Symbol.asyncDispose]() {
       disposed = true;
