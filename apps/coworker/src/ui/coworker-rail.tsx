@@ -469,9 +469,9 @@ export function CoworkerRail({
       )}
       </div>
       <div className={calendarMode ? "flex min-h-0 flex-1 flex-col" : "hidden"} data-testid="calendar-rail-content">
-        {panel.collapsed ? <div className="flex flex-1 flex-col items-center gap-2 px-1 pt-3">
+        {panel.collapsed ? <div className="flex min-h-0 flex-1 flex-col items-center gap-2 pt-3">
           <IconButton label="Expand calendars" tooltipSide="right" onClick={() => { setFocusSearchOnExpand(true); panel.expand(); }} data-testid="calendar-rail-expand"><CalendarIcon /></IconButton>
-          <p className="text-center text-[10px] leading-snug text-mist">Your team's calendar</p>
+          <CalendarSidebar coworkers={coworkers} data={calendarData} preferences={calendarPreferences} onPreferencesChange={onCalendarPreferencesChange} query="" compact />
         </div> : <CalendarSidebar coworkers={coworkers} data={calendarData} preferences={calendarPreferences} onPreferencesChange={onCalendarPreferencesChange} query={calendarQuery} />}
       </div>
       <div className={activityMode ? "flex min-h-0 flex-1 flex-col" : "hidden"} data-testid="activity-rail-content">{activityContent}</div>
