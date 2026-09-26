@@ -78,4 +78,11 @@ test("an agent builds a workspace before anyone signs up, and a person claims it
     expect(oldToken.status).toBe(401);
     expect(reexchange.error).toBe("invalid_grant");
   });
+
+  await step("a used or mistyped code says so plainly and offers to enter another", async () => {
+    await person.navigate(code.verificationUrl);
+    await person.see({ text: "This code can’t be used" }, { timeoutMs: 60_000 });
+    await person.see({ text: "This code is invalid or has expired. Ask your agent for a new one." });
+    await person.screenshot();
+  });
 });
