@@ -24,6 +24,7 @@ import {
 import { normalizeDenTypeId, type DenTypeId } from "@openwork-ee/utils/typeid"
 import { db } from "../../db.js"
 import { env } from "../../env.js"
+import { memberSignInLink } from "../../agent-links.js"
 import { appLogger } from "../../observability/logger.js"
 import { ORGANIZATION_SUPER_ADMIN_ROLE, organizationRoleValueSatisfies } from "../../organization-role-hierarchy.js"
 import {
@@ -639,19 +640,6 @@ const connectionUpdatedResponseSchema = connectionResponseSchema.extend({
   identityChanged: z.boolean(),
   reconnectionRequired: z.boolean(),
 }).meta({ ref: "ExternalMcpConnectionUpdatedResponse" })
-
-/**
- * The classical member handoff: after an admin (or their agent) publishes a
- * connection, members connect their own account in the den-web dashboard.
- * betterAuthUrl is the den-web public origin in every deployment layout.
- */
-export function memberSignInLink(connection: Pick<ExternalMcpConnectionRow, "id" | "organizationId" | "name">) {
-  const signIn = new URL("/connect/mcp", env.betterAuthUrl)
-  signIn.searchParams.set("connectionId", connection.id)
-  signIn.searchParams.set("org", connection.organizationId)
-  signIn.searchParams.set("name", connection.name)
-  return signIn.toString()
-}
 
 function memberConnectLinks(connection: ExternalMcpConnectionRow) {
   const yourConnections = new URL("/dashboard/your-connections", env.betterAuthUrl)

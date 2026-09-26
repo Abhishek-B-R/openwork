@@ -6,7 +6,7 @@ import { describeRoute } from "hono-openapi"
 import { z } from "zod"
 import { ORGANIZATION_AUDIT_ACTIONS, recordOrganizationAuditEvent } from "../../audit-events.js"
 import { db } from "../../db.js"
-import { env } from "../../env.js"
+import { invitationBillingUrl } from "../../agent-links.js"
 import { invitationHasAdminTeam, withOrganizationTeamMutation } from "../../organization-team-roles.js"
 import { jsonValidator, orgRoleRoute, paramValidator } from "../../middleware/index.js"
 import { denTypeIdSchema, forbiddenSchema, invalidRequestSchema, jsonResponse, notFoundSchema, successSchema, unauthorizedSchema } from "../../openapi.js"
@@ -56,11 +56,6 @@ const invitePaymentRequiredSchema = z.object({
   message: z.string(),
   billingUrl: z.string().url().describe("Open in a browser to start seat billing; an owner can finish it there, then retry the invitation."),
 }).meta({ ref: "InvitePaymentRequiredError" })
-
-/** Where an owner starts seat billing. den-web resolves the active organization. */
-export function invitationBillingUrl() {
-  return new URL("/dashboard/billing", env.betterAuthUrl).toString()
-}
 
 const invitationNotPendingSchema = z.object({
   error: z.literal("invitation_not_pending"),

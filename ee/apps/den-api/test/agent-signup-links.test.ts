@@ -8,20 +8,18 @@ function seedRequiredEnv() {
   process.env.BETTER_AUTH_URL = process.env.BETTER_AUTH_URL ?? "http://127.0.0.1:8790"
 }
 
-let connections: typeof import("../src/routes/org/mcp-connections.js")
-let invitations: typeof import("../src/routes/org/invitations.js")
+let links: typeof import("../src/agent-links.js")
 let webOrigin = ""
 
 beforeAll(async () => {
   seedRequiredEnv()
   const { env } = await import("../src/env.js")
   webOrigin = new URL(env.betterAuthUrl).origin
-  connections = await import("../src/routes/org/mcp-connections.js")
-  invitations = await import("../src/routes/org/invitations.js")
+  links = await import("../src/agent-links.js")
 })
 
 test("a new MCP connection hands the agent a one-click browser sign-in link for that connection", () => {
-  const link = new URL(connections.memberSignInLink({
+  const link = new URL(links.memberSignInLink({
     id: "emc_01abc",
     organizationId: "org_01xyz",
     name: "Linear & Co",
@@ -35,7 +33,7 @@ test("a new MCP connection hands the agent a one-click browser sign-in link for 
 })
 
 test("the seat-billing refusal points the agent at the billing page", () => {
-  const url = new URL(invitations.invitationBillingUrl())
+  const url = new URL(links.invitationBillingUrl())
   expect(url.origin).toBe(webOrigin)
   expect(url.pathname).toBe("/dashboard/billing")
 })
