@@ -56,9 +56,28 @@ test("a member sees which app is asking and where it returns before authorizing 
     await person.navigate(world.unnamed.url);
     await person.see({ testId: "mcp-client-name", text: "An app without a name" }, { timeoutMs: 60_000 });
     await person.see({ testId: "mcp-redirect-host", text: world.unnamed.redirectHost });
-    await person.see({ testId: "mcp-unnamed-app-line", text: `Only continue if you know ${world.unnamed.redirectHost} and started this sign-in.` });
+    await person.see({ testId: "mcp-unnamed-app-line" });
+    await person.see({ text: `This app did not share its name. Only continue if you know ${world.unnamed.redirectHost} and started this sign-in.` });
     await person.see({ role: "button", label: "Authorize this app" });
     evidence.recordAssertionEvidence("An unnamed app names the host to check", `returns to ${world.unnamed.redirectHost}; guidance line shown`, true);
+    await person.screenshot();
+  });
+
+  await step("the consent step names the app, the workspace and the return address, with Deny as a quiet action", async () => {
+    await person.navigate(await world.consentUrl(world.loopback.authorizePath));
+    await person.see({ text: `Allow ${world.loopback.name} to use` }, { timeoutMs: 60_000 });
+    await person.see({ testId: "mcp-redirect-host", text: world.loopback.redirectHost });
+    await person.see({ testId: "mcp-loopback-warning" });
+    await person.see({ role: "button", label: `Authorize ${world.loopback.name}` });
+    await person.see({ role: "button", label: "Deny" });
+    await person.notSee({ text: /OpenWork MCP|Authorize MCP access/ });
+    await person.screenshot();
+  });
+
+  await step("an unnamed app's consent step names the host to check", async () => {
+    await person.navigate(await world.consentUrl(world.unnamed.authorizePath));
+    await person.see({ text: "Allow this app to use" }, { timeoutMs: 60_000 });
+    await person.see({ testId: "mcp-unnamed-app-line" });
     await person.screenshot();
   });
 });

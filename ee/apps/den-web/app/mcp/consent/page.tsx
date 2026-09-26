@@ -1,7 +1,7 @@
 "use client";
 
 import { X } from "lucide-react";
-import { type ReactNode, useEffect, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import { OnboardingTexture } from "../../(den)/_components/onboarding-texture";
 import { SetupFrame } from "../../(den)/_components/setup-frame";
 import {
@@ -18,6 +18,7 @@ import { getRuntimeConfig } from "../../(den)/_lib/runtime-config";
 import { McpReturnLine, mcpIdentityFacts, useMcpRedirect } from "../client-identity";
 import { McpConsentPermissions, McpTechnicalDetails } from "../consent-permissions";
 import { McpStoryTiles, mcpStoryCopy } from "../mcp-story";
+import { useLocationQuery } from "../use-location-query";
 import { useMcpClient } from "../use-mcp-client";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -57,10 +58,7 @@ export default function McpConsentPage() {
   const [denied, setDenied] = useState(false);
   const [workspaceName, setWorkspaceName] = useState<string | null>(null);
   const [email, setEmail] = useState<string | null>(null);
-  const oauthQuery = useMemo(() => {
-    if (typeof window === "undefined") return "";
-    return window.location.search.replace(/^\?/, "");
-  }, []);
+  const oauthQuery = useLocationQuery() ?? "";
   const scope = new URLSearchParams(oauthQuery).get("scope") ?? "openid profile email mcp:read";
   const client = useMcpClient(oauthQuery);
   const redirect = useMcpRedirect(oauthQuery);

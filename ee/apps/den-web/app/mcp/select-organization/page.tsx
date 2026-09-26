@@ -27,6 +27,7 @@ import { FilterInput } from "../../(den)/dashboard/_components/item-list";
 import { McpReturnLine, mcpIdentityFacts, useMcpRedirect } from "../client-identity";
 import { McpConsentPermissions, McpTechnicalDetails } from "../consent-permissions";
 import { McpStoryTiles, mcpStoryCopy } from "../mcp-story";
+import { useLocationQuery } from "../use-location-query";
 import { useMcpClient } from "../use-mcp-client";
 
 type Organization = {
@@ -131,10 +132,8 @@ export default function McpSelectOrganizationPage() {
   const [workspaceName, setWorkspaceName] = useState("");
   const [email, setEmail] = useState<string | null>(null);
 
-  const oauthQuery = useMemo(() => {
-    if (typeof window === "undefined") return "";
-    return window.location.search.replace(/^\?/, "");
-  }, []);
+  const locationQuery = useLocationQuery();
+  const oauthQuery = locationQuery ?? "";
   const params = useMemo(() => new URLSearchParams(oauthQuery), [oauthQuery]);
   const requestedScope = params.get("scope") ?? "openid profile email mcp:read";
   const client = useMcpClient(oauthQuery);
@@ -148,6 +147,7 @@ export default function McpSelectOrganizationPage() {
   const orgWindow = useOrgListWindow(orgs, ORG_PAGE_SIZE);
 
   useEffect(() => {
+    if (locationQuery === null) return;
     let cancelled = false;
     if (isMcpOAuthQueryExpired(oauthQuery)) {
       setFlowState("expired");
@@ -172,7 +172,7 @@ export default function McpSelectOrganizationPage() {
     return () => {
       cancelled = true;
     };
-  }, [oauthQuery]);
+  }, [locationQuery, oauthQuery]);
 
   async function continueFlow(org: Organization | null = selectedOrg) {
     if (!org) return;
