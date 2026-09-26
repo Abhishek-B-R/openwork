@@ -4,12 +4,15 @@
 //
 //   pnpm build && pnpm exec next start -p 3005 &
 //   node scripts/agent-discovery-eval.mjs --base-url http://localhost:3005 --out /tmp/agent-test \
-//     [--agents codex,gemini,claude] [--codex-bin codex] [--gemini-model <model>]
+//     [--agents codex,gemini,opencode] [--codex-bin codex] [--gemini-model <model>]
+//     [--opencode-bin ~/.opencode/bin/opencode] [--opencode-model openai/gpt-5.5]
 //
 // Runs each installed, signed-in agent CLI headless against the local build,
 // saves transcripts to --out, and greps the final answers for the exact
 // commands. It also lets one agent run `claude mcp add` inside a throwaway
-// HOME and checks `claude mcp list`. Nothing is installed and no account is
+// HOME and checks `claude mcp list`. `claude` is still a runner, but not a
+// default one. opencode never inherits the caller's OPENCODE_* variables, so
+// the eval also runs from a shell inside OpenWork. Nothing is installed and no account is
 // created. Agents that are missing or not signed in are reported as skipped.
 import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -25,7 +28,9 @@ const baseUrl = option("--base-url", "http://localhost:3005").replace(/\/$/, "")
 const outDir = option("--out", join(tmpdir(), "openwork-agent-test"));
 const codexBin = option("--codex-bin", "codex");
 const geminiModel = option("--gemini-model", "");
-const agents = option("--agents", "codex,gemini,claude").split(",").map((agent) => agent.trim()).filter(Boolean);
+const opencodeBin = option("--opencode-bin", join(homedir(), ".opencode", "bin", "opencode"));
+const opencodeModel = option("--opencode-model", "openai/gpt-5.5");
+const agents = option("--agents", "codex,gemini,opencode").split(",").map((agent) => agent.trim()).filter(Boolean);
 mkdirSync(outDir, { recursive: true });
 
 const MCP_URL = "https://api.openworklabs.com/mcp/agent";
@@ -54,7 +59,9 @@ const prompts = [
   },
 ];
 
-const noNpx = ["does not recommend `npx openwork`", (text) => text.split("\n").every((line) => !/npx openwork|npm (i|install)( -g)? openwork\b/.test(line) || /not|don't|never|avoid|different|unrelated|wrong/i.test(line))];
+// A mention is fine when it, or a line just above it (e.g. "Do not use:" before a code block), warns against it.
+const NEGATION = /not|don't|never|avoid|different|unrelated|wrong/i;
+const noNpx = ["does not recommend `npx openwork`", (text) => text.split("\n").every((line, index, lines) => !/npx openwork|npm (i|install)( -g)? openwork\b/.test(line) || lines.slice(Math.max(0, index - 3), index + 1).some((near) => NEGATION.test(near)))];
 
 // The agents below run shell commands with network access. Hand each one only
 // the variables it needs, never the caller's whole environment.
@@ -63,14 +70,35 @@ const AUTH_ENV_KEYS = {
   codex: ["CODEX_HOME", "OPENAI_API_KEY"],
   gemini: ["GEMINI_API_KEY", "GOOGLE_API_KEY", "GOOGLE_CLOUD_PROJECT", "GOOGLE_GENAI_USE_VERTEXAI"],
   claude: ["ANTHROPIC_API_KEY"],
+  opencode: [],
 };
+
+// opencode keeps its sign-in in XDG_DATA_HOME/opencode/auth.json. Pin that to
+// the real data dir so a swapped HOME keeps it, and give it an empty config
+// dir so the user's global config, plugins, and instructions stay out.
+const OPENCODE_DATA_HOME = process.env.XDG_DATA_HOME ?? join(homedir(), ".local", "share");
+const opencodeConfigHome = mkdtempSync(join(tmpdir(), "openwork-agent-eval-opencode-config-"));
+process.on("exit", () => rmSync(opencodeConfigHome, { recursive: true, force: true }));
+
+function opencodeEnv(bashAllow) {
+  const bash = { "*": "deny" };
+  for (const pattern of bashAllow) bash[pattern] = "allow";
+  return {
+    XDG_DATA_HOME: OPENCODE_DATA_HOME,
+    XDG_CONFIG_HOME: opencodeConfigHome,
+    OPENCODE_DISABLE_AUTOUPDATE: "1",
+    OPENCODE_CONFIG_CONTENT: JSON.stringify({ permission: { edit: "deny", webfetch: "allow", bash } }),
+  };
+}
 
 function agentEnv(agent, overrides = {}) {
   const env = {};
   for (const key of [...BASE_ENV_KEYS, ...(AUTH_ENV_KEYS[agent] ?? [])]) {
     if (process.env[key] !== undefined) env[key] = process.env[key];
   }
-  return { ...env, ...overrides };
+  // OpenWork's shell exports OPENCODE_* pointing at its own database; never pass the caller's.
+  const scoped = agent === "opencode" ? { ...env, ...opencodeEnv(["curl *"]) } : env;
+  return { ...scoped, ...overrides };
 }
 
 const SECRET_NAME = /KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|AUTH|COOKIE|SESSION|PRIVATE/i;
@@ -107,6 +135,25 @@ function run(command, commandArgs, options = {}) {
 
 function workdir() {
   return mkdtempSync(join(tmpdir(), "openwork-agent-eval-"));
+}
+
+const ANSI = /\u001b\[[0-9;?]*[ -\/]*[@-~]/g;
+const stripAnsi = (text) => String(text ?? "").replace(ANSI, "");
+
+// `opencode run --format json` prints one event per line; the answer is the final text part(s).
+function opencodeAnswer(stdout) {
+  const texts = stdout.split("\n").filter(Boolean).flatMap((line) => {
+    try {
+      const event = JSON.parse(line);
+      return event.type === "text" && typeof event.part?.text === "string" ? [event.part] : [];
+    } catch { return []; }
+  });
+  const final = texts.filter((part) => part.metadata?.openai?.phase === "final_answer");
+  return stripAnsi((final.length ? final : texts.slice(-1)).map((part) => part.text).join("\n"));
+}
+
+function opencodeRun(prompt, cwd, env, timeout) {
+  return run(opencodeBin, ["run", "--pure", "--format", "json", "-m", opencodeModel, prompt], { cwd, env, ...(timeout ? { timeout } : {}) });
 }
 
 function geminiArgs() {
@@ -148,6 +195,18 @@ const runners = {
       return { transcript: `${result.stdout}\n--- stderr ---\n${result.stderr}`, answer: final?.result ?? "", code: result.code };
     },
   },
+  opencode: {
+    probe: () => {
+      const cwd = workdir();
+      const result = opencodeRun("reply with exactly: ok", cwd, agentEnv("opencode"), 180000);
+      rmSync(cwd, { recursive: true, force: true });
+      return opencodeAnswer(result.stdout).toLowerCase().includes("ok");
+    },
+    ask(prompt, cwd, env) {
+      const result = opencodeRun(prompt, cwd, env);
+      return { transcript: stripAnsi(`${result.stdout}\n--- stderr ---\n${result.stderr}`), answer: opencodeAnswer(result.stdout), code: result.code };
+    },
+  },
 };
 
 const summary = [];
@@ -164,18 +223,21 @@ for (const agent of agents) {
     writeRedacted(join(outDir, `${agent}-${id}.answer.md`), answer);
     const results = [...checks, noNpx].map(([name, check]) => ({ name, ok: check(answer) }));
     const failed = results.filter((result) => !result.ok).map((result) => result.name);
-    summary.push({ agent, test: id, verdict: failed.length === 0 && answer.trim() ? "pass" : "fail", note: failed.length ? `missing: ${failed.join("; ")}` : `${results.length} checks` });
+    summary.push({ agent, test: id, verdict: failed.length === 0 && answer.trim() ? "pass" : "fail", note: !answer.trim() ? "no answer (agent error, see transcript)" : failed.length ? `missing: ${failed.join("; ")}` : `${results.length} checks` });
     rmSync(cwd, { recursive: true, force: true });
   }
 }
 
 // Execution run: the agent runs `claude mcp add` itself in a throwaway HOME.
 // `claude mcp add` only writes local config and needs no Claude sign-in.
-// Codex is the executor because CODEX_HOME keeps its sign-in while HOME is swapped.
-const executor = available.includes("codex") ? "codex" : undefined;
+// Codex is the preferred executor because CODEX_HOME keeps its sign-in while
+// HOME is swapped; opencode keeps its sign-in through the pinned XDG_DATA_HOME.
+const executor = ["codex", "opencode"].find((agent) => available.includes(agent));
 if (executor && run("claude", ["--version"]).code === 0) {
   const home = workdir();
-  const env = agentEnv(executor, { HOME: home, CODEX_HOME: process.env.CODEX_HOME ?? join(homedir(), ".codex") });
+  const env = executor === "codex"
+    ? agentEnv("codex", { HOME: home, CODEX_HOME: process.env.CODEX_HOME ?? join(homedir(), ".codex") })
+    : agentEnv("opencode", { HOME: home, ...opencodeEnv(["curl *", "claude mcp *"]) });
   const prompt = `${preamble}\n\nUser: Connect OpenWork to my Claude Code. Find the exact command in llms.txt and run it yourself now (it only writes local Claude Code config). Then run \`claude mcp list\` and show me the output. Do not try to sign in.`;
   const { transcript, answer } = runners[executor].ask(prompt, home, env);
   writeRedacted(join(outDir, `${executor}-execute-claude-mcp-add.transcript.txt`), `PROMPT:\n${prompt}\nHOME=${home}\n\n${transcript}`);
@@ -187,10 +249,10 @@ if (executor && run("claude", ["--version"]).code === 0) {
   summary.push({ agent: executor, test: "execute-claude-mcp-add", verdict: ok ? "pass" : "fail", note: ok ? "`claude mcp list` shows openwork -> /mcp/agent" : "openwork not registered" });
   rmSync(home, { recursive: true, force: true });
 } else {
-  summary.push({ agent: executor ?? "-", test: "execute-claude-mcp-add", verdict: "skip", note: "needs a signed-in codex and the claude CLI" });
+  summary.push({ agent: executor ?? "-", test: "execute-claude-mcp-add", verdict: "skip", note: "needs a signed-in codex or opencode and the claude CLI" });
 }
 
-const lines = summary.map((row) => `${row.verdict.padEnd(5)} ${row.agent.padEnd(7)} ${row.test.padEnd(24)} ${row.note}`);
+const lines = summary.map((row) => `${row.verdict.padEnd(5)} ${row.agent.padEnd(8)} ${row.test.padEnd(24)} ${row.note}`);
 writeFileSync(join(outDir, "summary.txt"), `${lines.join("\n")}\n`);
 console.log(lines.join("\n"));
 console.log(`\nTranscripts: ${outDir}`);
