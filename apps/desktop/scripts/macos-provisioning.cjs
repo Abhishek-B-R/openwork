@@ -50,7 +50,9 @@ function validateProvisioning({ entitlements, profile, bundleId, signingTeam, ce
     const requested = entitlements[key];
     const permitted = allowed[key];
     if (Array.isArray(requested)) {
-      if (!Array.isArray(permitted) || !requested.every((value) => permitted.some((pattern) => permits(pattern, value)))) {
+      // Apple can grant an array-valued entitlement with the scalar wildcard "*".
+      const patterns = Array.isArray(permitted) ? permitted : [permitted];
+      if (!requested.every((value) => patterns.some((pattern) => permits(pattern, value)))) {
         fail(`The profile does not authorize every requested value of ${key}.`);
       }
     } else if (!permits(permitted, requested)) {

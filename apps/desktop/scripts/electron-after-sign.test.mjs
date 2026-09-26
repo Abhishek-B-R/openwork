@@ -93,6 +93,26 @@ test("a matching signed macOS profile authorizes all requested capabilities", ()
   assert.doesNotThrow(() => validateProvisioning(provisionedApp()));
 });
 
+test("a scalar wildcard grant authorizes an array of associated domains", () => {
+  const app = provisionedApp();
+  app.entitlements["com.apple.developer.associated-domains"] = [
+    "webcredentials:example.com",
+    "webcredentials:login.example.com",
+  ];
+  app.profile.entitlements["com.apple.developer.associated-domains"] = "*";
+  assert.doesNotThrow(() => validateProvisioning(app));
+});
+
+test("a scalar domain grant cannot authorize unrelated domains", () => {
+  const app = provisionedApp();
+  app.entitlements["com.apple.developer.associated-domains"] = [
+    "webcredentials:example.com",
+    "webcredentials:unapproved.example.com",
+  ];
+  app.profile.entitlements["com.apple.developer.associated-domains"] = "webcredentials:example.com";
+  assert.throws(() => validateProvisioning(app), /every requested value/);
+});
+
 for (const [name, change, message] of [
   ["expired profile", (app) => { app.profile.expiration = "2025-12-31T00:00:00Z"; }, /expired/],
   ["invalid expiration", (app) => { app.profile.expiration = "invalid"; }, /expiration/],
