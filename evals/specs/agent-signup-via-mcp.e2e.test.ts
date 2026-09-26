@@ -117,7 +117,9 @@ test("a brand-new person signs up through their agent, names a workspace inline,
 
   await step("a connection link that was removed says so plainly, and a broken link asks for a new one", async () => {
     const removed = new URL(signInLink);
-    removed.searchParams.set("connectionId", "emc_removed0000000000000000");
+    const realId = removed.searchParams.get("connectionId") ?? "";
+    // Same shape as a real id, but no connection has it (as if it was removed).
+    removed.searchParams.set("connectionId", `${realId.slice(0, -1)}${realId.endsWith("0") ? "1" : "0"}`);
     await person.navigate(removed.toString());
     await person.see({ role: "button", label: "Sign in to Team tools" }, { timeoutMs: 30_000 });
     await person.click({ role: "button", label: "Sign in to Team tools" });
