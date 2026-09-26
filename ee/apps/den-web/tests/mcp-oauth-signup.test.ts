@@ -85,6 +85,7 @@ describe("signing in without leaving the page", () => {
     const location = { pathname: "/connect/mcp", search: "?connectionId=emc_1&org=org_1&name=Linear" };
     expect(signsInInPlace("/connect/mcp")).toBe(true);
     expect(signsInInPlace("/connect/mcp/")).toBe(true);
+    expect(getAuthResumeUrl({ pathname: "/device", search: "?user_code=ABCDEFGH" }, "https://app.example.test")).toBe("https://app.example.test/device?user_code=ABCDEFGH");
     expect(getAuthResumeUrl(location, "https://app.example.test")).toBe("https://app.example.test/connect/mcp?connectionId=emc_1&org=org_1&name=Linear");
   });
 

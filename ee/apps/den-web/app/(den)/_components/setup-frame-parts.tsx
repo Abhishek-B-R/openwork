@@ -2,6 +2,7 @@
 
 import { AppWindow, Check, ChevronRight, Plus } from "lucide-react";
 import type { ButtonHTMLAttributes, ReactNode } from "react";
+import styles from "./setup-frame.module.css";
 import { DenBrandMark } from "./ui/brand-mark";
 
 /*
@@ -210,4 +211,41 @@ export function SetupSkeletonRows({ count = 2 }: { count?: number }) {
 /** The panel's content column; the frame draws the band and padding. */
 export function SetupPanelBody({ children, gap = "lg" }: { children: ReactNode; gap?: "lg" | "md" }) {
   return <div className={`flex flex-col ${gap === "lg" ? "gap-[18px]" : "gap-4"}`}>{children}</div>;
+}
+
+export type SetupTerminalLine = { text: string; muted?: boolean };
+
+/**
+ * The terminal a command-line sign-in started from, drawn in the story column
+ * so the person can match the code on the page with the one in their terminal.
+ */
+export function SetupTerminal({ lines }: { lines: SetupTerminalLine[] }) {
+  return (
+    <figure className="m-0 mt-10 w-full max-w-110" aria-label="Your terminal" data-testid="setup-terminal">
+      <div className={styles.appWindow}>
+        <div className={styles.appTitlebar}>
+          <span className="flex gap-1.5" aria-hidden="true">
+            <i className="size-2.25 rounded-full bg-[var(--dls-border)]" />
+            <i className="size-2.25 rounded-full bg-[var(--dls-border)]" />
+            <i className="size-2.25 rounded-full bg-[var(--dls-border)]" />
+          </span>
+          <span className="pl-2 text-xs font-normal text-[#888]">Terminal</span>
+        </div>
+        <pre className="m-0 overflow-hidden whitespace-pre-wrap px-4 pb-4 pt-3.5 font-mono text-xs leading-5">
+          {lines.map((line, index) => (
+            <span key={index} className={`block ${line.muted ? "text-[var(--dls-text-secondary)]" : "text-[var(--dls-text-primary)]"}`}>{line.text}</span>
+          ))}
+        </pre>
+      </div>
+    </figure>
+  );
+}
+
+/** A one-time code as the panel's first fact, in mono. */
+export function SetupCode({ code, testId, size = "sm" }: { code: string; testId?: string; size?: "sm" | "lg" }) {
+  return (
+    <span className={`font-mono font-semibold tracking-[0.12em] text-[var(--dls-text-primary)] ${size === "lg" ? "text-xl leading-7" : "text-sm leading-[18px]"}`} data-testid={testId}>
+      {code}
+    </span>
+  );
 }

@@ -81,4 +81,15 @@ test("a person signs the OpenWork CLI in from their browser without typing a pas
     );
     expect(denied).toBe(true);
   });
+
+  await step("a mistyped or expired code says so plainly and offers to enter another", async () => {
+    await person.navigate(`${world.den.ref.webUrl}/device?user_code=ZZZZ-ZZZZ`);
+    await person.see({ text: "This code can’t be used" }, { timeoutMs: 60_000 });
+    await person.see({ text: "This code is not valid or has expired. Check it against your terminal, or run the command again." });
+    await person.screenshot();
+    await person.click({ role: "button", label: "Enter a different code" });
+    await person.see({ text: "Enter the code from your terminal" });
+    await person.see({ role: "button", label: "Continue" });
+    await person.screenshot();
+  });
 });

@@ -5,9 +5,21 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { getErrorMessage, requestJson } from "../_lib/den-flow";
 import { useDenFlow } from "../_providers/den-flow-provider";
 import { AuthPanel } from "./auth-panel";
-import { DenButton } from "./ui/button";
-import { DenInput } from "./ui/input";
-import { DenNotice } from "./ui/notice";
+import { OnboardingTexture } from "./onboarding-texture";
+import { SetupFrame } from "./setup-frame";
+import {
+  SetupCode,
+  SetupErrorLine,
+  SetupFacts,
+  SetupLine,
+  SetupPanelBody,
+  SetupPanelTitle,
+  SetupQuietButton,
+  SetupSkeletonRows,
+  SetupStatus,
+  SetupTerminal,
+  type SetupTerminalLine,
+} from "./setup-frame-parts";
 import { DenSelect } from "./ui/select";
 
 type Organization = { id: string; name: string; isActive: boolean };
@@ -19,8 +31,6 @@ type CodeState =
   | { kind: "invalid"; message: string }
   | { kind: "approved" }
   | { kind: "denied" };
-
-const HEADING = "text-[20px] font-semibold leading-tight tracking-[-0.01em] text-[var(--dls-text-primary)]";
 
 const CLIENT_NAMES: Record<string, string> = {
   "openwork-cli": "OpenWork CLI",
@@ -65,6 +75,11 @@ export function DeviceApprovalScreen({ initialUserCode }: { initialUserCode: str
   const [organizationId, setOrganizationId] = useState("");
   const [busy, setBusy] = useState<"approve" | "deny" | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [host, setHost] = useState("");
+
+  useEffect(() => {
+    setHost(window.location.host);
+  }, []);
 
   useEffect(() => {
     if (!user || !userCode) return;
@@ -80,7 +95,7 @@ export function DeviceApprovalScreen({ initialUserCode }: { initialUserCode: str
       setOrgs(list);
       setOrganizationId(list.find((org) => org.isActive)?.id ?? list[0]?.id ?? "");
       if (!lookup.response.ok) {
-        setCodeState({ kind: "invalid", message: getErrorMessage(lookup.payload, "This code is not valid. Check it against your terminal.") });
+        setCodeState({ kind: "invalid", message: "This code is not valid or has expired. Check it against your terminal, or run the command again." });
         return;
       }
       const clientId = readClientId(lookup.payload);
@@ -118,103 +133,108 @@ export function DeviceApprovalScreen({ initialUserCode }: { initialUserCode: str
     setCodeState(decision === "approve" ? { kind: "approved" } : { kind: "denied" });
   }
 
+  const shownCode = userCode || "XXXX-XXXX";
+  const terminalStatus: SetupTerminalLine = codeState.kind === "approved"
+    ? { text: `Signed in as ${user?.email ?? "you"}${selectedOrg ? ` in ${selectedOrg.name}` : ""}.` }
+    : codeState.kind === "denied"
+      ? { text: "Sign-in was denied." }
+      : { text: "Waiting for approval...", muted: true };
+  const description = codeState.kind === "approved"
+    ? "Your terminal is signed in."
+    : codeState.kind === "denied"
+      ? "Your terminal did not get access."
+      : "Your terminal is waiting for approval.";
+
   const frame = (children: ReactNode) => (
-    <section className="den-page py-6 lg:py-10">
-      <div className="den-frame mx-auto grid w-full max-w-[32rem] gap-6 p-6 md:p-8">{children}</div>
-    </section>
+    <SetupFrame
+      title={`Sign in ${clientName}.`}
+      description={description}
+      panelVisual={<OnboardingTexture />}
+      aside={(
+        <SetupTerminal
+          lines={[
+            { text: "$ openwork-bootstrap login" },
+            { text: "Open this link to sign in:", muted: true },
+            { text: `  ${host || "…"}/device` },
+            { text: `and confirm the code ${shownCode}.`, muted: true },
+            terminalStatus,
+          ]}
+        />
+      )}
+    >
+      <div data-testid="device-approval">{children}</div>
+    </SetupFrame>
   );
 
   if (!sessionHydrated) {
     return frame(
-      <div className="grid gap-3" aria-busy="true">
-        <div className="h-6 w-2/3 animate-pulse rounded-md bg-[var(--dls-hover)]" />
-        <div className="h-12 animate-pulse rounded-lg bg-[var(--dls-hover)]" />
-        <div className="h-10 w-40 animate-pulse rounded-lg bg-[var(--dls-hover)]" />
-      </div>,
+      <SetupPanelBody>
+        <SetupPanelTitle>{`Sign in ${clientName}?`}</SetupPanelTitle>
+        <SetupSkeletonRows count={1} />
+      </SetupPanelBody>,
     );
   }
 
   if (!user) {
-    return (
-      <section className="den-page py-6 lg:py-10">
-        <div className="mx-auto grid w-full max-w-[32rem] gap-5">
-          <h1 className={`${HEADING} text-center`}>Sign in to OpenWork CLI</h1>
-          {userCode ? (
-            <p className="text-center font-mono text-[20px] font-semibold tracking-[0.12em] text-[var(--dls-text-primary)]" data-testid="device-user-code">
-              {userCode}
-            </p>
-          ) : null}
-          <AuthPanel
-            eyebrow="OpenWork CLI"
-            prefillKey={userCode}
-            // Social sign-in returns to the site root and would drop this code.
-            hideSocialAuth
-            signUpContent={{ title: "Create your account", submitLabel: "Create account" }}
-            signInContent={{ title: "Sign in", submitLabel: "Sign in" }}
-          />
-        </div>
-      </section>
+    return frame(
+      <SetupPanelBody>
+        {userCode ? <SetupFacts rows={[{ label: "Code", value: <SetupCode code={userCode} testId="device-user-code" /> }]} /> : null}
+        <AuthPanel
+          bare
+          emailFirstFlow
+          socialFirst
+          socialProviders={["google"]}
+          prefillKey={userCode}
+          emailStepContent={{ title: "Sign in to OpenWork" }}
+        />
+      </SetupPanelBody>,
     );
   }
 
   if (!userCode) {
     return frame(
       <form
-        className="grid gap-4"
+        className="flex flex-col gap-[18px]"
         onSubmit={(event) => {
           event.preventDefault();
           if (draftCode.trim()) setUserCode(formatUserCode(draftCode));
         }}
       >
-        <h1 className={HEADING}>Enter the code from your terminal</h1>
-        <DenInput
-          aria-label="Code"
-          value={draftCode}
-          onChange={(event) => setDraftCode(event.target.value)}
-          placeholder="ABCD-EFGH"
-          autoComplete="off"
-          className="font-mono uppercase tracking-[0.12em]"
-        />
-        <div>
-          <DenButton type="submit" disabled={!draftCode.trim()}>Continue</DenButton>
-        </div>
+        <SetupPanelTitle>Enter the code from your terminal</SetupPanelTitle>
+        <label className="flex flex-col gap-2">
+          <span className="den-label">Code</span>
+          <input
+            className="den-input font-mono uppercase tracking-[0.12em]"
+            value={draftCode}
+            onChange={(event) => setDraftCode(event.target.value)}
+            placeholder="ABCD-EFGH"
+            autoComplete="off"
+            autoFocus
+          />
+        </label>
+        <SetupFacts rows={[{ label: "Account", value: user.email }]} />
+        <button type="submit" className="den-button-primary w-full" disabled={!draftCode.trim()}>Continue</button>
       </form>,
     );
   }
 
   if (codeState.kind === "approved") {
-    return frame(
-      <div className="grid gap-3" role="status">
-        <span className="flex size-10 items-center justify-center rounded-full bg-[var(--dls-hover)]">
-          <Check className="size-5" aria-hidden />
-        </span>
-        <h1 className={HEADING}>{clientName} is signed in. Return to your terminal.</h1>
-      </div>,
-    );
+    return frame(<SetupStatus icon={<Check className="size-5" strokeWidth={1.5} />} title={`${clientName} is signed in`} line="Return to your terminal." />);
   }
 
   if (codeState.kind === "denied") {
-    return frame(
-      <div className="grid gap-3" role="status">
-        <span className="flex size-10 items-center justify-center rounded-full bg-[var(--dls-hover)]">
-          <X className="size-5" aria-hidden />
-        </span>
-        <h1 className={HEADING}>Sign-in denied. {clientName} did not get access.</h1>
-      </div>,
-    );
+    return frame(<SetupStatus icon={<X className="size-5" strokeWidth={1.5} />} title="Sign-in denied" line={`${clientName} did not get access. You can close this tab.`} />);
   }
 
   if (codeState.kind === "invalid") {
     return frame(
-      <div className="grid gap-4">
-        <h1 className={HEADING}>This code can&apos;t be used</h1>
-        <DenNotice message={codeState.message} />
-        <div>
-          <DenButton variant="secondary" onClick={() => { setUserCode(""); setCodeState({ kind: "idle" }); }}>
-            Enter a different code
-          </DenButton>
-        </div>
-      </div>,
+      <SetupPanelBody gap="md">
+        <SetupPanelTitle>This code can’t be used</SetupPanelTitle>
+        <SetupLine>{codeState.message}</SetupLine>
+        <button type="button" className="den-button-secondary self-start" onClick={() => { setUserCode(""); setCodeState({ kind: "idle" }); }}>
+          Enter a different code
+        </button>
+      </SetupPanelBody>,
     );
   }
 
@@ -222,61 +242,47 @@ export function DeviceApprovalScreen({ initialUserCode }: { initialUserCode: str
   const orgLabel = selectedOrg ? selectedOrg.name : "no organization yet";
 
   return frame(
-    <>
-      <div className="grid gap-4">
-        <div className="flex items-center gap-3">
-          <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-[var(--dls-hover)]">
-            <Terminal className="size-4" aria-hidden />
-          </span>
-          <h1 className={HEADING}>Sign in {clientName}?</h1>
-        </div>
-        <div className="grid gap-1">
-          <span className="text-[13px] text-[var(--dls-text-secondary)]">Code</span>
-          <span className="font-mono text-[20px] font-semibold tracking-[0.12em] text-[var(--dls-text-primary)]" data-testid="device-user-code">
-            {userCode}
-          </span>
-        </div>
+    <SetupPanelBody>
+      <span className="flex size-10 items-center justify-center rounded-full bg-[var(--dls-hover)] text-[var(--dls-text-primary)]" aria-hidden="true">
+        <Terminal className="size-5" strokeWidth={1.5} />
+      </span>
+      <SetupPanelTitle>{`Sign in ${clientName}?`}</SetupPanelTitle>
+      <div className="flex flex-col gap-1">
+        <span className="text-[13px] leading-[18px] text-[var(--dls-text-secondary)]">Code</span>
+        <SetupCode code={userCode} size="lg" testId="device-user-code" />
       </div>
-
-      <div className="grid divide-y divide-[var(--dls-border)] border-y border-[var(--dls-border)]">
-        <div className="flex min-h-11 items-center justify-between gap-4 py-2 text-[13px]">
-          <span className="text-[var(--dls-text-secondary)]">Account</span>
-          <span className="truncate font-medium text-[var(--dls-text-primary)]">{user.email}</span>
-        </div>
-        {orgs && orgs.length > 1 ? (
-          <div className="flex min-h-11 items-center justify-between gap-4 py-2 text-[13px]">
-            <span className="text-[var(--dls-text-secondary)]">Organization</span>
-            <DenSelect aria-label="Organization" value={organizationId} onChange={(event) => setOrganizationId(event.target.value)} disabled={busy !== null}>
-              {orgs.map((org) => (
-                <option key={org.id} value={org.id}>{org.name}</option>
-              ))}
-            </DenSelect>
-          </div>
-        ) : (
-          <div className="flex min-h-11 items-center justify-between gap-4 py-2 text-[13px]">
-            <span className="text-[var(--dls-text-secondary)]">Organization</span>
-            <span className="font-medium text-[var(--dls-text-primary)]">{checking ? "…" : selectedOrg?.name ?? "None yet"}</span>
-          </div>
-        )}
-      </div>
-
-      <p className="den-copy text-[13px]" data-testid="device-consent-line">
+      <SetupFacts
+        rows={[
+          { label: "Account", value: user.email },
+          {
+            label: "Organization",
+            value: orgs && orgs.length > 1 ? (
+              <DenSelect aria-label="Organization" value={organizationId} onChange={(event) => setOrganizationId(event.target.value)} disabled={busy !== null}>
+                {orgs.map((org) => (
+                  <option key={org.id} value={org.id}>{org.name}</option>
+                ))}
+              </DenSelect>
+            ) : checking ? "…" : selectedOrg?.name ?? "None yet",
+          },
+        ]}
+      />
+      <p className="m-0 text-[13px] leading-5 text-[var(--setup-ink-soft)]" data-testid="device-consent-line">
         Only approve if you started this in your own terminal and the code matches. {clientName} will act as {user.email} in {orgLabel} until you sign out of it.
       </p>
-
-      {error ? <DenNotice message={error} /> : null}
-
-      <div className="flex flex-wrap items-center gap-3">
-        <DenButton onClick={() => void decide("approve")} loading={busy === "approve"} disabled={checking || busy !== null}>
-          Sign in {clientName}
-        </DenButton>
-        <DenButton variant="secondary" onClick={() => void decide("deny")} loading={busy === "deny"} disabled={checking || busy !== null}>
-          Deny
-        </DenButton>
-        <DenButton variant="ghost" onClick={() => void signOut()} disabled={busy !== null}>
+      <div className="flex flex-col gap-3.5">
+        {error ? <SetupErrorLine>{error}</SetupErrorLine> : null}
+        <div className="flex gap-2.5">
+          <button type="button" className="den-button-primary grow" onClick={() => void decide("approve")} disabled={checking || busy !== null}>
+            {busy === "approve" ? "Signing in…" : `Sign in ${clientName}`}
+          </button>
+          <button type="button" className="den-button-secondary w-30 shrink-0" onClick={() => void decide("deny")} disabled={checking || busy !== null}>
+            {busy === "deny" ? "Denying…" : "Deny"}
+          </button>
+        </div>
+        <SetupQuietButton className="self-start" onClick={() => void signOut()} disabled={busy !== null}>
           Use a different account
-        </DenButton>
+        </SetupQuietButton>
       </div>
-    </>,
+    </SetupPanelBody>,
   );
 }
