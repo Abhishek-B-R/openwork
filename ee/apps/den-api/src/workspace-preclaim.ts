@@ -1,8 +1,10 @@
 import { createHash, createHmac, randomBytes } from "node:crypto"
-import { and, desc, eq, gt, inArray, isNull } from "@openwork-ee/den-db/drizzle"
+import { and, desc, eq, gt, inArray, isNull, lte } from "@openwork-ee/den-db/drizzle"
 import {
+  AuthAccountTable,
   AuthSessionTable,
   AuthUserTable,
+  MemberTable,
   OrganizationTable,
   WorkspaceBootstrapTable,
   WorkspaceClaimCodeTable,
@@ -381,6 +383,56 @@ export async function revokePreclaimCredentials(bootstrapId: string, now = new D
     await cache.auth.revokeSession(session.token)
     await cache.auth.revokeSessionId(normalizeDenTypeId("session", session.id))
   }
+}
+
+/**
+ * Remove the sign-in-less setup agent once a workspace has an owner or has
+ * expired: its membership is removed and detached, and the agent user and any
+ * accounts are deleted, so it can never count as a seat or appear as a member.
+ * The bootstrap keeps the agent id so the old assertion can still read the
+ * final claim state.
+ */
+export async function retirePreclaimAgent(bootstrapId: string, now = new Date()): Promise<void> {
+  const [bootstrap] = await db
+    .select({ agentUserId: WorkspaceBootstrapTable.agentUserId, setupMemberId: WorkspaceBootstrapTable.setupMemberId })
+    .from(WorkspaceBootstrapTable)
+    .where(eq(WorkspaceBootstrapTable.id, normalizeDenTypeId("workspaceBootstrap", bootstrapId)))
+    .limit(1)
+  if (!bootstrap?.agentUserId) return
+  const agentUserId = normalizeDenTypeId("user", bootstrap.agentUserId)
+  await db.transaction(async (tx) => {
+    await tx
+      .update(MemberTable)
+      .set({ removedAt: now })
+      .where(and(eq(MemberTable.id, bootstrap.setupMemberId), isNull(MemberTable.removedAt)))
+    await tx
+      .update(MemberTable)
+      .set({ userId: null })
+      .where(and(eq(MemberTable.userId, agentUserId), eq(MemberTable.isSetupAgent, true)))
+    await tx.delete(AuthAccountTable).where(eq(AuthAccountTable.userId, agentUserId))
+    await tx.delete(AuthUserTable).where(eq(AuthUserTable.id, agentUserId))
+  })
+}
+
+/**
+ * Expiry cleanup: end pre-claim credentials and retire the setup agent for
+ * provisional workspaces nobody claimed in time. Runs in small batches.
+ */
+export async function retireExpiredPreclaimWorkspaces(now = new Date(), limit = 25): Promise<number> {
+  const expired = await db
+    .select({ id: WorkspaceBootstrapTable.id })
+    .from(WorkspaceBootstrapTable)
+    .where(and(
+      eq(WorkspaceBootstrapTable.status, "provisional"),
+      lte(WorkspaceBootstrapTable.expiresAt, now),
+      isNull(WorkspaceBootstrapTable.credentialsRevokedAt),
+    ))
+    .limit(limit)
+  for (const row of expired) {
+    await revokePreclaimCredentials(row.id, now)
+    await retirePreclaimAgent(row.id, now)
+  }
+  return expired.length
 }
 
 /** Create the sign-in-less agent user that acts as the setup member. */

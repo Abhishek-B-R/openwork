@@ -785,6 +785,13 @@
       "when": 1790407468548,
       "tag": "0112_claimable_workspaces",
       "breakpoints": true
+    },
+    {
+      "idx": 113,
+      "version": "5",
+      "when": 1790454359250,
+      "tag": "0113_setup_agent_member",
+      "breakpoints": true
     }
   ]
 }

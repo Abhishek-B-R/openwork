@@ -36,6 +36,8 @@ import {
   lookupClaimCode,
   preclaimAssertionAudience,
   readClaimState,
+  retireExpiredPreclaimWorkspaces,
+  retirePreclaimAgent,
   revokePreclaimCredentials,
   signPreclaimAssertion,
   verifyPreclaimAssertion,
@@ -340,6 +342,9 @@ export function registerBootstrapRoutes<T extends { Variables: AuthContextVariab
       }
 
       const input = c.req.valid("json")
+      // Expiry cleanup rides on new bootstraps: retire a few unclaimed,
+      // expired workspaces' setup agents. Never blocks or fails this request.
+      void retireExpiredPreclaimWorkspaces().catch(() => undefined)
       const expiresAt = new Date(Date.now() + BOOTSTRAP_TTL_MS)
       const skillText = starterSkillText(input.skillName)
       const metadata = skillMetadata(skillText)
@@ -374,6 +379,7 @@ export function registerBootstrapRoutes<T extends { Variables: AuthContextVariab
           organizationId,
           userId: agentUser.id,
           role: "owner",
+          isSetupAgent: true,
         })
 
         await tx.insert(WorkspaceBootstrapTable).values({
@@ -675,6 +681,7 @@ export function registerBootstrapRoutes<T extends { Variables: AuthContextVariab
       await ensureMemberGatewayKey({ organizationId: result.organization.id, memberId: result.memberId })
       // A claim link also ends the agent's pre-claim credentials.
       await revokePreclaimCredentials(result.bootstrapId)
+      await retirePreclaimAgent(result.bootstrapId)
       await db.update(WorkspaceClaimCodeTable).set({ state: "cancelled" }).where(and(eq(WorkspaceClaimCodeTable.bootstrapId, result.bootstrapId), eq(WorkspaceClaimCodeTable.state, "pending")))
       return c.json({ ok: true, organization: result.organization })
     },
@@ -831,6 +838,7 @@ export function registerBootstrapRoutes<T extends { Variables: AuthContextVariab
 
       // Reconcile: revoke the assertion and every pre-claim token, then mark it.
       await revokePreclaimCredentials(lookup.bootstrapId, now)
+      await retirePreclaimAgent(lookup.bootstrapId, now)
       await db.update(WorkspaceClaimCodeTable)
         .set({ state: "reconciled", reconciledAt: new Date() })
         .where(eq(WorkspaceClaimCodeTable.id, result.codeId))

@@ -15,6 +15,8 @@ let db: typeof import("../src/db.js").db
 let schema: typeof import("@openwork-ee/den-db/schema")
 let drizzle: typeof import("@openwork-ee/den-db/drizzle")
 let preclaim: typeof import("../src/workspace-preclaim.js")
+let billing: typeof import("../src/stripe-billing.js")
+let cacheModule: typeof import("../src/cache.js")
 
 const humanUserId = createDenTypeId("user")
 const humanSessionToken = `preclaim-human-${randomBytes(12).toString("hex")}`
@@ -62,12 +64,16 @@ beforeAll(async () => {
     import("@openwork-ee/den-db/schema"),
     import("@openwork-ee/den-db/drizzle"),
     import("../src/workspace-preclaim.js"),
+    import("../src/stripe-billing.js"),
+    import("../src/cache.js"),
   ])
   app = modules[0].default
   db = modules[1].db
   schema = modules[2]
   drizzle = modules[3]
   preclaim = modules[4]
+  billing = modules[5]
+  cacheModule = modules[6]
   await db.insert(schema.AuthUserTable).values({ id: humanUserId, name: "Claimant", email: `claimant+${humanUserId}@preclaim.test`, emailVerified: true })
   await db.insert(schema.AuthSessionTable).values({
     id: createDenTypeId("session"), userId: humanUserId, activeOrganizationId: null, token: humanSessionToken,
@@ -107,6 +113,18 @@ test("registration returns claim links and an anonymous identity assertion bound
   const claims: unknown = JSON.parse(Buffer.from(payload ?? "", "base64url").toString("utf8"))
   expect(isRecord(claims) && claims.aud).toBe(identity.tokenEndpoint)
   expect(isRecord(claims) && claims.bid).toBe(bootstrapId)
+})
+
+test("the setup agent is not a seat, not a listed member, and does not use up free invitations", async () => {
+  const orgId = normalizeOrg(organizationId)
+  const [agentMember] = await db.select().from(schema.MemberTable).where(drizzle.eq(schema.MemberTable.organizationId, orgId))
+  expect(agentMember?.isSetupAgent).toBe(true)
+  const seats = await billing.getOrganizationSeatBillingCounts({ organizationId: orgId })
+  expect(seats.total).toBe(0)
+  const eligibility = await billing.getOrganizationSeatAddEligibility(orgId)
+  expect(eligibility).toMatchObject({ allowed: true, currentCount: 0 })
+  const listed = await cacheModule.cache.org.members(orgId)
+  expect(listed).toHaveLength(0)
 })
 
 test("the assertion exchanges (RFC 7523) for a short-lived MCP token; a tampered one does not", async () => {
@@ -213,4 +231,44 @@ test("reconcile revokes the assertion and every pre-claim token", async () => {
     drizzle.isNull(schema.MemberTable.removedAt),
   ))
   expect(members.map((member) => ({ userId: member.userId, role: member.role }))).toEqual([{ userId: humanUserId, role: "owner" }])
+})
+
+test("claiming removes the setup agent: its user is deleted and its membership is detached", async () => {
+  const [bootstrap] = await db.select().from(schema.WorkspaceBootstrapTable).where(drizzle.eq(schema.WorkspaceBootstrapTable.id, normalizeDenTypeId("workspaceBootstrap", bootstrapId))).limit(1)
+  const agentUserId = normalizeDenTypeId("user", bootstrap?.agentUserId ?? "")
+  const agentUsers = await db.select({ id: schema.AuthUserTable.id }).from(schema.AuthUserTable).where(drizzle.eq(schema.AuthUserTable.id, agentUserId))
+  expect(agentUsers).toHaveLength(0)
+  const [agentMember] = await db.select().from(schema.MemberTable).where(drizzle.and(
+    drizzle.eq(schema.MemberTable.organizationId, normalizeOrg(organizationId)),
+    drizzle.eq(schema.MemberTable.isSetupAgent, true),
+  ))
+  expect(agentMember?.userId).toBeNull()
+  expect(agentMember?.removedAt).not.toBeNull()
+  const seats = await billing.getOrganizationSeatBillingCounts({ organizationId: normalizeOrg(organizationId) })
+  expect(seats.total).toBe(1)
+})
+
+test("expiry cleanup retires the setup agent of a workspace nobody claimed", async () => {
+  const response = await app.request("/v1/bootstrap/workspace", {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-forwarded-for": `${forwardedFor.slice(0, -1)}9` },
+    body: JSON.stringify({ workspaceName: "Unclaimed studio", claimRoles: ["owner"] }),
+  })
+  expect(response.status).toBe(200)
+  const body = await json(response)
+  const unclaimedBootstrapId = normalizeDenTypeId("workspaceBootstrap", String(field(body, "setup").id))
+  const unclaimedOrgId = normalizeOrg(String(field(body, "organization").id))
+  const [bootstrap] = await db.select().from(schema.WorkspaceBootstrapTable).where(drizzle.eq(schema.WorkspaceBootstrapTable.id, unclaimedBootstrapId)).limit(1)
+  const agentUserId = normalizeDenTypeId("user", bootstrap?.agentUserId ?? "")
+  await db.update(schema.WorkspaceBootstrapTable).set({ expiresAt: new Date(Date.now() - 1000) }).where(drizzle.eq(schema.WorkspaceBootstrapTable.id, unclaimedBootstrapId))
+
+  expect(await preclaim.retireExpiredPreclaimWorkspaces(new Date(), 500)).toBeGreaterThanOrEqual(1)
+
+  const agentUsers = await db.select({ id: schema.AuthUserTable.id }).from(schema.AuthUserTable).where(drizzle.eq(schema.AuthUserTable.id, agentUserId))
+  expect(agentUsers).toHaveLength(0)
+  const active = await db.select().from(schema.MemberTable).where(drizzle.and(drizzle.eq(schema.MemberTable.organizationId, unclaimedOrgId), drizzle.isNull(schema.MemberTable.removedAt)))
+  expect(active).toHaveLength(0)
+  const [after] = await db.select().from(schema.WorkspaceBootstrapTable).where(drizzle.eq(schema.WorkspaceBootstrapTable.id, unclaimedBootstrapId)).limit(1)
+  expect(after?.credentialsRevokedAt).not.toBeNull()
+  await db.delete(schema.MemberTable).where(drizzle.eq(schema.MemberTable.organizationId, unclaimedOrgId))
 })

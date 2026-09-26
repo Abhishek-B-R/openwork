@@ -1,5 +1,5 @@
 import { relations, sql } from "drizzle-orm"
-import { index, json, mysqlTable, text, timestamp, uniqueIndex, varchar } from "drizzle-orm/mysql-core"
+import { boolean, index, json, mysqlTable, text, timestamp, uniqueIndex, varchar } from "drizzle-orm/mysql-core"
 import type { DesktopAppRestrictions } from "@openwork/types/den/desktop-app-restrictions"
 import type { ConnectLinkClaims } from "@openwork/types/connect-link"
 import { denTypeIdColumn, mediumBlobColumn } from "../columns"
@@ -88,6 +88,12 @@ export const MemberTable = mysqlTable(
     joinedAt: timestamp("joined_at", { fsp: 3 }).defaultNow(),
     removedAt: timestamp("removed_at", { fsp: 3 }),
     removedByOrgMember: denTypeIdColumn("member", "removed_by_org_member"),
+    /**
+     * The sign-in-less agent user that holds a provisional workspace until a
+     * person claims it. It is never a seat, never listed as a member, and is
+     * removed when the workspace is claimed or expires.
+     */
+    isSetupAgent: boolean("is_setup_agent").notNull().default(false),
     createdAt: timestamp("created_at", { fsp: 3 }).notNull().defaultNow(),
   },
   (table) => [
