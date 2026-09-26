@@ -6059,6 +6059,15 @@ export type PostV1BootstrapWorkspaceResponses = {
       url: string;
       expiresAt: string;
     }>;
+    identity: {
+      type: "anonymous";
+      assertion: string;
+      assertionType: "urn:ietf:params:oauth:grant-type:jwt-bearer";
+      tokenEndpoint: string;
+      scope: string;
+      expiresAt: string;
+      claimEndpoint: string;
+    };
   };
 };
 
@@ -6116,6 +6125,85 @@ export type PostV1BootstrapClaimsAcceptResponses = {
 
 export type PostV1BootstrapClaimsAcceptResponse =
   PostV1BootstrapClaimsAcceptResponses[keyof PostV1BootstrapClaimsAcceptResponses];
+
+export type GetV1BootstrapWorkspaceByBootstrapIdClaimData = {
+  body?: never;
+  path: {
+    /**
+     * Den TypeID with 'wbt_' prefix and a 26-character base32 suffix.
+     */
+    bootstrapId: string;
+  };
+  query?: never;
+  url: "/v1/bootstrap/workspace/{bootstrapId}/claim";
+};
+
+export type GetV1BootstrapWorkspaceByBootstrapIdClaimErrors = {
+  /**
+   * The pre-claim assertion is missing or invalid.
+   */
+  401: {
+    error: string;
+    error_description: string;
+  };
+};
+
+export type GetV1BootstrapWorkspaceByBootstrapIdClaimError =
+  GetV1BootstrapWorkspaceByBootstrapIdClaimErrors[keyof GetV1BootstrapWorkspaceByBootstrapIdClaimErrors];
+
+export type GetV1BootstrapWorkspaceByBootstrapIdClaimResponses = {
+  /**
+   * Current claim state.
+   */
+  200: {
+    state: "none" | "pending" | "expired" | "accepted" | "reconciled";
+    reconciled: boolean;
+  };
+};
+
+export type GetV1BootstrapWorkspaceByBootstrapIdClaimResponse =
+  GetV1BootstrapWorkspaceByBootstrapIdClaimResponses[keyof GetV1BootstrapWorkspaceByBootstrapIdClaimResponses];
+
+export type PostV1BootstrapWorkspaceByBootstrapIdClaimData = {
+  body?: never;
+  path: {
+    /**
+     * Den TypeID with 'wbt_' prefix and a 26-character base32 suffix.
+     */
+    bootstrapId: string;
+  };
+  query?: never;
+  url: "/v1/bootstrap/workspace/{bootstrapId}/claim";
+};
+
+export type PostV1BootstrapWorkspaceByBootstrapIdClaimErrors = {
+  /**
+   * The pre-claim assertion is missing, invalid, or revoked.
+   */
+  401: {
+    error: string;
+    error_description: string;
+  };
+};
+
+export type PostV1BootstrapWorkspaceByBootstrapIdClaimError =
+  PostV1BootstrapWorkspaceByBootstrapIdClaimErrors[keyof PostV1BootstrapWorkspaceByBootstrapIdClaimErrors];
+
+export type PostV1BootstrapWorkspaceByBootstrapIdClaimResponses = {
+  /**
+   * Claim code created.
+   */
+  200: {
+    user_code: string;
+    verification_uri: string;
+    verification_uri_complete: string;
+    expires_in: number;
+    interval: number;
+  };
+};
+
+export type PostV1BootstrapWorkspaceByBootstrapIdClaimResponse =
+  PostV1BootstrapWorkspaceByBootstrapIdClaimResponses[keyof PostV1BootstrapWorkspaceByBootstrapIdClaimResponses];
 
 export type GetV1CloudInstanceData = {
   body?: never;
