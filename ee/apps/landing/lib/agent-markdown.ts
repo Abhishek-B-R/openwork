@@ -237,6 +237,7 @@ MCP server URL: \`https://api.openworklabs.com/mcp/agent\` (Streamable HTTP, OAu
 - Claude Code: \`claude mcp add --transport http openwork https://api.openworklabs.com/mcp/agent\`
 - Codex: \`codex mcp add openwork --url https://api.openworklabs.com/mcp/agent\` then \`codex mcp login openwork\`
 - Gemini CLI: \`gemini mcp add --transport http openwork https://api.openworklabs.com/mcp/agent\`
+- OpenCode: \`opencode mcp add openwork --url https://api.openworklabs.com/mcp/agent\` then \`opencode mcp auth openwork\`
 - Other clients: [Connect OpenWork MCP](https://openworklabs.com/docs/start-here/connect-openwork-mcp)
 - [MCP server card](https://openworklabs.com/.well-known/mcp/server-card.json)
 `
