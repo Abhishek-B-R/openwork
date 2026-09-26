@@ -1,94 +1,45 @@
 "use client";
 
-import { TriangleAlert } from "lucide-react";
-import { useEffect, useState } from "react";
-import { denApiCredentials, denBrowserEndpoint } from "../(den)/_lib/den-api-origin";
-import { getRuntimeConfig } from "../(den)/_lib/runtime-config";
-import { describeMcpRedirect, fallbackClientName } from "./client-identity-model";
+import type { SetupFact } from "../(den)/_components/setup-frame-parts";
+import { describeMcpRedirect, type McpRedirectDescription } from "./client-identity-model";
+import { McpAppFact } from "./mcp-story";
+import type { McpClient } from "./use-mcp-client";
 
-type PublicClient = { name: string | null; logoUri: string | null };
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
+/** Where the approval is sent, from the signed authorize query. */
+export function useMcpRedirect(oauthQuery: string): McpRedirectDescription | null {
+  return describeMcpRedirect(oauthQuery ? new URLSearchParams(oauthQuery).get("redirect_uri") : null);
 }
 
-async function loadPublicClient(clientId: string, oauthQuery: string): Promise<PublicClient | null> {
-  await getRuntimeConfig();
-  // The prelogin variant is authorized by the signed OAuth query itself, so it
-  // works the same whether or not this browser's session cookie is readable.
-  const endpoint = denBrowserEndpoint("/api/auth/oauth2/public-client-prelogin");
-  const response = await fetch(endpoint, {
-    method: "POST",
-    credentials: denApiCredentials(endpoint),
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ client_id: clientId, oauth_query: oauthQuery }),
-  }).catch(() => null);
-  if (!response?.ok) return null;
-  const payload: unknown = await response.json().catch(() => null);
-  if (!isRecord(payload)) return null;
+/** The App and Returns to rows that lead every consent panel (P9). */
+export function mcpIdentityFacts(client: McpClient, redirect: McpRedirectDescription | null): { app: SetupFact; returnsTo: SetupFact } {
   return {
-    name: typeof payload.client_name === "string" && payload.client_name.trim() ? payload.client_name.trim() : null,
-    logoUri: typeof payload.logo_uri === "string" && payload.logo_uri.startsWith("https://") ? payload.logo_uri : null,
+    app: { label: "App", value: <McpAppFact client={client} /> },
+    returnsTo: { label: "Returns to", value: redirect?.host ?? "Unknown", mono: true, testId: "mcp-redirect-host" },
   };
 }
 
 /**
- * Who is asking and where the approval is sent. Consent is only meaningful
- * when the person can see both, so they lead the card (P9), and a loopback-only
- * return address gets an explicit warning.
+ * One plain line above the button when the return address needs a second
+ * look: a loopback-only redirect (anything on this computer could use the
+ * access) or an app that shared no name (name the host to check).
  */
-export function McpClientIdentity({ clientId, redirectUri, oauthQuery }: { clientId: string | null; redirectUri: string | null; oauthQuery: string }) {
-  const [client, setClient] = useState<PublicClient | null>(null);
-  const [loaded, setLoaded] = useState(false);
-  const redirect = describeMcpRedirect(redirectUri);
-
-  useEffect(() => {
-    if (!clientId) {
-      setLoaded(true);
-      return;
-    }
-    let cancelled = false;
-    void loadPublicClient(clientId, oauthQuery).then((result) => {
-      if (cancelled) return;
-      setClient(result);
-      setLoaded(true);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [clientId, oauthQuery]);
-
-  const name = client?.name ?? (clientId ? fallbackClientName(clientId) : "An app without a name");
-
-  return (
-    <div className="grid gap-3" data-testid="mcp-client-identity">
-      <div className="grid divide-y divide-[var(--dls-border)] border-y border-[var(--dls-border)]">
-        <div className="flex min-h-11 items-center justify-between gap-4 py-2 text-[13px]">
-          <span className="text-[var(--dls-text-secondary)]">App</span>
-          <span className="flex min-w-0 items-center gap-2 font-medium text-[var(--dls-text-primary)]">
-            {client?.logoUri ? <img src={client.logoUri} alt="" className="size-4 shrink-0 rounded-sm" /> : null}
-            <span className="truncate" data-testid="mcp-client-name">{loaded ? name : "…"}</span>
-          </span>
-        </div>
-        <div className="flex min-h-11 items-center justify-between gap-4 py-2 text-[13px]">
-          <span className="text-[var(--dls-text-secondary)]">Returns to</span>
-          <span className="truncate font-mono text-[12px] text-[var(--dls-text-primary)]" data-testid="mcp-redirect-host">
-            {redirect?.host ?? "Unknown"}
-          </span>
-        </div>
-      </div>
-      {redirect?.loopbackOnly ? (
-        <div
-          role="status"
-          data-testid="mcp-loopback-warning"
-          className="flex items-start gap-3 rounded-[var(--radius)] border border-[var(--dls-border)] bg-[var(--dls-hover)] px-4 py-3 text-[13px] text-[var(--dls-text-primary)]"
-        >
-          <TriangleAlert className="mt-0.5 size-4 shrink-0 text-[var(--ow-warning)]" aria-hidden />
-          <span>
-            This app returns to your own computer ({redirect.host}). Anything running on this computer could use this access, so only continue if you started this sign-in here just now.
-          </span>
-        </div>
-      ) : null}
-    </div>
-  );
+export function McpReturnLine({ client, redirect, short = false }: { client: McpClient; redirect: McpRedirectDescription | null; short?: boolean }) {
+  if (!client.loaded) return null;
+  if (redirect?.loopbackOnly) {
+    return (
+      <p className="m-0 text-[13px] leading-5 text-[var(--setup-ink-soft)]" role="status" data-testid="mcp-loopback-warning">
+        {short
+          ? "This app returns to your own computer. Only continue if you started this sign-in here just now."
+          : "This app returns to your own computer. Anything running on it could use this access, so only continue if you started this sign-in here just now."}
+      </p>
+    );
+  }
+  if (!client.name && redirect) {
+    return (
+      <p className="m-0 text-[13px] leading-5 text-[var(--setup-ink-soft)]" role="status" data-testid="mcp-unnamed-app-line">
+        This app did not share its name. Only continue if you know {redirect.host} and started this sign-in.
+      </p>
+    );
+  }
+  return null;
 }

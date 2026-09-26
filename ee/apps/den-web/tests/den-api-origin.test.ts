@@ -109,7 +109,7 @@ describe("Den API browser origin", () => {
 });
 
 const consentPages = [
-  { name: "consent authorization", page: McpConsentPage, route: "consent", button: "Authorize", path: "/api/auth/oauth2/consent" },
+  { name: "consent authorization", page: McpConsentPage, route: "consent", button: "Authorize this app", path: "/api/auth/oauth2/consent" },
   { name: "consent denial", page: McpConsentPage, route: "consent", button: "Deny", path: "/api/auth/oauth2/consent" },
   { name: "organization selection", page: McpSelectOrganizationPage, route: "select-organization", button: null, path: "/v1/me/orgs" },
 ];
@@ -158,9 +158,9 @@ test.each(consentPages)("fresh $name waits for runtime configuration and keeps t
       method: button ? "POST" : "GET",
     }));
     // Other requests are only the signed public-client lookup for the app name
-    // and the signed-in account shown in the Account row.
+    // and the signed-in account and workspace shown in the facts.
     const otherCalls = fetchRequest.mock.calls.filter(([input]) => String(input) !== expectedPath);
-    expect(otherCalls.every(([input]) => String(input).endsWith("/api/auth/oauth2/public-client-prelogin") || String(input) === "/api/browser/v1/me")).toBe(true);
+    expect(otherCalls.every(([input]) => String(input).endsWith("/api/auth/oauth2/public-client-prelogin") || String(input) === "/api/browser/v1/me" || String(input) === "/api/browser/v1/me/orgs")).toBe(true);
   } finally {
     await act(async () => { root.unmount(); });
     fetchRequest.mockRestore();

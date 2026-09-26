@@ -18,11 +18,11 @@ export async function mcpConsentClientIdentity(seed: Seed) {
   const den = await seed.den({ org: { name: "Consent identity org", members: {} } });
   const scope = "openid profile email mcp:read mcp:write";
 
-  async function authorizeUrl(clientName: string, redirectUri: string) {
+  async function authorizeUrl(clientName: string | null, redirectUri: string) {
     const registered = await denFetch(den.ref, "/register", {
       method: "POST",
       body: JSON.stringify({
-        client_name: clientName, redirect_uris: [redirectUri], token_endpoint_auth_method: "none",
+        ...(clientName ? { client_name: clientName } : {}), redirect_uris: [redirectUri], token_endpoint_auth_method: "none",
         grant_types: ["authorization_code", "refresh_token"], response_types: ["code"], scope,
       }),
     });
@@ -37,6 +37,7 @@ export async function mcpConsentClientIdentity(seed: Seed) {
 
   const loopback = { name: "Terminal agent", redirectHost: "127.0.0.1:39422", ...await authorizeUrl("Terminal agent", "http://127.0.0.1:39422/callback") };
   const hosted = { name: "Hosted assistant", redirectHost: "assistant.example.com", ...await authorizeUrl("Hosted assistant", "https://assistant.example.com/oauth/callback") };
+  const unnamed = { redirectHost: "agent.example.net", ...await authorizeUrl(null, "https://agent.example.net/oauth/callback") };
   const web = await seed.web({ den, headless: true, viewport: { width: 1280, height: 1000 } });
-  return { den, web, loopback, hosted, admin: { email: den.admin.email, password: den.admin.password } };
+  return { den, web, loopback, hosted, unnamed, admin: { email: den.admin.email, password: den.admin.password } };
 }

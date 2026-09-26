@@ -48,7 +48,17 @@ test("a member sees which app is asking and where it returns before authorizing 
   await step("the card shows the app's registered name, never its raw client identifier", async () => {
     await person.see({ testId: "mcp-client-name", text: world.hosted.name });
     await person.notSee({ text: world.hosted.clientId });
-    await person.see({ text: "Use connected tools and take actions that may create, change, or delete data." });
-    evidence.recordAssertionEvidence("No opaque client id on the card", `client id ${world.hosted.clientId.slice(0, 6)}… absent; name "${world.hosted.name}" shown; mcp:write listed as "Use connected tools and take actions…"`, true);
+    await person.see({ text: "Use your connected tools, including actions that create, change, or delete data" });
+    evidence.recordAssertionEvidence("No opaque client id on the card", `client id ${world.hosted.clientId.slice(0, 6)}… absent; name "${world.hosted.name}" shown; mcp:write listed as "Use your connected tools, including actions…"`, true);
+  });
+
+  await step("an app that shared no name is called that, with the host to check", async () => {
+    await person.navigate(world.unnamed.url);
+    await person.see({ testId: "mcp-client-name", text: "An app without a name" }, { timeoutMs: 60_000 });
+    await person.see({ testId: "mcp-redirect-host", text: world.unnamed.redirectHost });
+    await person.see({ testId: "mcp-unnamed-app-line", text: `Only continue if you know ${world.unnamed.redirectHost} and started this sign-in.` });
+    await person.see({ role: "button", label: "Authorize this app" });
+    evidence.recordAssertionEvidence("An unnamed app names the host to check", `returns to ${world.unnamed.redirectHost}; guidance line shown`, true);
+    await person.screenshot();
   });
 });

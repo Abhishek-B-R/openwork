@@ -24,8 +24,9 @@ import {
 import { getRuntimeConfig } from "../../(den)/_lib/runtime-config";
 import { useOrgListWindow } from "../../(den)/_lib/use-org-list-window";
 import { FilterInput } from "../../(den)/dashboard/_components/item-list";
+import { McpReturnLine, mcpIdentityFacts, useMcpRedirect } from "../client-identity";
 import { McpConsentPermissions, McpTechnicalDetails } from "../consent-permissions";
-import { McpAppFact, McpStoryTiles, mcpStoryCopy } from "../mcp-story";
+import { McpStoryTiles, mcpStoryCopy } from "../mcp-story";
 import { useMcpClient } from "../use-mcp-client";
 
 type Organization = {
@@ -137,6 +138,7 @@ export default function McpSelectOrganizationPage() {
   const params = useMemo(() => new URLSearchParams(oauthQuery), [oauthQuery]);
   const requestedScope = params.get("scope") ?? "openid profile email mcp:read";
   const client = useMcpClient(oauthQuery);
+  const redirect = useMcpRedirect(oauthQuery);
   const appName = client.name ?? "this app";
   const actor = client.name ?? "This app";
   const story = mcpStoryCopy(client);
@@ -253,7 +255,7 @@ export default function McpSelectOrganizationPage() {
     <SetupFrame
       title={story.title}
       description={story.description}
-      aside={<McpStoryTiles client={client} workspaceName={storyWorkspace} />}
+      aside={<McpStoryTiles client={client} workspaceName={storyWorkspace} appHost={redirect?.host ?? null} />}
       panelVisual={<OnboardingTexture />}
     >
       <div data-testid="mcp-select-organization">{children}</div>
@@ -286,8 +288,10 @@ export default function McpSelectOrganizationPage() {
     );
   }
 
+  const identity = mcpIdentityFacts(client, redirect);
   const facts = [
-    { label: "App", value: <McpAppFact client={client} /> },
+    identity.app,
+    identity.returnsTo,
     { label: "Account", value: email ?? "…", testId: "mcp-account-email" },
   ];
 
@@ -367,6 +371,7 @@ export default function McpSelectOrganizationPage() {
       <McpConsentPermissions scope={requestedScope} actor={actor} />
 
       <div className="flex flex-col gap-3.5">
+        <McpReturnLine client={client} redirect={redirect} short />
         {errorMessage ? <SetupErrorLine>{errorMessage}</SetupErrorLine> : null}
         {creating ? (
           <button
