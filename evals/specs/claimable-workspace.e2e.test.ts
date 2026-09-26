@@ -43,17 +43,19 @@ test("an agent builds a workspace before anyone signs up, and a person claims it
     const state = await world.claimState(workspace.bootstrapId, workspace.assertion);
     expect(state.state).toBe("pending");
     await person.navigate(code.verificationUrl);
-    await person.see({ text: "Claim the workspace your agent set up" }, { timeoutMs: 90_000 });
+    await person.see({ text: "Claim your workspace." }, { timeoutMs: 90_000 });
     await person.see({ testId: "claim-user-code", text: code.userCode });
+    await person.see({ role: "button", label: "Continue with Google" });
     evidence.recordAssertionEvidence("The claim page shows the agent's code", `code ${code.userCode}; agent poll → ${state.state}`, true);
     await person.screenshot();
   });
 
   await step("the person creates an account and keeps the workspace as a new organization", async () => {
     await person.type({ role: "textbox", label: /^email$/i }, world.person.email);
-    await person.type({ role: "textbox", label: /^password$/i }, world.person.password);
-    // The mode tab and the submit button are both named "Create account"; the second is the submit.
-    await person.click({ role: "button", label: "Create account", nth: 1 });
+    await person.click({ role: "button", text: /^next$/i });
+    await person.type({ role: "textbox", label: "Name" }, world.person.name);
+    await person.type({ role: "textbox", label: /^password$/i }, world.person.password, { sensitive: true });
+    await person.click({ role: "button", label: "Sign up" });
     await person.see({ text: `Claim ${world.workspaceName}?` }, { timeoutMs: 60_000 });
     await person.see({ testId: "claim-consent-line" });
     await person.screenshot();
