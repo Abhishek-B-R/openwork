@@ -302,7 +302,7 @@ export function CoworkCostCalculator({
               3P: tokens only.
             </li>
             <li>
-              OpenWork Team: ${planPrices.openworkTeamSeat}/seat plus tokens. Enterprise: ${planPrices.openworkEnterpriseSeat}/user
+              OpenWork Team: first {planPrices.openworkFreeSeats} seats free, then ${planPrices.openworkTeamSeat}/seat, plus tokens. Enterprise: ${planPrices.openworkEnterpriseSeat}/user
               annual, volume pricing above {planPrices.openworkEnterpriseVolumeAbove}.
             </li>
             <li>

@@ -112,7 +112,7 @@ export function PricingGrid(props: PricingGridProps) {
       id: "free",
       title: "Free",
       price: "$0",
-      priceSub: "up to 5 users",
+      priceSub: "first 5 seats",
       ctaLabel: "Get Started for free",
       href: CLOUD_SIGNUP_URL,
       external: true,
@@ -123,7 +123,7 @@ export function PricingGrid(props: PricingGridProps) {
         { text: "macOS, Windows, and Linux downloads", icon: Download },
         { text: "Community support", icon: Plug },
       ],
-      footer: "Free forever for up to 5 users",
+      footer: "First 5 seats free, any team size",
     },
     {
       id: "team",

@@ -21,7 +21,7 @@ const pricingSchema = {
       url: "https://app.openworklabs.com?mode=sign-up",
       availability: "https://schema.org/InStock",
       description:
-        "Free for up to 5 users. Open source desktop app with bring-your-own-keys; self-host the full platform."
+        "First 5 seats free. Open source desktop app with bring-your-own-keys; self-host the full platform."
     },
     {
       "@type": "Offer",
@@ -59,9 +59,9 @@ const pricingSchema = {
 };
 
 export const metadata = withSocialMetadata({
-  title: "OpenWork Pricing — Free up to 5 users, $10 Team, $40 Enterprise",
+  title: "OpenWork Pricing — First 5 seats free, $10 Team, $40 Enterprise",
   description:
-    "Free for up to 5 users. Team $10 per seat/month. Enterprise $40 per user/month with SSO and desktop policies. Same price cloud or self-hosted.",
+    "First 5 seats free, then Team $10 per seat/month. Enterprise $40 per user/month with SSO and desktop policies. Same price cloud or self-hosted.",
   alternates: {
     canonical: "/pricing"
   },

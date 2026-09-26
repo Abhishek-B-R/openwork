@@ -75,7 +75,7 @@ export const planPrices = {
   claudeEnterpriseSeat: 20,
   claudeEnterpriseMinSeats: 20,
   openworkTeamSeat: 10,
-  openworkFreeMaxUsers: 5,
+  openworkFreeSeats: 5,
   openworkEnterpriseSeat: 40,
   openworkEnterpriseVolumeAbove: 250
 };
@@ -137,6 +137,7 @@ export function calculatePlanCosts(inputs: CostInputs): PlanCost[] {
     ...(teamAvailable ? [] : [`Team plan allows up to ${planPrices.claudeTeamMaxSeats} seats.`])
   ];
   const enterpriseSeats = Math.max(users, planPrices.claudeEnterpriseMinSeats);
+  const openworkTeamSeats = Math.max(0, users - planPrices.openworkFreeSeats);
 
   return [
     plan(
@@ -207,14 +208,11 @@ export function calculatePlanCosts(inputs: CostInputs): PlanCost[] {
         name: "OpenWork Team",
         modelLabel: openworkModelLabel,
         available: true,
-        seatsBilled: users,
-        seatMonthly: users * planPrices.openworkTeamSeat,
+        seatsBilled: openworkTeamSeats,
+        seatMonthly: openworkTeamSeats * planPrices.openworkTeamSeat,
         tokensMonthly: openworkTokens,
         notes: [
-          "Tokens billed by your own provider or gateway.",
-          ...(users <= planPrices.openworkFreeMaxUsers
-            ? [`The Free plan covers up to ${planPrices.openworkFreeMaxUsers} users with no seat fee.`]
-            : [])
+          `First ${planPrices.openworkFreeSeats} seats free. Tokens billed by your own provider or gateway.`
         ]
       },
       users

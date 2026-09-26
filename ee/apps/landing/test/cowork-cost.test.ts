@@ -83,7 +83,8 @@ describe("plan costs", () => {
     expect(byId(plans, "claude-3p").totalMonthly).toBeCloseTo(claudeTokens, 4);
     expect(byId(plans, "claude-3p").seatMonthly).toBe(0);
     const openworkTokens = 500 * tokenCostPerUser(cheap, usageProfiles.typical.usage);
-    expect(byId(plans, "openwork-team").totalMonthly).toBeCloseTo(500 * 10 + openworkTokens, 4);
+    expect(byId(plans, "openwork-team").totalMonthly).toBeCloseTo((500 - 5) * 10 + openworkTokens, 4);
+    expect(byId(plans, "openwork-team").seatsBilled).toBe(495);
     const enterprise = byId(plans, "openwork-enterprise");
     expect(enterprise.totalMonthly).toBeCloseTo(500 * 40 + openworkTokens, 4);
     expect(enterprise.totalAnnual).toBeCloseTo(enterprise.totalMonthly * 12, 4);
@@ -103,7 +104,8 @@ describe("plan costs", () => {
     expect(byId(plans, "claude-team-standard").seatMonthly).toBe(2 * 25);
     expect(byId(plans, "claude-team-premium").seatMonthly).toBe(2 * 125);
     expect(byId(plans, "claude-enterprise").seatMonthly).toBe(20 * 20);
-    expect(byId(plans, "openwork-team").notes.join(" ")).toContain("Free plan");
+    expect(byId(plans, "openwork-team").seatMonthly).toBe(0);
+    expect(byId(plans, "openwork-team").notes.join(" ")).toContain("First 5 seats free");
     const annual = calculatePlanCosts(inputs({ users: 100 }));
     expect(byId(annual, "claude-team-standard").seatMonthly).toBe(100 * 20);
     expect(byId(annual, "claude-team-standard").tokensMonthly).toBe(0);
