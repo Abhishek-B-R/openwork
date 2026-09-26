@@ -120,6 +120,8 @@
 .plain .top { grid-template-columns: 1fr; }
 .plain .grid { margin-top: 24px; }
 .plain .customPreview { margin-top: 56px; }
+/* One-page flows change state in place; the panel does not re-enter (P11, V6). */
+.plain .panel { animation: none; }
 .embedded { min-height: auto; border-radius: 18px; padding: 30px clamp(18px, 3vw, 42px); }
 .embedded .top, .embedded .grid { gap: 35px; grid-template-columns: minmax(0, .85fr) minmax(0, 1.15fr); }
 .embedded .grid { margin: 48px auto; }
