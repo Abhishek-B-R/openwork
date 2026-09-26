@@ -1646,7 +1646,19 @@ export function createProviderAuthStore(options: CreateProviderAuthStoreOptions)
 
   let providerRefreshGeneration = 0;
 
-  async function refreshProviders(optionsArg?: { dispose?: boolean; force?: boolean }, isCurrent = () => !disposed) {
+  async function refreshProviders(
+    optionsArg?: {
+      dispose?: boolean;
+      force?: boolean;
+      /**
+       * The caller just rewrote engine config (for example disabled_providers).
+       * Reload even inside the 10s dispose throttle; otherwise the read below
+       * returns the pre-change config and undoes the change in the UI.
+       */
+      configChanged?: boolean;
+    },
+    isCurrent = () => !disposed,
+  ) {
     const c = options.client();
     if (!c || !isCurrent()) return null;
     const generation = ++providerRefreshGeneration;
@@ -1665,7 +1677,8 @@ export function createProviderAuthStore(options: CreateProviderAuthStoreOptions)
       : false;
     if (optionsArg?.dispose && !liveCatalog) {
       const now = Date.now();
-      const shouldDispose = now - lastGlobalProviderDisposeRefreshAt >= 10_000;
+      const shouldDispose = Boolean(optionsArg?.configChanged)
+        || now - lastGlobalProviderDisposeRefreshAt >= 10_000;
       const shouldUseServerReload = !(
         isDesktopRuntime() && options.selectedWorkspaceDisplay().workspaceType === "local"
       );
@@ -2514,8 +2527,8 @@ export function createProviderAuthStore(options: CreateProviderAuthStoreOptions)
           // Zen may have no stored credentials; disable still applies.
         }
         if (!isCurrentWorkspace()) throw new Error(t("providers.disconnect_unverified"));
-        await ensureProjectProviderDisabledState(resolved, true);
-        requireDiscovery(await refreshProviders({ dispose: true }, isCurrentWorkspace), true);
+        const configChanged = await ensureProjectProviderDisabledState(resolved, true);
+        requireDiscovery(await refreshProviders({ dispose: true, configChanged }, isCurrentWorkspace), true);
         removeProviderFromState(resolved);
         return `${t("providers.disconnected_prefix")} ${resolved}`;
       }
@@ -2530,8 +2543,8 @@ export function createProviderAuthStore(options: CreateProviderAuthStoreOptions)
           // alone can never disconnect it. Disable it via disabled_providers,
           // exactly like the built-in OpenCode Zen branch above, instead of
           // leaving the Disconnect button a silent no-op.
-          await ensureProjectProviderDisabledState(resolved, true);
-          requireDiscovery(await refreshProviders({ dispose: true }, isCurrentWorkspace), true);
+          const configChanged = await ensureProjectProviderDisabledState(resolved, true);
+          requireDiscovery(await refreshProviders({ dispose: true, configChanged }, isCurrentWorkspace), true);
           removeProviderFromState(resolved);
           return `${t("providers.disconnected_prefix")} ${resolved}`;
         }
@@ -2567,8 +2580,8 @@ export function createProviderAuthStore(options: CreateProviderAuthStoreOptions)
       && workspaceKey === currentWorkspaceKey()
       && baseUrl === options.providerBaseUrl();
     try {
-      await ensureProjectProviderDisabledState(resolved, false);
-      await refreshProviders({ dispose: true }, isCurrentWorkspace);
+      const configChanged = await ensureProjectProviderDisabledState(resolved, false);
+      await refreshProviders({ dispose: true, configChanged }, isCurrentWorkspace);
       return `${t("providers.enabled_prefix")} ${resolved}`;
     } catch (error) {
       const message = describeProviderError(error, t("providers.enable_failed"));
