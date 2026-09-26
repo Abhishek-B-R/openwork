@@ -1,7 +1,7 @@
 import { workflowRunPreviewSchema, type WorkflowRunPreview } from "@openwork/types/workflows";
 import { DEN_WORKER_POLL_INTERVAL_MS } from "./CONSTS";
 import { denApiCredentials, denBrowserEndpoint } from "./den-api-origin";
-import { getMcpOAuthSocialCallbackUrl } from "./mcp-oauth-route";
+import { getAuthResumeUrl } from "./auth-resume";
 import { ORG_SCOPE_HEADER, getRequestOrgScope, shouldPinOrgScopePath } from "./org-scope";
 import { getRuntimeConfig } from "./runtime-config";
 
@@ -341,9 +341,9 @@ export function getSocialCallbackUrl(authCallbackBaseUrl = ""): string {
       return "/";
     }
     if (typeof window !== "undefined") {
-      const mcpOAuthCallbackUrl = getMcpOAuthSocialCallbackUrl(window.location.search, origin);
-      if (mcpOAuthCallbackUrl) {
-        return mcpOAuthCallbackUrl;
+      const resumeUrl = getAuthResumeUrl(window.location, origin);
+      if (resumeUrl) {
+        return resumeUrl;
       }
     }
     const callbackUrl = new URL("/", origin);

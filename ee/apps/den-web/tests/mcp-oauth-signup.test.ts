@@ -6,7 +6,11 @@ import {
   getMcpOAuthSocialCallbackUrl,
   isMcpOAuthQueryExpired,
 } from "../app/(den)/_lib/mcp-oauth-route";
-import { readConnectMcpLink, readConnectStartResult } from "../app/connect/mcp/connect-mcp-link";
+import { getAuthResumeUrl, signsInInPlace } from "../app/(den)/_lib/auth-resume";
+import { readConnectMcpLink, readConnectStartResult, readWorkspaceName } from "../app/connect/mcp/connect-mcp-link";
+import { mcpPermissionLines } from "../app/mcp/consent-permissions";
+import { mcpStoryCopy } from "../app/mcp/mcp-story";
+import { fallbackMcpClientName, readPublicMcpClient } from "../app/mcp/use-mcp-client";
 
 const signedQuery =
   "response_type=code&client_id=agent-cli&scope=openid+mcp%3Aread+mcp%3Awrite&redirect_uri=http%3A%2F%2F127.0.0.1%3A5555%2Fcb&code_challenge=abc&exp=1900000000&ba_iat=1&sig=s1g";
@@ -58,10 +62,59 @@ describe("one-click connection sign-in link", () => {
       kind: "redirect",
       authorizeUrl: "https://idp.test/authorize",
     });
-    expect(readConnectStartResult({ status: "needs_auth", authorizeUrl: null }, true).kind).toBe("error");
-    expect(readConnectStartResult({ error: "connection_not_found" }, false)).toEqual({
+    expect(readConnectStartResult({ status: "needs_auth", authorizeUrl: null }, true, "Linear")).toEqual({
       kind: "error",
+      message: "Linear did not open a sign-in page. Try again.",
+    });
+    expect(readConnectStartResult({ error: "connection_not_found" }, false)).toEqual({
+      kind: "unavailable",
       message: "This connection was removed or is not shared with you. Ask your agent for a new link.",
     });
+  });
+
+  test("names the link's workspace from the person's organizations", () => {
+    const payload = { orgs: [{ id: "org_1", name: "Sam's work" }, { id: "org_2", name: "Acme" }] };
+    expect(readWorkspaceName(payload, "org_2")).toBe("Acme");
+    expect(readWorkspaceName(payload, "org_3")).toBeNull();
+    expect(readWorkspaceName(null, "org_1")).toBeNull();
+  });
+});
+
+describe("signing in without leaving the page", () => {
+  test("connection links come back to themselves after social sign-in", () => {
+    const location = { pathname: "/connect/mcp", search: "?connectionId=emc_1&org=org_1&name=Linear" };
+    expect(signsInInPlace("/connect/mcp")).toBe(true);
+    expect(signsInInPlace("/connect/mcp/")).toBe(true);
+    expect(getAuthResumeUrl(location, "https://app.example.test")).toBe("https://app.example.test/connect/mcp?connectionId=emc_1&org=org_1&name=Linear");
+  });
+
+  test("an agent's authorization keeps its signed query; other pages use the default landing", () => {
+    expect(getAuthResumeUrl({ pathname: "/", search: `?${signedQuery}` }, "https://app.example.test")).toBe(`https://app.example.test/?${signedQuery}`);
+    expect(getAuthResumeUrl({ pathname: "/dashboard", search: "?mode=sign-up" }, "https://app.example.test")).toBeNull();
+    expect(signsInInPlace("/dashboard")).toBe(false);
+  });
+});
+
+describe("what the agent's authorization page says", () => {
+  test("turns scopes into plain sentences", () => {
+    expect(mcpPermissionLines("openid profile email mcp:read mcp:write offline_access")).toEqual([
+      "See your name and email",
+      "Find and read what is in this workspace",
+      "Use your connected tools, including actions that create, change, or delete data",
+      "Stay connected until you remove it",
+    ]);
+    expect(mcpPermissionLines("mcp:read")).toEqual(["Find and read what is in this workspace"]);
+  });
+
+  test("names the app that asked, or says an app asked when it shared no name", () => {
+    expect(mcpStoryCopy({ name: "Claude Code" })).toEqual({ title: "Connect Claude Code.", description: "Claude Code asked to use OpenWork as you." });
+    expect(mcpStoryCopy({ name: null })).toEqual({ title: "Connect an app.", description: "An app asked to use OpenWork as you." });
+  });
+
+  test("reads the registered client name and only trusts https logos", () => {
+    expect(readPublicMcpClient({ client_name: " Claude Code ", logo_uri: "https://example.test/logo.png" })).toEqual({ name: "Claude Code", logoUri: "https://example.test/logo.png" });
+    expect(readPublicMcpClient({ client_name: "", logo_uri: "http://example.test/logo.png" })).toEqual({ name: null, logoUri: null });
+    expect(fallbackMcpClientName("https://agent.example.net/client.json")).toBe("agent.example.net");
+    expect(fallbackMcpClientName("dcr_abc123")).toBeNull();
   });
 });

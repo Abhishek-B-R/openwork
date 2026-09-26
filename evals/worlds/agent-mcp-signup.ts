@@ -66,7 +66,7 @@ export async function agentMcpSignup(seed: Seed) {
     const registered = await denFetch(den.ref, "/register", {
       method: "POST",
       body: JSON.stringify({
-        client_name: "Agent CLI", redirect_uris: [redirectUri], token_endpoint_auth_method: "none",
+        client_name: "Claude Code", redirect_uris: [redirectUri], token_endpoint_auth_method: "none",
         grant_types: ["authorization_code", "refresh_token"], response_types: ["code"], scope,
       }),
     });

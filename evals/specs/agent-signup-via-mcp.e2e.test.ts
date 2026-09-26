@@ -24,9 +24,13 @@ test("a brand-new person signs up through their agent, names a workspace inline,
   let signInLink = "";
   let installPageUrl = "";
 
-  await step("before: the agent's sign-in link opens OpenWork for someone with no account", async () => {
+  await step("before: the agent's sign-in link opens OpenWork for someone with no account and names the app asking", async () => {
     await person.navigate(world.authorizeUrl);
     await person.see({ role: "textbox", label: /email/i }, { timeoutMs: 90_000 });
+    await person.see({ text: "Signing in for" });
+    await person.see({ text: "Connect Claude Code." });
+    await person.see({ role: "button", label: "Continue with Google" });
+    await person.notSee({ text: /MCP/ });
     await person.screenshot();
   });
 
@@ -48,7 +52,9 @@ test("a brand-new person signs up through their agent, names a workspace inline,
 
   await step("after: they name their workspace on the same page and authorize without restarting", async () => {
     await person.type({ role: "textbox", label: "Workspace name" }, world.workspaceName);
-    await person.see({ text: "Requested access" });
+    await person.see({ text: "Claude Code can" });
+    await person.see({ text: "Find and read what is in this workspace" });
+    await person.notSee({ text: /MCP authorization|Requested access/ });
     await person.screenshot();
     await person.click({ role: "button", label: "Create workspace and authorize" });
     await person.see({ text: "Your agent is connected to OpenWork" }, { timeoutMs: 60_000 });
@@ -88,6 +94,7 @@ test("a brand-new person signs up through their agent, names a workspace inline,
     await person.navigate(signInLink);
     await person.see({ text: "Connect Team tools" }, { timeoutMs: 30_000 });
     await person.see({ role: "button", label: "Sign in to Team tools" });
+    await person.see({ text: world.workspaceName });
     await person.screenshot();
     evidence.recordAssertionEvidence("postMcpConnections returns a sign-in link a terminal agent can hand over", signInLink.replace(/org_[a-z0-9]+/i, "org_…"), true);
   });
@@ -108,15 +115,31 @@ test("a brand-new person signs up through their agent, names a workspace inline,
     evidence.recordAssertionEvidence("postOrgsInstallLinks returns installPageUrl + connectUrl", `installPageUrl ${new URL(installPageUrl).pathname}…; connectUrl ${connectUrl.slice(0, 26)}…`, true);
   });
 
+  await step("a connection link that was removed says so plainly, and a broken link asks for a new one", async () => {
+    const removed = new URL(signInLink);
+    removed.searchParams.set("connectionId", "emc_removed0000000000000000");
+    await person.navigate(removed.toString());
+    await person.see({ role: "button", label: "Sign in to Team tools" }, { timeoutMs: 30_000 });
+    await person.click({ role: "button", label: "Sign in to Team tools" });
+    await person.see({ text: "Team tools can’t be connected" }, { timeoutMs: 30_000 });
+    await person.see({ text: "This connection was removed or is not shared with you. Ask your agent for a new link." });
+    await person.screenshot();
+    await person.navigate(`${world.den.ref.webUrl}/connect/mcp?name=Team%20tools`);
+    await person.see({ text: "This sign-in link is incomplete" }, { timeoutMs: 30_000 });
+    await person.screenshot();
+  });
+
   await step("an expired sign-in link tells the person to restart from their agent instead of failing silently", async () => {
     const expired = new URL(world.authorizeUrl);
     const query = new URLSearchParams(expired.search);
     query.set("exp", "1");
     query.set("sig", "stale");
     await person.navigate(`${world.den.ref.webUrl}/mcp/select-organization?${query}`);
-    await person.see({ text: "This sign-in link expired. Start sign-in again from your agent." }, { timeoutMs: 30_000 });
+    await person.see({ text: "This sign-in link expired" }, { timeoutMs: 30_000 });
+    await person.see({ text: "Start sign-in again from your agent." });
+    await person.see({ text: "Nothing was authorized." });
     await person.notSee({ role: "button", label: "Create workspace and authorize" });
-    await person.notSee({ role: "button", label: "Authorize and continue" });
+    await person.notSee({ role: "button", label: /^Authorize/ });
     expect(world.exchanges()).toHaveLength(1);
     await person.screenshot();
   });
