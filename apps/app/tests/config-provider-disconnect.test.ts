@@ -173,6 +173,26 @@ test("disconnecting a config-file provider disables it without changing env-back
   expect(engine.configUpdates.at(-1)?.disabled_providers).toEqual(["litellm"]);
 });
 
+test("OpenCode Zen hidden by Disconnect can be enabled again", async () => {
+  const { engine, ui, store } = createHarness();
+  const zen = providerItem({ id: "opencode", name: "OpenCode Zen", source: "env" });
+  engine.all.push(zen);
+  engine.connected.push("opencode");
+  await store.refreshProviders({ force: true });
+
+  await store.disconnectProvider("opencode");
+  expect(ui.disabled).toEqual(["opencode"]);
+  expect(ui.providers.some((provider) => provider.id === "opencode")).toBe(false);
+
+  const message = await store.enableProvider("opencode");
+  expect(message).toBe("Enabled opencode");
+  expect(ui.disabled).toEqual([]);
+  expect(engine.configUpdates.at(-1)?.disabled_providers).toBeUndefined();
+  expect(ui.connected).toContain("opencode");
+  expect(ui.providers.some((provider) => provider.id === "opencode")).toBe(true);
+  expect(store.getSnapshot().providerAuthError).toBeNull();
+});
+
 test.each([
   { providerId: "litellm", verification: 1, disabled: false },
   { providerId: "anthropic", verification: 1, disabled: false },

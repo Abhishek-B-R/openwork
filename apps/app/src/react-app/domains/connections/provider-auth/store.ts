@@ -88,7 +88,7 @@ import {
 } from "./cloud-provider-config";
 import { dispatchNewProviders } from "../../../../app/lib/provider-events";
 import { hasPendingGatewayModelSelection } from "./pending-gateway-model-selection";
-import { updateManagedDisabledProviders } from "../managed-engine-config";
+import { readManagedDisabledProviders, updateManagedDisabledProviders } from "../managed-engine-config";
 import {
   DESKTOP_RESTRICTION_OPENCODE_PROVIDER_ID,
   isDesktopProviderBlocked,
@@ -1723,11 +1723,13 @@ export function createProviderAuthStore(options: CreateProviderAuthStoreOptions)
     if (!isRefreshCurrent()) return null;
     const activeClient = options.client() ?? c;
     try {
-      const config = unwrap(await activeClient.config.get());
+      const disabledProviders = await readManagedDisabledProviders({
+        opencodeClient: activeClient,
+        openworkClient: options.openworkServer.getSnapshot().openworkServerClient,
+        workspaceId: options.runtimeWorkspaceId(),
+        workspaceType: options.selectedWorkspaceDisplay().workspaceType,
+      });
       if (!isRefreshCurrent()) return null;
-      const disabledProviders = Array.isArray(config.disabled_providers)
-        ? config.disabled_providers
-        : [];
       const updated = filterProviderList(
         await ensureProviderListQuery(getReactQueryClient(), {
           client: activeClient,
@@ -2547,6 +2549,34 @@ export function createProviderAuthStore(options: CreateProviderAuthStoreOptions)
     }
   }
 
+  /**
+   * Undo a Disconnect that hid a provider through `disabled_providers` (for
+   * example OpenCode Zen, which has no credentials to remove). Once hidden the
+   * engine drops it from every list, so this is the only way back in the UI.
+   */
+  async function enableProvider(providerId: string) {
+    setStateField("providerAuthError", null);
+    const resolved = providerId.trim();
+    if (!resolved) {
+      throw new Error(t("providers.provider_id_required"));
+    }
+    assertProviderAllowedByDesktopPolicy(resolved);
+    const workspaceKey = currentWorkspaceKey();
+    const baseUrl = options.providerBaseUrl();
+    const isCurrentWorkspace = () => !disposed
+      && workspaceKey === currentWorkspaceKey()
+      && baseUrl === options.providerBaseUrl();
+    try {
+      await ensureProjectProviderDisabledState(resolved, false);
+      await refreshProviders({ dispose: true }, isCurrentWorkspace);
+      return `${t("providers.enabled_prefix")} ${resolved}`;
+    } catch (error) {
+      const message = describeProviderError(error, t("providers.enable_failed"));
+      setStateField("providerAuthError", message);
+      throw error instanceof Error ? error : new Error(message);
+    }
+  }
+
   function isProviderAddRestricted(providerId?: string | null) {
     return isProviderAddRestrictedByDesktopPolicy({
       providerId,
@@ -2906,6 +2936,7 @@ export function createProviderAuthStore(options: CreateProviderAuthStoreOptions)
     connectCloudProvider,
     removeCloudProvider,
     disconnectProvider,
+    enableProvider,
     ensureProjectProviderDisabledState,
     isProviderAddRestricted,
     openProviderAuthModal,
