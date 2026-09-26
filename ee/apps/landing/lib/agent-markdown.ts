@@ -18,7 +18,7 @@ const home = `# OpenWork
 
 - **Download for free** — [Desktop](https://openworklabs.com/download)
 - **Open in your browser** — [OpenWork Web](https://app.openworklabs.com)
-- **Team plans** — [Pricing](https://openworklabs.com/pricing) (first 5 seats free, then \\$10 per seat/mo)
+- **Team plans** — [Pricing](https://openworklabs.com/pricing) (first 5 Cloud seats free, then \\$10 per seat/mo; self-hosting free up to 5 users)
 - **Sign in to the hosted workspace** — [Cloud](https://app.openworklabs.com)
 - **SSO / audit / procurement** — [Enterprise](https://openworklabs.com/enterprise)
 - **Docs** — [openworklabs.com/docs](https://openworklabs.com/docs)
@@ -37,7 +37,7 @@ const home = `# OpenWork
 A free, open-source desktop app (macOS, Windows, Linux) for doing work with AI agents on your own files. Built on OpenCode; an open-source alternative to Claude Cowork and Codex.
 
 ### Is OpenWork free?
-Yes — the desktop app is free and open source with bring-your-own keys. Team Starter includes your first 5 seats free, then \\$10 per seat/mo; Enterprise is custom.
+Yes — the desktop app is free and open source with bring-your-own keys. On OpenWork Cloud, Team Starter includes your first 5 seats free, then \\$10 per seat/mo; self-hosting is free for organizations up to 5 users; Enterprise is custom.
 
 ### Which models does it support?
 Any model OpenCode supports: OpenAI, Anthropic, Google, local models — 50+ providers.
@@ -59,7 +59,7 @@ Backed by Y Combinator.
 
 const pricing = `# OpenWork pricing — free, team, and enterprise
 
-> OpenWork has three tiers: free open-source desktop, Team Starter with the first 5 seats free then \\$10 per seat/mo, and custom Enterprise.
+> OpenWork has three tiers: free open-source desktop, Team Starter with the first 5 OpenWork Cloud seats free then \\$10 per seat/mo, and custom Enterprise. Self-hosting is free for organizations up to 5 users.
 
 ## Solo — Free
 
@@ -71,7 +71,7 @@ const pricing = `# OpenWork pricing — free, team, and enterprise
 
 ## Team Starter — \\$10 / seat / month
 
-- First 5 seats free
+- First 5 seats free on OpenWork Cloud
 - API access
 - Extension Marketplace
 - Bring your own LLM keys, distributed to your team

@@ -212,7 +212,7 @@ export function calculatePlanCosts(inputs: CostInputs): PlanCost[] {
         seatMonthly: openworkTeamSeats * planPrices.openworkTeamSeat,
         tokensMonthly: openworkTokens,
         notes: [
-          `First ${planPrices.openworkFreeSeats} seats free. Tokens billed by your own provider or gateway.`
+          `First ${planPrices.openworkFreeSeats} seats free on OpenWork Cloud. Tokens billed by your own provider or gateway.`
         ]
       },
       users
