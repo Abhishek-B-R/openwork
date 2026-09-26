@@ -4682,7 +4682,7 @@ export class DenClient extends HeyApiClient {
   /**
    * Create organization invitation
    *
-   * Creates or refreshes a pending organization invitation for an email address and sends the invite email. Returns 502 when the invitation row is persisted but the configured email provider failed to send; the client should surface the error and give the user a retry affordance.
+   * Creates or refreshes a pending organization invitation for an email address and sends the invite email. Returns 502 when the invitation row is persisted but the configured email provider failed to send; the client should surface the error and give the user a retry affordance. Returns 402 with billingUrl when the workspace has used its free members: give the user billingUrl to start seat billing, then invite again.
    */
   public postV1Invitations<ThrowOnError extends boolean = false>(
     parameters: {
@@ -4738,9 +4738,9 @@ export class DenClient extends HeyApiClient {
   }
 
   /**
-   * Create organization install link
+   * Create organization install link (download desktop app, install OpenWork)
    *
-   * Mints a shareable OpenWork desktop install link for a signed-in organization member. Older active links remain valid unless an owner or admin explicitly requests rotation.
+   * Download the desktop app and install OpenWork pointed at this organization. Returns installPageUrl, a shareable page that downloads OpenWork for this organization, and connectUrl, a short-lived link that opens an already-installed desktop app signed in to this organization. Any member can mint one. Older active links remain valid unless an owner or admin explicitly requests rotation.
    */
   public postV1OrgsByOrganizationIdInstallLinks<ThrowOnError extends boolean = false>(
     parameters: {
@@ -9515,7 +9515,7 @@ export class DenClient extends HeyApiClient {
   /**
    * Register a new External MCP Connection for the org
    *
-   * Owners and admins can register any server. Other members can add one for themselves: an OAuth server where each person signs in (credentialMode per_member) or a server with no sign-in, shared with specific members or teams but never org-wide; the caller is always kept in its access. Registers a third-party MCP server by name + URL and grants access (org-wide, teams, or members). Use GET /v1/mcp-connections/presets for known server URLs (Notion, Linear, Stripe, Sentry, Slack, Context7). For credentialMode per_member, each member connects their own account afterwards — share links.yourConnections from the response so teammates know where to sign in. For servers with pre-registered OAuth apps, whitelist links.oauthCallback. API-key and OAuth-client credentials cannot be created through the agent surface; use the dashboard.
+   * Owners and admins can register any server. Other members can add one for themselves: an OAuth server where each person signs in (credentialMode per_member) or a server with no sign-in, shared with specific members or teams but never org-wide; the caller is always kept in its access. Registers a third-party MCP server by name + URL and grants access (org-wide, teams, or members). Use GET /v1/mcp-connections/presets for known server URLs (Notion, Linear, Stripe, Sentry, Slack, Context7). For credentialMode per_member, each member connects their own account afterwards — give the user links.signIn (a one-click browser sign-in page for this connection) when you cannot show a sign-in card, and share links.yourConnections so teammates know where to sign in. For servers with pre-registered OAuth apps, whitelist links.oauthCallback. API-key and OAuth-client credentials cannot be created through the agent surface; use the dashboard.
    */
   public postV1McpConnections<ThrowOnError extends boolean = false>(
     parameters: {
