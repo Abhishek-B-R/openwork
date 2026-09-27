@@ -147,6 +147,21 @@ test(`AGENT-VIS-02 ${resolveEvalEngine()}: a person follows up while a helper wo
     expect.soft(helperStop, "a Stop control on the helper row").toBe(true);
   });
 
+  await step("they stop just the helper, and the turn keeps going", async () => {
+    await user.click({ role: "button", label: /Check the error log\. Stop sub-agent/ });
+    const helperStopped = await probe.eventually(async () => (await probe.dom('[data-subagent-activity="shimmer"]')).elements.length === 0,
+      { within: 30_000, intervalMs: 250, label: "helper no longer running", until: Boolean }).catch(() => false);
+    const turnStillRunning = (await probe.dom('button[aria-label="Stop"]')).elements.length > 0;
+    evidence.recordAssertionEvidence("Stopping one helper leaves the turn running", `helper stopped: ${helperStopped}; the turn's Stop is still offered: ${turnStillRunning}`, helperStopped && turnStillRunning);
+    expect(helperStopped).toBe(true);
+    expect(turnStillRunning).toBe(true);
+    const helperText = (await probe.dom("[data-subagent-run]")).elements.map((element) => element.text).join(" ");
+    evidence.recordAssertionEvidence("A stopped helper says Stopped, not error", `helper row reads "${helperText.slice(0, 100)}"`, /Stopped/.test(helperText) && !/reported an error/i.test(helperText));
+    expect(helperText).toMatch(/Stopped/);
+    expect(helperText).not.toMatch(/reported an error/i);
+    await user.screenshot();
+  });
+
   await step("after: they press Stop, and the whole turn stops", async () => {
     await user.click("Stop");
     await user.see("Run task", { timeoutMs: 30_000 });

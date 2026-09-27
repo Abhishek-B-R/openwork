@@ -1529,7 +1529,8 @@ export function shouldShowRunReconnecting(status: ThreadStatus, syncDegraded: bo
 }
 
 export function MessageList({ messages, messageIdReplacements, status, activityStatus, retryStatus, syncHealth, viewport, sessionErrorHandled = false }: MessageListProps) {
-  const { workspaceId, sessionId } = useMessageList()
+  const { workspaceId, sessionId, onStopSubagentSession } = useMessageList()
+  const [stoppingBackground, setStoppingBackground] = React.useState(false)
   const workspace = useWorkspaceMaybe()
   const tasks = React.useMemo(() => activeDelegatedTasks(messages), [messages])
   const delegatedIds = React.useMemo(() => [...new Set(messages.flatMap(message => message.parts)
@@ -1657,9 +1658,26 @@ export function MessageList({ messages, messageIdReplacements, status, activityS
         )
         }}
       >
-        {!runActive && backgroundCount > 0 && <p data-background-agents className="px-3 py-2 text-sm text-muted-foreground md:px-5">
-          {syncDegraded ? "Background activity — reconnecting…" : `${backgroundCount} ${backgroundCount === 1 ? "agent" : "agents"} running`}
-        </p>}
+        {!runActive && backgroundCount > 0 && <div data-background-agents className="flex items-center gap-3 px-3 py-2 text-sm text-muted-foreground md:px-5">
+          <span>{syncDegraded ? "Background activity — reconnecting…" : `${backgroundCount} ${backgroundCount === 1 ? "agent" : "agents"} running`}</span>
+          {/* Stops only the background helpers; the chat itself is already idle. */}
+          {onStopSubagentSession && !syncDegraded ? (
+            <button
+              type="button"
+              disabled={stoppingBackground}
+              className="cursor-pointer text-xs text-muted-foreground/70 underline-offset-2 transition-colors hover:text-foreground hover:underline disabled:cursor-default disabled:opacity-50"
+              onClick={() => {
+                const records = useSessionActivityStore.getState().recordsByWorkspaceId[workspaceId]
+                const running = delegatedIds.filter((id) => records?.[id]?.runActive)
+                setStoppingBackground(true)
+                void Promise.allSettled(running.map((id) => onStopSubagentSession(id)))
+                  .finally(() => setStoppingBackground(false))
+              }}
+            >
+              {stoppingBackground ? "Stopping…" : backgroundCount === 1 ? "Stop" : "Stop all"}
+            </button>
+          ) : null}
+        </div>}
         {showLoading && <LoadingMessage elapsedSeconds={runElapsedSeconds} starting={status === "submitted"} />}
         {showReconnecting && <ReconnectingMessage lastConfirmedAt={syncHealth?.lastConfirmedAt ?? null} />}
         {retryStatus ? <RetryMessage status={retryStatus} /> : null}
