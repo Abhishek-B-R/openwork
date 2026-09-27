@@ -470,13 +470,11 @@ export function CoworkCostCalculator({
   });
 
   const claudeLine = claudeSide === "3p" ? result.claude3p : result.claude;
-  const featured = result.openModel ?? result.openwork;
-  const delta = claudeLine.total - featured.total;
-  const sameModelDelta = claudeLine.total - result.openwork.total;
+  // The headline always compares the same model on both sides; the open model is an extra line.
+  const delta = claudeLine.total - result.openwork.total;
+  const tie = Math.abs(delta) < 0.5;
   const claudeShort = claudeSide === "3p" ? "Claude on 3P" : claudeLine.name;
-  const comparison = result.openModel
-    ? `${claudeLine.tokensIncluded ? claudeShort : `${claudeShort} with ${model.label}`} vs ${featured.name} with ${featured.modelLabel}`
-    : `${claudeShort} vs ${featured.name}, both with ${model.label}`;
+  const comparison = `${claudeShort} vs ${result.openwork.name}, both with ${model.label}`;
   const period = periodLabel(years);
 
   const lines: ChartLine[] = [
@@ -487,7 +485,7 @@ export function CoworkCostCalculator({
       series: result.openwork,
       stroke: "var(--lp-ink)",
       width: 2.5,
-      strong: !result.openModel
+      strong: true
     },
     ...(result.openModel
       ? [
@@ -516,20 +514,31 @@ export function CoworkCostCalculator({
       : [])
   ];
 
-  const seatGap = planPrices.openworkEnterpriseSeat - planPrices.claudeEnterpriseSeat;
-  const sameModelLine = result.openModel
-    ? sameModelDelta >= 0
-      ? `Same model on both: OpenWork saves ${dollars.format(sameModelDelta)}.`
-      : `Same model on both: Claude costs ${dollars.format(-sameModelDelta)} less.`
-    : delta >= 0
-      ? null
+  const headline = tie
+    ? "Same price with the same model"
+    : delta > 0
+      ? `You keep ${dollars.format(delta)}`
+      : `Claude costs ${dollars.format(-delta)} less`;
+  const openModelLine = (() => {
+    if (!result.openModel) return null;
+    const label = result.openModel.modelLabel;
+    const extra = result.openwork.total - result.openModel.total;
+    const openDelta = claudeLine.total - result.openModel.total;
+    if (delta > 0 && !tie && extra >= 0.5) return `…and ${dollars.format(extra)} more with ${label}`;
+    if (openDelta >= 0.5) return `With ${label} on OpenWork, you keep ${dollars.format(openDelta)}.`;
+    if (openDelta > -0.5) return `With ${label} on OpenWork, the price is the same.`;
+    return `With ${label} on OpenWork, Claude still costs ${dollars.format(-openDelta)} less.`;
+  })();
+  const reasonLine =
+    delta >= 0 || tie
+      ? tie && tier === "enterprise"
+        ? "Seats and tokens cost the same on both."
+        : null
       : claudeLine.tokensIncluded
         ? "Claude Team includes usage up to plan limits. OpenWork pays for tokens at API rates."
         : claudeLine.seatsMonthly === 0
           ? "Claude on 3P has no seat fee. Tokens cost the same on both."
-          : tier === "enterprise"
-            ? `Tokens cost the same on both. OpenWork Enterprise seats cost $${seatGap} more per person.`
-            : null;
+          : null;
 
   const rows: { key: string; series: CostSeries; detail: string; strong: boolean }[] = [
     {
@@ -542,7 +551,7 @@ export function CoworkCostCalculator({
           : model.label,
       strong: true
     },
-    { key: "openwork", series: result.openwork, detail: model.label, strong: !result.openModel },
+    { key: "openwork", series: result.openwork, detail: model.label, strong: true },
     ...(result.openModel
       ? [{ key: "open", series: result.openModel, detail: `${result.openModel.modelLabel}, open model`, strong: true }]
       : []),
@@ -653,9 +662,12 @@ export function CoworkCostCalculator({
                 {comparison}, {count.format(users)} people, over {period}
               </p>
               <p className="mt-1 text-[44px] font-light leading-[1.05] tracking-[-0.03em] tabular-nums text-[var(--lp-ink)] md:text-[56px] lg:text-[64px]">
-                {delta >= 0 ? `You keep ${dollars.format(delta)}` : `Claude costs ${dollars.format(-delta)} less`}
+                {headline}
               </p>
-              {sameModelLine ? <p className="mt-2 text-[14px] text-[var(--lp-body)]">{sameModelLine}</p> : null}
+              {openModelLine ? (
+                <p className="mt-2 text-[18px] font-light tabular-nums text-[var(--lp-ink)] md:text-[20px]">{openModelLine}</p>
+              ) : null}
+              {reasonLine ? <p className="mt-2 text-[14px] text-[var(--lp-body)]">{reasonLine}</p> : null}
               {notices.map((notice) => (
                 <p key={notice} className="mt-1 text-[13px] text-[var(--lp-muted)]">
                   {notice}
@@ -681,7 +693,7 @@ export function CoworkCostCalculator({
             <CostChart
               lines={lines}
               months={years * 12}
-              shade={{ from: claudeLine, to: featured }}
+              shade={{ from: claudeLine, to: result.openwork }}
               label={`Cumulative cost over ${period}. Use arrow keys to move by month.`}
             />
           </div>
@@ -741,15 +753,17 @@ export function CoworkCostCalculator({
           </summary>
           <ul className="mt-3 space-y-1.5 text-[12.5px] leading-[19px] text-[var(--lp-body)]">
             <li>
-              Both sides use the same Claude model. Tokens per person = input × (uncached × input price + cached × cache
+              Both sides use the same Claude model; the headline compares them. The open model is an extra line. Tokens per person = input × (uncached × input price + cached × cache
               price) + output × output price. Light, Typical, and Heavy assume 5M, 25M, or 100M input tokens a month, 70%
               cached.
             </li>
             <li>
               Claude Team: ${planPrices.claudeTeamStandard.annual}/seat billed annually (${planPrices.claudeTeamStandard.monthly} monthly),{" "}
               {planPrices.claudeTeamMinSeats} to {planPrices.claudeTeamMaxSeats} seats, usage included up to plan limits.
-              Heavy usage is priced on Premium seats (${planPrices.claudeTeamPremium.annual}). Usage beyond limits is billed
-              at API rates and not included, so this favours Claude.
+              Typical and Heavy use reach Standard seat limits, so they are priced on Premium seats ($
+              {planPrices.claudeTeamPremium.annual} annual, ${planPrices.claudeTeamPremium.monthly} monthly), which Anthropic
+              positions for heavy and agentic use. Light use is priced on Standard seats. Team usage beyond limits is billed
+              at API rates; we don&apos;t add it, so this still favours Claude.
             </li>
             <li>
               Claude Enterprise: ${planPrices.claudeEnterpriseSeat}/seat billed annually, {planPrices.claudeEnterpriseMinSeats}{" "}

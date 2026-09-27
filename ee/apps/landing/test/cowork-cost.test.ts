@@ -47,28 +47,47 @@ describe("token cost", () => {
     expect(tokenCostPerUser(sonnet, { inputMillions: 1, outputMillions: 0, cacheReadShare: Number.NaN })).toBeCloseTo(2, 6);
   });
 
-  test("flags Team limit risk from typical and Premium seats only above typical", () => {
+  test("flags Team limit risk and Premium seats from typical usage", () => {
     expect(likelyExceedsTeamLimits(usageProfiles.light.usage)).toBe(false);
     expect(likelyExceedsTeamLimits(typical)).toBe(true);
     expect(needsPremiumSeat(usageProfiles.light.usage)).toBe(false);
-    expect(needsPremiumSeat(typical)).toBe(false);
+    expect(needsPremiumSeat(typical)).toBe(true);
     expect(needsPremiumSeat(usageProfiles.heavy.usage)).toBe(true);
   });
 });
 
 describe("cumulative costs", () => {
-  test("compares Claude Team with OpenWork Team on the same model, annual seat price", () => {
+  test("compares Claude Team Premium with OpenWork Team on the same model at typical usage", () => {
     const result = cumulativeCosts(inputs());
     expect(result.claude.id).toBe("claude-team");
-    expect(result.claudeTeamSeat).toBe("standard");
-    expect(result.claude.seatsMonthly).toBe(50 * 20);
+    expect(result.claudeTeamSeat).toBe("premium");
+    expect(result.claude.name).toBe("Claude Team, Premium seats");
+    expect(result.claude.seatsMonthly).toBe(50 * 100);
     expect(result.claude.tokensMonthly).toBe(0);
     expect(result.claude.tokensIncluded).toBe(true);
     expect(result.openwork.id).toBe("openwork-team");
     expect(result.openwork.modelLabel).toBe("Sonnet");
     expect(result.openwork.seatsBilled).toBe(45);
     expect(result.openwork.monthly).toBeCloseTo(45 * 10 + 50 * sonnetTypical, 6);
-    expect(result.claude.total).toBeCloseTo(36 * 1000, 6);
+    expect(result.claude.total).toBeCloseTo(36 * 5000, 6);
+  });
+
+  test("50 people at typical usage over 3 years", () => {
+    const result = cumulativeCosts(inputs({ openModel: cheap }));
+    // Claude Team Premium: 50 × $100 × 36 = $180,000. OpenWork Team: (45 × $10 + 50 × $30.50) × 36 = $71,100.
+    expect(result.claude.total).toBeCloseTo(180_000, 6);
+    expect(result.openwork.total).toBeCloseTo(71_100, 6);
+    expect(result.savings).toBeCloseTo(108_900, 6);
+    expect(result.openModelSavings ?? 0).toBeGreaterThan(result.savings);
+  });
+
+  test("prices light usage on Claude Team Standard seats", () => {
+    const light = usageProfiles.light.usage;
+    const result = cumulativeCosts(inputs({ usage: light }));
+    expect(result.claudeTeamSeat).toBe("standard");
+    expect(result.claude.name).toBe("Claude Team");
+    expect(result.claude.seatsMonthly).toBe(50 * 20);
+    expect(result.savings).toBeCloseTo(36 * (1000 - (450 + 50 * tokenCostPerUser(sonnet, light))), 6);
   });
 
   test("builds cumulative points from zero, one per month", () => {
@@ -84,23 +103,38 @@ describe("cumulative costs", () => {
   });
 
   test("reports when OpenWork costs more instead of hiding it", () => {
-    const result = cumulativeCosts(inputs());
-    // Claude Team includes usage within limits; OpenWork pays tokens at API rates.
-    expect(result.savings).toBeCloseTo(36 * (1000 - (450 + 50 * sonnetTypical)), 6);
+    // A heavy Claude model at light usage: Claude Team Standard includes usage, OpenWork pays tokens at API rates.
+    const opus = model({ id: "opus", label: "Opus", input: 10, output: 50, cacheRead: 1, claude: true });
+    const result = cumulativeCosts(inputs({ usage: usageProfiles.light.usage, model: opus }));
     expect(result.savings).toBeLessThan(0);
+  });
+
+  test("Enterprise is a tie on seats and tokens with the same model", () => {
     const enterprise = cumulativeCosts(inputs({ users: 200, tier: "enterprise" }));
-    expect(enterprise.savings).toBeCloseTo(36 * 200 * (20 - 40), 6);
+    expect(enterprise.openwork.seatsMonthly).toBe(200 * 20);
+    expect(enterprise.claude.seatsMonthly).toBe(200 * 20);
+    expect(enterprise.savings).toBeCloseTo(0, 6);
+  });
+
+  test("1000 people with SSO: same price on the same model, open model saves", () => {
+    const result = cumulativeCosts(inputs({ users: 1000, tier: "enterprise", openModel: cheap }));
+    expect(result.claude.id).toBe("claude-enterprise");
+    expect(result.openwork.id).toBe("openwork-enterprise");
+    expect(result.claude.total).toBeCloseTo(36 * 1000 * (20 + sonnetTypical), 6);
+    expect(result.savings).toBeCloseTo(0, 6);
+    expect(result.openModelSavings).toBeCloseTo(36 * 1000 * (sonnetTypical - tokenCostPerUser(cheap, typical)), 6);
   });
 
   test("first 5 seats are free on OpenWork Team", () => {
     expect(cumulativeCosts(inputs({ users: 3 })).openwork.seatsMonthly).toBe(0);
     expect(cumulativeCosts(inputs({ users: 5 })).openwork.seatsMonthly).toBe(0);
     expect(cumulativeCosts(inputs({ users: 6 })).openwork.seatsMonthly).toBe(10);
-    expect(cumulativeCosts(inputs({ users: 6, tier: "enterprise" })).openwork.seatsMonthly).toBe(6 * 40);
+    expect(cumulativeCosts(inputs({ users: 6, tier: "enterprise" })).openwork.seatsMonthly).toBe(6 * 20);
   });
 
   test("applies Claude seat minimums", () => {
-    expect(cumulativeCosts(inputs({ users: 1 })).claude.seatsMonthly).toBe(2 * 20);
+    expect(cumulativeCosts(inputs({ users: 1 })).claude.seatsMonthly).toBe(2 * 100);
+    expect(cumulativeCosts(inputs({ users: 1, usage: usageProfiles.light.usage })).claude.seatsMonthly).toBe(2 * 20);
     const enterprise = cumulativeCosts(inputs({ users: 5, tier: "enterprise" }));
     expect(enterprise.claude.id).toBe("claude-enterprise");
     expect(enterprise.claude.seatsBilled).toBe(20);
