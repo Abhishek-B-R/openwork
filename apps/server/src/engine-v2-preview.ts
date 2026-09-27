@@ -449,9 +449,13 @@ export function createEngineV2Preview(options: {
         if (applied.get(name) === fingerprint && (!live || (liveStatus !== undefined && liveStatus !== "failed"))) continue;
         const previousRejection = rejected.get(name);
         if (previousRejection?.fingerprint === fingerprint && Date.now() - previousRejection.at < waits.mcpRetryMs) continue;
-        const status = await active.fetchJson(`/api/mcp/${encodeURIComponent(name)}`, {
-          method: "PUT", body: { config: mcpConfig }, directory, timeoutMs: 30_000,
-        }).then((result) => result.status, (error) => { warn(`MCP ${name}: ${errorMessage(error)}`); return 0; });
+        // The engine ignores a PUT of the config it already holds, so a failed
+        // connection with an unchanged config is started again with connect.
+        const reconnect = applied.get(name) === fingerprint && liveStatus === "failed";
+        const status = await active.fetchJson(`/api/mcp/${encodeURIComponent(name)}${reconnect ? "/connect" : ""}`, reconnect
+          ? { method: "POST", directory, timeoutMs: 30_000 }
+          : { method: "PUT", body: { config: mcpConfig }, directory, timeoutMs: 30_000 },
+        ).then((result) => result.status, (error) => { warn(`MCP ${name}: ${errorMessage(error)}`); return 0; });
         if (status !== 204) {
           rejected.set(name, { fingerprint, at: Date.now() });
           if (status !== 0) warn(`MCP ${name}: registration failed (${status})`);

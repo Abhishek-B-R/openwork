@@ -373,25 +373,31 @@ test("a connection that failed to start is registered again once its app is up",
     waits: { mcpSettleMs: 150, mcpRetryMs: 1_000 },
     mcp: { "paper-local": { type: "remote", url: "http://127.0.0.1:29979/mcp" } },
     reply: (path, method) => {
-      if (method === "PUT") { liveStatus = appUp ? "connected" : "failed"; return { status: 204, json: null }; }
+      // Like the pinned engine, a PUT of the config it already holds is a
+      // no-op; only connect starts a failed connection again.
+      if (method === "PUT") { if (liveStatus === "pending") liveStatus = appUp ? "connected" : "failed"; return { status: 204, json: null }; }
+      if (method === "POST" && path.endsWith("/connect")) { liveStatus = appUp ? "connected" : "failed"; return { status: 204, json: null }; }
       if (path === "/api/mcp") return { status: 200, json: { data: [{ name: "paper-local", status: { status: liveStatus } }] } };
       return { status: 200, json: { data: [] } };
     },
   }, async (preview, root, calls) => {
     const puts = () => calls.filter((call) => call === "PUT /api/mcp/paper-local").length;
+    const connects = () => calls.filter((call) => call === "POST /api/mcp/paper-local/connect").length;
     await preview.syncWorkspaceMcp("ws_1", root);
     expect(puts()).toBe(1);
     expect(preview.status().lastWarning).toContain("paper-local: connection failed");
     // Within the back-off a failed connection is not hammered on every prompt.
     await preview.syncWorkspaceMcp("ws_1", root);
-    expect(puts()).toBe(1);
+    expect(connects()).toBe(0);
     appUp = true;
     await new Promise((resolve) => setTimeout(resolve, 1_050));
     await preview.syncWorkspaceMcp("ws_1", root);
-    expect(puts()).toBe(2);
+    expect(connects()).toBe(1);
+    expect(liveStatus).toBe("connected");
     await new Promise((resolve) => setTimeout(resolve, 1_050));
     await preview.syncWorkspaceMcp("ws_1", root);
-    expect(puts()).toBe(2);
+    expect(puts()).toBe(1);
+    expect(connects()).toBe(1);
     expect(calls).not.toContain("DELETE /api/mcp/paper-local");
   });
 });
