@@ -1,18 +1,10 @@
 import { CLAUDE_COWORK_ALTERNATIVE_PATH } from "../lib/claude-cowork-alternative";
-import {
-  anthropic3pCheckedAt,
-  anthropic3pSources,
-  claudeCowork3pAnswer,
-  claudeCowork3pFaq,
-  claudeCowork3pHeading,
-  threePCards,
-  threeWayColumns,
-  threeWayRows
-} from "../lib/claude-cowork-3p";
+import { claudeCowork3pAnswer, claudeCowork3pFaq, claudeCowork3pHeading, threePCards } from "../lib/claude-cowork-3p";
+import { CapabilityMatrix } from "./capability-matrix";
 import { CoworkCostCalculator } from "./cowork-cost-calculator";
 import { DownloadLink } from "./download-link";
 import { LandingFaq } from "./landing-faq";
-import { CompareCards, CompareHero, CompareSection, CompareTable } from "./lp-compare";
+import { CompareCards, CompareHero, CompareSection } from "./lp-compare";
 import { LpCta } from "./lp-cta";
 import { LpArrowLink } from "./lp-primitives";
 import { SiteFooter } from "./site-footer";
@@ -33,13 +25,9 @@ export function ClaudeCowork3pPage({ stars }: Props) {
         </CompareHero>
 
         <CompareSection id="three-way-heading" heading="Enterprise, 3P, or OpenWork">
-          <CompareTable
-            caption="Claude Enterprise, Claude Desktop on 3P, and OpenWork compared"
-            columns={threeWayColumns}
-            rows={threeWayRows}
-            highlight="openwork"
-            sources={anthropic3pSources}
-            checkedAt={anthropic3pCheckedAt}
+          <CapabilityMatrix
+            caption="Claude Enterprise, Claude Desktop on 3P, and OpenWork compared by capability"
+            emphasis="thirdParty"
           />
         </CompareSection>
 

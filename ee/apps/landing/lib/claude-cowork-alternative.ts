@@ -1,5 +1,5 @@
-import type { CompareCard, CompareColumn, CompareRow, CompareSource } from "./compare";
-import { compareMarkdownTable, sourcesMarkdown } from "./compare";
+import type { CompareCard } from "./compare";
+import { capabilityMarkdown } from "./cowork-capabilities";
 import type { FaqEntry } from "./faq";
 
 export const CLAUDE_COWORK_ALTERNATIVE_PATH = "/alternatives/claude-cowork";
@@ -11,38 +11,6 @@ export const claudeCoworkAlternativeHeading = "The free, open-source alternative
 /** Hero sub-line. Keep it under 20 words. */
 export const claudeCoworkAlternativeAnswer =
   "Any model, your own keys, files that stay on your machine. Free for macOS, Windows, and Linux.";
-
-export type CoworkColumnKey = "openwork" | "cowork" | "thirdParty";
-
-export const comparisonColumns: CompareColumn<CoworkColumnKey>[] = [
-  { key: "openwork", label: "OpenWork" },
-  { key: "cowork", label: "Claude Cowork" },
-  { key: "thirdParty", label: "Cowork on 3P" }
-];
-
-// Keep the Claude columns factual and neutral: describe what Anthropic
-// offers, never claim a limitation we cannot verify. 3P cells follow
-// Anthropic's 3P docs: org plugins and skills ship from a plugin marketplace
-// you host in git or over HTTPS (or a folder on each device), and MCP servers
-// ship as a managed config key via MDM or a bootstrap server.
-export const comparisonRows: CompareRow<CoworkColumnKey>[] = [
-  { label: "Free and open source", openwork: true, cowork: false, thirdParty: false },
-  { label: "Any model, 50+ providers", openwork: true, cowork: "Claude only", thirdParty: "Via your gateway" },
-  { label: "Local models", openwork: true, cowork: false, thirdParty: false },
-  { label: "Linux", openwork: true, cowork: false, thirdParty: false },
-  { label: "Seat price / month", openwork: "$10–$20", cowork: "$20+", thirdParty: "None" },
-  { label: "Bedrock, Vertex, Foundry", openwork: true, cowork: false, thirdParty: true },
-  { label: "Share skills, plugins, MCP with your team", openwork: "Built in", cowork: "Built in", thirdParty: "Your own git repo + MDM" },
-  { label: "Self-host", openwork: true, cowork: false, thirdParty: false }
-];
-
-export const comparisonSources: CompareSource[] = [
-  { label: "Claude Team plan", href: "https://support.claude.com/en/articles/9266767-what-is-the-team-plan" },
-  { label: "Claude Enterprise pricing", href: "https://claude.com/pricing/enterprise" },
-  { label: "Claude Desktop on 3P", href: "https://claude.com/docs/third-party/claude-desktop/overview" },
-  { label: "3P feature matrix", href: "https://claude.com/docs/third-party/claude-desktop/feature-matrix" },
-  { label: "3P plugins and MCP", href: "https://claude.com/docs/third-party/claude-desktop/extensions" }
-];
 
 export const alternativeCards: CompareCard[] = [
   {
@@ -101,9 +69,7 @@ export const claudeCoworkAlternativeMarkdown = `# ${claudeCoworkAlternativeHeadi
 
 ## OpenWork vs Claude Cowork
 
-${compareMarkdownTable(comparisonColumns, comparisonRows)}
-
-Sources: ${sourcesMarkdown(comparisonSources)}.
+${capabilityMarkdown()}
 
 ## Why people switch
 

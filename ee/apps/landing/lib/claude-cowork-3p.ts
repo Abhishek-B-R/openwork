@@ -1,48 +1,15 @@
-import type { CompareCard, CompareColumn, CompareRow, CompareSource } from "./compare";
-import { compareMarkdownTable, sourcesMarkdown } from "./compare";
+import type { CompareCard } from "./compare";
+import { capabilityMarkdown } from "./cowork-capabilities";
 import type { FaqEntry } from "./faq";
 
 export const CLAUDE_COWORK_3P_PATH = "/alternatives/claude-cowork-3p";
 export const CLAUDE_COWORK_3P_URL = `https://openworklabs.com${CLAUDE_COWORK_3P_PATH}`;
-
-/** Date the Anthropic 3P facts were checked against Anthropic's public docs. */
-export const anthropic3pCheckedAt = "2026-09-25";
-
-export const anthropic3pSources: CompareSource[] = [
-  { label: "3P overview", href: "https://claude.com/docs/third-party/claude-desktop/overview" },
-  { label: "3P feature matrix", href: "https://claude.com/docs/third-party/claude-desktop/feature-matrix" },
-  { label: "3P models", href: "https://claude.com/docs/third-party/claude-desktop/models" },
-  { label: "3P plugins and MCP", href: "https://claude.com/docs/third-party/claude-desktop/extensions" },
-  { label: "Claude Enterprise pricing", href: "https://claude.com/pricing/enterprise" }
-];
 
 export const claudeCowork3pHeading = "OpenWork vs Claude Cowork on 3P";
 
 /** Hero sub-line. Keep it under 20 words. */
 export const claudeCowork3pAnswer =
   "Keep Bedrock, Vertex, or Foundry. Add any model, and share skills and MCP servers with every teammate.";
-
-export type ThreeWayColumnKey = "enterprise" | "thirdParty" | "openwork";
-
-export const threeWayColumns: CompareColumn<ThreeWayColumnKey>[] = [
-  { key: "enterprise", label: "Claude Enterprise" },
-  { key: "thirdParty", label: "Claude on 3P" },
-  { key: "openwork", label: "OpenWork" }
-];
-
-// Anthropic cells come from Anthropic's 3P overview, feature matrix, models,
-// and Enterprise pricing pages (see anthropic3pSources). OpenWork cells are
-// verified against this repository's docs and pricing.
-export const threeWayRows: CompareRow<ThreeWayColumnKey>[] = [
-  { label: "Seat price / month", enterprise: "$20 + usage", thirdParty: "None", openwork: "$10–$20" },
-  { label: "Non-Claude models", enterprise: false, thirdParty: "Via your gateway", openwork: true },
-  { label: "Bedrock, Vertex, Foundry", enterprise: false, thirdParty: true, openwork: true },
-  { label: "Share skills, plugins, MCP with your team", enterprise: "Built in", thirdParty: "Your own git repo + MDM", openwork: "Built in" },
-  { label: "Browser access", enterprise: true, thirdParty: false, openwork: "Alpha" },
-  { label: "Mobile app", enterprise: true, thirdParty: false, openwork: false },
-  { label: "Usage analytics and audit", enterprise: true, thirdParty: "Export only", openwork: true },
-  { label: "Self-host the control plane", enterprise: false, thirdParty: false, openwork: true }
-];
 
 export const threePCards: CompareCard[] = [
   {
@@ -102,9 +69,7 @@ export const claudeCowork3pMarkdown = `# ${claudeCowork3pHeading} (Bedrock, Vert
 
 ## Claude Enterprise vs Claude Desktop on 3P vs OpenWork
 
-${compareMarkdownTable(threeWayColumns, threeWayRows)}
-
-Anthropic details as of ${anthropic3pCheckedAt}: ${sourcesMarkdown(anthropic3pSources)}.
+${capabilityMarkdown()}
 
 ## Why teams on 3P switch
 
