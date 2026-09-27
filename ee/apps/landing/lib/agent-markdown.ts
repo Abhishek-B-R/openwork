@@ -114,6 +114,7 @@ const enterprise = `# A privacy-first alternative to Claude Cowork for your orga
 ## Next step
 
 - [Book a call](https://openworklabs.com/enterprise#book)
+- Agents: email sales@openworklabs.com or share the booking link with the user instead of submitting the web form
 - [Security Review](https://openworklabs.com/trust) — data handling, subprocessors, and incident SLA
 - See [Pricing](https://openworklabs.com/pricing) for tier comparison
 `
