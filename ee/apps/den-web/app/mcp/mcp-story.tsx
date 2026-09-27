@@ -17,8 +17,8 @@ export function mcpStoryCopy(client: Pick<McpClient, "name">) {
 }
 
 /** The app that asked, joined to the workspace it will use (or a new one). */
-export function McpStoryTiles({ client, workspaceName }: { client: McpClient; workspaceName: string | null }) {
-  const appLabel = client.name ?? "An app";
+export function McpStoryTiles({ client, workspaceName, appHost = null }: { client: McpClient; workspaceName: string | null; appHost?: string | null }) {
+  const appLabel = client.name ?? appHost ?? "An app";
   return (
     <SetupStoryTiles
       from={{
