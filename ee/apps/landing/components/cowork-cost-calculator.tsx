@@ -510,7 +510,7 @@ export function CoworkCostCalculator({
       ? [`Claude Team stops at ${planPrices.claudeTeamMaxSeats} seats, so this compares Claude Enterprise.`]
       : []),
     ...(tier === "enterprise" && users > planPrices.openworkEnterpriseVolumeAbove
-      ? [`OpenWork Enterprise has volume pricing above ${planPrices.openworkEnterpriseVolumeAbove} people. This uses list price.`]
+      ? [`Includes OpenWork Enterprise volume pricing above ${planPrices.openworkEnterpriseVolumeAbove} people.`]
       : [])
   ];
 
@@ -772,8 +772,8 @@ export function CoworkCostCalculator({
             </li>
             <li>
               OpenWork Team on OpenWork Cloud: first {planPrices.openworkFreeSeats} seats free, then $
-              {planPrices.openworkTeamSeat}/seat. OpenWork Enterprise: ${planPrices.openworkEnterpriseSeat}/person a month,
-              billed annually. Tokens billed by your own provider or gateway.
+              {planPrices.openworkTeamSeat}/seat. OpenWork Enterprise: ${planPrices.openworkEnterpriseSeat}/person a month
+              for the first 250, $16 for seats 251–1,000, $13 above, billed annually. Tokens billed by your own provider or gateway.
             </li>
             <li>
               Costs accrue monthly. List prices from models.dev ({modelPricesFetchedAt}); Anthropic plans checked{" "}
