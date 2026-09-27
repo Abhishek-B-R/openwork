@@ -12,30 +12,34 @@ export const claudeCoworkAlternativeHeading = "The free, open-source alternative
 export const claudeCoworkAlternativeAnswer =
   "Any model, your own keys, files that stay on your machine. Free for macOS, Windows, and Linux.";
 
-export type CoworkColumnKey = "openwork" | "cowork";
+export type CoworkColumnKey = "openwork" | "cowork" | "thirdParty";
 
 export const comparisonColumns: CompareColumn<CoworkColumnKey>[] = [
   { key: "openwork", label: "OpenWork" },
-  { key: "cowork", label: "Claude Cowork" }
+  { key: "cowork", label: "Claude Cowork" },
+  { key: "thirdParty", label: "Cowork on 3P" }
 ];
 
-// Keep the Claude Cowork column factual and neutral: describe what Anthropic
-// offers, never claim a limitation we cannot verify.
+// Keep the Claude columns factual and neutral: describe what Anthropic
+// offers, never claim a limitation we cannot verify. 3P cells follow
+// Anthropic's 3P feature matrix (admins can distribute skills and allowlist
+// MCP servers on 3P; teammates cannot share projects or plugins).
 export const comparisonRows: CompareRow<CoworkColumnKey>[] = [
-  { label: "Free and open source", openwork: true, cowork: false },
-  { label: "Linux", openwork: true, cowork: false },
-  { label: "Any model, 50+ providers", openwork: true, cowork: "Claude only" },
-  { label: "Local models", openwork: true, cowork: false },
-  { label: "Your own API keys", openwork: true, cowork: "On 3P" },
-  { label: "Skills, plugins, MCP", openwork: true, cowork: true },
-  { label: "Share skills with your team", openwork: true, cowork: "Team plans" },
-  { label: "Self-host", openwork: true, cowork: false }
+  { label: "Free and open source", openwork: true, cowork: false, thirdParty: false },
+  { label: "Any model, 50+ providers", openwork: true, cowork: "Claude only", thirdParty: "Claude only" },
+  { label: "Local models", openwork: true, cowork: false, thirdParty: false },
+  { label: "Linux", openwork: true, cowork: false, thirdParty: false },
+  { label: "Seat price / month", openwork: "$10–$20", cowork: "$20+", thirdParty: "None" },
+  { label: "Bedrock, Vertex, Foundry", openwork: true, cowork: false, thirdParty: true },
+  { label: "Teammates share skills and plugins", openwork: true, cowork: true, thirdParty: "Admins only" },
+  { label: "Self-host", openwork: true, cowork: false, thirdParty: false }
 ];
 
 export const comparisonSources: CompareSource[] = [
   { label: "Claude Team plan", href: "https://support.claude.com/en/articles/9266767-what-is-the-team-plan" },
   { label: "Claude Enterprise pricing", href: "https://claude.com/pricing/enterprise" },
-  { label: "Claude Desktop on 3P", href: "https://claude.com/docs/third-party/claude-desktop/overview" }
+  { label: "Claude Desktop on 3P", href: "https://claude.com/docs/third-party/claude-desktop/overview" },
+  { label: "3P feature matrix", href: "https://claude.com/docs/third-party/claude-desktop/feature-matrix" }
 ];
 
 export const alternativeCards: CompareCard[] = [

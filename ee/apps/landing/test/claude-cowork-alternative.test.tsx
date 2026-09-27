@@ -38,6 +38,7 @@ describe("Claude Cowork alternative page", () => {
       expect(text).toContain(row.label);
       expect(text).toContain(compareCellText(row.openwork));
       expect(text).toContain(compareCellText(row.cowork));
+      expect(text).toContain(compareCellText(row.thirdParty));
     }
     for (const entry of claudeCoworkAlternativeFaq) {
       expect(text).toContain(entry.question);
@@ -48,6 +49,6 @@ describe("Claude Cowork alternative page", () => {
     expect(sitemap().map((entry) => entry.url)).toContain(`https://openworklabs.com${CLAUDE_COWORK_ALTERNATIVE_PATH}`);
     const markdown = agentMarkdown[CLAUDE_COWORK_ALTERNATIVE_PATH];
     expect(markdown).toStartWith("# The free, open-source alternative to Claude Cowork");
-    expect(markdown).toContain("| Local models | Yes | No |");
+    expect(markdown).toContain("| Local models | Yes | No | No |");
   });
 });
