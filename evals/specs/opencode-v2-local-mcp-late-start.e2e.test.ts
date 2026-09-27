@@ -13,7 +13,7 @@ const test = spec.world(localMcpLateStart, {
 // own connect attempt.
 const RETRY_AFTER_MS = 65_000;
 
-test("a member whose local design app was closed when OpenWork started gets its tools in chat once the app is open", async ({ world, user, probe, step, evidence }) => {
+test("a member whose local design app was closed when OpenWork started gets its tools in chat once the app is open", { tags: ["agent-flow"] }, async ({ world, user, probe, step, evidence }) => {
   expect(world.engine).toBe("v2");
   await probe.eventually(() => probe.composer(), { within: 60_000, label: "starter model ready", until: (state) => state.selectedModelLabel.includes("Big Pickle") && !state.modelUnavailable });
   let failedAt = 0;

@@ -67,3 +67,26 @@ export async function localMcpLateStart(seed: Seed, context: { place: Place }) {
     async [Symbol.asyncDispose]() { await resources.disposeAsync(); },
   };
 }
+
+/**
+ * The same world after the member added the design app connection while the
+ * app was closed: the engine has already tried it once and marked it failed.
+ */
+export async function localMcpAddedWhileClosed(seed: Seed, context: { place: Place }) {
+  await using setup = new AsyncDisposableStack();
+  const world = setup.use(await localMcpLateStart(seed, context));
+  const added = await world.connect();
+  if (added.status !== 200) throw new Error(`Adding the design app connection failed: ${added.status}`);
+  const deadline = Date.now() + 30_000;
+  let status = await world.liveStatus();
+  while (status !== "failed" && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    status = await world.liveStatus();
+  }
+  if (status !== "failed") throw new Error(`Expected the closed design app to fail to start; engine status is ${status}`);
+  const resources = setup.move();
+  return {
+    ...world,
+    async [Symbol.asyncDispose]() { await resources.disposeAsync(); },
+  };
+}
