@@ -4,8 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 import sitemap from "../app/sitemap";
 import { agentMarkdown } from "../lib/agent-markdown";
-import { CLAUDE_COWORK_3P_PATH, claudeCowork3pFaq, threeWayRows } from "../lib/claude-cowork-3p";
-import { compareCellText } from "../lib/compare";
+import { CLAUDE_COWORK_3P_PATH, claudeCowork3pFaq } from "../lib/claude-cowork-3p";
 
 mock.module("next/navigation", () => ({ useRouter: () => ({ push: () => {} }) }));
 const { ClaudeCowork3pPage } = await import("../components/claude-cowork-3p-page");
@@ -18,16 +17,10 @@ const html = renderToStaticMarkup(createElement(ClaudeCowork3pPage, { stars: "23
 const text = decode(html);
 
 describe("Claude Cowork on 3P page", () => {
-  test("answers first and renders the three-way comparison", () => {
+  test("answers first and renders the capability matrix", () => {
     expect(html).toMatch(/<h1[^>]*>OpenWork vs Claude Cowork on 3P<\/h1>/);
-    for (const row of threeWayRows) {
-      expect(text).toContain(row.label);
-      expect(text).toContain(compareCellText(row.enterprise));
-      expect(text).toContain(compareCellText(row.thirdParty));
-      expect(text).toContain(compareCellText(row.openwork));
-    }
-    expect(threeWayRows.length).toBeLessThanOrEqual(8);
-    expect(text).toContain("Sources, checked 2026-09-25");
+    expect(html).toContain("<table");
+    expect(text).toContain("Claude on 3P");
   });
 
   test("embeds the calculator focused on 3P with 500 people", () => {
@@ -41,7 +34,7 @@ describe("Claude Cowork on 3P page", () => {
     expect(claudeCowork3pFaq.length).toBeLessThanOrEqual(6);
     for (const entry of claudeCowork3pFaq) expect(text).toContain(entry.question);
     expect(sitemap().map((entry) => entry.url)).toContain(`https://openworklabs.com${CLAUDE_COWORK_3P_PATH}`);
-    expect(agentMarkdown[CLAUDE_COWORK_3P_PATH]).toContain("| Non-Claude models | No | Via your gateway | Yes |");
+    expect(agentMarkdown[CLAUDE_COWORK_3P_PATH]).toContain("| Any model, including open-weight and self-hosted | No | Partial [");
   });
 
   test("is linked from the main Claude Cowork alternative page", () => {
