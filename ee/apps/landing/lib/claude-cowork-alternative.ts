@@ -26,7 +26,7 @@ export const comparisonColumns: CompareColumn<CoworkColumnKey>[] = [
 // MCP servers on 3P; teammates cannot share projects or plugins).
 export const comparisonRows: CompareRow<CoworkColumnKey>[] = [
   { label: "Free and open source", openwork: true, cowork: false, thirdParty: false },
-  { label: "Any model, 50+ providers", openwork: true, cowork: "Claude only", thirdParty: "Claude only" },
+  { label: "Any model, 50+ providers", openwork: true, cowork: "Claude only", thirdParty: "Via your gateway" },
   { label: "Local models", openwork: true, cowork: false, thirdParty: false },
   { label: "Linux", openwork: true, cowork: false, thirdParty: false },
   { label: "Seat price / month", openwork: "$10–$20", cowork: "$20+", thirdParty: "None" },

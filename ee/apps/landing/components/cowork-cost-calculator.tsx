@@ -556,7 +556,7 @@ export function CoworkCostCalculator({
       ? [{ key: "open", series: result.openModel, detail: `${result.openModel.modelLabel}, open model`, strong: true }]
       : []),
     ...(claudeSide === "plan"
-      ? [{ key: "3p", series: result.claude3p, detail: `${model.label}, Claude models only, no shared skills or plugins`, strong: false }]
+      ? [{ key: "3p", series: result.claude3p, detail: `${model.label}, no sharing between teammates`, strong: false }]
       : [])
   ];
 
@@ -767,8 +767,8 @@ export function CoworkCostCalculator({
             </li>
             <li>
               Claude Enterprise: ${planPrices.claudeEnterpriseSeat}/seat billed annually, {planPrices.claudeEnterpriseMinSeats}{" "}
-              seats minimum, all usage at API rates. Claude Desktop on 3P: no seat fee, tokens through Bedrock, Vertex, or
-              Foundry, Claude models only.
+              seats minimum, all usage at API rates. Claude Desktop on 3P: no seat fee, tokens through Bedrock, Vertex, Foundry, or
+              your own gateway.
             </li>
             <li>
               OpenWork Team on OpenWork Cloud: first {planPrices.openworkFreeSeats} seats free, then $
