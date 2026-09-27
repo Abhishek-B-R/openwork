@@ -1161,6 +1161,41 @@ function getRenderableMessage(message: UIMessage) {
 }
 
 /**
+ * Running steps only ever grow. When a finished step folds its live detail
+ * before the next step's row arrives, the area briefly got shorter and the
+ * chat jumped; holding the tallest height seen during the run keeps it still.
+ * The hold ends when the turn folds (this element unmounts).
+ */
+function LiveSteps({ children }: { children: React.ReactNode }) {
+  const ref = React.useRef<HTMLDivElement>(null)
+  React.useLayoutEffect(() => {
+    const element = ref.current
+    if (!element || typeof ResizeObserver === "undefined") return
+    let tallest = 0
+    const hold = () => {
+      element.style.minHeight = ""
+      const height = element.getBoundingClientRect().height
+      if (height > tallest) tallest = height
+      element.style.minHeight = `${tallest}px`
+    }
+    hold()
+    const observer = new ResizeObserver(hold)
+    for (const child of element.children) observer.observe(child)
+    const mutations = new MutationObserver(() => {
+      observer.disconnect()
+      for (const child of element.children) observer.observe(child)
+      hold()
+    })
+    mutations.observe(element, { childList: true })
+    return () => {
+      observer.disconnect()
+      mutations.disconnect()
+    }
+  }, [])
+  return <div ref={ref} data-live-steps="" className="flex flex-col gap-2">{children}</div>
+}
+
+/**
  * A finished turn's steps collapse to a single "Worked for 1m 19s" line
  * that expands back into the full run. Only live turns show their steps
  * unprompted; once the answer is in, the reasoning is available but out
@@ -1376,9 +1411,9 @@ function MessageGroup({
             </div>
           </CompletedStepRun>
         ) : (
-          <div data-live-steps="" className="flex flex-col gap-2">
+          <LiveSteps>
             {renderItems(stepItems, 0)}
-          </div>
+          </LiveSteps>
         )
       ) : null}
       {mcpAppParts.map((part) => (
@@ -1478,12 +1513,13 @@ interface MessageListProps {
   sessionErrorHandled?: boolean
 }
 
-export function shouldShowMessageListLoading(
-  status: ThreadStatus,
-  messageCount: number,
-  hasVisibleToolActivity = false,
-) {
-  if (hasVisibleToolActivity) return false
+/**
+ * The turn's "Working 12s" line stays on screen for the whole run, including
+ * while a tool row shows its own live step: the row says what is happening
+ * now, the line says the turn is still going and how long since the person's
+ * last message. Hiding it between steps made the chat look finished.
+ */
+export function shouldShowMessageListLoading(status: ThreadStatus, messageCount: number) {
   return status === "streaming" || (status === "submitted" && messageCount > 0)
 }
 
@@ -1560,8 +1596,6 @@ export function MessageList({ messages, messageIdReplacements, status, activityS
     () => collectLatestAssistantToolParts(messages),
     [messages],
   )
-  // Delegated task rows may be above newer messages; keep the run footer visible.
-  const hasVisibleToolActivity = latestAssistantToolParts.some((part) => !isTaskToolPart(part) && isToolPartInFlight(part))
   const waiting = activityStatus === "waiting" || activityStatus === "compacting" || childBlocked
   const showReconnecting = !waiting && !retryStatus && shouldShowRunReconnecting(status, syncDegraded)
   const noNewActivity = hasNoNewActivity({
@@ -1569,7 +1603,7 @@ export function MessageList({ messages, messageIdReplacements, status, activityS
     disconnected: syncDegraded, lastProgressAt, now: Date.now(),
   })
   const showLoading = !waiting && !noNewActivity && !showReconnecting
-    && shouldShowMessageListLoading(status, messages.length, hasVisibleToolActivity)
+    && shouldShowMessageListLoading(status, messages.length)
   const baseUrl = workspace?.opencodeBaseUrl
   React.useEffect(() => {
     if (!noNewActivity || !baseUrl) return
