@@ -37,8 +37,9 @@ const UNSET_API_KEY = "openwork-engine-v2-preview-unset";
 const CATALOG_MIRROR_TIMEOUT_MS = 60_000;
 // Upkeep waits are bounded and never fail a request, as in v1: the engine
 // serves what it has, and OpenWork only improves the next turn's odds.
-// A registration the engine rejected is retried after `mcpRetryMs`, or at once
-// when its configuration changes, instead of on every prompt.
+// A registration the engine rejected, or a connection that failed to start, is
+// retried after `mcpRetryMs`, or at once when its configuration changes,
+// instead of on every prompt.
 export const ENGINE_V2_UPKEEP_WAITS: Readonly<Record<"providerPushJoinMs" | "workspaceProviderReadyMs" | "mcpSettleMs" | "mcpRetryMs", number>> = Object.freeze({
   providerPushJoinMs: 10_000,
   workspaceProviderReadyMs: 8_000,
@@ -333,6 +334,22 @@ export function mapRuntimeMcpToV2(value: unknown): Record<string, unknown> | und
     ...(oauth === undefined ? {} : { oauth }), ...shared };
 }
 
+/** Live MCP status per name for one location, or undefined when unknown. */
+async function readLiveMcpStatus(
+  active: Pick<ManagedOpencodeV2Server, "fetchJson">,
+  directory: string,
+): Promise<Map<string, string> | undefined> {
+  const result = await active.fetchJson("/api/mcp", { directory, timeoutMs: 5_000 }).catch(() => undefined);
+  const entries = isRecord(result?.json) ? result.json.data : undefined;
+  if (result?.status !== 200 || !Array.isArray(entries)) return undefined;
+  const statuses = new Map<string, string>();
+  for (const entry of entries) {
+    if (!isRecord(entry) || typeof entry.name !== "string") continue;
+    statuses.set(entry.name, isRecord(entry.status) && typeof entry.status.status === "string" ? entry.status.status : "unknown");
+  }
+  return statuses;
+}
+
 export function createEngineV2Preview(options: {
   config: ServerConfig;
   env?: Pick<EnvService, "list" | "onChange">;
@@ -402,6 +419,11 @@ export function createEngineV2Preview(options: {
       }));
       const applied = workspaceMcp.get(directory) ?? new Map<string, string>();
       workspaceMcp.set(directory, applied);
+      // The engine's live status, not our record of what we sent, decides
+      // whether a connection is healthy. A 204 only means the engine accepted
+      // the config; the connection starts afterwards and can fail (a local app
+      // that was closed), and the engine never retries it on its own.
+      const live = await readLiveMcpStatus(active, directory);
       let changed = false;
       // Remove first so a failed replacement cannot leave an old credential or
       // revoked tool active. Only touch registrations owned by this mirror.
@@ -420,7 +442,11 @@ export function createEngineV2Preview(options: {
       mcpRejected.set(directory, rejected);
       for (const [name, mcpConfig] of desired) {
         const fingerprint = JSON.stringify(mcpConfig);
-        if (applied.get(name) === fingerprint) continue;
+        // Leave a healthy or still-starting connection alone: re-registering
+        // replaces and closes a client a running turn may be using. Register
+        // again when the config changed, the engine lost it, or it failed.
+        const liveStatus = live?.get(name);
+        if (applied.get(name) === fingerprint && (!live || (liveStatus !== undefined && liveStatus !== "failed"))) continue;
         const previousRejection = rejected.get(name);
         if (previousRejection?.fingerprint === fingerprint && Date.now() - previousRejection.at < waits.mcpRetryMs) continue;
         const status = await active.fetchJson(`/api/mcp/${encodeURIComponent(name)}`, {
@@ -440,13 +466,21 @@ export function createEngineV2Preview(options: {
         // next turn; a slow server only delays that, it never refuses it.
         const deadline = Date.now() + waits.mcpSettleMs;
         while (true) {
-          const result = await active.fetchJson("/api/mcp", { directory, timeoutMs: 5_000 }).catch(() => undefined);
-          const entries = isRecord(result?.json) ? result.json.data : undefined;
-          const pending = result?.status !== 200 || !Array.isArray(entries) || [...applied.keys()].some((name) => {
-            const entry = entries.find((entry) => isRecord(entry) && entry.name === name);
-            return !isRecord(entry) || !isRecord(entry.status) || entry.status.status === "pending";
+          const statuses = await readLiveMcpStatus(active, directory);
+          const pending = !statuses || [...applied.keys()].some((name) => {
+            const status = statuses.get(name);
+            return status === undefined || status === "pending";
           });
-          if (!pending) break;
+          if (!pending) {
+            // A connection that failed to start is backed off like a rejected
+            // registration, and the next sync after `mcpRetryMs` tries again.
+            for (const [name, fingerprint] of applied) {
+              if (statuses?.get(name) !== "failed" || rejected.get(name)?.fingerprint === fingerprint) continue;
+              rejected.set(name, { fingerprint, at: Date.now() });
+              warn(`MCP ${name}: connection failed; will retry`);
+            }
+            break;
+          }
           if (Date.now() >= deadline) {
             warn("MCP: connections were still starting when the request proceeded");
             break;
@@ -459,14 +493,11 @@ export function createEngineV2Preview(options: {
       }
     })();
     mcpInFlight.set(directory, pending);
+    // A failed sync keeps its record as is: only successful registrations are
+    // recorded, and the live status check above catches anything unhealthy.
+    // Clearing every record here would make the next sync remove and re-add
+    // every connection, so tools vanish and return between turns.
     try { await pending; }
-    catch (error) {
-      // Retain ownership for removals, but never cache a failed readiness
-      // attempt as an applied configuration.
-      const applied = workspaceMcp.get(directory);
-      if (applied) for (const name of applied.keys()) applied.set(name, "");
-      throw error;
-    }
     finally { if (mcpInFlight.get(directory) === pending) mcpInFlight.delete(directory); }
   }
 
