@@ -12,6 +12,7 @@ export const anthropic3pSources: CompareSource[] = [
   { label: "3P overview", href: "https://claude.com/docs/third-party/claude-desktop/overview" },
   { label: "3P feature matrix", href: "https://claude.com/docs/third-party/claude-desktop/feature-matrix" },
   { label: "3P models", href: "https://claude.com/docs/third-party/claude-desktop/models" },
+  { label: "3P plugins and MCP", href: "https://claude.com/docs/third-party/claude-desktop/extensions" },
   { label: "Claude Enterprise pricing", href: "https://claude.com/pricing/enterprise" }
 ];
 
@@ -36,7 +37,7 @@ export const threeWayRows: CompareRow<ThreeWayColumnKey>[] = [
   { label: "Seat price / month", enterprise: "$20 + usage", thirdParty: "None", openwork: "$10–$20" },
   { label: "Non-Claude models", enterprise: false, thirdParty: "Via your gateway", openwork: true },
   { label: "Bedrock, Vertex, Foundry", enterprise: false, thirdParty: true, openwork: true },
-  { label: "Share plugins with your team", enterprise: true, thirdParty: false, openwork: true },
+  { label: "Share skills, plugins, MCP with your team", enterprise: "Built in", thirdParty: "Your own git repo + MDM", openwork: "Built in" },
   { label: "Browser access", enterprise: true, thirdParty: false, openwork: "Alpha" },
   { label: "Mobile app", enterprise: true, thirdParty: false, openwork: false },
   { label: "Usage analytics and audit", enterprise: true, thirdParty: "Export only", openwork: true },
