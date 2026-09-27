@@ -183,6 +183,8 @@ import type {
   GetV1AuthBootstrapStatusResponses,
   GetV1AuthLoginOptionsErrors,
   GetV1AuthLoginOptionsResponses,
+  GetV1BootstrapWorkspaceByBootstrapIdClaimErrors,
+  GetV1BootstrapWorkspaceByBootstrapIdClaimResponses,
   GetV1BrandAssetsByOrganizationIdByKindByVersionErrors,
   GetV1BrandAssetsByOrganizationIdByKindByVersionResponses,
   GetV1CapabilitiesGoogleWorkspaceCalendarEventsErrors,
@@ -576,6 +578,8 @@ import type {
   PostV1AuthBootstrapVerifyResponses,
   PostV1BootstrapClaimsAcceptErrors,
   PostV1BootstrapClaimsAcceptResponses,
+  PostV1BootstrapWorkspaceByBootstrapIdClaimErrors,
+  PostV1BootstrapWorkspaceByBootstrapIdClaimResponses,
   PostV1BootstrapWorkspaceErrors,
   PostV1BootstrapWorkspaceResponses,
   PostV1CapabilitiesGoogleWorkspaceCalendarEventsErrors,
@@ -1796,6 +1800,52 @@ export class DenClient extends HeyApiClient {
         ...options?.headers,
         ...params.headers,
       },
+    });
+  }
+
+  /**
+   * Read the claim state of a provisional workspace
+   *
+   * Authenticated with the workspace's pre-claim identity assertion. Works after the claim so the agent can observe `reconciled`; the assertion itself no longer exchanges for tokens by then.
+   */
+  public getV1BootstrapWorkspaceByBootstrapIdClaim<ThrowOnError extends boolean = false>(
+    parameters: {
+      bootstrapId: string;
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "path", key: "bootstrapId" }] }]);
+    return (options?.client ?? this.client).get<
+      GetV1BootstrapWorkspaceByBootstrapIdClaimResponses,
+      GetV1BootstrapWorkspaceByBootstrapIdClaimErrors,
+      ThrowOnError
+    >({
+      url: "/v1/bootstrap/workspace/{bootstrapId}/claim",
+      ...options,
+      ...params,
+    });
+  }
+
+  /**
+   * Create a claim code for a provisional workspace
+   *
+   * Authenticated with the workspace's pre-claim identity assertion as a Bearer token. Returns an RFC 8628-style user code and verification URL for a person to claim the workspace. Each call cancels the previous unused code.
+   */
+  public postV1BootstrapWorkspaceByBootstrapIdClaim<ThrowOnError extends boolean = false>(
+    parameters: {
+      bootstrapId: string;
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "path", key: "bootstrapId" }] }]);
+    return (options?.client ?? this.client).post<
+      PostV1BootstrapWorkspaceByBootstrapIdClaimResponses,
+      PostV1BootstrapWorkspaceByBootstrapIdClaimErrors,
+      ThrowOnError
+    >({
+      url: "/v1/bootstrap/workspace/{bootstrapId}/claim",
+      ...options,
+      ...params,
     });
   }
 
