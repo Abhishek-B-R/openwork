@@ -37,6 +37,7 @@ One URL brings the user's organization skills, plugins, and connections into any
 - Claude Code: `claude mcp add --transport http openwork https://api.openworklabs.com/mcp/agent` then run `/mcp` and sign in
 - Codex: `codex mcp add openwork --url https://api.openworklabs.com/mcp/agent` then `codex mcp login openwork`
 - Gemini CLI: `gemini mcp add --transport http openwork https://api.openworklabs.com/mcp/agent` then `/mcp auth openwork`
+- OpenCode: `opencode mcp add openwork --url https://api.openworklabs.com/mcp/agent` then `opencode mcp auth openwork`
 - Cursor, VS Code, Claude Desktop, ChatGPT, others: add `https://api.openworklabs.com/mcp/agent` as a remote MCP server. See [Connect OpenWork MCP](https://openworklabs.com/docs/start-here/connect-openwork-mcp)
 - Verify: the agent should list the `search_capabilities` and `execute_capability` tools.
 - Skill: [connect-openwork-mcp](https://openworklabs.com/.well-known/agent-skills/connect-openwork-mcp/SKILL.md)

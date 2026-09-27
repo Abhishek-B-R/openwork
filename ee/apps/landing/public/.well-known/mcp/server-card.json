@@ -29,6 +29,7 @@
   "install": {
     "claude-code": "claude mcp add --transport http openwork https://api.openworklabs.com/mcp/agent",
     "codex": "codex mcp add openwork --url https://api.openworklabs.com/mcp/agent && codex mcp login openwork",
-    "gemini-cli": "gemini mcp add --transport http openwork https://api.openworklabs.com/mcp/agent"
+    "gemini-cli": "gemini mcp add --transport http openwork https://api.openworklabs.com/mcp/agent",
+    "opencode": "opencode mcp add openwork --url https://api.openworklabs.com/mcp/agent && opencode mcp auth openwork"
   }
 }

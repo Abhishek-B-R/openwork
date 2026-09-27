@@ -33,20 +33,12 @@ Bring your organization's skills, plugins, and connections into the agent you al
     Then run `/mcp auth openwork` in `gemini`. [Guide](/model-context-protocol/gemini-cli)
   </Tab>
   <Tab title="OpenCode">
-    ```json
-    {
-      "mcp": {
-        "openwork": {
-          "type": "remote",
-          "enabled": true,
-          "url": "https://api.openworklabs.com/mcp/agent",
-          "oauth": {}
-        }
-      }
-    }
+    ```sh
+    opencode mcp add openwork --url https://api.openworklabs.com/mcp/agent
+    opencode mcp auth openwork
     ```
 
-    Then run `opencode mcp auth openwork`. [Guide](/model-context-protocol/opencode)
+    [Guide](/model-context-protocol/opencode)
   </Tab>
   <Tab title="Cursor">
     [Add to Cursor](cursor://anysphere.cursor-deeplink/mcp/install?name=openwork&config=eyJ1cmwiOiJodHRwczovL2FwaS5vcGVud29ya2xhYnMuY29tL21jcC9hZ2VudCJ9) in one click, or paste the URL as a remote MCP server. [Guide](/model-context-protocol/cursor)

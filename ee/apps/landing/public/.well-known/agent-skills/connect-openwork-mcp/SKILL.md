@@ -34,6 +34,13 @@ Gemini CLI:
 gemini mcp add --transport http openwork https://api.openworklabs.com/mcp/agent
 ```
 
+OpenCode:
+
+```sh
+opencode mcp add openwork --url https://api.openworklabs.com/mcp/agent
+opencode mcp auth openwork
+```
+
 Cursor, VS Code, Claude Desktop, ChatGPT, Windsurf, Zed: add `https://api.openworklabs.com/mcp/agent` as a remote MCP server. Per-client steps: https://openworklabs.com/docs/start-here/connect-openwork-mcp
 
 ## 2. Sign in
@@ -41,6 +48,7 @@ Cursor, VS Code, Claude Desktop, ChatGPT, Windsurf, Zed: add `https://api.openwo
 - Claude Code: run `/mcp`, select `openwork`, and authenticate.
 - Codex: `codex mcp login openwork` opens the browser.
 - Gemini CLI: run `/mcp auth openwork`.
+- OpenCode: `opencode mcp auth openwork` opens the browser.
 
 The user signs in and picks their organization. The organization is pinned to the token; to switch, log out of the `openwork` server and sign in again.
 
