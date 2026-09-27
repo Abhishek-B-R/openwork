@@ -22,8 +22,9 @@ export const comparisonColumns: CompareColumn<CoworkColumnKey>[] = [
 
 // Keep the Claude columns factual and neutral: describe what Anthropic
 // offers, never claim a limitation we cannot verify. 3P cells follow
-// Anthropic's 3P feature matrix (admins can distribute skills and allowlist
-// MCP servers on 3P; teammates cannot share projects or plugins).
+// Anthropic's 3P docs: org plugins and skills ship from a plugin marketplace
+// you host in git or over HTTPS (or a folder on each device), and MCP servers
+// ship as a managed config key via MDM or a bootstrap server.
 export const comparisonRows: CompareRow<CoworkColumnKey>[] = [
   { label: "Free and open source", openwork: true, cowork: false, thirdParty: false },
   { label: "Any model, 50+ providers", openwork: true, cowork: "Claude only", thirdParty: "Via your gateway" },
@@ -31,7 +32,7 @@ export const comparisonRows: CompareRow<CoworkColumnKey>[] = [
   { label: "Linux", openwork: true, cowork: false, thirdParty: false },
   { label: "Seat price / month", openwork: "$10–$20", cowork: "$20+", thirdParty: "None" },
   { label: "Bedrock, Vertex, Foundry", openwork: true, cowork: false, thirdParty: true },
-  { label: "Teammates share skills and plugins", openwork: true, cowork: true, thirdParty: "Admins only" },
+  { label: "Share skills, plugins, MCP with your team", openwork: "Built in", cowork: "Built in", thirdParty: "Your own git repo + MDM" },
   { label: "Self-host", openwork: true, cowork: false, thirdParty: false }
 ];
 
@@ -39,7 +40,8 @@ export const comparisonSources: CompareSource[] = [
   { label: "Claude Team plan", href: "https://support.claude.com/en/articles/9266767-what-is-the-team-plan" },
   { label: "Claude Enterprise pricing", href: "https://claude.com/pricing/enterprise" },
   { label: "Claude Desktop on 3P", href: "https://claude.com/docs/third-party/claude-desktop/overview" },
-  { label: "3P feature matrix", href: "https://claude.com/docs/third-party/claude-desktop/feature-matrix" }
+  { label: "3P feature matrix", href: "https://claude.com/docs/third-party/claude-desktop/feature-matrix" },
+  { label: "3P plugins and MCP", href: "https://claude.com/docs/third-party/claude-desktop/extensions" }
 ];
 
 export const alternativeCards: CompareCard[] = [
