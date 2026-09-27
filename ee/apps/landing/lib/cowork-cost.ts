@@ -43,6 +43,31 @@ export const planPrices = {
   openworkEnterpriseVolumeAbove: 250
 };
 
+/**
+ * OpenWork Enterprise volume pricing used in the calculator, graduated like tax brackets: each tier's price applies
+ * only to the seats inside that tier. The public pricing page says "volume pricing above 250 users".
+ */
+export const openworkEnterpriseVolumeTiers: { upTo: number; price: number }[] = [
+  { upTo: 250, price: 20 },
+  { upTo: 1000, price: 16 },
+  { upTo: Number.POSITIVE_INFINITY, price: 13 }
+];
+
+/** Monthly OpenWork Enterprise seat cost for a number of seats, with graduated volume tiers. */
+export function openworkEnterpriseSeatsMonthly(seats: number): number {
+  let remaining = Math.max(0, Math.round(seats));
+  let previous = 0;
+  let total = 0;
+  for (const tier of openworkEnterpriseVolumeTiers) {
+    const inTier = Math.min(remaining, tier.upTo - previous);
+    total += inTier * tier.price;
+    remaining -= inTier;
+    previous = tier.upTo;
+    if (remaining <= 0) break;
+  }
+  return total;
+}
+
 function clamp(value: number, min: number, max: number): number {
   if (!Number.isFinite(value)) return min;
   return Math.min(max, Math.max(min, value));
@@ -173,14 +198,16 @@ export function cumulativeCosts(inputs: CumulativeInputs): CumulativeCosts {
 
   const openworkSeats =
     inputs.tier === "team" ? Math.max(0, users - planPrices.openworkFreeSeats) : users;
-  const openworkSeatPrice =
-    inputs.tier === "team" ? planPrices.openworkTeamSeat : planPrices.openworkEnterpriseSeat;
+  const openworkSeatsMonthly =
+    inputs.tier === "team"
+      ? openworkSeats * planPrices.openworkTeamSeat
+      : openworkEnterpriseSeatsMonthly(openworkSeats);
   const openworkBase: Omit<CostSeries, "monthly" | "points" | "total" | "modelLabel" | "tokensMonthly"> = {
     id: inputs.tier === "team" ? "openwork-team" : "openwork-enterprise",
     vendor: "openwork",
     name: inputs.tier === "team" ? "OpenWork Team" : "OpenWork Enterprise",
     seatsBilled: openworkSeats,
-    seatsMonthly: openworkSeats * openworkSeatPrice,
+    seatsMonthly: openworkSeatsMonthly,
     tokensIncluded: false
   };
   const openwork = series({ ...openworkBase, modelLabel: inputs.model.label, tokensMonthly: tokens }, months);

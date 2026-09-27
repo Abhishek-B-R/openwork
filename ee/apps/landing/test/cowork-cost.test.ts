@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import {
+  openworkEnterpriseSeatsMonthly,
   cumulativeCosts,
   likelyExceedsTeamLimits,
   needsPremiumSeat,
@@ -116,13 +117,30 @@ describe("cumulative costs", () => {
     expect(enterprise.savings).toBeCloseTo(0, 6);
   });
 
-  test("1000 people with SSO: same price on the same model, open model saves", () => {
+  test("1000 people with SSO: volume tiers make OpenWork cheaper on the same model, open model saves more", () => {
     const result = cumulativeCosts(inputs({ users: 1000, tier: "enterprise", openModel: cheap }));
     expect(result.claude.id).toBe("claude-enterprise");
     expect(result.openwork.id).toBe("openwork-enterprise");
     expect(result.claude.total).toBeCloseTo(36 * 1000 * (20 + sonnetTypical), 6);
+    // 250 seats at $20 + 750 at $16 = $17,000/mo vs Claude's $20,000/mo.
+    expect(result.openwork.seatsMonthly).toBe(17_000);
+    expect(result.savings).toBeCloseTo(36 * 3_000, 6);
+    expect(result.openModelSavings).toBeCloseTo(36 * (3_000 + 1000 * (sonnetTypical - tokenCostPerUser(cheap, typical))), 6);
+  });
+
+  test("OpenWork Enterprise volume tiers are graduated", () => {
+    expect(openworkEnterpriseSeatsMonthly(20)).toBe(400);
+    expect(openworkEnterpriseSeatsMonthly(250)).toBe(5_000);
+    expect(openworkEnterpriseSeatsMonthly(251)).toBe(5_016);
+    expect(openworkEnterpriseSeatsMonthly(1_000)).toBe(17_000);
+    expect(openworkEnterpriseSeatsMonthly(2_000)).toBe(30_000);
+    // A bigger team never costs less than a smaller one.
+    expect(openworkEnterpriseSeatsMonthly(251)).toBeGreaterThan(openworkEnterpriseSeatsMonthly(250));
+  });
+
+  test("SSO at 250 people or fewer is the same price on the same model", () => {
+    const result = cumulativeCosts(inputs({ users: 200, tier: "enterprise" }));
     expect(result.savings).toBeCloseTo(0, 6);
-    expect(result.openModelSavings).toBeCloseTo(36 * 1000 * (sonnetTypical - tokenCostPerUser(cheap, typical)), 6);
   });
 
   test("first 5 seats are free on OpenWork Team", () => {
