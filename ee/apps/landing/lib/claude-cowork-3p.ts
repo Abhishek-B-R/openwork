@@ -33,7 +33,7 @@ export const threeWayColumns: CompareColumn<ThreeWayColumnKey>[] = [
 // and Enterprise pricing pages (see anthropic3pSources). OpenWork cells are
 // verified against this repository's docs and pricing.
 export const threeWayRows: CompareRow<ThreeWayColumnKey>[] = [
-  { label: "Seat price / month", enterprise: "$20 + usage", thirdParty: "None", openwork: "$10–$40" },
+  { label: "Seat price / month", enterprise: "$20 + usage", thirdParty: "None", openwork: "$10–$20" },
   { label: "Non-Claude models", enterprise: false, thirdParty: false, openwork: true },
   { label: "Bedrock, Vertex, Foundry", enterprise: false, thirdParty: true, openwork: true },
   { label: "Share plugins with your team", enterprise: true, thirdParty: false, openwork: true },
@@ -79,7 +79,7 @@ export const claudeCowork3pFaq: FaqEntry[] = [
   {
     question: "Is OpenWork cheaper than Claude Desktop on 3P?",
     answer:
-      "Not on seats: 3P has none, and OpenWork Enterprise is $40 per user. Savings come from routing work to lower-cost models, so check the calculator with your numbers."
+      "Not on seats: 3P has none, and OpenWork Enterprise is $20 per user. Savings come from routing work to lower-cost models, so check the calculator with your numbers."
   },
   {
     question: "How do we share skills and MCP servers?",

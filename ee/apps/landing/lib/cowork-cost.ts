@@ -39,7 +39,7 @@ export const planPrices = {
   claudeEnterpriseMinSeats: 20,
   openworkTeamSeat: 10,
   openworkFreeSeats: 5,
-  openworkEnterpriseSeat: 40,
+  openworkEnterpriseSeat: 20,
   openworkEnterpriseVolumeAbove: 250
 };
 
@@ -64,12 +64,12 @@ export function likelyExceedsTeamLimits(usage: Usage): boolean {
 }
 
 /**
- * True when usage is beyond the typical profile, so a Claude Team Premium seat is the fair comparison.
- * Light and typical usage are priced on the cheaper Standard seat, which favours Claude.
+ * True when Claude Team should be priced on Premium seats. Anthropic positions Premium seats for heavy and agentic
+ * use, and typical agentic use already reaches Standard seat limits, so Typical and Heavy use Premium; Light stays on
+ * Standard.
  */
 export function needsPremiumSeat(usage: Usage): boolean {
-  const typical = usageProfiles.typical.usage;
-  return usage.inputMillions > typical.inputMillions || usage.outputMillions > typical.outputMillions;
+  return likelyExceedsTeamLimits(usage);
 }
 
 /** "team" compares plans without SSO and admin controls; "enterprise" compares plans with them. */

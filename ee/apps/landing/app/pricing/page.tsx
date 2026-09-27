@@ -42,26 +42,26 @@ const pricingSchema = {
     {
       "@type": "Offer",
       name: "Enterprise",
-      price: "40",
+      price: "20",
       priceCurrency: "USD",
       url: "https://openworklabs.com/enterprise",
       availability: "https://schema.org/InStock",
       priceSpecification: {
         "@type": "UnitPriceSpecification",
-        price: "40",
+        price: "20",
         priceCurrency: "USD",
         unitText: "user per month"
       },
       description:
-        "$40 per user per month billed annually, cloud or self-hosted. SSO/SAML and SCIM, desktop policies, audit log, spend observability, standard SLA support. Volume pricing above 250 users."
+        "$20 per user per month billed annually, cloud or self-hosted. SSO/SAML and SCIM, desktop policies, audit log, spend observability, standard SLA support. Volume pricing above 250 users."
     }
   ]
 };
 
 export const metadata = withSocialMetadata({
-  title: "OpenWork Pricing — First 5 Cloud seats free, $10 Team, $40 Enterprise",
+  title: "OpenWork Pricing — First 5 Cloud seats free, $10 Team, $20 Enterprise",
   description:
-    "First 5 seats free on OpenWork Cloud, then Team $10 per seat/month; self-hosting is free for organizations up to 5 users. Enterprise $40 per user/month with SSO and desktop policies.",
+    "First 5 seats free on OpenWork Cloud, then Team $10 per seat/month; self-hosting is free for organizations up to 5 users. Enterprise $20 per user/month with SSO and desktop policies.",
   alternates: {
     canonical: "/pricing"
   },

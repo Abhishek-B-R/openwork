@@ -147,7 +147,7 @@ export function PricingGrid(props: PricingGridProps) {
     {
       id: "enterprise",
       title: "Enterprise",
-      price: "$40",
+      price: "$20",
       priceSub: "per user / month, billed annually",
       ctaLabel: "Talk to us",
       href: props.callUrl,
