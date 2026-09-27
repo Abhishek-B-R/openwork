@@ -41,7 +41,7 @@ describe("Claude Cowork on 3P page", () => {
     expect(claudeCowork3pFaq.length).toBeLessThanOrEqual(6);
     for (const entry of claudeCowork3pFaq) expect(text).toContain(entry.question);
     expect(sitemap().map((entry) => entry.url)).toContain(`https://openworklabs.com${CLAUDE_COWORK_3P_PATH}`);
-    expect(agentMarkdown[CLAUDE_COWORK_3P_PATH]).toContain("| Non-Claude models | No | No | Yes |");
+    expect(agentMarkdown[CLAUDE_COWORK_3P_PATH]).toContain("| Non-Claude models | No | Via your gateway | Yes |");
   });
 
   test("is linked from the main Claude Cowork alternative page", () => {

@@ -34,7 +34,7 @@ export const threeWayColumns: CompareColumn<ThreeWayColumnKey>[] = [
 // verified against this repository's docs and pricing.
 export const threeWayRows: CompareRow<ThreeWayColumnKey>[] = [
   { label: "Seat price / month", enterprise: "$20 + usage", thirdParty: "None", openwork: "$10–$20" },
-  { label: "Non-Claude models", enterprise: false, thirdParty: false, openwork: true },
+  { label: "Non-Claude models", enterprise: false, thirdParty: "Via your gateway", openwork: true },
   { label: "Bedrock, Vertex, Foundry", enterprise: false, thirdParty: true, openwork: true },
   { label: "Share plugins with your team", enterprise: true, thirdParty: false, openwork: true },
   { label: "Browser access", enterprise: true, thirdParty: false, openwork: "Alpha" },
@@ -70,7 +70,7 @@ export const claudeCowork3pFaq: FaqEntry[] = [
   {
     question: "What is Claude Desktop on 3P?",
     answer:
-      "Claude Desktop, including Cowork, sending inference to Bedrock, Vertex, Foundry, or your own gateway. There is no seat fee, and only Claude models are available."
+      "Claude Desktop, including Cowork, sending inference to Bedrock, Vertex, Foundry, or your own gateway. There is no seat fee. It is built for Claude models; others need an Anthropic-compatible gateway you run."
   },
   {
     question: "Can OpenWork use my Bedrock, Vertex, or Foundry account?",
