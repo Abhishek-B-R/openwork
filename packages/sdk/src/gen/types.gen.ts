@@ -1202,6 +1202,10 @@ export type InvitePaymentRequiredError = {
   currentCount: number;
   freeSeatCount: number;
   message: string;
+  /**
+   * Open in a browser to start seat billing; an owner can finish it there, then retry the invitation.
+   */
+  billingUrl: string;
 };
 
 export type InviteEmailDomainNotAllowedError = {
@@ -1233,7 +1237,15 @@ export type InvitationNotPendingError = {
 
 export type CreateInstallLinkResponse = {
   token: string;
+  /**
+   * Share this page: it downloads the OpenWork desktop app for this organization.
+   */
   installPageUrl: string;
+  /**
+   * Open on a computer that already has OpenWork installed to point the desktop app at this organization. Short-lived; mint a new link when it expires.
+   */
+  connectUrl: string;
+  connectExpiresAt: string;
 };
 
 export type CapabilityDisabledError = {
@@ -2678,6 +2690,10 @@ export type ExternalMcpConnectionCreatedResponse = {
   requestedScopes?: Array<string>;
   links: {
     yourConnections: string;
+    /**
+     * Browser link where the person signs in to this connection. Give it to the user when you cannot show a sign-in card.
+     */
+    signIn: string;
     oauthCallback: string;
   };
 };
@@ -11179,7 +11195,7 @@ export type PostV1InvitationsErrors = {
    */
   401: UnauthorizedError;
   /**
-   * A seat subscription is required before inviting more members.
+   * A seat subscription is required before inviting more members. The body includes billingUrl, where an owner starts seat billing.
    */
   402: InvitePaymentRequiredError;
   /**
