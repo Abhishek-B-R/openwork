@@ -40,6 +40,14 @@ describe("Homepage products showcase", () => {
     expect(text(html)).toContain("Post weekly-update.md to #launch?");
   });
 
+  test("leads with the open-source app and the free team tier, without folder labels", () => {
+    const body = text(renderToStaticMarkup(createElement(LpProductsShowcase)));
+    expect(body).toContain("Start with the open-source app. Add the rest when you need it.");
+    expect(body).toContain("Free for teams of up to 5.");
+    expect(body).not.toContain("~/Marketing");
+    expect(body).not.toContain("Cloud computer ");
+  });
+
   test("uses no dark panel surfaces", () => {
     const html = renderToStaticMarkup(createElement(LpProductsShowcase));
     expect(html).not.toContain("lp-terminal");

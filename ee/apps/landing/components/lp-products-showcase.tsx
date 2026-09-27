@@ -103,8 +103,10 @@ export function LpProductsShowcase() {
         id="products-heading"
         className="mt-3 text-[32px] font-medium leading-[38px] tracking-[-0.035em] text-[var(--lp-ink)] md:text-[40px] md:leading-[46px]"
       >
-        One workspace. Four ways to run it.
+        <span className="block">Start with the open-source app.</span>
+        <span className="block">Add the rest when you need it.</span>
       </h2>
+      <p className="mt-4 text-[17px] text-[var(--lp-body)]">Free for teams of up to 5.</p>
 
       <div
         role="tablist"
