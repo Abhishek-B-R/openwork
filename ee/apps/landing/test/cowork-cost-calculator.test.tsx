@@ -9,8 +9,6 @@ import { modelPrices } from "../lib/model-prices";
 const text = (html: string) =>
   html
     .replace(/<[^>]+>/g, " ")
-    .replace(/&amp;/g, "&")
-    .replace(/&#x27;/g, "'")
     .replace(/\s+/g, " ");
 const dollars = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
 
