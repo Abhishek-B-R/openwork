@@ -119,3 +119,57 @@ test(`AGENT-VIS-01 ${resolveEvalEngine()}: a person asks a research question and
     expect(helperTools).toEqual([world.shell]);
   });
 });
+
+test(`AGENT-VIS-02 ${resolveEvalEngine()}: a person follows up while a helper works, then stops, and nothing they typed is lost or sent behind their back`, async ({ world, user, probe, step, evidence }) => {
+  await step("the person starts the research and the helper begins working", async () => {
+    await user.type("composer", world.prompt);
+    await user.click("Run task");
+    await user.see({ text: "Check the error log" }, { timeoutMs: 60_000 });
+    await user.see("Stop");
+    await user.screenshot();
+  });
+
+  await step("they add a follow-up with Enter, and it waits instead of interrupting", async () => {
+    await user.type("composer", world.followUp, { verify: true });
+    await user.press("Enter");
+    await user.see({ text: /1 queued/ }, { timeoutMs: 10_000 });
+    const delivered = (await world.followUpRequests()).length;
+    evidence.recordAssertionEvidence("The follow-up waits for the current run", `shows "1 queued"; the model received it ${delivered} times`, delivered === 0);
+    expect(delivered).toBe(0);
+    await user.screenshot();
+  });
+
+  await step("the helper row offers its own Stop, so the person can stop just that helper", async () => {
+    // TODO(primitive): no probe finds a control scoped to one helper row.
+    const helperStop = await probe.eval(() => [...document.querySelectorAll<HTMLElement>("[data-subagent-run] button, [data-subagent-run] [role=button]")]
+      .some((button) => /stop/i.test(button.getAttribute("aria-label") ?? button.textContent ?? "")));
+    evidence.recordAssertionEvidence("Each helper can be stopped on its own", helperStop ? "the helper row has a Stop control" : "no Stop control on the helper row", helperStop);
+    expect.soft(helperStop, "a Stop control on the helper row").toBe(true);
+  });
+
+  await step("after: they press Stop, and the whole turn stops", async () => {
+    await user.click("Stop");
+    await user.see("Run task", { timeoutMs: 30_000 });
+    await user.notSee({ text: /Working\s*\d/ }, { timeoutMs: 15_000 });
+    evidence.recordAssertionEvidence("Stop ends the turn and its helper", "composer shows Run task; no Working line left", true);
+    await user.screenshot();
+  });
+
+  await step("the words they queued are still there to send or edit", async () => {
+    const kept = await probe.eventually(async () => {
+      const onScreen = (await probe.text()).includes(world.followUp);
+      const inComposer = (await probe.composer()).draftText.includes(world.followUp);
+      return onScreen || inComposer;
+    }, { within: 5_000, intervalMs: 250, label: "queued words kept", until: Boolean }).catch(() => false);
+    evidence.recordAssertionEvidence("Stop does not throw away a queued message", kept ? "the follow-up is still visible" : "the follow-up vanished after Stop", kept);
+    expect.soft(kept, "queued follow-up kept after Stop").toBe(true);
+    await user.screenshot();
+  });
+
+  await step("the model never receives the follow-up on its own after Stop", async () => {
+    await new Promise((resolve) => setTimeout(resolve, 4_000));
+    const delivered = (await world.followUpRequests()).length;
+    evidence.recordAssertionEvidence("Nothing is sent behind the person's back", `4 s after Stop the model had received the follow-up ${delivered} times`, delivered === 0);
+    expect(delivered).toBe(0);
+  });
+});

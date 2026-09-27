@@ -32,6 +32,7 @@ export async function agentVisibility(seed: Seed) {
   const answer = "People lose track of agents because the working line disappears between steps and the helper has no way back.";
   const helperAnswer = "Two log lines mention the helper row disappearing.";
   const shell = engine === "v2" ? "shell" : "bash";
+  const followUp = "Also check whether the billing page has the same problem.";
 
   const app = await seed.appWeb({ name: "agent-visibility", workspacePath, mocks: {
     agent: seed.mock({ isolatedProcessEnv: true, agentWorkloads: [{
@@ -65,6 +66,12 @@ export async function agentVisibility(seed: Seed) {
         description: "Search the error log",
         timeout: 60_000,
       } }],
+    }, {
+      // Only answers if a follow-up actually reaches the model.
+      promptMarker: followUp,
+      latestUserTurn: true,
+      finalReply: "The billing page looks fine.",
+      steps: [],
     }] }),
   } });
   const mock = app.mocks.agent;
@@ -93,9 +100,10 @@ export async function agentVisibility(seed: Seed) {
   };
 
   return {
-    app, workspace, session, engine, shell, prompt, answer, helperAnswer,
+    app, workspace, session, engine, shell, prompt, answer, helperAnswer, followUp,
     requests: () => mock.agentRequests({ promptMarker: prompt }),
     helperRequests: () => mock.agentRequests({ promptMarker: helperMarker }),
+    followUpRequests: () => mock.agentRequests({ promptMarker: followUp }),
     // A held reply can only be released once the model has actually asked for it;
     // until then the mock answers 404, so keep trying for a bounded time.
     releaseHelper: () => releaseWhenAsked(helperMarker),
