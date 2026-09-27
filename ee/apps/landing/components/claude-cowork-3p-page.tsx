@@ -46,7 +46,8 @@ export function ClaudeCowork3pPage({ stars }: Props) {
         <div id="cost" className="scroll-mt-28 py-12 md:py-16">
           <CoworkCostCalculator
             defaultUsers={500}
-            highlight={["claude-3p", "openwork-enterprise"]}
+            defaultTier="enterprise"
+            claudeSide="3p"
             heading="Claude on 3P vs OpenWork"
           />
         </div>

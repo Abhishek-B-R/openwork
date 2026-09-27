@@ -1,17 +1,17 @@
 "use client";
 
 import { ChevronDown, ChevronRight } from "lucide-react";
-import { useId, useState } from "react";
+import { useEffect, useId, useRef, useState, type KeyboardEvent, type PointerEvent, type RefObject } from "react";
 
 import {
   anthropicPricingCheckedAt,
-  calculatePlanCosts,
+  cumulativeCosts,
   planPrices,
   pricingSources,
   usageProfileIds,
   usageProfiles,
-  type PlanCost,
-  type PlanId,
+  type CostSeries,
+  type Tier,
   type UsageProfileId
 } from "../lib/cowork-cost";
 import { modelPrices, modelPricesFetchedAt, type ModelPrice } from "../lib/model-prices";
@@ -20,32 +20,23 @@ import { LpSectionHeader } from "./lp-primitives";
 
 type Props = {
   defaultUsers?: number;
-  defaultOpenworkModelId?: string;
-  /** The two plans shown as big numbers, Claude first. */
-  highlight?: [PlanId, PlanId];
+  defaultTier?: Tier;
+  /** "plan" compares the Claude plan for the tier; "3p" compares Claude Desktop on Bedrock, Vertex, or Foundry. */
+  claudeSide?: "plan" | "3p";
   heading?: string;
 };
 
+type Years = 1 | 3;
+
 const claudeModels = modelPrices.filter((model) => model.claude);
+const openModels = modelPrices.filter((model) => !model.claude);
 const fallbackModel = modelPrices[0];
 const sliderMax = 1000;
 
-const shownPlans: { id: PlanId; label: string; note?: string }[] = [
-  { id: "claude-team-standard", label: "Claude Team", note: "Within plan limits" },
-  { id: "claude-enterprise", label: "Claude Enterprise" },
-  { id: "claude-3p", label: "Claude on 3P" },
-  { id: "openwork-team", label: "OpenWork Team" },
-  { id: "openwork-enterprise", label: "OpenWork Enterprise" }
-];
-
 const profileLabels: Record<UsageProfileId, string> = { light: "Light", typical: "Typical", heavy: "Heavy" };
 
-function findModel(id: string): ModelPrice {
-  return modelPrices.find((model) => model.id === id) ?? fallbackModel;
-}
-
-function planLabel(id: PlanId): string {
-  return shownPlans.find((plan) => plan.id === id)?.label ?? id;
+function findModel(models: ModelPrice[], id: string): ModelPrice {
+  return models.find((model) => model.id === id) ?? models[0] ?? fallbackModel;
 }
 
 const dollars = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
@@ -55,9 +46,14 @@ const compactDollars = new Intl.NumberFormat("en-US", {
   notation: "compact",
   maximumFractionDigits: 1
 });
+const count = new Intl.NumberFormat("en-US");
 
-function bigDollars(value: number): string {
+function shortDollars(value: number): string {
   return value >= 10_000 ? compactDollars.format(value) : dollars.format(value);
+}
+
+function periodLabel(years: Years): string {
+  return years === 1 ? "1 year" : "3 years";
 }
 
 const brandByProvider: Record<string, "claude" | "openai" | "gemini" | "mistral"> = {
@@ -80,91 +76,480 @@ function ProviderMark({ model }: { model: ModelPrice }) {
   );
 }
 
+const focusRing =
+  "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--lp-ink)]";
+
 function ModelSelect({
   id,
   label,
   models,
   value,
-  onChange
+  onChange,
+  compact = false,
+  muted = false
 }: {
   id: string;
   label: string;
   models: ModelPrice[];
   value: string;
   onChange: (value: string) => void;
+  compact?: boolean;
+  muted?: boolean;
 }) {
   const providers = Array.from(new Set(models.map((model) => model.providerName)));
+  const select = (
+    <div className="relative">
+      <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2">
+        <ProviderMark model={findModel(models, value)} />
+      </span>
+      <select
+        id={id}
+        value={value}
+        aria-label={compact ? label : undefined}
+        onChange={(event) => onChange(event.target.value)}
+        className={`w-full appearance-none bg-[var(--lp-page)] pl-9 pr-9 text-[var(--lp-ink)] shadow-[0_0_0_1px_var(--lp-border)] transition-shadow duration-150 hover:shadow-[0_0_0_1px_var(--lp-muted)] ${focusRing} ${
+          compact ? "h-9 rounded-[10px] text-[13px]" : "h-11 rounded-[12px] text-[14px] font-medium"
+        } ${muted ? "opacity-60" : ""}`}
+      >
+        {providers.map((provider) => (
+          <optgroup key={provider} label={provider}>
+            {models
+              .filter((model) => model.providerName === provider)
+              .map((model) => (
+                <option key={model.id} value={model.id}>
+                  {model.label}
+                </option>
+              ))}
+          </optgroup>
+        ))}
+      </select>
+      <ChevronDown
+        aria-hidden="true"
+        strokeWidth={1.5}
+        className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--lp-muted)]"
+      />
+    </div>
+  );
+  if (compact) return select;
   return (
     <div>
       <label htmlFor={id} className="block text-[13px] text-[var(--lp-muted)]">
         {label}
       </label>
-      <div className="relative mt-2">
-        <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2">
-          <ProviderMark model={findModel(value)} />
-        </span>
-        <select
-          id={id}
-          value={value}
-          onChange={(event) => onChange(event.target.value)}
-          className="h-11 w-full appearance-none rounded-[12px] bg-[var(--lp-page)] pl-9 pr-9 text-[14px] font-medium text-[var(--lp-ink)] shadow-[0_0_0_1px_var(--lp-border)] transition-shadow duration-150 hover:shadow-[0_0_0_1px_var(--lp-muted)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--lp-ink)]"
-        >
-          {providers.map((provider) => (
-            <optgroup key={provider} label={provider}>
-              {models
-                .filter((model) => model.providerName === provider)
-                .map((model) => (
-                  <option key={model.id} value={model.id}>
-                    {model.label}
-                  </option>
-                ))}
-            </optgroup>
-          ))}
-        </select>
-        <ChevronDown
-          aria-hidden="true"
-          strokeWidth={1.5}
-          className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--lp-muted)]"
-        />
-      </div>
+      <div className="mt-2">{select}</div>
     </div>
+  );
+}
+
+function Segmented<T extends string | number>({
+  name,
+  legend,
+  options,
+  value,
+  onChange,
+  hideLegend = false
+}: {
+  name: string;
+  legend: string;
+  options: { value: T; label: string }[];
+  value: T;
+  onChange: (value: T) => void;
+  hideLegend?: boolean;
+}) {
+  return (
+    <fieldset>
+      <legend className={hideLegend ? "sr-only" : "text-[13px] text-[var(--lp-muted)]"}>{legend}</legend>
+      <div
+        className={`grid h-11 rounded-[12px] bg-[var(--lp-page)] p-1 shadow-[0_0_0_1px_var(--lp-border)] ${hideLegend ? "" : "mt-2"}`}
+        style={{ gridTemplateColumns: `repeat(${options.length}, minmax(0, 1fr))` }}
+      >
+        {options.map((option) => (
+          <label
+            key={String(option.value)}
+            className="flex cursor-pointer items-center justify-center whitespace-nowrap rounded-[8px] px-3 text-[13px] text-[var(--lp-body)] transition-colors duration-150 has-[:checked]:bg-[var(--lp-ink)] has-[:checked]:font-medium has-[:checked]:text-[var(--lp-page)] has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-[var(--lp-ink)]"
+          >
+            <input
+              type="radio"
+              name={name}
+              value={String(option.value)}
+              checked={value === option.value}
+              onChange={() => onChange(option.value)}
+              className="sr-only"
+            />
+            {option.label}
+          </label>
+        ))}
+      </div>
+    </fieldset>
+  );
+}
+
+type ChartLine = {
+  key: string;
+  label: string;
+  series: CostSeries;
+  stroke: string;
+  width: number;
+  dashed?: boolean;
+  faint?: boolean;
+  strong?: boolean;
+};
+
+function useWidth<T extends HTMLElement>(fallback: number): [RefObject<T>, number] {
+  const ref = useRef<T>(null);
+  const [width, setWidth] = useState(fallback);
+  useEffect(() => {
+    const node = ref.current;
+    if (!node || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver((entries) => {
+      const next = entries[0]?.contentRect.width;
+      if (next) setWidth(Math.round(next));
+    });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
+  return [ref, width];
+}
+
+function monthLabel(month: number): string {
+  if (month === 0) return "Today";
+  if (month % 12 === 0) return month === 12 ? "Year 1" : `Year ${month / 12}`;
+  return `Month ${month}`;
+}
+
+function CostChart({
+  lines,
+  months,
+  shade,
+  label
+}: {
+  lines: ChartLine[];
+  months: number;
+  shade: { from: CostSeries; to: CostSeries };
+  label: string;
+}) {
+  const [ref, width] = useWidth<HTMLDivElement>(880);
+  const [active, setActive] = useState<number | null>(null);
+  const wide = width >= 560;
+  const height = wide ? 300 : 220;
+  const pad = { left: 2, right: wide ? 136 : 2, top: 14, bottom: 26 };
+  const plotWidth = Math.max(10, width - pad.left - pad.right);
+  const plotHeight = height - pad.top - pad.bottom;
+  const max = Math.max(1, ...lines.map((line) => line.series.total)) * 1.06;
+  const x = (month: number) => pad.left + (plotWidth * month) / months;
+  const y = (value: number) => pad.top + plotHeight - (plotHeight * value) / max;
+  const path = (series: CostSeries) =>
+    series.points.map((value, month) => `${month === 0 ? "M" : "L"}${x(month).toFixed(1)},${y(value).toFixed(1)}`).join(" ");
+  const shadePath = `${path(shade.from)} ${shade.to.points
+    .map((value, month) => ({ value, month }))
+    .reverse()
+    .map(({ value, month }) => `L${x(month).toFixed(1)},${y(value).toFixed(1)}`)
+    .join(" ")} Z`;
+  const shadeSaving = shade.to.total <= shade.from.total;
+  const tickStep = months >= 24 ? 12 : 3;
+  const ticks = Array.from({ length: Math.floor(months / tickStep) + 1 }, (_, index) => index * tickStep);
+
+  const endLabels = [...lines]
+    .map((line) => ({ line, y: y(line.series.total) }))
+    .sort((a, b) => a.y - b.y);
+  for (let index = 1; index < endLabels.length; index += 1) {
+    const previous = endLabels[index - 1];
+    if (endLabels[index].y - previous.y < 34) endLabels[index].y = previous.y + 34;
+  }
+  const overflow = (endLabels[endLabels.length - 1]?.y ?? 0) - (height - pad.bottom);
+  if (overflow > 0) for (const entry of endLabels) entry.y -= overflow;
+
+  const monthAt = (clientX: number, rect: DOMRect) =>
+    Math.round(Math.min(1, Math.max(0, (clientX - rect.left - pad.left) / plotWidth)) * months);
+  const onPointerMove = (event: PointerEvent<HTMLDivElement>) => {
+    setActive(monthAt(event.clientX, event.currentTarget.getBoundingClientRect()));
+  };
+  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    const current = active ?? months;
+    const steps: Record<string, number> = {
+      ArrowRight: current + 1,
+      ArrowUp: current + 1,
+      ArrowLeft: current - 1,
+      ArrowDown: current - 1,
+      PageUp: current + 12,
+      PageDown: current - 12,
+      Home: 0,
+      End: months
+    };
+    const next = steps[event.key];
+    if (next === undefined) return;
+    event.preventDefault();
+    setActive(Math.min(months, Math.max(0, next)));
+  };
+  const shown = active === null ? null : Math.min(active, months);
+  const valueText =
+    shown === null
+      ? undefined
+      : `${monthLabel(shown)}: ${lines.map((line) => `${line.label} ${dollars.format(line.series.points[shown] ?? 0)}`).join(", ")}`;
+  const tooltipWidth = 220;
+  const tooltipLeft =
+    shown === null
+      ? 0
+      : x(shown) > width / 2
+        ? Math.max(0, x(shown) - tooltipWidth - 12)
+        : Math.min(width - tooltipWidth, x(shown) + 12);
+
+  return (
+    <div ref={ref} className="relative">
+      <div
+        role="slider"
+        tabIndex={0}
+        aria-label={label}
+        aria-valuemin={0}
+        aria-valuemax={months}
+        aria-valuenow={shown ?? months}
+        aria-valuetext={valueText ?? `${monthLabel(months)}: ${lines.map((line) => `${line.label} ${dollars.format(line.series.total)}`).join(", ")}`}
+        onPointerMove={onPointerMove}
+        onPointerDown={onPointerMove}
+        onPointerLeave={() => setActive(null)}
+        onFocus={() => setActive(months)}
+        onBlur={() => setActive(null)}
+        onKeyDown={onKeyDown}
+        className={`relative touch-pan-y rounded-[8px] ${focusRing}`}
+      >
+        <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} aria-hidden="true" className="block overflow-visible">
+          {ticks.map((month) => (
+            <g key={month}>
+              <line x1={x(month)} x2={x(month)} y1={pad.top} y2={height - pad.bottom} stroke="var(--lp-border)" strokeWidth={1} />
+              <text
+                x={x(month)}
+                y={height - 8}
+                fontSize={11}
+                fill="var(--lp-muted)"
+                textAnchor={month === 0 ? "start" : month === months ? "end" : "middle"}
+              >
+                {months >= 24 ? monthLabel(month) : month === 0 ? "Today" : `Month ${month}`}
+              </text>
+            </g>
+          ))}
+          <path
+            d={shadePath}
+            fill="var(--lp-ink)"
+            fillOpacity={shadeSaving ? 0.08 : 0.035}
+            className="[transition:d_200ms_cubic-bezier(.2,.8,.2,1)] motion-reduce:[transition:none]"
+          />
+          {lines.map((line) => (
+            <path
+              key={line.key}
+              d={path(line.series)}
+              fill="none"
+              stroke={line.stroke}
+              strokeWidth={line.width}
+              strokeOpacity={line.faint ? 0.5 : 1}
+              strokeDasharray={line.dashed ? "6 5" : undefined}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="[transition:d_200ms_cubic-bezier(.2,.8,.2,1)] motion-reduce:[transition:none]"
+            />
+          ))}
+          {lines.map((line) => (
+            <circle
+              key={line.key}
+              cx={x(months)}
+              cy={y(line.series.total)}
+              r={3.5}
+              fill={line.stroke}
+              fillOpacity={line.faint ? 0.5 : 1}
+            />
+          ))}
+          {wide
+            ? endLabels.map(({ line, y: labelY }) => (
+                <g key={line.key}>
+                  <text
+                    x={x(months) + 14}
+                    y={labelY - 1}
+                    fontSize={13}
+                    fontWeight={line.strong ? 600 : 400}
+                    fill={line.faint ? "var(--lp-muted)" : "var(--lp-ink)"}
+                    className="tabular-nums"
+                  >
+                    {shortDollars(line.series.total)}
+                  </text>
+                  <text x={x(months) + 14} y={labelY + 14} fontSize={11.5} fill="var(--lp-muted)">
+                    {line.label}
+                  </text>
+                </g>
+              ))
+            : null}
+          {shown !== null ? (
+            <g>
+              <line x1={x(shown)} x2={x(shown)} y1={pad.top} y2={height - pad.bottom} stroke="var(--lp-ink)" strokeOpacity={0.35} />
+              {lines.map((line) => (
+                <circle
+                  key={line.key}
+                  cx={x(shown)}
+                  cy={y(line.series.points[shown] ?? 0)}
+                  r={4}
+                  fill="var(--lp-page)"
+                  stroke={line.stroke}
+                  strokeWidth={2}
+                />
+              ))}
+            </g>
+          ) : null}
+        </svg>
+        {shown !== null ? (
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute top-0 w-[220px] rounded-[12px] bg-[var(--lp-page)] px-3 py-2.5 shadow-[0_0_0_1px_var(--lp-border),0_8px_24px_-12px_rgba(1,22,39,0.25)]"
+            style={{ left: tooltipLeft }}
+          >
+            <div className="text-[12px] font-medium text-[var(--lp-ink)]">{monthLabel(shown)}</div>
+            <ul className="mt-1.5 space-y-1">
+              {lines.map((line) => (
+                <li key={line.key} className="flex items-center justify-between gap-3 text-[12px] text-[var(--lp-body)]">
+                  <span className="flex min-w-0 items-center gap-1.5">
+                    <LineSwatch line={line} />
+                    <span className="truncate">{line.label}</span>
+                  </span>
+                  <span className="tabular-nums text-[var(--lp-ink)]">{shortDollars(line.series.points[shown] ?? 0)}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+      </div>
+      <ul className="mt-3 flex flex-wrap gap-x-5 gap-y-1.5" aria-label="Chart legend">
+        {lines.map((line) => (
+          <li key={line.key} className="flex items-center gap-1.5 text-[12px] text-[var(--lp-body)]">
+            <LineSwatch line={line} />
+            {line.series.name}, {line.series.modelLabel === "Claude models, within plan limits" ? "usage included" : line.series.modelLabel}
+            {wide ? null : <span className="tabular-nums text-[var(--lp-ink)]">{shortDollars(line.series.total)}</span>}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function LineSwatch({ line }: { line: ChartLine }) {
+  return (
+    <span
+      aria-hidden="true"
+      className="inline-block w-4 shrink-0"
+      style={{
+        borderTop: `${Math.max(1.5, line.width)}px ${line.dashed ? "dashed" : "solid"} ${line.stroke}`,
+        opacity: line.faint ? 0.5 : 1
+      }}
+    />
   );
 }
 
 export function CoworkCostCalculator({
   defaultUsers = 50,
-  defaultOpenworkModelId = "deepseek-v4-pro",
-  highlight = ["claude-enterprise", "openwork-team"],
-  heading = "What will it cost?"
+  defaultTier = "team",
+  claudeSide = "plan",
+  heading = "What will your team spend?"
 }: Props) {
   const id = useId();
   const [usersText, setUsersText] = useState(String(defaultUsers));
   const [profile, setProfile] = useState<UsageProfileId>("typical");
-  const [claudeModelId, setClaudeModelId] = useState("claude-sonnet-5");
-  const [openworkModelId, setOpenworkModelId] = useState(defaultOpenworkModelId);
+  const [tier, setTier] = useState<Tier>(defaultTier);
+  const [modelId, setModelId] = useState("claude-sonnet-5");
+  const [openOn, setOpenOn] = useState(true);
+  const [openModelId, setOpenModelId] = useState("deepseek-v4-pro");
+  const [years, setYears] = useState<Years>(3);
 
   const parsedUsers = Number(usersText);
   const users = Number.isFinite(parsedUsers) && parsedUsers >= 1 ? Math.round(parsedUsers) : defaultUsers;
-  const openworkModel = findModel(openworkModelId);
+  const model = findModel(claudeModels, modelId);
+  const openModel = findModel(openModels, openModelId);
 
-  const plans = calculatePlanCosts({
+  const result = cumulativeCosts({
     users,
     usage: usageProfiles[profile].usage,
-    claudeModel: findModel(claudeModelId),
-    openworkModel,
-    routeModel: openworkModel,
-    routeShare: 0,
-    claudeTeamBilling: "annual"
+    tier,
+    model,
+    openModel: openOn ? openModel : null,
+    months: years * 12
   });
 
-  const byId = new Map(plans.map((plan) => [plan.id, plan]));
-  const rows = shownPlans.flatMap((shown) => {
-    const plan = byId.get(shown.id);
-    return plan ? [{ ...shown, plan }] : [];
-  });
-  const max = Math.max(1, ...rows.filter((row) => row.plan.available).map((row) => row.plan.totalMonthly));
-  const [claudeFocus, openworkFocus] = highlight.map((planId) => byId.get(planId));
-  const delta = claudeFocus && openworkFocus ? (claudeFocus.totalMonthly - openworkFocus.totalMonthly) * 12 : 0;
+  const claudeLine = claudeSide === "3p" ? result.claude3p : result.claude;
+  const featured = result.openModel ?? result.openwork;
+  const delta = claudeLine.total - featured.total;
+  const sameModelDelta = claudeLine.total - result.openwork.total;
+  const claudeShort = claudeSide === "3p" ? "Claude on 3P" : claudeLine.name;
+  const comparison = result.openModel
+    ? `${claudeLine.tokensIncluded ? claudeShort : `${claudeShort} with ${model.label}`} vs ${featured.name} with ${featured.modelLabel}`
+    : `${claudeShort} vs ${featured.name}, both with ${model.label}`;
+  const period = periodLabel(years);
+
+  const lines: ChartLine[] = [
+    { key: "claude", label: claudeLine.name, series: claudeLine, stroke: "var(--lp-muted)", width: 2, strong: true },
+    {
+      key: "openwork",
+      label: `${result.openwork.name}`,
+      series: result.openwork,
+      stroke: "var(--lp-ink)",
+      width: 2.5,
+      strong: !result.openModel
+    },
+    ...(result.openModel
+      ? [
+          {
+            key: "open",
+            label: result.openModel.modelLabel,
+            series: result.openModel,
+            stroke: "var(--lp-ink)",
+            width: 2,
+            dashed: true,
+            strong: true
+          }
+        ]
+      : []),
+    ...(claudeSide === "plan"
+      ? [{ key: "3p", label: "Claude on 3P", series: result.claude3p, stroke: "var(--lp-faint)", width: 1.5, faint: true }]
+      : [])
+  ];
+
+  const notices = [
+    ...(result.claudeTeamUnavailable && claudeSide === "plan"
+      ? [`Claude Team stops at ${planPrices.claudeTeamMaxSeats} seats, so this compares Claude Enterprise.`]
+      : []),
+    ...(tier === "enterprise" && users > planPrices.openworkEnterpriseVolumeAbove
+      ? [`OpenWork Enterprise has volume pricing above ${planPrices.openworkEnterpriseVolumeAbove} people. This uses list price.`]
+      : [])
+  ];
+
+  const seatGap = planPrices.openworkEnterpriseSeat - planPrices.claudeEnterpriseSeat;
+  const sameModelLine = result.openModel
+    ? sameModelDelta >= 0
+      ? `Same model on both: OpenWork saves ${dollars.format(sameModelDelta)}.`
+      : `Same model on both: Claude costs ${dollars.format(-sameModelDelta)} less.`
+    : delta >= 0
+      ? null
+      : claudeLine.tokensIncluded
+        ? "Claude Team includes usage up to plan limits. OpenWork pays for tokens at API rates."
+        : claudeLine.seatsMonthly === 0
+          ? "Claude on 3P has no seat fee. Tokens cost the same on both."
+          : tier === "enterprise"
+            ? `Tokens cost the same on both. OpenWork Enterprise seats cost $${seatGap} more per person.`
+            : null;
+
+  const rows: { key: string; series: CostSeries; detail: string; strong: boolean }[] = [
+    {
+      key: "claude",
+      series: claudeLine,
+      detail: claudeLine.tokensIncluded
+        ? "Usage included up to plan limits"
+        : claudeSide === "3p"
+          ? `${model.label}, tokens billed by your cloud provider`
+          : model.label,
+      strong: true
+    },
+    { key: "openwork", series: result.openwork, detail: model.label, strong: !result.openModel },
+    ...(result.openModel
+      ? [{ key: "open", series: result.openModel, detail: `${result.openModel.modelLabel}, open model`, strong: true }]
+      : []),
+    ...(claudeSide === "plan"
+      ? [{ key: "3p", series: result.claude3p, detail: `${model.label}, Claude models only, no shared skills or plugins`, strong: false }]
+      : [])
+  ];
 
   return (
     <section aria-labelledby={`${id}-heading`}>
@@ -176,22 +561,23 @@ export function CoworkCostCalculator({
         <form
           onSubmit={(event) => event.preventDefault()}
           aria-label="Cost calculator inputs"
-          className="grid gap-6 md:grid-cols-2 lg:grid-cols-[1.2fr_1fr_1fr_1fr]"
+          className="grid gap-6 md:grid-cols-2 lg:grid-cols-[1.2fr_1fr_0.8fr_1fr]"
         >
           <div>
             <div className="flex items-center justify-between">
               <label htmlFor={`${id}-users`} className="text-[13px] text-[var(--lp-muted)]">
-                People
+                Team size
               </label>
               <input
                 id={`${id}-users`}
                 type="number"
                 inputMode="numeric"
                 min={1}
+                max={100000}
                 step={1}
                 value={usersText}
                 onChange={(event) => setUsersText(event.target.value)}
-                className="h-8 w-[84px] rounded-[8px] bg-[var(--lp-page)] px-2 text-right text-[14px] font-medium tabular-nums text-[var(--lp-ink)] shadow-[0_0_0_1px_var(--lp-border)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--lp-ink)]"
+                className={`h-8 w-[84px] rounded-[8px] bg-[var(--lp-page)] px-2 text-right text-[14px] font-medium tabular-nums text-[var(--lp-ink)] shadow-[0_0_0_1px_var(--lp-border)] ${focusRing}`}
               />
             </div>
             <input
@@ -201,113 +587,183 @@ export function CoworkCostCalculator({
               step={1}
               value={Math.min(users, sliderMax)}
               onChange={(event) => setUsersText(event.target.value)}
-              aria-label="People, slider"
-              className="mt-4 h-11 w-full cursor-pointer accent-[var(--lp-ink)]"
+              aria-label="Team size, slider"
+              className="mt-2 h-11 w-full cursor-pointer accent-[var(--lp-ink)]"
             />
           </div>
 
-          <fieldset>
-            <legend className="text-[13px] text-[var(--lp-muted)]">Usage per person</legend>
-            <div className="mt-2 grid h-11 grid-cols-3 rounded-[12px] bg-[var(--lp-page)] p-1 shadow-[0_0_0_1px_var(--lp-border)]">
-              {usageProfileIds.map((key) => (
-                <label
-                  key={key}
-                  className="flex cursor-pointer items-center justify-center rounded-[8px] text-[13px] text-[var(--lp-body)] transition-colors duration-150 has-[:checked]:bg-[var(--lp-ink)] has-[:checked]:font-medium has-[:checked]:text-[var(--lp-page)] has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-[var(--lp-ink)]"
-                >
-                  <input
-                    type="radio"
-                    name={`${id}-profile`}
-                    value={key}
-                    checked={profile === key}
-                    onChange={() => setProfile(key)}
-                    className="sr-only"
-                  />
-                  {profileLabels[key]}
-                </label>
-              ))}
-            </div>
-          </fieldset>
+          <Segmented
+            name={`${id}-profile`}
+            legend="Usage per person"
+            options={usageProfileIds.map((key) => ({ value: key, label: profileLabels[key] }))}
+            value={profile}
+            onChange={setProfile}
+          />
+
+          <Segmented
+            name={`${id}-tier`}
+            legend="SSO and admin controls"
+            options={[
+              { value: "team", label: "No" },
+              { value: "enterprise", label: "Yes" }
+            ]}
+            value={tier}
+            onChange={setTier}
+          />
 
           <ModelSelect
-            id={`${id}-claude-model`}
-            label="Claude plans use"
+            id={`${id}-model`}
+            label="Model, both sides"
             models={claudeModels}
-            value={claudeModelId}
-            onChange={setClaudeModelId}
+            value={model.id}
+            onChange={setModelId}
           />
-          <ModelSelect
-            id={`${id}-openwork-model`}
-            label="OpenWork uses"
-            models={modelPrices}
-            value={openworkModelId}
-            onChange={setOpenworkModelId}
-          />
+
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2 md:col-span-2 lg:col-span-4">
+            <label className="flex cursor-pointer items-center gap-2.5 text-[13px] font-medium text-[var(--lp-ink)]">
+              <input
+                type="checkbox"
+                checked={openOn}
+                onChange={(event) => setOpenOn(event.target.checked)}
+                className={`h-4 w-4 cursor-pointer rounded accent-[var(--lp-ink)] ${focusRing}`}
+              />
+              Also try an open model on OpenWork
+            </label>
+            <div className="w-[190px]">
+              <ModelSelect
+                id={`${id}-open-model`}
+                label="Open model on OpenWork"
+                models={openModels}
+                value={openModel.id}
+                onChange={(value) => {
+                  setOpenModelId(value);
+                  setOpenOn(true);
+                }}
+                compact
+                muted={!openOn}
+              />
+            </div>
+          </div>
         </form>
 
-        <div className="mt-8 grid gap-8 border-t border-[var(--lp-border)] pt-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)] lg:gap-12">
-          <div aria-live="polite" className="grid grid-cols-2 gap-6 self-start">
-            {[claudeFocus, openworkFocus].map((plan) =>
-              plan ? (
-                <div key={plan.id}>
-                  <div className="text-[13px] text-[var(--lp-muted)]">{planLabel(plan.id)}</div>
-                  <div className="mt-1 text-[34px] font-light leading-[40px] tracking-[-0.02em] tabular-nums md:text-[44px] md:leading-[50px]">
-                    {plan.available ? bigDollars(plan.totalMonthly) : "—"}
-                  </div>
-                  <div className="text-[13px] text-[var(--lp-muted)]">per month</div>
-                </div>
-              ) : null
-            )}
-            <p className="col-span-2 text-[14px] font-medium text-[var(--lp-ink)]">
-              {delta >= 0
-                ? `OpenWork saves ${dollars.format(delta)} a year`
-                : `OpenWork costs ${dollars.format(-delta)} more a year`}
-            </p>
+        <div className="mt-8 border-t border-[var(--lp-border)] pt-8">
+          <div className="flex flex-col gap-5 md:flex-row md:items-end md:justify-between">
+            <div aria-live="polite" className="min-w-0">
+              <p className="text-[14px] text-[var(--lp-body)]">
+                {comparison}, {count.format(users)} people, over {period}
+              </p>
+              <p className="mt-1 text-[44px] font-light leading-[1.05] tracking-[-0.03em] tabular-nums text-[var(--lp-ink)] md:text-[56px] lg:text-[64px]">
+                {delta >= 0 ? `You keep ${dollars.format(delta)}` : `Claude costs ${dollars.format(-delta)} less`}
+              </p>
+              {sameModelLine ? <p className="mt-2 text-[14px] text-[var(--lp-body)]">{sameModelLine}</p> : null}
+              {notices.map((notice) => (
+                <p key={notice} className="mt-1 text-[13px] text-[var(--lp-muted)]">
+                  {notice}
+                </p>
+              ))}
+            </div>
+            <div className="w-[180px] shrink-0">
+              <Segmented
+                name={`${id}-years`}
+                legend="Period"
+                hideLegend
+                options={[
+                  { value: 1, label: "1 year" },
+                  { value: 3, label: "3 years" }
+                ]}
+                value={years}
+                onChange={setYears}
+              />
+            </div>
           </div>
 
-          <ul aria-label={`Monthly cost for ${users} people`} className="space-y-3.5">
-            {rows.map(({ id: planId, label, note, plan }) => (
-              <PlanBar
-                key={planId}
-                label={label}
-                note={note}
-                plan={plan}
-                max={max}
-                focused={highlight.includes(planId)}
-              />
-            ))}
-          </ul>
+          <div className="mt-8">
+            <CostChart
+              lines={lines}
+              months={years * 12}
+              shade={{ from: claudeLine, to: featured }}
+              label={`Cumulative cost over ${period}. Use arrow keys to move by month.`}
+            />
+          </div>
+
+          <table className="mt-8 w-full border-collapse text-left text-[13px]">
+            <caption className="sr-only">
+              Cost breakdown for {count.format(users)} people over {period}
+            </caption>
+            <thead>
+              <tr className="text-[12px] text-[var(--lp-muted)]">
+                <th scope="col" className="h-8 font-normal">
+                  <span className="sr-only">Plan</span>
+                </th>
+                <th scope="col" className="hidden h-8 text-right font-normal sm:table-cell">
+                  Seats a year
+                </th>
+                <th scope="col" className="hidden h-8 text-right font-normal sm:table-cell">
+                  Tokens a year
+                </th>
+                <th scope="col" className="h-8 text-right font-normal">
+                  {period}
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row) => (
+                <tr key={row.key} className="border-t border-[var(--lp-border)]">
+                  <th scope="row" className="py-2.5 pr-4 text-left font-normal">
+                    <span className={row.strong ? "font-medium text-[var(--lp-ink)]" : "text-[var(--lp-body)]"}>
+                      {row.series.name}
+                    </span>
+                    <span className="block text-[12px] text-[var(--lp-muted)]">{row.detail}</span>
+                  </th>
+                  <td className="hidden py-2.5 text-right tabular-nums text-[var(--lp-body)] sm:table-cell">
+                    {dollars.format(row.series.seatsMonthly * 12)}
+                  </td>
+                  <td className="hidden py-2.5 text-right tabular-nums text-[var(--lp-body)] sm:table-cell">
+                    {row.series.tokensIncluded ? "Included" : dollars.format(row.series.tokensMonthly * 12)}
+                  </td>
+                  <td className="py-2.5 text-right font-medium tabular-nums text-[var(--lp-ink)]">
+                    {dollars.format(row.series.total)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
 
-        <p className="mt-8 text-[13px] leading-[20px] text-[var(--lp-body)]">
-          Tokens outweigh seats, so the model you pick moves the total more than the plan.
-        </p>
-
-        <details className="group mt-4 border-t border-[var(--lp-border)] pt-4">
+        <details className="group mt-6 border-t border-[var(--lp-border)] pt-4">
           <summary className="flex cursor-pointer list-none items-center gap-1.5 text-[13px] font-medium text-[var(--lp-ink)] [&::-webkit-details-marker]:hidden">
             <ChevronRight
               aria-hidden="true"
               strokeWidth={2}
-              className="h-3.5 w-3.5 transition-transform duration-150 ease-out group-open:rotate-90"
+              className="h-3.5 w-3.5 transition-transform duration-150 ease-out group-open:rotate-90 motion-reduce:transition-none"
             />
             How we calculate
           </summary>
           <ul className="mt-3 space-y-1.5 text-[12.5px] leading-[19px] text-[var(--lp-body)]">
             <li>
-              Tokens per person = input × (uncached × input price + cached × cache price) + output × output price.
-              Presets assume 5M, 25M, or 100M input tokens a month, 70% cached.
+              Both sides use the same Claude model. Tokens per person = input × (uncached × input price + cached × cache
+              price) + output × output price. Light, Typical, and Heavy assume 5M, 25M, or 100M input tokens a month, 70%
+              cached.
             </li>
             <li>
-              Claude Team: ${planPrices.claudeTeamStandard.annual}/seat annual, up to {planPrices.claudeTeamMaxSeats} seats.
-              Enterprise: ${planPrices.claudeEnterpriseSeat}/seat, {planPrices.claudeEnterpriseMinSeats} minimum, plus tokens.
-              3P: tokens only.
+              Claude Team: ${planPrices.claudeTeamStandard.annual}/seat billed annually (${planPrices.claudeTeamStandard.monthly} monthly),{" "}
+              {planPrices.claudeTeamMinSeats} to {planPrices.claudeTeamMaxSeats} seats, usage included up to plan limits.
+              Heavy usage is priced on Premium seats (${planPrices.claudeTeamPremium.annual}). Usage beyond limits is billed
+              at API rates and not included, so this favours Claude.
             </li>
             <li>
-              OpenWork Cloud Team: first {planPrices.openworkFreeSeats} seats free, then ${planPrices.openworkTeamSeat}/seat, plus tokens. Enterprise: ${planPrices.openworkEnterpriseSeat}/user
-              annual, volume pricing above {planPrices.openworkEnterpriseVolumeAbove}.
+              Claude Enterprise: ${planPrices.claudeEnterpriseSeat}/seat billed annually, {planPrices.claudeEnterpriseMinSeats}{" "}
+              seats minimum, all usage at API rates. Claude Desktop on 3P: no seat fee, tokens through Bedrock, Vertex, or
+              Foundry, Claude models only.
             </li>
             <li>
-              List prices from models.dev ({modelPricesFetchedAt}); Anthropic plans checked {anthropicPricingCheckedAt}.
-              Committed-spend discounts are not included.
+              OpenWork Team on OpenWork Cloud: first {planPrices.openworkFreeSeats} seats free, then $
+              {planPrices.openworkTeamSeat}/seat. OpenWork Enterprise: ${planPrices.openworkEnterpriseSeat}/person a month,
+              billed annually. Tokens billed by your own provider or gateway.
+            </li>
+            <li>
+              Costs accrue monthly. List prices from models.dev ({modelPricesFetchedAt}); Anthropic plans checked{" "}
+              {anthropicPricingCheckedAt}. Committed-spend discounts are not included.
             </li>
             <li className="flex flex-wrap gap-x-3 gap-y-1 pt-1">
               {pricingSources.map((source) => (
@@ -325,48 +781,5 @@ export function CoworkCostCalculator({
         </details>
       </div>
     </section>
-  );
-}
-
-function PlanBar({
-  label,
-  note,
-  plan,
-  max,
-  focused
-}: {
-  label: string;
-  note?: string;
-  plan: PlanCost;
-  max: number;
-  focused: boolean;
-}) {
-  const openwork = plan.vendor === "openwork";
-  const width = plan.available ? Math.max(1.5, (plan.totalMonthly / max) * 100) : 0;
-  return (
-    <li className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-1.5 md:grid-cols-[150px_minmax(0,1fr)_88px]">
-      <div className="min-w-0">
-        <div className={`truncate text-[13.5px] ${focused ? "font-medium text-[var(--lp-ink)]" : "text-[var(--lp-body)]"}`}>
-          {label}
-        </div>
-        {note ? <div className="truncate text-[11.5px] text-[var(--lp-muted)]">{note}</div> : null}
-      </div>
-      <div className="order-last col-span-2 h-2.5 overflow-hidden rounded-full bg-[var(--lp-page)] md:order-none md:col-span-1">
-        {plan.available ? (
-          <div
-            aria-hidden="true"
-            className={`h-full rounded-full transition-[width] duration-200 ease-out motion-reduce:transition-none ${
-              openwork ? "bg-[var(--lp-ink)]" : focused ? "bg-[var(--lp-muted)]" : "bg-[var(--lp-border)]"
-            }`}
-            style={{ width: `${width}%` }}
-          />
-        ) : null}
-      </div>
-      <div
-        className={`text-right text-[13.5px] tabular-nums ${focused ? "font-medium text-[var(--lp-ink)]" : "text-[var(--lp-body)]"}`}
-      >
-        {plan.available ? dollars.format(plan.totalMonthly) : `Max ${planPrices.claudeTeamMaxSeats}`}
-      </div>
-    </li>
   );
 }
