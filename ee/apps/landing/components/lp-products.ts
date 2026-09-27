@@ -1,4 +1,4 @@
-import { Cloud, Monitor, Plug, Route, type LucideIcon } from "lucide-react";
+import { Globe, Monitor, Plug, Route, type LucideIcon } from "lucide-react";
 
 export type LpProductKey = "mcp-gateway" | "ai-gateway" | "desktop-app" | "cloud-app";
 
@@ -8,18 +8,19 @@ export type LpProduct = {
   href: string;
   /** Short fact shown on the right of the header menu row. */
   fact: string;
-  /** One line shown under the name in the homepage Products row. */
+  /** One line shown under the name in the homepage product tabs. */
   line: string;
   icon: LucideIcon;
 };
 
+/** Header menu order. */
 export const LP_PRODUCTS: LpProduct[] = [
   {
     key: "mcp-gateway",
     name: "MCP Gateway",
     href: "/connect",
     fact: "Any MCP client",
-    line: "One URL gives every agent your team's tools.",
+    line: "Your team's skills and tools in any agent.",
     icon: Plug
   },
   {
@@ -27,7 +28,7 @@ export const LP_PRODUCTS: LpProduct[] = [
     name: "AI Gateway",
     href: "/docs/ai-gateway/overview",
     fact: "50+ providers",
-    line: "Connect providers once. Choose who uses which model.",
+    line: "Every model, one set of keys and limits.",
     icon: Route
   },
   {
@@ -35,15 +36,18 @@ export const LP_PRODUCTS: LpProduct[] = [
     name: "Desktop App",
     href: "/download",
     fact: "Free, open source",
-    line: "Free and local-first on Mac, Windows and Linux.",
+    line: "The full app on Mac, Windows and Linux. Free.",
     icon: Monitor
   },
   {
     key: "cloud-app",
     name: "Cloud App",
     href: "/cloud",
-    fact: "For teams",
-    line: "Skills, models and access for the whole team.",
-    icon: Cloud
+    fact: "OpenWork Web",
+    line: "OpenWork Web, with admin controls in one place.",
+    icon: Globe
   }
 ];
+
+/** Homepage tab order: the app first, then the gateways, then Cloud. */
+export const LP_PRODUCT_TAB_ORDER: LpProductKey[] = ["desktop-app", "mcp-gateway", "ai-gateway", "cloud-app"];

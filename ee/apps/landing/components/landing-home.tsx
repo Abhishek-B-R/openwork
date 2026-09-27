@@ -1,21 +1,13 @@
 "use client";
 
-import { motion } from "framer-motion";
 import { ArrowRight } from "lucide-react";
-import { useMemo, useState } from "react";
 
-import { LandingAppDemoPanel } from "./landing-app-demo-panel";
-import {
-  defaultLandingDemoFlowId,
-  landingDemoFlows
-} from "./landing-demo-flows";
 import { LandingFaq } from "./landing-faq";
 import { LandingHeroPrompt } from "./landing-hero-prompt";
 import { LpCta } from "./lp-cta";
-import { LpGatewayEndpoint } from "./lp-gateway-endpoint";
 import { LpHeroBackground } from "./lp-hero-background";
 import { LpParityTable } from "./lp-parity-table";
-import { LP_PRODUCTS } from "./lp-products";
+import { LpProductsShowcase } from "./lp-products-showcase";
 import { LpSectionHeader } from "./lp-primitives";
 import { SiteFooter } from "./site-footer";
 import { SiteNav } from "./site-nav";
@@ -32,25 +24,8 @@ type Props = {
 };
 
 const CLOUD_SIGNUP_URL = "https://app.openworklabs.com";
-const GATEWAY_URL = "https://api.openworklabs.com/mcp/agent";
-
-// Four product cells: stacked on phones, 2x2 on tablets, one row on desktop.
-// Dividers are hairlines between cells only, never an outer box (DESIGN.md S1).
-function productCellClass(index: number) {
-  const classes = ["border-[var(--lp-border)]"];
-  if (index > 0) classes.push("border-t");
-  if (index === 1) classes.push("sm:border-t-0");
-  if (index % 2 === 1) classes.push("sm:border-l");
-  if (index > 0) classes.push("lg:border-t-0 lg:border-l");
-  return classes.join(" ");
-}
 
 export function LandingHome(props: Props) {
-  const [activeDemoId, setActiveDemoId] = useState(defaultLandingDemoFlowId);
-  const activeDemo = useMemo(
-    () => landingDemoFlows.find((flow) => flow.id === activeDemoId) ?? landingDemoFlows[0],
-    [activeDemoId]
-  );
   const primaryHref = props.isMobileVisitor ? CLOUD_SIGNUP_URL : "/download";
   const primaryLabel = props.isMobileVisitor ? "Open in browser" : "Download OpenWork";
 
@@ -158,40 +133,7 @@ export function LandingHome(props: Props) {
             )}
           </section>
 
-          <section aria-labelledby="products-heading" className="mt-16 lg:mt-24">
-            <h2 id="products-heading" className="mb-4 text-[13px] font-normal text-[var(--lp-muted)]">
-              Products
-            </h2>
-            <ul className="grid border-y border-[var(--lp-border)] sm:grid-cols-2 lg:grid-cols-4">
-              {LP_PRODUCTS.map((product, index) => (
-                <li key={product.key} className={productCellClass(index)}>
-                  <a
-                    href={product.href}
-                    className={`group flex h-full flex-col gap-6 py-6 sm:py-7 lg:gap-10 ${index % 2 === 0 ? "sm:pr-6" : "sm:px-6"} ${index === 2 ? "lg:px-6" : ""}`}
-                  >
-                    <product.icon
-                      className="h-5 w-5 text-[var(--lp-ink)]"
-                      strokeWidth={1.5}
-                      aria-hidden="true"
-                    />
-                    <span className="flex flex-col gap-1.5">
-                      <span className="flex items-center gap-2 text-[20px] font-medium tracking-[-0.02em] text-[var(--lp-ink)]">
-                        {product.name}
-                        <ArrowRight
-                          size={16}
-                          aria-hidden="true"
-                          className="-translate-x-1 opacity-0 transition duration-150 ease-out group-hover:translate-x-0 group-hover:opacity-100 motion-reduce:transition-none"
-                        />
-                      </span>
-                      <span className="text-[14px] leading-[21px] text-[var(--lp-body)]">
-                        {product.line}
-                      </span>
-                    </span>
-                  </a>
-                </li>
-              ))}
-            </ul>
-          </section>
+          <LpProductsShowcase />
 
           <section className="mt-20 lg:mt-[120px]" id="comparison">
             <LpSectionHeader
@@ -212,75 +154,6 @@ export function LandingHome(props: Props) {
             <div className="mt-10">
               <LpParityTable />
             </div>
-          </section>
-
-          <section className="mt-[120px]">
-            <LpSectionHeader
-              label="MCP Gateway"
-              heading="Set up your MCPs once. Your whole team has them."
-              headingLines={["Set up your MCPs once.", "Your whole team has them."]}
-              right={
-                <a href="/connect" className="lp-pill-secondary lp-pill-sm !hidden md:!inline-flex">
-                  Explore MCP Gateway
-                </a>
-              }
-            />
-            <a href="/connect" className="lp-pill-secondary lp-pill-sm mt-6 md:!hidden">
-              Explore MCP Gateway
-            </a>
-            <div className="mt-10">
-              <LpGatewayEndpoint url={GATEWAY_URL} />
-            </div>
-          </section>
-
-          <section
-            id="product"
-            className="mt-[120px] scroll-mt-24"
-            aria-label="OpenWork product demo"
-          >
-            <div className="landing-shell overflow-hidden rounded-2xl">
-              <div className="relative flex h-10 items-center border-b border-white/50 bg-gradient-to-b from-white/90 to-white/60 px-4">
-                <div className="flex gap-1.5" aria-hidden="true">
-                  <div className="h-2.5 w-2.5 rounded-full border border-[#e0443e]/20 bg-[#ff5f56]/90" />
-                  <div className="h-2.5 w-2.5 rounded-full border border-[#dea123]/20 bg-[#ffbd2e]/90" />
-                  <div className="h-2.5 w-2.5 rounded-full border border-[#1aab29]/20 bg-[#27c93f]/90" />
-                </div>
-                <span className="absolute left-1/2 -translate-x-1/2 text-xs font-medium text-[var(--lp-muted)]">OpenWork</span>
-              </div>
-              <div className="p-3">
-                <LandingAppDemoPanel
-                  flows={landingDemoFlows}
-                  activeFlowId={activeDemo.id}
-                  onSelectFlow={setActiveDemoId}
-                />
-              </div>
-              <div className="flex flex-wrap gap-1 border-t border-[var(--lp-border)] px-3 py-3" role="group" aria-label="Example tasks">
-                {landingDemoFlows.map((flow) => {
-                  const isActive = flow.id === activeDemo.id;
-                  return (
-                    <button
-                      key={flow.id}
-                      type="button"
-                      onClick={() => setActiveDemoId(flow.id)}
-                      aria-pressed={isActive}
-                      className={`relative cursor-pointer rounded-full px-3 py-2 text-xs transition-colors ${isActive ? "text-[var(--lp-ink)]" : "text-[var(--lp-muted)] hover:text-[var(--lp-ink)]"}`}
-                    >
-                      {isActive ? (
-                        <motion.div
-                          layoutId="active-pill"
-                          className="absolute inset-0 rounded-full border border-[var(--lp-border)] bg-white shadow-sm"
-                          transition={{ type: "spring", stiffness: 400, damping: 30 }}
-                        />
-                      ) : null}
-                      <span className="relative z-10">{flow.categoryLabel}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-            <p className="mt-4 text-[13px] leading-relaxed text-[var(--lp-muted)]" aria-live="polite">
-              {activeDemo.description}
-            </p>
           </section>
 
           <div className="mt-[120px] [&_h2]:!text-[36px] [&_h2]:!leading-[42px]">
