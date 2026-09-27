@@ -22,6 +22,16 @@ test("AGENT-VIS-03 v2: a person keeps chatting while a background helper works, 
     await user.screenshot();
   });
 
+  await step("the launch step finishing does not make the helper look finished", async () => {
+    // v2 marks the launch tool completed at once; only the child's own activity says whether it still runs.
+    const running = (await probe.dom('[data-subagent-activity="shimmer"]')).elements.length;
+    const helperRows = (await probe.dom("[data-subagent-run]")).elements.map((element) => element.text).join(" | ");
+    const looksDone = /Completed|Finished/i.test(helperRows);
+    evidence.recordAssertionEvidence("A launched helper still shows as running", `${running} running helper row(s); row reads "${helperRows.slice(0, 120)}"`, running === 1 && !looksDone);
+    expect(running).toBe(1);
+    expect(looksDone).toBe(false);
+  });
+
   await step("they ask something else and get an answer without waiting for the helper", async () => {
     await user.type("composer", world.quickQuestion);
     await user.click("Run task");
@@ -75,16 +85,28 @@ test("AGENT-VIS-03 v2: a person keeps chatting while a background helper works, 
     evidence.recordAssertionEvidence("The chat reports the helper's result on its own", `"${world.wakeReply}" appeared; Working readings while it picked back up: ${readings.join(", ") || "none"}`, true);
     const first = readings[0]?.match(/(?:(\d+)m\s*)?(\d+)s/);
     const firstSeconds = first ? Number(first[1] ?? 0) * 60 + Number(first[2]) : 0;
-    evidence.recordAssertionEvidence("The timer counts from when the chat picked back up, not from the old message",
+    evidence.recordAssertionEvidence("The timer counts from the message that started this run (the helper's result), not from the old question",
       readings.length ? `first reading ${readings[0]}` : "no Working line was shown while it picked back up", readings.length > 0 && firstSeconds < 5);
     expect.soft(readings.length > 0 && firstSeconds < 5, "timer restarts when the chat wakes").toBe(true);
     await user.screenshot();
   });
 
-  await step("the chat says why it started talking again", async () => {
+  await step("the earlier reply is kept, and the result arrives as a new turn", async () => {
     const text = await probe.text();
-    const explained = /helper (?:has )?finished|agent finished|background (?:helper|agent) finished/i.test(text.replace(world.wakeReply, ""));
-    evidence.recordAssertionEvidence("A self-started reply is labelled with its reason", explained ? "a note says the helper finished" : "the reply just appears with no reason shown", explained);
+    const keptEarlier = text.includes(world.started);
+    const order = text.indexOf(world.started) < text.indexOf(world.wakeReply);
+    evidence.recordAssertionEvidence("A helper's result never rewrites the earlier answer", `earlier reply kept: ${keptEarlier}; result shown after it: ${order}`, keptEarlier && order);
+    expect(keptEarlier).toBe(true);
+    expect(order).toBe(true);
+  });
+
+  await step("the chat says why it started talking again, in plain words", async () => {
+    const text = await probe.text();
+    // v2 delivers the result as a hidden <subagent state="completed" description="…"> message.
+    const rawMarkup = /<subagent\b/.test(text);
+    const explained = /Compare screenshots with the designs.*(finished|done|completed)|helper (?:has )?finished|agent finished/i.test(text.replace(world.wakeReply, ""));
+    evidence.recordAssertionEvidence("A self-started reply is labelled with its reason", explained ? "a quiet note says the helper finished" : "the reply just appears with no reason shown", explained && !rawMarkup);
+    expect(rawMarkup, "raw <subagent> markup on screen").toBe(false);
     expect.soft(explained, "reason shown for the chat picking back up").toBe(true);
   });
 });
