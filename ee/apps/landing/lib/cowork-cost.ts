@@ -30,43 +30,6 @@ export const usageProfiles: Record<UsageProfileId, { label: string; usage: Usage
   heavy: { label: "Heavy agentic", usage: { inputMillions: 100, outputMillions: 4, cacheReadShare: 0.7 } }
 };
 
-export type Billing = "annual" | "monthly";
-
-export type CostInputs = {
-  users: number;
-  usage: Usage;
-  claudeModel: ModelPrice;
-  openworkModel: ModelPrice;
-  /** Optional cheaper model that takes `routeShare` of OpenWork usage. */
-  routeModel: ModelPrice;
-  /** Share of OpenWork usage sent to `routeModel`, 0–1. */
-  routeShare: number;
-  claudeTeamBilling: Billing;
-};
-
-export type PlanId =
-  | "claude-team-standard"
-  | "claude-team-premium"
-  | "claude-enterprise"
-  | "claude-3p"
-  | "openwork-team"
-  | "openwork-enterprise";
-
-export type PlanCost = {
-  id: PlanId;
-  vendor: "claude" | "openwork";
-  name: string;
-  modelLabel: string;
-  available: boolean;
-  seatsBilled: number;
-  seatMonthly: number;
-  tokensMonthly: number;
-  totalMonthly: number;
-  totalAnnual: number;
-  perUserMonthly: number;
-  notes: string[];
-};
-
 export const planPrices = {
   claudeTeamStandard: { monthly: 25, annual: 20 },
   claudeTeamPremium: { monthly: 125, annual: 100 },
@@ -94,147 +57,168 @@ export function tokenCostPerUser(model: ModelPrice, usage: Usage): number {
   return input * ((1 - cacheShare) * model.input + cacheShare * cacheRead) + output * model.output;
 }
 
-/** Monthly token cost for one user when part of the work goes to a second model. */
-export function blendedTokenCostPerUser(primary: ModelPrice, route: ModelPrice, routeShare: number, usage: Usage): number {
-  const share = clamp(routeShare, 0, 1);
-  return (1 - share) * tokenCostPerUser(primary, usage) + share * tokenCostPerUser(route, usage);
-}
-
 /** True when a usage profile is heavy enough that Claude Team seat limits are likely to be reached. */
 export function likelyExceedsTeamLimits(usage: Usage): boolean {
   const typical = usageProfiles.typical.usage;
   return usage.inputMillions >= typical.inputMillions || usage.outputMillions >= typical.outputMillions;
 }
 
-function plan(
-  base: Omit<PlanCost, "totalMonthly" | "totalAnnual" | "perUserMonthly">,
-  users: number
-): PlanCost {
-  const totalMonthly = base.seatMonthly + base.tokensMonthly;
-  return {
-    ...base,
-    totalMonthly,
-    totalAnnual: totalMonthly * 12,
-    perUserMonthly: users > 0 ? totalMonthly / users : 0
-  };
+/**
+ * True when usage is beyond the typical profile, so a Claude Team Premium seat is the fair comparison.
+ * Light and typical usage are priced on the cheaper Standard seat, which favours Claude.
+ */
+export function needsPremiumSeat(usage: Usage): boolean {
+  const typical = usageProfiles.typical.usage;
+  return usage.inputMillions > typical.inputMillions || usage.outputMillions > typical.outputMillions;
 }
 
-export function calculatePlanCosts(inputs: CostInputs): PlanCost[] {
-  const users = Math.round(clamp(inputs.users, 1, 1_000_000));
-  const claudeTokens = tokenCostPerUser(inputs.claudeModel, inputs.usage) * users;
-  const routeShare = clamp(inputs.routeShare, 0, 1);
-  const openworkTokens = blendedTokenCostPerUser(inputs.openworkModel, inputs.routeModel, routeShare, inputs.usage) * users;
-  const openworkModelLabel =
-    routeShare > 0 && inputs.routeModel.id !== inputs.openworkModel.id
-      ? `${inputs.openworkModel.label} + ${Math.round(routeShare * 100)}% ${inputs.routeModel.label}`
-      : inputs.openworkModel.label;
-  const heavy = likelyExceedsTeamLimits(inputs.usage);
-  const teamAvailable = users <= planPrices.claudeTeamMaxSeats;
-  const teamSeats = Math.max(users, planPrices.claudeTeamMinSeats);
-  const teamNotes = [
-    "Usage included up to weekly limits. Usage beyond limits is billed as usage credits at API rates and is not included here.",
-    ...(heavy ? ["At this usage, many people are likely to reach weekly limits."] : []),
-    ...(teamAvailable ? [] : [`Team plan allows up to ${planPrices.claudeTeamMaxSeats} seats.`])
-  ];
-  const enterpriseSeats = Math.max(users, planPrices.claudeEnterpriseMinSeats);
-  const openworkTeamSeats = Math.max(0, users - planPrices.openworkFreeSeats);
+/** "team" compares plans without SSO and admin controls; "enterprise" compares plans with them. */
+export type Tier = "team" | "enterprise";
 
-  return [
-    plan(
+export type SeriesId = "claude-team" | "claude-enterprise" | "claude-3p" | "openwork-team" | "openwork-enterprise";
+
+export type CostSeries = {
+  id: SeriesId;
+  vendor: "claude" | "openwork";
+  name: string;
+  modelLabel: string;
+  seatsBilled: number;
+  seatsMonthly: number;
+  /** Token spend billed at API rates. Zero when usage is included in the seat. */
+  tokensMonthly: number;
+  tokensIncluded: boolean;
+  monthly: number;
+  /** Cumulative spend at the end of each month; index 0 is today (0). */
+  points: number[];
+  total: number;
+};
+
+export type CumulativeInputs = {
+  users: number;
+  usage: Usage;
+  tier: Tier;
+  /** Claude model used by both the Claude plan and OpenWork, so the comparison is like for like. */
+  model: ModelPrice;
+  /** Optional open model to price on OpenWork as an extra line. */
+  openModel?: ModelPrice | null;
+  months: number;
+};
+
+export type CumulativeCosts = {
+  users: number;
+  months: number;
+  claude: CostSeries;
+  openwork: CostSeries;
+  openModel: CostSeries | null;
+  claude3p: CostSeries;
+  /** True when SSO is not needed but the team is too big for Claude Team, so Claude Enterprise is compared. */
+  claudeTeamUnavailable: boolean;
+  claudeTeamSeat: "standard" | "premium" | null;
+  /** Claude total minus OpenWork total over `months`, same model. Negative when OpenWork costs more. */
+  savings: number;
+  /** Claude total minus OpenWork-on-open-model total over `months`. */
+  openModelSavings: number | null;
+};
+
+function series(
+  base: Omit<CostSeries, "monthly" | "points" | "total">,
+  months: number
+): CostSeries {
+  const monthly = base.seatsMonthly + base.tokensMonthly;
+  const points = Array.from({ length: months + 1 }, (_, month) => monthly * month);
+  return { ...base, monthly, points, total: monthly * months };
+}
+
+export function cumulativeCosts(inputs: CumulativeInputs): CumulativeCosts {
+  const users = Math.round(clamp(inputs.users, 1, 1_000_000));
+  const months = Math.round(clamp(inputs.months, 1, 120));
+  const tokens = tokenCostPerUser(inputs.model, inputs.usage) * users;
+  const claudeTeamUnavailable = inputs.tier === "team" && users > planPrices.claudeTeamMaxSeats;
+  const useClaudeTeam = inputs.tier === "team" && !claudeTeamUnavailable;
+  const premium = needsPremiumSeat(inputs.usage);
+
+  let claude: CostSeries;
+  if (useClaudeTeam) {
+    const seats = Math.max(users, planPrices.claudeTeamMinSeats);
+    const seatPrice = premium ? planPrices.claudeTeamPremium.annual : planPrices.claudeTeamStandard.annual;
+    claude = series(
       {
-        id: "claude-team-standard",
+        id: "claude-team",
         vendor: "claude",
-        name: "Claude Team, Standard seat",
+        name: premium ? "Claude Team, Premium seats" : "Claude Team",
         modelLabel: "Claude models, within plan limits",
-        available: teamAvailable,
-        seatsBilled: teamSeats,
-        seatMonthly: teamSeats * planPrices.claudeTeamStandard[inputs.claudeTeamBilling],
+        seatsBilled: seats,
+        seatsMonthly: seats * seatPrice,
         tokensMonthly: 0,
-        notes: teamNotes
+        tokensIncluded: true
       },
-      users
-    ),
-    plan(
-      {
-        id: "claude-team-premium",
-        vendor: "claude",
-        name: "Claude Team, Premium seat",
-        modelLabel: "Claude models, within plan limits",
-        available: teamAvailable,
-        seatsBilled: teamSeats,
-        seatMonthly: teamSeats * planPrices.claudeTeamPremium[inputs.claudeTeamBilling],
-        tokensMonthly: 0,
-        notes: teamNotes.filter((note) => !note.startsWith("At this usage"))
-      },
-      users
-    ),
-    plan(
+      months
+    );
+  } else {
+    const seats = Math.max(users, planPrices.claudeEnterpriseMinSeats);
+    claude = series(
       {
         id: "claude-enterprise",
         vendor: "claude",
         name: "Claude Enterprise",
-        modelLabel: inputs.claudeModel.label,
-        available: true,
-        seatsBilled: enterpriseSeats,
-        seatMonthly: enterpriseSeats * planPrices.claudeEnterpriseSeat,
-        tokensMonthly: claudeTokens,
-        notes: [
-          "Seat covers access only; all usage billed at API rates. Seat price billed annually.",
-          ...(users < planPrices.claudeEnterpriseMinSeats
-            ? [`Minimum ${planPrices.claudeEnterpriseMinSeats} seats.`]
-            : [])
-        ]
+        modelLabel: inputs.model.label,
+        seatsBilled: seats,
+        seatsMonthly: seats * planPrices.claudeEnterpriseSeat,
+        tokensMonthly: tokens,
+        tokensIncluded: false
       },
-      users
-    ),
-    plan(
-      {
-        id: "claude-3p",
-        vendor: "claude",
-        name: "Claude Desktop on 3P",
-        modelLabel: inputs.claudeModel.label,
-        available: true,
-        seatsBilled: 0,
-        seatMonthly: 0,
-        tokensMonthly: claudeTokens,
-        notes: ["No seat fee. Tokens billed by your cloud provider; committed-spend discounts not included."]
-      },
-      users
-    ),
-    plan(
-      {
-        id: "openwork-team",
-        vendor: "openwork",
-        name: "OpenWork Team",
-        modelLabel: openworkModelLabel,
-        available: true,
-        seatsBilled: openworkTeamSeats,
-        seatMonthly: openworkTeamSeats * planPrices.openworkTeamSeat,
-        tokensMonthly: openworkTokens,
-        notes: [
-          `First ${planPrices.openworkFreeSeats} seats free on OpenWork Cloud. Tokens billed by your own provider or gateway.`
-        ]
-      },
-      users
-    ),
-    plan(
-      {
-        id: "openwork-enterprise",
-        vendor: "openwork",
-        name: "OpenWork Enterprise",
-        modelLabel: openworkModelLabel,
-        available: true,
-        seatsBilled: users,
-        seatMonthly: users * planPrices.openworkEnterpriseSeat,
-        tokensMonthly: openworkTokens,
-        notes: [
-          "Billed annually. Same price cloud or self-hosted.",
-          ...(users > planPrices.openworkEnterpriseVolumeAbove
-            ? [`Volume pricing above ${planPrices.openworkEnterpriseVolumeAbove} users. Talk to sales.`]
-            : [])
-        ]
-      },
-      users
-    )
-  ];
+      months
+    );
+  }
+
+  const openworkSeats =
+    inputs.tier === "team" ? Math.max(0, users - planPrices.openworkFreeSeats) : users;
+  const openworkSeatPrice =
+    inputs.tier === "team" ? planPrices.openworkTeamSeat : planPrices.openworkEnterpriseSeat;
+  const openworkBase: Omit<CostSeries, "monthly" | "points" | "total" | "modelLabel" | "tokensMonthly"> = {
+    id: inputs.tier === "team" ? "openwork-team" : "openwork-enterprise",
+    vendor: "openwork",
+    name: inputs.tier === "team" ? "OpenWork Team" : "OpenWork Enterprise",
+    seatsBilled: openworkSeats,
+    seatsMonthly: openworkSeats * openworkSeatPrice,
+    tokensIncluded: false
+  };
+  const openwork = series({ ...openworkBase, modelLabel: inputs.model.label, tokensMonthly: tokens }, months);
+  const openModel = inputs.openModel
+    ? series(
+        {
+          ...openworkBase,
+          modelLabel: inputs.openModel.label,
+          tokensMonthly: tokenCostPerUser(inputs.openModel, inputs.usage) * users
+        },
+        months
+      )
+    : null;
+
+  const claude3p = series(
+    {
+      id: "claude-3p",
+      vendor: "claude",
+      name: "Claude Desktop on 3P",
+      modelLabel: inputs.model.label,
+      seatsBilled: 0,
+      seatsMonthly: 0,
+      tokensMonthly: tokens,
+      tokensIncluded: false
+    },
+    months
+  );
+
+  return {
+    users,
+    months,
+    claude,
+    openwork,
+    openModel,
+    claude3p,
+    claudeTeamUnavailable,
+    claudeTeamSeat: useClaudeTeam ? (premium ? "premium" : "standard") : null,
+    savings: claude.total - openwork.total,
+    openModelSavings: openModel ? claude.total - openModel.total : null
+  };
 }
