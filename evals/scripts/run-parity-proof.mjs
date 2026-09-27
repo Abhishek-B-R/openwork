@@ -20,6 +20,7 @@ const specs = new Set([
   "evals/specs/engine-live-desktop.e2e.test.ts",
   "evals/specs/engine-live-launch.e2e.test.ts",
   "evals/specs/engine-live-parity.e2e.test.ts",
+  "evals/specs/agent-visibility-journey.e2e.test.ts",
 ]);
 
 export function parityProofPlan(spec) {
