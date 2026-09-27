@@ -15,7 +15,7 @@ function listed(entries: IndexEntry[], connectionId: string): string {
   return entry ? `listed (exposeDirectly ${entry.exposeDirectly})` : "absent";
 }
 
-test("an admin deletes a connector's plugin and members' agents stop getting its tools, until it is restored", async ({ world, step, evidence }) => {
+test("an admin deletes a connector's plugin and members' agents stop getting its tools, until it is restored", { tags: ["agent-flow"] }, async ({ world, step, evidence }) => {
   const { crm, notes } = world;
 
   await step("given: a plugin's CRM server is also shared with everyone and exposed to members' desktops", async () => {

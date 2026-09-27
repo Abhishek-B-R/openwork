@@ -1,4 +1,5 @@
-import { denFetch, type DenSession } from "@openwork/behaviors";
+import { mkdir, realpath } from "node:fs/promises";
+import { denFetch, signInDesktopAs, type DenSession } from "@openwork/behaviors";
 import type { MockMcpTool } from "@openwork/labs";
 import type { Seed } from "@openwork/env";
 import { isRecord } from "./openwork-server-cli.ts";
@@ -34,13 +35,40 @@ export interface IndexEntry { connectionId: string; name: string; exposeDirectly
  * The spec archives and restores the plugin; everything else is arranged here.
  */
 export async function retiredPluginConnection(seed: Seed) {
+  return arrangeRetiredPluginConnection(seed, { web: false });
+}
+
+/**
+ * The same organization, with the admin (who owns the plugin) signed in to the
+ * real app in a browser. Den API calls go through the app's same-origin proxy,
+ * as a hosted web build does.
+ */
+export async function retiredPluginConnectionInApp(seed: Seed) {
+  const world = await arrangeRetiredPluginConnection(seed, { web: false });
+  const { den } = world;
+  const folder = seed.tmpPath("retired-plugin-connection");
+  await mkdir(folder, { recursive: true });
+  const workspacePath = await realpath(folder);
+  const app = await seed.appWeb({
+    name: "retired-plugin-connection", workspacePath, headless: true,
+    env: {
+      OPENWORK_DEV_HEADLESS_WEB_DEN_PROXY: "1", OPENWORK_DEV_DEN_PROXY_TARGET: den.ref.webUrl,
+      OPENWORK_DEV_HEADLESS_DEN_API_TARGET: den.ref.apiUrl,
+      VITE_DEN_BASE_URL: den.ref.webUrl, VITE_DEN_API_BASE_URL: "/api/den",
+    },
+  });
+  await signInDesktopAs(app, { ...den.ref, apiUrl: `${app.webUrl}/api/den` }, den.admin);
+  return { ...world, app };
+}
+
+async function arrangeRetiredPluginConnection(seed: Seed, options: { web: false }) {
   const runId = `${Date.now().toString(36)}${process.pid.toString(36)}`;
   const orgName = `Retired plugin connection ${runId}`;
-  const pluginName = `CRM tools ${runId}`;
+  const pluginName = "CRM tools";
   const crmTool = "crm_lookup";
   const notesTool = "notes_lookup";
   const den = await seed.den({
-    web: false,
+    web: options.web,
     org: { name: orgName, members: { member: {} } },
     mocks: {
       crm: seed.mock({ allowUnauthenticatedMcp: true, tools: [tool(crmTool, "crm result")] }),
@@ -107,7 +135,7 @@ export async function retiredPluginConnection(seed: Seed) {
   expectStatus(exposed, 200, "Exposing the plugin connection directly");
 
   // An ordinary admin-added connection: the boundary that must not change.
-  const notesName = `Notes ${runId}`;
+  const notesName = "Notes";
   const notes = await call(den.admin, `/v1/mcp-connections/by-key/notes-${runId}`, {
     method: "PUT",
     body: JSON.stringify({ name: notesName, url: notesMock.mcpUrl, authType: "none", credentialMode: "shared", exposeDirectly: true, access: { orgWide: true } }),
