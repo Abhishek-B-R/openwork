@@ -184,16 +184,25 @@ function Segmented<T extends string | number>({
   );
 }
 
+type LinePattern = "solid" | "dashed" | "dotted";
+
 type ChartLine = {
   key: string;
+  /** Vendor and model, e.g. "OpenWork · Claude Sonnet 5". */
   label: string;
   series: CostSeries;
   stroke: string;
   width: number;
-  dashed?: boolean;
-  faint?: boolean;
-  strong?: boolean;
+  pattern: LinePattern;
+  /** Stroke opacity; the light Claude-on-3P line stays at or above 3:1 against the panel. */
+  opacity: number;
 };
+
+const dashArray: Record<LinePattern, string | undefined> = { solid: undefined, dashed: "7 5", dotted: "1.5 4.5" };
+
+// OpenWork is drawn in the landing accent, Claude in neutral gray (DESIGN.md V2).
+const accent = "var(--lp-blue)";
+const claudeGray = "var(--lp-muted)";
 
 function useWidth<T extends HTMLElement>(fallback: number): [RefObject<T>, number] {
   const ref = useRef<T>(null);
@@ -230,9 +239,10 @@ function CostChart({
 }) {
   const [ref, width] = useWidth<HTMLDivElement>(880);
   const [active, setActive] = useState<number | null>(null);
-  const wide = width >= 560;
-  const height = wide ? 300 : 220;
-  const pad = { left: 2, right: wide ? 136 : 2, top: 14, bottom: 26 };
+  const wide = width >= 720;
+  const height = wide ? 320 : 220;
+  const labelGap = 12;
+  const pad = { left: 2, right: wide ? 250 : 6, top: 16, bottom: 26 };
   const plotWidth = Math.max(10, width - pad.left - pad.right);
   const plotHeight = height - pad.top - pad.bottom;
   const max = Math.max(1, ...lines.map((line) => line.series.total)) * 1.06;
@@ -249,15 +259,20 @@ function CostChart({
   const tickStep = months >= 24 ? 12 : 3;
   const ticks = Array.from({ length: Math.floor(months / tickStep) + 1 }, (_, index) => index * tickStep);
 
+  // End labels are two lines (value, then vendor and model). Nudge them apart so they never overlap.
+  const labelHeight = 40;
   const endLabels = [...lines]
     .map((line) => ({ line, y: y(line.series.total) }))
     .sort((a, b) => a.y - b.y);
   for (let index = 1; index < endLabels.length; index += 1) {
     const previous = endLabels[index - 1];
-    if (endLabels[index].y - previous.y < 34) endLabels[index].y = previous.y + 34;
+    if (endLabels[index].y - previous.y < labelHeight) endLabels[index].y = previous.y + labelHeight;
   }
-  const overflow = (endLabels[endLabels.length - 1]?.y ?? 0) - (height - pad.bottom);
+  const lowest = height - pad.bottom - 14;
+  const overflow = (endLabels[endLabels.length - 1]?.y ?? 0) - lowest;
   if (overflow > 0) for (const entry of endLabels) entry.y -= overflow;
+  const topOverflow = pad.top + 2 - (endLabels[0]?.y ?? pad.top);
+  if (topOverflow > 0) for (const entry of endLabels) entry.y += topOverflow;
 
   const monthAt = (clientX: number, rect: DOMRect) =>
     Math.round(Math.min(1, Math.max(0, (clientX - rect.left - pad.left) / plotWidth)) * months);
@@ -286,13 +301,13 @@ function CostChart({
     shown === null
       ? undefined
       : `${monthLabel(shown)}: ${lines.map((line) => `${line.label} ${dollars.format(line.series.points[shown] ?? 0)}`).join(", ")}`;
-  const tooltipWidth = 220;
+  const tooltipWidth = 280;
   const tooltipLeft =
     shown === null
       ? 0
       : x(shown) > width / 2
         ? Math.max(0, x(shown) - tooltipWidth - 12)
-        : Math.min(width - tooltipWidth, x(shown) + 12);
+        : Math.min(Math.max(0, width - tooltipWidth), x(shown) + 12);
 
   return (
     <div ref={ref} className="relative">
@@ -329,8 +344,8 @@ function CostChart({
           ))}
           <path
             d={shadePath}
-            fill="var(--lp-ink)"
-            fillOpacity={shadeSaving ? 0.08 : 0.035}
+            fill={shadeSaving ? accent : claudeGray}
+            fillOpacity={shadeSaving ? 0.1 : 0.06}
             className="[transition:d_200ms_cubic-bezier(.2,.8,.2,1)] motion-reduce:[transition:none]"
           />
           {lines.map((line) => (
@@ -340,8 +355,8 @@ function CostChart({
               fill="none"
               stroke={line.stroke}
               strokeWidth={line.width}
-              strokeOpacity={line.faint ? 0.5 : 1}
-              strokeDasharray={line.dashed ? "6 5" : undefined}
+              strokeOpacity={line.opacity}
+              strokeDasharray={dashArray[line.pattern]}
               strokeLinecap="round"
               strokeLinejoin="round"
               className="[transition:d_200ms_cubic-bezier(.2,.8,.2,1)] motion-reduce:[transition:none]"
@@ -352,25 +367,34 @@ function CostChart({
               key={line.key}
               cx={x(months)}
               cy={y(line.series.total)}
-              r={3.5}
+              r={line.pattern === "dotted" ? 3 : 4}
               fill={line.stroke}
-              fillOpacity={line.faint ? 0.5 : 1}
+              fillOpacity={line.opacity}
             />
           ))}
           {wide
             ? endLabels.map(({ line, y: labelY }) => (
                 <g key={line.key}>
+                  <line
+                    x1={x(months) + 5}
+                    x2={x(months) + labelGap - 2}
+                    y1={y(line.series.total)}
+                    y2={labelY + 4}
+                    stroke={line.stroke}
+                    strokeOpacity={Math.abs(labelY + 4 - y(line.series.total)) > 3 ? 0.6 : 0}
+                    strokeWidth={1}
+                  />
                   <text
-                    x={x(months) + 14}
-                    y={labelY - 1}
-                    fontSize={13}
-                    fontWeight={line.strong ? 600 : 400}
-                    fill={line.faint ? "var(--lp-muted)" : "var(--lp-ink)"}
+                    x={x(months) + labelGap}
+                    y={labelY + 4}
+                    fontSize={13.5}
+                    fontWeight={600}
+                    fill={line.series.vendor === "openwork" ? accent : "var(--lp-ink)"}
                     className="tabular-nums"
                   >
                     {shortDollars(line.series.total)}
                   </text>
-                  <text x={x(months) + 14} y={labelY + 14} fontSize={11.5} fill="var(--lp-muted)">
+                  <text x={x(months) + labelGap} y={labelY + 20} fontSize={12} fill="var(--lp-body)">
                     {line.label}
                   </text>
                 </g>
@@ -396,7 +420,7 @@ function CostChart({
         {shown !== null ? (
           <div
             aria-hidden="true"
-            className="pointer-events-none absolute top-0 w-[220px] rounded-[12px] bg-[var(--lp-page)] px-3 py-2.5 shadow-[0_0_0_1px_var(--lp-border),0_8px_24px_-12px_rgba(1,22,39,0.25)]"
+            className="pointer-events-none absolute top-0 w-[280px] max-w-full rounded-[12px] bg-[var(--lp-page)] px-3 py-2.5 shadow-[0_0_0_1px_var(--lp-border),0_8px_24px_-12px_rgba(1,22,39,0.25)]"
             style={{ left: tooltipLeft }}
           >
             <div className="text-[12px] font-medium text-[var(--lp-ink)]">{monthLabel(shown)}</div>
@@ -414,30 +438,75 @@ function CostChart({
           </div>
         ) : null}
       </div>
-      <ul className="mt-3 flex flex-wrap gap-x-5 gap-y-1.5" aria-label="Chart legend">
-        {lines.map((line) => (
-          <li key={line.key} className="flex items-center gap-1.5 text-[12px] text-[var(--lp-body)]">
-            <LineSwatch line={line} />
-            {line.series.name}, {line.series.modelLabel === "Claude models, within plan limits" ? "usage included" : line.series.modelLabel}
-            {wide ? null : <span className="tabular-nums text-[var(--lp-ink)]">{shortDollars(line.series.total)}</span>}
+      {wide ? (
+        <ul className="mt-3 flex flex-wrap gap-x-5 gap-y-1.5 text-[12px] text-[var(--lp-body)]" aria-label="Chart colors">
+          <li className="flex items-center gap-1.5">
+            <span aria-hidden="true" className="inline-block h-2.5 w-2.5 rounded-full bg-[var(--lp-blue)]" />
+            OpenWork
           </li>
-        ))}
-      </ul>
+          <li className="flex items-center gap-1.5">
+            <span aria-hidden="true" className="inline-block h-2.5 w-2.5 rounded-full bg-[var(--lp-muted)]" />
+            Claude
+          </li>
+          {shadeSaving ? (
+            <li className="flex items-center gap-1.5">
+              <span aria-hidden="true" className="inline-block h-2.5 w-4 rounded-[3px] bg-[var(--lp-blue)] opacity-20" />
+              What you keep with the same model
+            </li>
+          ) : null}
+        </ul>
+      ) : (
+        <ul className="mt-3 space-y-1.5" aria-label="Chart lines">
+          {[...lines]
+            .sort((a, b) => b.series.total - a.series.total)
+            .map((line) => (
+              <li key={line.key} className="flex items-center justify-between gap-3 text-[12.5px] text-[var(--lp-body)]">
+                <span className="flex min-w-0 items-center gap-2">
+                  <LineSwatch line={line} />
+                  <span className="min-w-0">{line.label}</span>
+                </span>
+                <span
+                  className={`shrink-0 font-semibold tabular-nums ${line.series.vendor === "openwork" ? "text-[var(--lp-blue)]" : "text-[var(--lp-ink)]"}`}
+                >
+                  {shortDollars(line.series.total)}
+                </span>
+              </li>
+            ))}
+        </ul>
+      )}
     </div>
   );
 }
 
 function LineSwatch({ line }: { line: ChartLine }) {
   return (
-    <span
-      aria-hidden="true"
-      className="inline-block w-4 shrink-0"
-      style={{
-        borderTop: `${Math.max(1.5, line.width)}px ${line.dashed ? "dashed" : "solid"} ${line.stroke}`,
-        opacity: line.faint ? 0.5 : 1
-      }}
-    />
+    <svg aria-hidden="true" width={18} height={6} viewBox="0 0 18 6" className="shrink-0">
+      <line
+        x1={1.5}
+        x2={16.5}
+        y1={3}
+        y2={3}
+        stroke={line.stroke}
+        strokeOpacity={line.opacity}
+        strokeWidth={Math.max(1.75, line.width)}
+        strokeDasharray={line.pattern === "dashed" ? "4 3" : line.pattern === "dotted" ? "1 3" : undefined}
+        strokeLinecap="round"
+      />
+    </svg>
   );
+}
+
+type ResultCard = { key: string; title: string; headline: string; detail: string; line: ChartLine | undefined };
+
+/** Plain verdict for Claude total minus OpenWork total. Says so when Claude is cheaper. */
+function verdict(delta: number): string {
+  if (Math.abs(delta) < 0.5) return "Same price";
+  return delta > 0 ? `You keep ${dollars.format(delta)}` : `Claude costs ${dollars.format(-delta)} less`;
+}
+
+/** "Claude Sonnet 5" -> "Sonnet 5" when the vendor already says Claude. */
+function shortClaudeModel(label: string): string {
+  return label.replace(/^Claude\s+/, "");
 }
 
 export function CoworkCostCalculator({
@@ -470,38 +539,45 @@ export function CoworkCostCalculator({
   });
 
   const claudeLine = claudeSide === "3p" ? result.claude3p : result.claude;
-  // The headline always compares the same model on both sides; the open model is an extra line.
-  const delta = claudeLine.total - result.openwork.total;
-  const tie = Math.abs(delta) < 0.5;
-  const claudeShort = claudeSide === "3p" ? "Claude on 3P" : claudeLine.name;
-  const comparison = `${claudeShort} vs ${result.openwork.name}, both with ${model.label}`;
   const period = periodLabel(years);
+  // "Claude Team, Premium seats" -> vendor "Claude Team", seat "Premium seats".
+  const [claudePlanVendor = claudeLine.name, claudeSeat] = result.claude.name.split(", ");
+  const claudeVendor = claudeSide === "3p" ? "Claude on 3P" : claudePlanVendor;
+  const claudeModelShort = shortClaudeModel(model.label);
+  const claudePlanLabel = `${claudePlanVendor} · ${claudeModelShort}${claudeSeat ? ` (${claudeSeat})` : ""}`;
+  const claude3pLabel = `Claude on 3P · ${claudeModelShort}`;
+  const claudeLabel = claudeSide === "3p" ? claude3pLabel : claudePlanLabel;
+  const openworkLabel = `OpenWork · ${model.label}`;
+  const openModelLabel = result.openModel ? `OpenWork · ${result.openModel.modelLabel}` : "";
 
   const lines: ChartLine[] = [
-    { key: "claude", label: claudeLine.name, series: claudeLine, stroke: "var(--lp-muted)", width: 2, strong: true },
-    {
-      key: "openwork",
-      label: `${result.openwork.name}`,
-      series: result.openwork,
-      stroke: "var(--lp-ink)",
-      width: 2.5,
-      strong: true
-    },
+    { key: "claude", label: claudeLabel, series: claudeLine, stroke: claudeGray, width: 2.25, pattern: "solid", opacity: 1 },
+    ...(claudeSide === "plan"
+      ? [
+          {
+            key: "3p",
+            label: claude3pLabel,
+            series: result.claude3p,
+            stroke: claudeGray,
+            width: 1.75,
+            pattern: "dotted" as const,
+            opacity: 0.75
+          }
+        ]
+      : []),
+    { key: "openwork", label: openworkLabel, series: result.openwork, stroke: accent, width: 2.75, pattern: "solid", opacity: 1 },
     ...(result.openModel
       ? [
           {
             key: "open",
-            label: result.openModel.modelLabel,
+            label: openModelLabel,
             series: result.openModel,
-            stroke: "var(--lp-ink)",
-            width: 2,
-            dashed: true,
-            strong: true
+            stroke: accent,
+            width: 2.25,
+            pattern: "dashed" as const,
+            opacity: 1
           }
         ]
-      : []),
-    ...(claudeSide === "plan"
-      ? [{ key: "3p", label: "Claude on 3P", series: result.claude3p, stroke: "var(--lp-faint)", width: 1.5, faint: true }]
       : [])
   ];
 
@@ -514,31 +590,39 @@ export function CoworkCostCalculator({
       : [])
   ];
 
-  const headline = tie
-    ? "Same price with the same model"
-    : delta > 0
-      ? `You keep ${dollars.format(delta)}`
-      : `Claude costs ${dollars.format(-delta)} less`;
-  const openModelLine = (() => {
-    if (!result.openModel) return null;
-    const label = result.openModel.modelLabel;
-    const extra = result.openwork.total - result.openModel.total;
-    const openDelta = claudeLine.total - result.openModel.total;
-    if (delta > 0 && !tie && extra >= 0.5) return `…and ${dollars.format(extra)} more with ${label}`;
-    if (openDelta >= 0.5) return `With ${label} on OpenWork, you keep ${dollars.format(openDelta)}.`;
-    if (openDelta > -0.5) return `With ${label} on OpenWork, the price is the same.`;
-    return `With ${label} on OpenWork, Claude still costs ${dollars.format(-openDelta)} less.`;
-  })();
+  const delta = claudeLine.total - result.openwork.total;
+  const results: ResultCard[] = [
+    {
+      key: "same",
+      title: `Same model on both (${model.label})`,
+      headline: verdict(delta),
+      detail: `${claudeVendor} ${dollars.format(claudeLine.total)} vs OpenWork ${dollars.format(result.openwork.total)}`,
+      line: lines.find((line) => line.key === "openwork")
+    },
+    ...(result.openModel
+      ? [
+          {
+            key: "open",
+            title: `OpenWork with ${result.openModel.modelLabel}`,
+            headline: verdict(claudeLine.total - result.openModel.total),
+            detail: `${claudeVendor} ${dollars.format(claudeLine.total)} vs OpenWork ${dollars.format(result.openModel.total)}`,
+            line: lines.find((line) => line.key === "open")
+          }
+        ]
+      : [])
+  ];
   const reasonLine =
-    delta >= 0 || tie
-      ? tie && tier === "enterprise"
-        ? "Seats and tokens cost the same on both."
-        : null
-      : claudeLine.tokensIncluded
-        ? "Claude Team includes usage up to plan limits. OpenWork pays for tokens at API rates."
-        : claudeLine.seatsMonthly === 0
-          ? "Claude on 3P has no seat fee. Tokens cost the same on both."
-          : null;
+    delta >= 0.5
+      ? null
+      : delta > -0.5
+        ? tier === "enterprise"
+          ? "Seats and tokens cost the same on both."
+          : null
+        : claudeLine.tokensIncluded
+          ? "Claude Team includes usage up to plan limits. OpenWork pays for tokens at API rates."
+          : claudeLine.seatsMonthly === 0
+            ? "Claude on 3P has no seat fee. Tokens cost the same on both."
+            : null;
 
   const rows: { key: string; series: CostSeries; detail: string; strong: boolean }[] = [
     {
@@ -622,7 +706,7 @@ export function CoworkCostCalculator({
 
           <ModelSelect
             id={`${id}-model`}
-            label="Model, both sides"
+            label="Claude model (both sides)"
             models={claudeModels}
             value={model.id}
             onChange={setModelId}
@@ -636,7 +720,7 @@ export function CoworkCostCalculator({
                 onChange={(event) => setOpenOn(event.target.checked)}
                 className={`h-4 w-4 cursor-pointer rounded accent-[var(--lp-ink)] ${focusRing}`}
               />
-              Also try an open model on OpenWork
+              Compare an open model on OpenWork
             </label>
             <div className="w-[190px]">
               <ModelSelect
@@ -655,25 +739,11 @@ export function CoworkCostCalculator({
           </div>
         </form>
 
-        <div className="mt-8 border-t border-[var(--lp-border)] pt-8">
-          <div className="flex flex-col gap-5 md:flex-row md:items-end md:justify-between">
-            <div aria-live="polite" className="min-w-0">
-              <p className="text-[14px] text-[var(--lp-body)]">
-                {comparison}, {count.format(users)} people, over {period}
-              </p>
-              <p className="mt-1 text-[44px] font-light leading-[1.05] tracking-[-0.03em] tabular-nums text-[var(--lp-ink)] md:text-[56px] lg:text-[64px]">
-                {headline}
-              </p>
-              {openModelLine ? (
-                <p className="mt-2 text-[18px] font-light tabular-nums text-[var(--lp-ink)] md:text-[20px]">{openModelLine}</p>
-              ) : null}
-              {reasonLine ? <p className="mt-2 text-[14px] text-[var(--lp-body)]">{reasonLine}</p> : null}
-              {notices.map((notice) => (
-                <p key={notice} className="mt-1 text-[13px] text-[var(--lp-muted)]">
-                  {notice}
-                </p>
-              ))}
-            </div>
+        <div className="mt-8 border-t border-[var(--lp-border)] pt-6">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="text-[14px] text-[var(--lp-body)]">
+              {count.format(users)} people, over {period}
+            </p>
             <div className="w-[180px] shrink-0">
               <Segmented
                 name={`${id}-years`}
@@ -688,6 +758,35 @@ export function CoworkCostCalculator({
               />
             </div>
           </div>
+
+          <div
+            aria-live="polite"
+            className={`mt-5 grid gap-5 ${results.length > 1 ? "md:grid-cols-2 md:gap-0 md:divide-x md:divide-[var(--lp-border)]" : ""}`}
+          >
+            {results.map((card, index) => (
+              <div
+                key={card.key}
+                className={`min-w-0 ${index > 0 ? "border-t border-[var(--lp-border)] pt-5 md:border-t-0 md:pl-8 md:pt-0" : "md:pr-8"}`}
+              >
+                <h3 className="flex items-center gap-2 text-[14px] font-medium text-[var(--lp-ink)]">
+                  {card.line ? <LineSwatch line={card.line} /> : null}
+                  {card.title}
+                </h3>
+                <p className="mt-1.5 text-[30px] font-light leading-[1.1] tracking-[-0.03em] tabular-nums text-[var(--lp-ink)] sm:text-[36px]">
+                  {card.headline}
+                </p>
+                <p className="mt-1.5 text-[13px] tabular-nums text-[var(--lp-body)]">{card.detail}</p>
+                {card.key === "same" && reasonLine ? (
+                  <p className="mt-2 text-[13px] text-[var(--lp-body)]">{reasonLine}</p>
+                ) : null}
+              </div>
+            ))}
+          </div>
+          {notices.map((notice) => (
+            <p key={notice} className="mt-5 text-[13px] text-[var(--lp-muted)]">
+              {notice}
+            </p>
+          ))}
 
           <div className="mt-8">
             <CostChart
@@ -753,7 +852,7 @@ export function CoworkCostCalculator({
           </summary>
           <ul className="mt-3 space-y-1.5 text-[12.5px] leading-[19px] text-[var(--lp-body)]">
             <li>
-              Both sides use the same Claude model; the headline compares them. The open model is an extra line. Tokens per person = input × (uncached × input price + cached × cache
+              Both sides use the same Claude model; the first result compares them. The second result compares the same Claude plan with OpenWork on the open model you pick. Tokens per person = input × (uncached × input price + cached × cache
               price) + output × output price. Light, Typical, and Heavy assume 5M, 25M, or 100M input tokens a month, 70%
               cached.
             </li>
