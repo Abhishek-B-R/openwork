@@ -41,7 +41,7 @@ import { CalendarIcon } from "@/ui/main-content-switch";
 import { CollaborationReceipts, ComposerFootnote, SendButton, SummaryLine } from "@/ui/threads";
 import { useAutoGrow } from "@/ui/use-auto-grow";
 import { JumpToLatest, useConversationScroll } from "@/ui/use-conversation-scroll";
-import { SuperKeyStrip, useSuperKey } from "@/ui/use-super-key";
+import { SuperKeyHint, SuperKeyStrip, useSuperKey } from "@/ui/use-super-key";
 import { ConversationWindow, useConversationWindow } from "@/ui/conversation-window";
 import { appendVoiceDraft, groupVoiceReply, type VoiceExpectation } from "@/lib/voice";
 import { useVoice } from "@/ui/use-voice";
@@ -952,8 +952,9 @@ function GroupChatView({
           {assignmentMode ? (
             <p className="mb-2 px-2 text-[11px] text-mist" data-testid="group-assignment-mode">Something one of them should own, separate from this chat</p>
           ) : null}
-          <div className={`glass-sheen relative rounded-[24px] border bg-panel/55 p-3 shadow-[0_8px_32px_rgb(0_0_0/0.35)] backdrop-blur-xl backdrop-saturate-150 transition-colors focus-within:border-spark/50 ${assignmentMode ? "border-spark/35" : "border-line"}`} data-testid="coworker-input-surface" data-glint="surface" data-super={superKey.active ? "true" : "false"}>
+          <div className={`glass-sheen @container relative rounded-[24px] border bg-panel/55 p-3 shadow-[0_8px_32px_rgb(0_0_0/0.35)] backdrop-blur-xl backdrop-saturate-150 transition-colors focus-within:border-spark/50 ${assignmentMode ? "border-spark/35" : "border-line"}`} data-testid="coworker-input-surface" data-glint="surface" data-super={superKey.active ? "true" : "false"}>
             <SuperKeyStrip pace={false} />
+            <SuperKeyHint />
             {!assignmentMode ? <VoicePanel voice={voice} /> : null}
             {mention && mentionOptions.length > 0 && !assignmentMode ? (
               <ul
