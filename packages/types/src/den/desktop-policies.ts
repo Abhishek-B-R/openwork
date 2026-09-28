@@ -12,12 +12,25 @@ import { z } from "zod";
  *   so the projection below keeps it and the updater keeps honouring it. */
 export const DESKTOP_POLICY_ENFORCEMENT_ENABLED: boolean = false;
 
+/**
+ * The two keys that keep "only managed providers" true are enforced again,
+ * while every other desktop feature policy stays suspended with the flag
+ * above: Airwallex, Brainforce and other enterprise customers rely on it.
+ * Enforcement never blocks startup, sign-in or chat: callers apply the last
+ * known policy and allow when none is known (see #5131).
+ */
+export const ENFORCED_DESKTOP_POLICY_KEYS = ["allowCustomProviders", "allowZenModel"] as const;
+
+export function desktopPolicyKeyEnforced(key: string): boolean {
+  return DESKTOP_POLICY_ENFORCEMENT_ENABLED || (ENFORCED_DESKTOP_POLICY_KEYS as readonly string[]).includes(key);
+}
+
 /** Runtime-only projection; never persist this over the control-plane config. */
 export function desktopCapabilityConfig(config: DesktopConfig): DesktopConfig {
   if (DESKTOP_POLICY_ENFORCEMENT_ENABLED) return config;
   const { execution: _execution, ...effective } = config;
   for (const key of desktopPolicyKeys) {
-    if (key !== "showWelcomePage") delete effective[key];
+    if (key !== "showWelcomePage" && !desktopPolicyKeyEnforced(key)) delete effective[key];
   }
   return effective;
 }

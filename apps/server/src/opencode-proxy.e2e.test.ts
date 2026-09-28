@@ -413,7 +413,12 @@ describe("workspace OpenCode proxy", () => {
       signal: AbortSignal.timeout(1_000),
     });
     expect(identity.status).toBe(204);
-    expect(denRequests).toEqual([]);
+    // Identity installation does not wait on Den; the only Den call is the background policy read
+    // ("only managed providers" is enforced), which must settle before the prompts below.
+    const settle = Date.now() + 2_000;
+    while (!denRequests.length && Date.now() < settle) await new Promise((resolve) => setTimeout(resolve, 20));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(denRequests.every(({ method, pathname }) => method === "GET" && pathname === "/v1/me/desktop-config")).toBe(true);
     outage = true;
     const denCount = denRequests.length;
     const prompt = (providerID: string, token = openwork.token) => fetch(`${base}/workspace/ws_1/opencode/session/ses_created/prompt_async`, {
@@ -466,7 +471,8 @@ describe("workspace OpenCode proxy", () => {
     const response = await fixture.prompt("local-byok");
     expect(response.status).toBe(204);
     expect(fixture.prompts()).toHaveLength(1);
-    expect(fixture.denRequests).toEqual([]);
+    // Only the background policy read reached Den; a rejected identity never blocks the prompt.
+    expect(fixture.denRequests.every(({ pathname }) => pathname === "/v1/me/desktop-config")).toBe(true);
   });
 
   test.serial("native history pagination exposes cursors to browsers, preserves upstream headers, and verifies every page owner", async () => {

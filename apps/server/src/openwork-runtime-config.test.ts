@@ -68,46 +68,91 @@ describe("openwork runtime config file", () => {
     expect(OPENWORK_AGENT_PROMPT).toContain("context.features.connectionQuestions === true");
   });
 
-  test("signed-in and signed-out runtime ignores cached org restrictions and preserves local models", async () => {
+  test("a verified only-managed-providers policy limits the engine while signed in; signing out lifts it; execution stays suspended", async () => {
     const { config } = await setup();
-    const provider = { ollama: { models: { "local-model": { name: "Local model" } } } };
+    const provider = { ollama: { models: { "local-model": { name: "Local model" } } }, lpr_team: { models: { team: { name: "Team" } } } };
     await writeGlobalRuntimeOpencodeConfig(config, (current) => ({ ...current, provider }));
-    await writeManagedDesktopPolicy(config, {
+    const policyDocument = {
       allowCustomProviders: false, allowZenModel: false,
-      execution: { commands: "deny", blockedCommands: [], blockBrowserUploads: false },
-    });
-    const snapshot = await readGlobalRuntimeOpencodeConfig(config);
-    expect(buildOpenworkRuntimeConfigObjectFromSnapshot(snapshot).enabled_providers).toBeUndefined();
-    await writeOpenworkRuntimeConfigFile(config);
-    const rendered = await readConfigFile(config);
-    expect(rendered.enabled_providers).toBeUndefined();
-    expect(rendered.provider).toEqual(provider);
-    expect(rendered.permission).toEqual({});
-    expect((await readGlobalRuntimeOpencodeConfig(config)).managedPolicy).toEqual(snapshot.managedPolicy);
-
-    const den = Bun.serve({ port: 0, fetch: () => Response.json(snapshot.managedPolicy) });
+      execution: { commands: "deny" as const, blockedCommands: [], blockBrowserUploads: false },
+    };
+    const den = Bun.serve({ port: 0, fetch: () => Response.json(policyDocument) });
     cleanups.push(() => den.stop(true));
     const policy = managedDesktopPolicy(config);
     await policy.setSession({ baseUrl: `http://127.0.0.1:${den.port}`, token: "test-token", orgId: "test-org" });
-    await expect(policy.assert("provider", { providerID: "ollama" })).resolves.toBeUndefined();
+    await policy.current();
     await writeOpenworkRuntimeConfigFile(config);
-    expect(await readConfigFile(config)).toEqual(rendered);
+    const restricted = await readConfigFile(config);
+    expect(restricted.enabled_providers).toEqual(["lpr_team"]);
+    expect(restricted.provider).toEqual(provider);
+    // Execution rules and every other desktop policy stay suspended.
+    expect(restricted.permission).toEqual({});
+    await expect(policy.assert("provider", { providerID: "ollama" })).rejects.toMatchObject({ status: 403, code: "organization_policy_denied" });
+    await expect(policy.assert("model", { providerID: "ollama", modelID: "local-model" })).rejects.toMatchObject({ status: 403, code: "organization_model_denied" });
+    await expect(policy.assert("model", { providerID: "lpr_team", modelID: "team" })).resolves.toBeUndefined();
+    await expect(policy.assert("shell", { command: "curl https://example.com" })).resolves.toBeUndefined();
+    await expect(policy.assert("file_write", { filePath: "/tmp/opencode.json" })).resolves.toBeUndefined();
+
+    // A cached policy is not device enrollment: signing out ends enforcement (#5131).
     await policy.clearSession();
+    expect((await readGlobalRuntimeOpencodeConfig(config)).managedPolicy).toBeUndefined();
     await expect(policy.assert("provider", { providerID: "ollama" })).resolves.toBeUndefined();
     await expect(policy.assert("model", { providerID: "ollama", modelID: "local-model" })).resolves.toBeUndefined();
     await writeOpenworkRuntimeConfigFile(config);
-    expect(await readConfigFile(config)).toEqual(rendered);
+    const signedOut = await readConfigFile(config);
+    expect(signedOut.enabled_providers).toBeUndefined();
+    expect(signedOut.provider).toEqual(provider);
   });
 
-  test("restrictive policy does not filter materialized or local providers", () => {
+  test("only managed providers is enforced on engine sign-in and sends, keeps the last verified policy when Den drops, and never parses non-JSON bodies", async () => {
+    const { config } = await setup();
+    let down = false;
+    const den = Bun.serve({ port: 0, fetch: () => down ? new Response(null, { status: 503 }) : Response.json({ allowCustomProviders: false, allowZenModel: true }) });
+    cleanups.push(() => den.stop(true));
+    const policy = managedDesktopPolicy(config);
+    await policy.setSession({ baseUrl: `http://127.0.0.1:${den.port}`, token: "test-token", orgId: "test-org" });
+    await policy.current();
+    const post = (path: string, body?: unknown) => policy.assertRequest(new Request(`http://localhost${path}`, {
+      method: "POST", ...(body === undefined ? {} : { body: typeof body === "string" ? body : JSON.stringify(body) }) }), path, true);
+    await expect(post("/opencode/auth/ollama")).rejects.toMatchObject({ code: "organization_policy_denied" });
+    await expect(post("/opencode/provider/anthropic/oauth/authorize")).rejects.toMatchObject({ code: "organization_policy_denied" });
+    await expect(post("/opencode/session/s1/prompt_async", { model: { providerID: "ollama", modelID: "local" } })).rejects.toMatchObject({ code: "organization_model_denied" });
+    await expect(post("/opencode2/api/session/s1/message", { model: { providerID: "lpr_team", id: "team" } })).resolves.toBeUndefined();
+    await expect(post("/opencode/session/s1/prompt_async", { model: { providerID: "opencode", modelID: "big-pickle" } })).resolves.toBeUndefined();
+    await expect(post("/opencode/session/s1/prompt_async", "not json")).resolves.toBeUndefined();
+    await expect(policy.assertRequest(new Request("http://localhost/opencode/auth/ollama"), "/opencode/auth/ollama", true)).resolves.toBeUndefined();
+    // Adding managed providers (cloud imports) and removing any provider stay allowed; adding a personal one does not.
+    await expect(policy.assert("provider", { providerIDs: ["lpr_team", "ipr_gateway", "openwork"] })).resolves.toBeUndefined();
+    await expect(policy.assert("provider", { providerIDs: [] })).resolves.toBeUndefined();
+    await expect(policy.assert("provider", { providerIDs: ["lpr_team", "personal"] })).rejects.toMatchObject({ code: "organization_policy_denied" });
+    // Den going down never unlocks personal providers for this sign-in, and never blocks managed ones.
+    down = true;
+    await policy.current();
+    await expect(policy.assert("model", { providerID: "ollama" })).rejects.toMatchObject({ code: "organization_model_denied" });
+    await expect(policy.assert("model", { providerID: "ipr_gateway" })).resolves.toBeUndefined();
+  });
+
+  test("a first policy read that fails leaves the desktop fully usable", async () => {
+    const { config } = await setup();
+    const den = Bun.serve({ port: 0, fetch: () => new Response(null, { status: 503 }) });
+    cleanups.push(() => den.stop(true));
+    const policy = managedDesktopPolicy(config);
+    await policy.setSession({ baseUrl: `http://127.0.0.1:${den.port}`, token: "test-token", orgId: "test-org" });
+    await policy.current();
+    expect(await policy.current()).toBeNull();
+    await expect(policy.assert("provider", { providerID: "ollama" })).resolves.toBeUndefined();
+    await expect(policy.assert("model", { providerID: "ollama" })).resolves.toBeUndefined();
+  });
+
+  test("only managed providers lists the managed providers for the engine, with Zen only when allowed", () => {
     const provider = { lpr_legacy: {}, ipr_gateway: {}, openwork: {}, personal: {}, opencode: {} };
-    const restricted = buildOpenworkRuntimeConfigObjectFromSnapshot({
+    expect(buildOpenworkRuntimeConfigObjectFromSnapshot({
       managedPolicy: { allowCustomProviders: false, allowZenModel: false }, provider,
-    });
-    expect(restricted.enabled_providers).toBeUndefined();
+    }).enabled_providers).toEqual(["lpr_legacy", "ipr_gateway", "openwork"]);
     expect(buildOpenworkRuntimeConfigObjectFromSnapshot({
       managedPolicy: { allowCustomProviders: false }, provider,
-    }).enabled_providers).toBeUndefined();
+    }).enabled_providers).toEqual(["lpr_legacy", "ipr_gateway", "openwork", "opencode"]);
+    expect(buildOpenworkRuntimeConfigObjectFromSnapshot({ managedPolicy: { allowCustomProviders: true }, provider }).enabled_providers).toBeUndefined();
     expect(buildOpenworkRuntimeConfigObjectFromSnapshot({ provider }).enabled_providers).toBeUndefined();
   });
 
