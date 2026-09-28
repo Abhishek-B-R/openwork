@@ -6,12 +6,14 @@ import type { DenSession } from "@/lib/den";
 import type { CoworkerActivity } from "@/lib/threads";
 import { CoworkerMark } from "@/ui/brand";
 import { CoworkerAvatar, GroupAvatars } from "@/ui/coworker-avatar";
-import { Button, IconButton, PlusIcon, SearchIcon, SlidersIcon, StatusDot, Tooltip } from "@/ui/kit";
+import { Button, IconButton, PlusIcon, SearchIcon, StatusDot, Tooltip } from "@/ui/kit";
 import type { ResizablePanel } from "@/ui/use-resizable-panel";
 import { CalendarIcon, MainContentSwitch, type MainContent } from "@/ui/main-content-switch";
 import { CalendarSidebar } from "@/ui/calendar-sidebar";
 import type { CalendarData } from "@/ui/calendar-data";
+import { calendarItems } from "@/lib/calendar";
 import type { CalendarPreferences, CalendarPreferencesChange } from "@/ui/calendar-preferences";
+import { useFeatures } from "@/ui/use-features";
 
 export type CoworkerMainContent = MainContent;
 
@@ -50,6 +52,9 @@ function activityTextTone(activity: CoworkerActivity | undefined): string {
 
 const DOT_BG: Record<Tone, string> = { spark: "bg-spark", ready: "bg-ready", amber: "bg-amber", rose: "bg-rose", mist: "bg-mist" };
 
+/** The floating list title's height: the list starts below it and names the section under it. */
+const RAIL_TITLE_HEIGHT = 34;
+
 export function CoworkerRail({
   coworkers,
   runtime,
@@ -60,6 +65,8 @@ export function CoworkerRail({
   onSelect,
   onNewCoworker,
   onOpenOpenWork,
+  onOpenMarketplace,
+  drawer = false,
   groups = [],
   groupLines = {},
   groupActiveSlugs = {},
@@ -95,9 +102,13 @@ export function CoworkerRail({
   selectedSlug: string;
   /** Width, collapse state, and the separator for this edge; owned by the shell. */
   panel: ResizablePanel;
+  /** Shown as a drawer over the conversation (Focus mode, a narrow window): full width, no resize edge. */
+  drawer?: boolean;
   onSelect: (slug: string) => void;
   onNewCoworker: () => void;
   onOpenOpenWork: () => void;
+  /** Featured coworkers and apps, from the store icon beside the account row while Marketplace is on. */
+  onOpenMarketplace: () => void;
   /** Group chats (several coworkers in one conversation), newest first, archived ones excluded. */
   groups?: CoworkerGroupSummary[];
   /** One plain line per group: the latest activity, when known. */
@@ -110,9 +121,25 @@ export function CoworkerRail({
   unreadMentions?: number;
   activityError?: boolean;
 }) {
+  // Without Calendar there are no events: no Chat/Calendar switch, no calendar shortcuts,
+  // and group chats need no filter because they are the only kind. Without
+  // Notifications there is no Activity bell; without Marketplace, no store icon.
+  const { calendar: calendarEnabled, notifications: notificationsEnabled, marketplace: marketplaceEnabled } = useFeatures();
   const bySlug = new Map(coworkers.map((coworker) => [coworker.slug, coworker]));
   const membersOf = (group: CoworkerGroupSummary) => group.participantSlugs.map((slug) => bySlug.get(slug)).filter((member): member is CoworkerSummary => Boolean(member));
   const [query, setQuery] = useState("");
+  /** The list scrolled (its rows fade out under the title), and which section the title names. */
+  const listRef = useRef<HTMLElement>(null);
+  const groupTitleRef = useRef<HTMLDivElement>(null);
+  const [listScrolled, setListScrolled] = useState(false);
+  const [listSection, setListSection] = useState<"coworkers" | "groups">("coworkers");
+  const followList = () => {
+    const list = listRef.current;
+    if (!list) return;
+    setListScrolled(list.scrollTop > 1);
+    const groupTop = groupTitleRef.current?.offsetTop ?? Number.POSITIVE_INFINITY;
+    setListSection(list.scrollTop + RAIL_TITLE_HEIGHT >= groupTop ? "groups" : "coworkers");
+  };
   const [calendarQuery, setCalendarQuery] = useState("");
   const [showGroupFilters, setShowGroupFilters] = useState(false);
   const filterMenuId = useId();
@@ -127,7 +154,8 @@ export function CoworkerRail({
     return { groups: true, events: true };
   });
   useEffect(() => { try { window.localStorage.setItem("coworker.rail.group-types.v1", JSON.stringify(groupTypes)); } catch { /* Filtering still works without storage. */ } }, [groupTypes]);
-  const visibleGroups = groups.filter((group) => !group.archivedAt && (group.eventId || eventGroupIds.has(group.id) ? groupTypes.events : groupTypes.groups) && (!query.trim() || group.name.toLowerCase().includes(query.trim().toLowerCase())));
+  const isEvent = (group: CoworkerGroupSummary) => Boolean(group.eventId || eventGroupIds.has(group.id));
+  const visibleGroups = groups.filter((group) => !group.archivedAt && (!calendarEnabled ? !isEvent(group) : isEvent(group) ? groupTypes.events : groupTypes.groups) && (!query.trim() || group.name.toLowerCase().includes(query.trim().toLowerCase())));
   const [peek, setPeek] = useState<{ slug: string; top: number } | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const [focusSearchOnExpand, setFocusSearchOnExpand] = useState(false);
@@ -143,7 +171,7 @@ export function CoworkerRail({
   const activityMode = mainContent === "activity";
   const collapsed = panel.collapsed && !activityMode;
   const width = activityMode ? Math.max(panel.bounds.min, panel.width) : panel.width;
-  const calendarMode = mainContent === "calendar";
+  const calendarMode = calendarEnabled && mainContent === "calendar";
 
   function closeGroupFilters(restoreFocus = false) {
     setShowGroupFilters(false);
@@ -223,18 +251,19 @@ export function CoworkerRail({
     .split(/\s+/).slice(0, 2).map((part) => Array.from(part)[0]).join("").toLocaleUpperCase();
   const accountDescription = `${accountName} · ${accountLabel} · Account and settings`;
   const activityLabel = `Activity${unreadActivity ? ` · ${unreadActivity} unread` : ""}${unreadMentions ? ` · ${unreadMentions} mentions of you` : ""}${activityError ? " · Refresh unavailable" : ""}`;
-  const activityBell = <IconButton label={activityLabel} tooltipSide="right" aria-pressed={mainContent === "activity"} data-testid="coworker-activity-button"
+  const activityBell = !notificationsEnabled ? null : <IconButton label={activityLabel} tooltipSide="right" aria-pressed={mainContent === "activity"} data-testid="coworker-activity-button"
     className={`window-no-drag relative shrink-0 ${collapsed ? "size-6" : "size-7"} ${mainContent === "activity" ? "bg-white/8 text-snow" : ""}`} onClick={() => onMainContentChange("activity")}>
     <svg className="size-4" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M7.5 16.5a2.5 2.5 0 0 0 5 0M5 8a5 5 0 0 1 10 0c0 4 1.75 4.5 1.75 6H3.25C3.25 12.5 5 12 5 8ZM10 1.5V3" /></svg>
-    {unreadActivity > 0 ? <span aria-hidden="true" className={`absolute -right-1 -top-1 flex min-w-4 items-center justify-center rounded-md px-1 text-[10px] font-semibold leading-4 tabular-nums ${unreadMentions ? "bg-spark/20 text-spark" : "bg-white/10 text-snow"}`}>{unreadActivity > 99 ? "99+" : unreadActivity}</span> : activityError ? <span aria-hidden="true" className="absolute right-0 -top-1 text-[10px] text-amber">!</span> : null}
+    {unreadActivity > 0 ? <span aria-hidden="true" data-testid="activity-badge" className={`pointer-events-none absolute right-0 top-0 flex h-3.5 min-w-3.5 translate-x-1/4 -translate-y-1/4 items-center justify-center rounded-full px-[3px] text-[9px] font-semibold leading-none tabular-nums ring-2 ring-[var(--color-ink)] ${unreadMentions ? "bg-spark text-white" : "bg-white/20 text-snow"}`}>{unreadActivity > 9 ? "9+" : unreadActivity}</span> : activityError ? <span aria-hidden="true" className="absolute right-0 -top-1 text-[10px] text-amber">!</span> : null}
   </IconButton>;
-  const filterControl = <IconButton label="Filter group chats and events" tooltipSide="right" aria-haspopup="menu" aria-expanded={showGroupFilters} aria-controls={showGroupFilters ? filterMenuId : undefined} data-testid="group-filter-trigger" className={!groupTypes.groups || !groupTypes.events ? "text-spark" : ""} onClick={(event) => showGroupFilters ? closeGroupFilters(true) : openGroupFilters(event.currentTarget)} onKeyDown={(event) => { if (event.key === "ArrowDown") { event.preventDefault(); openGroupFilters(event.currentTarget); } }}>
+  const filterControl = !calendarEnabled ? null : <IconButton label="Filter group chats and events" tooltipSide="right" aria-haspopup="menu" aria-expanded={showGroupFilters} aria-controls={showGroupFilters ? filterMenuId : undefined} data-testid="group-filter-trigger" className={!groupTypes.groups || !groupTypes.events ? "text-spark" : ""} onClick={(event) => showGroupFilters ? closeGroupFilters(true) : openGroupFilters(event.currentTarget)} onKeyDown={(event) => { if (event.key === "ArrowDown") { event.preventDefault(); openGroupFilters(event.currentTarget); } }}>
     <svg className="size-4" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.25" strokeLinejoin="round" aria-hidden="true"><path d="M2 3h12L9.5 8v4.25l-3 1V8L2 3Z" /></svg>
   </IconButton>;
 
   return (
     <aside
-      className={`glass-rail relative z-20 flex h-full shrink-0 flex-col border-r border-line ${panel.resizing ? "" : "transition-[width] duration-200"}`}
+      data-glint="surface"
+      className={`glass-rail glass-sheen relative z-20 flex h-full shrink-0 flex-col border-r border-line ${panel.resizing ? "" : "transition-[width] duration-200"}`}
       style={{ width }}
       data-testid="coworker-rail"
       data-collapsed={collapsed ? "true" : "false"}
@@ -244,7 +273,7 @@ export function CoworkerRail({
         {/* Use the existing titlebar space; the Chat / Calendar row never moves.
             In the folded rail the native traffic lights own that space. */}
         {!collapsed ? <div className="absolute right-3 top-2">{activityBell}</div> : null}
-        <MainContentSwitch value={mainContent} onChange={onMainContentChange} chatAvailable={chatAvailable} compact={collapsed} />
+        {calendarEnabled ? <MainContentSwitch value={mainContent} onChange={onMainContentChange} chatAvailable={chatAvailable} compact={collapsed} /> : null}
         <div className={`${activityMode ? "hidden" : "flex"} items-center ${collapsed ? "justify-center gap-0" : "gap-2"}`}>
           {collapsed ? <>
             {!calendarMode ? <IconButton label="Search coworkers" className="window-no-drag size-6" data-testid="coworker-rail-search" onClick={() => { setFocusSearchOnExpand(true); panel.expand(); }}><SearchIcon /></IconButton> : null}
@@ -259,7 +288,7 @@ export function CoworkerRail({
       <div className={calendarMode || activityMode ? "hidden" : "flex min-h-0 flex-1 flex-col"} data-testid="chat-rail-content">
       {panel.collapsed ? (
         <>
-          <nav aria-label="Coworkers" className="flex flex-1 flex-col items-center gap-1 overflow-y-auto px-1 pb-4 pt-3">
+          <nav aria-label="Coworkers" className="flex flex-1 flex-col items-center gap-1 overflow-y-auto overflow-x-hidden px-1 pb-4 pt-3">
             {coworkers.map((coworker) => {
               const activity = activityBySlug[coworker.slug];
               const active = coworker.slug === selectedSlug;
@@ -300,9 +329,9 @@ export function CoworkerRail({
                     className={`absolute bottom-1.5 right-1.5 size-2.5 rounded-full ring-2 ring-[rgb(7_10_15)] ${DOT_BG[tone]} ${activity?.state === "working" ? "animate-pulse" : ""}`}
                   />
                 </button>
-                <Tooltip content={`Open ${coworker.name}'s calendar`} side="right">
+                {calendarEnabled ? <Tooltip content={`Open ${coworker.name}'s calendar`} side="right">
                   <button type="button" aria-label={`Open ${coworker.name}'s calendar`} className="window-no-drag absolute bottom-1 left-0 inline-flex size-4 items-center justify-center rounded bg-ink/80 text-mist hover:text-snow focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-spark/60 [&>svg]:size-[14px]" onClick={(event) => { event.stopPropagation(); onOpenCalendar(coworker.slug); }} data-testid="coworker-calendar-shortcut"><CalendarIcon /></button>
-                </Tooltip>
+                </Tooltip> : null}
                 </div>
               );
             })}
@@ -355,8 +384,14 @@ export function CoworkerRail({
         </>
       ) : (
         <>
-          <p className="px-4 pb-1 pt-3 text-[10px] font-semibold uppercase tracking-[0.14em] text-mist">Coworkers</p>
-          <nav aria-label="Coworkers" className="flex-1 space-y-0.5 overflow-y-auto px-2 pb-5">
+          {/* One scroll for the whole list, its bar the full height. The title floats over the top and names
+              the section beneath it; rows fade out before they reach it, so it needs no background of its own. */}
+          <div className="relative flex min-h-0 flex-1 flex-col">
+          <p aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 z-10 px-4 pb-1.5 pt-3 text-[10px] font-semibold uppercase tracking-[0.14em] text-mist" data-testid="rail-section-title">
+            {listSection === "groups" ? "Group chats" : "Coworkers"}
+          </p>
+          <nav ref={listRef} onScroll={followList} aria-label="Coworkers" className="rail-list min-h-0 flex-1 overflow-y-auto pb-5" style={{ paddingTop: RAIL_TITLE_HEIGHT }} data-scrolled={listScrolled ? "true" : "false"} data-testid="coworker-rail-list">
+            <div className="space-y-0.5 px-2">
             {visibleCoworkers.map((coworker) => {
               const activity = activityBySlug[coworker.slug];
               const active = coworker.slug === selectedSlug;
@@ -398,9 +433,9 @@ export function CoworkerRail({
                       <span className="min-w-[3ch] shrink-0 text-right text-[10px] leading-5 tabular-nums text-mist">{relativeTime(activity?.updatedAt ?? 0)}</span>
                     </span>
                     <span data-testid="coworker-rail-status" className={`mt-0.5 flex h-4 min-w-0 items-center gap-1.5 text-[11px] font-medium leading-4 ${activityTextTone(activity)}`}>
-                      <Tooltip content={`Open ${coworker.name}'s calendar`} side="right">
+                      {calendarEnabled ? <Tooltip content={`Open ${coworker.name}'s calendar`} side="right">
                         <button type="button" aria-label={`Open ${coworker.name}'s calendar`} className="window-no-drag pointer-events-auto inline-flex size-4 shrink-0 items-center justify-center rounded text-mist hover:bg-white/6 hover:text-snow focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-spark/60 [&>svg]:size-[14px]" onClick={(event) => { event.stopPropagation(); onOpenCalendar(coworker.slug); }} data-testid="coworker-calendar-shortcut"><CalendarIcon /></button>
-                      </Tooltip>
+                      </Tooltip> : null}
                       <span className="flex size-2 shrink-0 items-center justify-center"><StatusDot tone={activityTone(activity)} /></span>
                       <RailStatusLabel coworker={coworker} activity={activity} />
                     </span>
@@ -417,12 +452,14 @@ export function CoworkerRail({
             })}
             {coworkers.length === 0 ? <p className="px-2.5 py-4 text-xs text-mist">No coworkers yet. Add your first teammate.</p> : null}
             {coworkers.length > 0 && visibleCoworkers.length === 0 ? <p className="px-2.5 py-4 text-xs text-mist">No matching coworkers.</p> : null}
+            </div>
             {coworkers.length > 0 || groups.length > 0 ? (
               <>
-                <div className="flex items-center justify-between gap-2 px-2 pt-3">
+                <div ref={groupTitleRef} className="mt-2 flex items-center justify-between gap-2 pb-1.5 pl-4 pr-2 pt-3">
                   <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-mist">Group chats</p>
                   {filterControl}
                 </div>
+                <div className="space-y-0.5 px-2">
                 {visibleGroups.map((group) => {
                   const members = membersOf(group);
                   const active = group.id === selectedGroupId;
@@ -445,7 +482,7 @@ export function CoworkerRail({
                         <GroupAvatars members={members} size={22} motion="navigation" activeSlugs={groupActiveSlugs[group.id]} />
                       </span>
                       <span className="min-w-0 flex-1">
-                        <span className="flex h-5 items-center gap-2"><span className="min-w-0 truncate text-sm font-semibold leading-5 text-snow">{group.name}</span>{group.eventId || eventGroupIds.has(group.id) ? <span className="shrink-0 text-[9px] font-medium text-spark">Event</span> : null}</span>
+                        <span className="flex h-5 items-center gap-2"><span className="min-w-0 truncate text-sm font-semibold leading-5 text-snow">{group.name}</span>{isEvent(group) ? <span className="shrink-0 text-[9px] font-medium text-spark">Event</span> : null}</span>
                         <span className="mt-0.5 block h-4 truncate text-[11px] leading-4 text-mist" title={groupLines[group.id] || members.map((member) => member.name).join(", ")} data-testid="group-rail-line">{groupLines[group.id] || members.map((member) => member.name).join(", ")}</span>
                       </span>
                     </button>
@@ -462,20 +499,20 @@ export function CoworkerRail({
                     New group chat
                   </button>
                 ) : null}
+                </div>
               </>
             ) : null}
           </nav>
+          </div>
         </>
       )}
       </div>
-      <div className={calendarMode ? "flex min-h-0 flex-1 flex-col" : "hidden"} data-testid="calendar-rail-content">
-        {panel.collapsed ? <div className="flex flex-1 flex-col items-center gap-2 px-1 pt-3">
-          <IconButton label="Expand calendars" tooltipSide="right" onClick={() => { setFocusSearchOnExpand(true); panel.expand(); }} data-testid="calendar-rail-expand"><CalendarIcon /></IconButton>
-          <p className="text-center text-[10px] leading-snug text-mist">Your team's calendar</p>
-        </div> : <CalendarSidebar coworkers={coworkers} data={calendarData} preferences={calendarPreferences} onPreferencesChange={onCalendarPreferencesChange} query={calendarQuery} />}
-      </div>
+      {calendarEnabled ? <div className={calendarMode ? "flex min-h-0 flex-1 flex-col" : "hidden"} data-testid="calendar-rail-content">
+        {panel.collapsed ? <FoldedCalendar data={calendarData} coworkers={coworkers} preferences={calendarPreferences} onPreferencesChange={onCalendarPreferencesChange} onExpand={() => { setFocusSearchOnExpand(true); panel.expand(); }} /> : <CalendarSidebar coworkers={coworkers} data={calendarData} preferences={calendarPreferences} onPreferencesChange={onCalendarPreferencesChange} query={calendarQuery} />}
+      </div> : null}
       <div className={activityMode ? "flex min-h-0 flex-1 flex-col" : "hidden"} data-testid="activity-rail-content">{activityContent}</div>
-      <div className="window-no-drag shrink-0 border-t border-line/60 p-2">
+      {/* The account row opens Settings; the Marketplace is one icon beside it. Folded, they stack. */}
+      <div className={`window-no-drag flex shrink-0 items-center gap-1.5 border-t border-line/60 p-2 ${collapsed ? "flex-col" : ""}`}>
         <Tooltip content={collapsed ? accountDescription : ""} side="right">
           <button
             type="button"
@@ -483,26 +520,27 @@ export function CoworkerRail({
             aria-label={`OpenWork account and settings · ${accountName} · ${accountLabel}`}
             title={collapsed ? undefined : "OpenWork account and settings"}
             onClick={onOpenOpenWork}
-            className={`group flex min-h-14 items-center gap-3 rounded-xl border border-transparent bg-white/[0.025] p-2 text-left transition-colors hover:border-white/8 hover:bg-white/5 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-spark/60 ${collapsed ? "mx-auto w-14 justify-center" : "w-full"}`}
+            className={`group flex min-h-14 min-w-0 items-center gap-3 rounded-xl border border-transparent p-2 text-left transition-colors hover:border-white/8 hover:bg-white/5 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-spark/60 ${collapsed ? "w-14 justify-center" : "flex-1"}`}
           >
             <span aria-hidden="true" className="flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-gradient-to-br from-spark/25 to-spark/5 text-xs font-semibold text-snow ring-1 ring-inset ring-spark/20">
               {session ? accountInitials : <CoworkerMark size={27} tile={false} />}
             </span>
             {!collapsed ? (
-              <>
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-xs font-semibold leading-4 text-snow">{accountName}</span>
-                  <span className="mt-0.5 block truncate text-[11px] leading-4 text-mist">{accountLabel}</span>
-                </span>
-                <span aria-hidden="true" className="flex size-7 shrink-0 items-center justify-center rounded-lg text-mist transition-colors group-hover:bg-white/5 group-hover:text-snow group-focus-visible:text-snow">
-                  <SlidersIcon className="size-4" />
-                </span>
-              </>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-xs font-semibold leading-4 text-snow">{accountName}</span>
+                <span className="mt-0.5 block truncate text-[11px] leading-4 text-mist">{accountLabel}</span>
+              </span>
             ) : null}
           </button>
         </Tooltip>
+        {marketplaceEnabled ? (
+          <IconButton label="Marketplace" tooltip="Marketplace: coworkers and apps" tooltipSide={collapsed ? "right" : "top"} data-testid="coworker-marketplace-button" className="size-10 shrink-0 rounded-xl" onClick={onOpenMarketplace}>
+            <StoreIcon />
+          </IconButton>
+        ) : null}
       </div>
-      {!activityMode ? <div
+      {/* The rail resizes in every mode, Activity included; as a drawer it keeps its width. */}
+      {drawer ? null : <div
         {...panel.separatorProps}
         aria-label="Resize team rail"
         className="window-no-drag group absolute inset-y-0 -right-[5px] z-30 w-[10px] cursor-col-resize outline-none"
@@ -510,8 +548,8 @@ export function CoworkerRail({
         data-testid="coworker-rail-resizer"
       >
         <span className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-transparent transition-colors group-hover:bg-spark/45 group-focus-visible:bg-spark/70" />
-      </div> : null}
-      {showGroupFilters && !calendarMode ? createPortal(<div ref={filterMenuRef} id={filterMenuId} role="menu" aria-label="Conversation types" data-testid="group-filter-menu" className="window-no-drag fixed z-50 max-h-[calc(100vh-16px)] w-44 max-w-[calc(100vw-16px)] overflow-y-auto rounded-xl border border-line bg-ink p-1 shadow-[0_8px_24px_rgb(0_0_0/0.45)]" style={filterPosition ?? { top: 0, left: 0, visibility: "hidden" }} onKeyDown={(event) => {
+      </div>}
+      {showGroupFilters && calendarEnabled && !calendarMode ? createPortal(<div ref={filterMenuRef} id={filterMenuId} role="menu" aria-label="Conversation types" data-testid="group-filter-menu" className="window-no-drag fixed z-50 max-h-[calc(100vh-16px)] w-44 max-w-[calc(100vw-16px)] overflow-y-auto rounded-xl border border-line bg-ink p-1 shadow-[0_8px_24px_rgb(0_0_0/0.45)]" style={filterPosition ?? { top: 0, left: 0, visibility: "hidden" }} onKeyDown={(event) => {
         if (event.key === "Tab") { closeGroupFilters(true); return; }
         if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
         event.preventDefault();
@@ -528,5 +566,72 @@ export function CoworkerRail({
         </button>
       </div>, document.body) : null}
     </aside>
+  );
+}
+
+/**
+ * The calendar while the rail is folded: today's date as a small calendar tile
+ * and the next few things on it, each a time and a title initial. Any of it
+ * unfolds the rail to the full calendar list.
+ */
+function FoldedCalendar({ data, coworkers, preferences, onPreferencesChange, onExpand }: {
+  data: CalendarData;
+  coworkers: CoworkerSummary[];
+  preferences: CalendarPreferences;
+  onPreferencesChange: CalendarPreferencesChange;
+  onExpand: () => void;
+}) {
+  const slugs = coworkers.map((coworker) => coworker.slug);
+  const shown = (slug: string) => preferences.coworkerSlugs === null || preferences.coworkerSlugs.includes(slug);
+  // Same preference as the full calendar list: tap a coworker to show or hide their events.
+  const toggle = (slug: string) => onPreferencesChange((value) => {
+    const current = value.coworkerSlugs ?? slugs;
+    return { ...value, coworkerSlugs: current.includes(slug) ? current.filter((item) => item !== slug) : [...current, slug] };
+  });
+  const now = new Date();
+  const upcoming = calendarItems({ events: data.events, eventRuns: data.eventRuns, responsibilities: data.responsibilities, start: now.getTime(), end: now.getTime() + 7 * 86_400_000, now: now.getTime() })
+    .filter((item) => item.planned).slice(0, 3);
+  return (
+    <div className="flex flex-1 flex-col items-center gap-2 px-1.5 pt-3" data-testid="calendar-rail-folded">
+      <Tooltip content="Show the calendar list" side="right">
+        <button type="button" onClick={onExpand} aria-label={`Expand calendars. Today is ${now.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })}`} data-testid="calendar-rail-expand"
+          className="window-no-drag flex w-12 flex-col items-center overflow-hidden rounded-xl border border-line bg-panel/70 transition-colors hover:border-white/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-spark/60">
+          <span className="w-full bg-rose/80 py-0.5 text-center text-[9px] font-semibold uppercase tracking-wider text-white">{now.toLocaleDateString(undefined, { weekday: "short" })}</span>
+          <span className="py-1 text-lg font-semibold leading-none text-snow tabular-nums">{now.getDate()}</span>
+        </button>
+      </Tooltip>
+      {coworkers.length ? <div className="flex flex-col items-center gap-1.5 border-b border-line/60 pb-2" role="group" aria-label="Show coworkers on the calendar" data-testid="calendar-rail-people">
+        {coworkers.map((coworker) => (
+          <Tooltip key={coworker.slug} content={`${shown(coworker.slug) ? "Hide" : "Show"} ${coworker.name}'s events`} side="right">
+            <button type="button" aria-pressed={shown(coworker.slug)} aria-label={`${coworker.name} on the calendar`} onClick={() => toggle(coworker.slug)} data-testid="calendar-rail-person"
+              className={`window-no-drag rounded-full transition-[opacity,filter] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-spark/60 ${shown(coworker.slug) ? "" : "opacity-35 grayscale"}`}>
+              <CoworkerAvatar identity={coworker.slug} name={coworker.name} color={coworker.avatarColor} glasses={coworker.avatarGlasses} size={30} animated={false} gaze={false} />
+            </button>
+          </Tooltip>
+        ))}
+      </div> : null}
+      {upcoming.map((item) => {
+        const when = new Date(item.startsAt);
+        const sameDay = when.toDateString() === now.toDateString();
+        const label = sameDay ? when.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }).replace(/\s?[AP]M$/i, "") : when.toLocaleDateString(undefined, { weekday: "short" });
+        return (
+          <Tooltip key={item.id} content={`${item.title} · ${when.toLocaleString(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" })}`} side="right">
+            <button type="button" onClick={onExpand} aria-label={`${item.title}, ${when.toLocaleString()}`} data-testid="calendar-rail-upcoming"
+              className="window-no-drag flex w-12 flex-col items-center rounded-lg px-1 py-1 text-center transition-colors hover:bg-white/6 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-spark/60">
+              <span className="text-[10px] font-medium tabular-nums text-snow">{label}</span>
+              <span className="mt-0.5 h-1 w-6 rounded-full bg-spark/70" aria-hidden="true" />
+            </button>
+          </Tooltip>
+        );
+      })}
+    </div>
+  );
+}
+
+function StoreIcon() {
+  return (
+    <svg viewBox="0 0 20 20" className="size-[18px]" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" aria-hidden="true">
+      <path d="M3.5 8.5v7.25c0 .69.56 1.25 1.25 1.25h10.5c.69 0 1.25-.56 1.25-1.25V8.5M2.75 5.25 4 3h12l1.25 2.25a2.5 2.5 0 0 1-4.75 1.1 2.5 2.5 0 0 1-5 0 2.5 2.5 0 0 1-4.75-1.1ZM8 17v-4.25h4V17" />
+    </svg>
   );
 }

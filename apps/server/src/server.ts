@@ -923,6 +923,11 @@ export async function startServer(config: ServerConfig): Promise<ServeResult & {
           assertOpencodeProxyAllowed(actor, request.method, mount.restPath);
           await managedDesktopPolicy(config).assertRequest(request, mount.restPath, true);
           assertNativeProxyManagementAllowed(request.method, nativeProxyPolicyPath(mount.restPath.slice("/opencode2".length), config.opencodeV2?.apiContract));
+          // Parse only after authentication and policy checks. Plain turns can
+          // skip the Cloud catalog refresh; selected skills keep the barrier.
+          const plainNativeAdmission = nativeAdmission
+            && await request.clone().json().then((body: unknown) => isRecord(body)
+              && (body.skills === undefined || Array.isArray(body.skills) && body.skills.length === 0), () => false);
           const workspace = await resolveWorkspaceWithoutBootstrap(config, mount.workspaceId);
           const connection = engineV2Preview.connection();
           if (!connection) {
@@ -950,7 +955,7 @@ export async function startServer(config: ServerConfig): Promise<ServeResult & {
             // The ordinary connection routes remain authoritative.
             const isSelectionMetadata = request.method === "GET"
               && /^\/opencode2\/api\/(?:agent\/[^/]+|model(?:\/default)?|provider|integration)$/.test(mount.restPath);
-            if (!isSelectionMetadata) await engineV2Preview.syncWorkspaceMcp(workspace.id, workspace.path);
+            if (!isSelectionMetadata) await engineV2Preview.syncWorkspaceMcp(workspace.id, workspace.path, undefined, !plainNativeAdmission);
           }
           const forward = (nativeSkillCatalog?: Awaited<ReturnType<typeof waitForNativeOpenWorkV2Skills>>, assertSkillsCurrent?: () => Promise<void>) => proxyOpencodeV2Request({
             config,
@@ -969,7 +974,7 @@ export async function startServer(config: ServerConfig): Promise<ServeResult & {
           const preparesSkills = config.engine === "v2" && ((request.method === "GET" && mount.restPath === "/opencode2/api/skill") || nativeAdmission);
           const send = async () => {
             if (!preparesSkills) return forward();
-            try { return await engineV2Preview.withNativeSkills(workspace.path, forward, expectedNativeSkillsScope); }
+            try { return await engineV2Preview.withNativeSkills(workspace.path, forward, expectedNativeSkillsScope, plainNativeAdmission); }
             catch (error) {
               if (error instanceof ApiError) throw error;
               throw new ApiError(error instanceof CloudNativeSkillSyncError && ["cloud_skill_sync_stale", "cloud_skill_scope_mismatch"].includes(error.code) ? 400 : 502,
@@ -1384,13 +1389,19 @@ export async function proxyOpencodeV2Request(input: {
     }
     // Session ownership was verified above. Replace one native instruction
     // entry immediately before admission; never append to conversation text.
-    const mcpUrl = new URL(target);
-    mcpUrl.pathname = "/api/mcp";
     const internalHeaders = new Headers({ authorization: headers.get("authorization") ?? "", "content-type": "application/json" });
-    const mcpResponse = await loopbackFetch(mcpUrl.toString(), { headers: internalHeaders, signal: AbortSignal.timeout(10_000) });
-    const mcpPayload: unknown = mcpResponse.ok ? await mcpResponse.json() : null;
-    const connectReady = isRecord(mcpPayload) && Array.isArray(mcpPayload.data) && mcpPayload.data.some((entry) =>
-      isRecord(entry) && entry.name === "openwork-cloud" && isRecord(entry.status) && entry.status.status === "connected");
+    // Native prompts use the tool catalog as the connection authority. A
+    // separate MCP status request here delayed every local message and could
+    // time out even after the message and tools were ready.
+    let connectReady: boolean | "unknown" = "unknown";
+    if (!mandatory) {
+      const mcpUrl = new URL(target);
+      mcpUrl.pathname = "/api/mcp";
+      const mcpResponse = await loopbackFetch(mcpUrl.toString(), { headers: internalHeaders, signal: AbortSignal.timeout(10_000) });
+      const mcpPayload: unknown = mcpResponse.ok ? await mcpResponse.json() : null;
+      connectReady = isRecord(mcpPayload) && Array.isArray(mcpPayload.data) && mcpPayload.data.some((entry) =>
+        isRecord(entry) && entry.name === "openwork-cloud" && isRecord(entry.status) && entry.status.status === "connected");
+    }
     if (!mandatory) {
       let cloudSkills: Awaited<ReturnType<EngineV2Preview["syncCloudSkills"]>>;
       try {

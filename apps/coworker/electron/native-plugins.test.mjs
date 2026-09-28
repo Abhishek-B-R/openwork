@@ -208,6 +208,7 @@ test("published native tools preserve trusted identity, broker payloads, file im
     [COMPUTER_PLUGIN, "coworker_computer_observe", { include_image: true }, "coworker_computer_observe"],
     [COLLABORATION_PLUGIN, "coworker_worker_pause", { id: "worker-one" }, "worker_pause"],
     [COLLABORATION_PLUGIN, "coworker_react", { emoji: null }, "react"],
+    [COLLABORATION_PLUGIN, "coworker_group_manage", { action: "start_parallel", participantSlugs: ["scout", "editor"], title: "Planning" }, "group_manage"],
     [GROUP_DOCUMENT_PLUGIN, "coworker_group_document_read", { groupId: "grp_12345678", id: "plan" }, "group_document_read"],
     [EVENT_PLUGIN, "coworker_event_details", { id: "event-fixture" }, "event_details"],
   ]) {
@@ -260,6 +261,11 @@ test("published native tools preserve trusted identity, broker payloads, file im
       }
       await Effect.runPromise(tool.execute({ emoji: "\u2764\ufe0f", messageId: "message_target" }, context));
       assert.deepEqual(requests.at(-1).body.args, { emoji: "\u2764\ufe0f", messageId: "message_target" });
+    }
+    if (name === "coworker_group_manage") {
+      for (const input of [{ action: "start_parallel", participantSlugs: [] }, { action: "add", participantSlugs: ["../other"] }, { action: "remove", participantSlugs: ["editor"], actor: "other" }]) {
+        await assert.rejects(Effect.runPromise(tool.execute(input, context)), /Invalid native tool arguments/);
+      }
     }
     if (source === EVENT_PLUGIN) {
       const create = f.tools.get("coworker_event_create");
@@ -328,6 +334,18 @@ test("published native tools preserve trusted identity, broker payloads, file im
   const disabled = { agent: "build", tools: {}, system: [] };
   await f.run("session", "context", disabled);
   assert.deepEqual(disabled, { agent: "build", tools: {}, system: [] }, "guidance never restores a configured execute deny");
+});
+
+test("with OpenWork Connect on a turn, web search goes through Connect and the native provider prompt cannot appear", async (t) => {
+  const f = await fixture(t, TURN_ROLES_PLUGIN, {});
+  const connected = { agent: "coworker-owner-builder", tools: { websearch: {}, webfetch: {}, "openwork-cloud_search_capabilities": {}, "openwork-cloud_execute_capability": {} }, system: [] };
+  await f.run("session", "context", connected);
+  assert.equal(connected.tools.websearch, undefined);
+  assert.ok(connected.tools.webfetch && connected.tools["openwork-cloud_execute_capability"]);
+  assert.ok(connected.system.some((part) => /openwork-cloud_search_capabilities/.test(part.text)));
+  const local = { agent: "coworker-owner-builder", tools: { websearch: {}, webfetch: {} }, system: [] };
+  await f.run("session", "context", local);
+  assert.ok(local.tools.websearch, "without Connect the native web search stays available");
 });
 
 test("native abilities enforce selected attachments, permission evaluation and Code Mode leaves with live identity", async (t) => {
@@ -675,7 +693,7 @@ async function originHintFixture() {
       assert.match(new URL(url).pathname, /\/prompt$/);
       calls.prompts.push({ headers: new Headers(init.headers), body: JSON.parse(init.body) });
       await state.beforePrompt();
-      if (!state.allowed || new Headers(init.headers).get("x-openwork-native-skills-scope") !== state.catalog[0]?.source.scope) return new Response(null, { status: 403 });
+      if (!state.allowed || new Headers(init.headers).get("x-openwork-native-skills-scope") !== (state.catalog[0]?.source?.scope ?? null)) return new Response(null, { status: 403 });
       calls.forwarded.push(state.catalog.map((skill) => skill.content));
       return Response.json({});
     },
@@ -690,7 +708,7 @@ async function originHintFixture() {
 }
 
 test("native main uses private origin hints only for unselected owned workspaces and keeps selected skills fresh", async () => {
-  for (const mode of ["warm", "older", "missing", "empty", "mutable", "invalid", "error", "foreign-workspace", "foreign-token", "selected"]) {
+  for (const mode of ["warm", "older", "missing", "mutable", "invalid", "error", "foreign-workspace", "foreign-token", "selected"]) {
     const f = await originHintFixture();
     if (mode === "warm") {
       f.entry.model = { providerId: "fixture", modelId: "b".repeat(64) };
@@ -698,7 +716,6 @@ test("native main uses private origin hints only for unselected owned workspaces
     }
     if (mode === "older") delete f.handle.nativeSkillOriginSnapshot;
     if (mode === "missing") f.state.hint = null;
-    if (mode === "empty") f.state.hint = Object.freeze({ scopes: Object.freeze([]) });
     if (mode === "mutable") f.state.hint = { scopes: [f.cloud.source.scope] };
     if (mode === "invalid") f.state.hint = f.frozen("unverified");
     if (mode === "error") f.state.beforeHint = async () => { throw new Error("Private hint unavailable"); };
@@ -722,6 +739,15 @@ test("native main uses private origin hints only for unselected owned workspaces
     assert.deepEqual(f.calls.forwarded, [["FRESH_BODY_CANARY"]], "origin preparation does not skip the final prompt path");
     assert.doesNotMatch(JSON.stringify([f.entry.cloudSkillOrigin, f.calls.prompts[0].body]), /PRIVATE_BODY_CANARY|FRESH_BODY_CANARY|fixture-principal-token|fixture-owner-token|SKILL\.md/);
   }
+  const empty = await originHintFixture();
+  empty.state.hint = Object.freeze({ scopes: Object.freeze([]) });
+  empty.state.catalog = [];
+  await empty.send();
+  assert.equal(empty.calls.hints.length, 2, "an empty native snapshot is checked again before admission");
+  assert.equal(empty.calls.catalogs, 0, "plain chat does not fetch the full skill catalog");
+  assert.equal(empty.calls.principals, 0);
+  assert.equal(empty.entry.cloudSkillOrigin.scope, null);
+  assert.equal(empty.calls.prompts[0].headers.get("x-openwork-native-skills-scope"), null);
   for (const phase of ["selected-origin", "final-prompt"]) {
     const f = await originHintFixture();
     if (phase === "selected-origin") {
@@ -924,4 +950,48 @@ test(`generated config is strict native ${NATIVE_PLUGIN_VERSION}, migrates once 
   await writeFile(path.join(root, "opencode.json"), "{ damaged");
   await assert.rejects(updateNativeConfig(root));
   assert.equal(await readFile(path.join(root, "opencode.json"), "utf8"), "{ damaged");
+});
+
+test("a coworker added after startup gets its owner agent before its workspace counts as warm", async () => {
+  // The team record has no slug, so the owner-agent install must not depend on one;
+  // and it must run before the warm cache is consulted, or a new coworker reuses the
+  // coordinator's warmup and its native agent is missing (HTTP 404 on preparation).
+  const main = await readFile(new URL("./main.mjs", import.meta.url), "utf8");
+  const source = main.slice(main.indexOf("async function warmCoworkerWorkspace("), main.indexOf("\n// ----", main.indexOf("async function warmCoworkerWorkspace(")));
+  const team = { path: "/team/.runtime", name: "Coworker team", workspaceId: "ws_team" };
+  let teamRevision = "coordinator";
+  let members = ["coordinator"];
+  const runs = [];
+  const warmedCoworkerWorkspaces = new Set(), warmedCoworkerScopes = new Map();
+  const warm = runInNewContext(`let coworkerWarmupTail = Promise.resolve(); const coworkerWarmups = new Map();\n${source}\nwarmCoworkerWorkspace`, {
+    teamWorkspace: () => team, ensureToolsServer: async () => ({}), AbortSignal, Promise,
+    installNativeCoworkerPlugins: async (owner) => { assert.equal(owner.slug, undefined); teamRevision = members.join(","); },
+    workspaceReadinessScope: () => JSON.stringify([team.workspaceId, teamRevision]),
+    withAbort: (promise) => promise, warmedCoworkerWorkspaces, warmedCoworkerScopes,
+    runCoworkerWorkspaceWarmup: async (_coworker, _signal, scope) => { runs.push(scope); warmedCoworkerWorkspaces.add(team.workspaceId); warmedCoworkerScopes.set(team.workspaceId, scope); },
+  });
+  await warm({ workspaceId: "ws_team" });
+  await warm({ workspaceId: "ws_team" });
+  assert.equal(runs.length, 1, "an unchanged team reuses its warmup");
+  members = ["coordinator", "builder"];
+  await warm({ slug: "builder", workspaceId: "ws_team" });
+  assert.equal(runs.length, 2, "a new teammate is installed and warmed, not served by the older warmup");
+  assert.match(runs[1], /builder/);
+});
+
+test("preparation waits out the engine reloading owner policies after the team configuration changes", async () => {
+  let calls = 0;
+  const waits = [];
+  await prepareNativeTurnRoles(async () => {
+    calls += 1;
+    if (calls < 3) throw new Error("The native AI service answered with HTTP 500.");
+    return { output: { ready: true, filesystemScopeRequired: true } };
+  }, { requireFilesystemScope: true, wait: async (ms) => { waits.push(ms); } });
+  assert.equal(calls, 3);
+  assert.deepEqual(waits, [150, 300]);
+
+  let stopped = 0;
+  await assert.rejects(prepareNativeTurnRoles(async () => { stopped += 1; throw new Error("The native AI service changed or stopped. Refresh before continuing."); }, { wait: async () => {} }), /changed or stopped/);
+  assert.equal(stopped, 1, "only a reload race is tried again");
+  await assert.rejects(prepareNativeTurnRoles(async () => { throw new Error("The native AI service answered with HTTP 500."); }, { retryDelaysMs: [1, 1], wait: async () => {} }), /HTTP 500/);
 });

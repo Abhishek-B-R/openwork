@@ -66,6 +66,7 @@ import { usesAppConversationDefault, type ModelDefaults } from "@/lib/model-defa
 import { describeReview, parseWorkerReview, parseWorkerTurn, workerNameFromTitle, type WorkerReview, type WorkerSummary } from "@/lib/workers";
 import { WorkerDecisionCards } from "@/ui/worker-decision";
 import { WorkersPanel } from "@/ui/workers";
+import { useFeatures } from "@/ui/use-features";
 import { coworkerToolName } from "@/lib/coworker-tools";
 import { EXECUTION_KINDS, executionMetadata, executionState, safeWorkLabel, summarizeWorkerReceipt } from "@/lib/work-receipt";
 import { executionProgress, pendingAdmissionState, type ExecutionActivity } from "@/lib/progress-activity";
@@ -105,7 +106,7 @@ import {
   type TurnOutcome,
   type TurnReplyState,
 } from "@/lib/turn-outcome";
-import { describeTurnFailure, failureText } from "@/lib/turn-failure";
+import { describeConversationError, describeTurnFailure, failureText } from "@/lib/turn-failure";
 import { composerDraftStore, useComposerDraft, useSelectedComposerDraft } from "@/ui/use-composer-draft";
 import { mergeSkillSelections, sameSkillFields, selectionFields, type ComposerDraftSnapshot, type ComposerDraftSubmission, type SelectedSkill } from "@/lib/skill-selection";
 import { classifyFailure, retryDelayMs } from "@/lib/turn-retry";
@@ -113,12 +114,15 @@ import { applyStreamEvent, type LivePart, type LiveStream } from "@/lib/live-str
 import { waitForGroup as waitForObservation } from "@/lib/group-continuity";
 import { useAutoGrow } from "@/ui/use-auto-grow";
 import { JumpToLatest, useConversationScroll } from "@/ui/use-conversation-scroll";
+import { ConversationWindow, useConversationWindow } from "@/ui/conversation-window";
 import { InteractionCard, InteractionCards, LETTERS, OptionRow, typingInField } from "@/ui/interactions";
 import { acknowledgeCoworker, CoworkerAvatar } from "@/ui/coworker-avatar";
 import { InlineLoader } from "@/ui/brand";
-import { Button, Empty, ErrorNote, PlusIcon, StatusDot, ToolIcon } from "@/ui/kit";
+import { Button, ChevronIcon, Empty, ErrorNote, IconButton, PlusIcon, StatusDot, StopIcon, ToolIcon } from "@/ui/kit";
 import { ChatReply } from "@/ui/chat-reply";
 import { MessageReactions, useMessageReactions } from "@/ui/message-reactions";
+import { ReplyReferences } from "@/ui/reply-references";
+import { linkDocumentMentions, type DocumentReference } from "@/lib/message-references";
 import { DocumentCard } from "@/ui/documents";
 import { documentCardsFromCalls, isDocumentTool, shouldFoldReply, splitReplyLead, type DocumentCardData } from "@/lib/documents";
 import { newcomerLine, teamCardsFromCalls } from "@/lib/team";
@@ -166,11 +170,37 @@ type TranscriptMessage = {
   toolCalls: TranscriptToolCall[];
 };
 
+// Keep a few recently viewed conversations in memory so returning to one
+// shows its last known messages while the native history read catches up.
+// Native history remains authoritative and replaces this view on refresh.
+const recentTranscripts = new Map<string, { title: string; messages: TranscriptMessage[]; readAt: number }>();
+function recentTranscript(key: string) {
+  const cached = recentTranscripts.get(key);
+  if (!cached || Date.now() - cached.readAt > 10 * 60_000) {
+    recentTranscripts.delete(key);
+    return null;
+  }
+  recentTranscripts.delete(key);
+  recentTranscripts.set(key, cached);
+  return cached;
+}
+function rememberTranscript(key: string, title: string, messages: TranscriptMessage[]) {
+  recentTranscripts.delete(key);
+  recentTranscripts.set(key, { title, messages: messages.slice(-300), readAt: Date.now() });
+  while (recentTranscripts.size > 8) {
+    const oldest = recentTranscripts.keys().next().value;
+    if (oldest === undefined) break;
+    recentTranscripts.delete(oldest);
+  }
+}
+
 export type AssignmentDraft = { id: number; text: string; skill?: SelectedSkill } | null;
 const appliedSkillRequests = new Map<string, number>();
 
 /** How the conversation reaches the Documents view: open a document there, or beside the chat when the window allows. */
 export type DocumentHooks = {
+  /** The coworker's documents, so a reply that names one can link to it. */
+  list: readonly DocumentReference[];
   onOpenDocument: (documentId: string) => void;
   onOpenDocumentBeside: (documentId: string) => void;
   canOpenBeside: boolean;
@@ -254,7 +284,7 @@ function newQueuedId(): string {
 }
 
 export const NO_TOOL_MODEL_MESSAGE =
-  "No connected AI model can use tools. Connect an AI provider in OpenWork, or choose an AI model in Coworker settings.";
+  "No connected AI model can use tools. Connect an AI provider in OpenWork, or choose one in Customize › AI model.";
 
 type WorkspaceProblem = { message: string; technical: string };
 
@@ -306,11 +336,12 @@ configureTurnStore({
 });
 
 /** Conversation-owned content in the header and the discussion-tools sidebar. */
-export type HeaderSlots = { title: HTMLElement | null; actions: HTMLElement | null; tools: HTMLElement | null };
+export type HeaderSlots = { lead: HTMLElement | null; title: HTMLElement | null; actions: HTMLElement | null; tools: HTMLElement | null };
 
-function HeaderContent({ slots, title, actions }: { slots: HeaderSlots; title: ReactNode; actions?: ReactNode }) {
+function HeaderContent({ slots, lead, title, actions }: { slots: HeaderSlots; lead?: ReactNode; title: ReactNode; actions?: ReactNode }) {
   return (
     <>
+      {slots.lead && lead ? createPortal(lead, slots.lead) : null}
       {slots.title ? createPortal(title, slots.title) : null}
       {slots.actions && actions ? createPortal(actions, slots.actions) : null}
     </>
@@ -379,7 +410,7 @@ export function ThreadsPanel({
   /** How the conversation answers a coworker's offers about the team. */
   team?: TeamHooks;
   headerSlots: HeaderSlots;
-  /** Coworker settings, opened at the AI model section — the first recovery step after a model failure. */
+  /** The coworker's Customize page, opened at its AI model — the first recovery step after a model failure. */
   onOpenModelSettings: () => void;
   /** The OpenWork account section — where a provider is reconnected. */
   onOpenAccount: () => void;
@@ -392,6 +423,8 @@ export function ThreadsPanel({
   /** A part of that line was chosen: open the matching level of Activity. */
   onOpenSummary?: (kind: SummaryKind) => void;
 }) {
+  // The saved selection only seeds this view. Every later choice is made here and
+  // saved behind it, so a coworker record read before that choice cannot move it.
   const [discussionThreadId, setDiscussionThreadId] = useState(coworker.conversationThreadId);
   const discussionSelection = useRef(0);
   /** Thread ids registered as discussions in `discussions.json`; the open one is added even when unregistered. */
@@ -472,10 +505,6 @@ export function ThreadsPanel({
     : error && runtime.engineManaged && !warmingUp
       ? { message: `${coworker.name}'s workspace is not answering right now.`, technical: error }
       : null;
-
-  useEffect(() => {
-    setDiscussionThreadId(coworker.conversationThreadId);
-  }, [coworker.conversationThreadId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -611,15 +640,16 @@ export function ThreadsPanel({
       setOpenThreadId("");
       return;
     }
+    // Switch at once from what is already known; the saved selection follows,
+    // and only the newest choice may apply its result.
     const selection = ++discussionSelection.current;
+    setDiscussionThreadId(threadId);
+    setOpenThreadId("");
     try {
       const updated = await coworkerBridge.coworkers.update(coworker.slug, { conversationThreadId: threadId });
-      if (selection !== discussionSelection.current) return;
-      setDiscussionThreadId(threadId);
-      onCoworkerChanged(updated);
-      setOpenThreadId("");
+      if (selection === discussionSelection.current) onCoworkerChanged(updated);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
+      if (selection === discussionSelection.current) setError(`The discussion is open, but its sidebar selection could not be kept: ${cause instanceof Error ? cause.message : String(cause)}`);
     }
   }, [coworker.slug, discussionThreadId, onCoworkerChanged]);
 
@@ -931,13 +961,13 @@ function DiscussionWelcome({
     <section className="flex h-full min-h-0 flex-col bg-ink" data-testid="coworker-discussion-view">
       <HeaderContent
         slots={headerSlots}
-        title={<span className="whitespace-normal">New discussion</span>}
-        actions={<Button variant="ghost" disabled={!startingMessage} title={startingMessage ? "Cancel starting this message" : "No active work to stop"} data-testid="coworker-stop" onClick={() => { startCancelled.current = true; startController.current?.abort(new Error("Starting cancelled. Your draft is kept.")); setStartingMessage(null); setComposerError("Starting cancelled. Your draft is kept."); }}>Stop</Button>}
+        title={<span className="truncate">New discussion</span>}
+        actions={startingMessage ? <IconButton label="Stop" tooltip="Cancel starting this message" tooltipSide="bottom" data-testid="coworker-stop" className="border border-line" onClick={() => { startCancelled.current = true; startController.current?.abort(new Error("Starting cancelled. Your draft is kept.")); setStartingMessage(null); setComposerError("Starting cancelled. Your draft is kept."); }}><StopIcon className="size-3.5" /></IconButton> : null}
       />
-      <div className="min-h-0 flex-1 overflow-y-auto px-6 py-8">
+      <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-8 pt-[calc(var(--conversation-top,0px)+2rem)]">
         {problem ? <WorkspaceProblemNote problem={problem} onRetry={onRetry} /> : null}
         {startingMessage ? <div className="space-y-3">
-          <article className="flex flex-col items-end" data-message-role="user"><div className="bubble bubble-user max-w-[72%] whitespace-pre-wrap bubble-tail-right">{startingMessage.value.text}</div></article>
+          <article className="flex flex-col items-end" data-message-role="user"><div className="bubble bubble-user max-w-[min(72%,30rem)] whitespace-pre-wrap bubble-tail-right">{startingMessage.value.text}</div></article>
           <LiveRow coworker={coworker} phase="sending" />
         </div> : !problem ? <QuietEmptyConversation coworker={coworker} warmingUp={warmingUp} proposerName={proposerName} /> : null}
       </div>
@@ -1013,7 +1043,7 @@ function DiscussionSwitcher({
   const label = discussionLabel(current.title, defaultTitle, currentUsed);
 
   return (
-    <div ref={rootRef} className="relative -ml-2 min-w-0" onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false); }}>
+    <div ref={rootRef} className="relative min-w-0" onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false); }}>
       <button
         ref={triggerRef}
         type="button"
@@ -1021,8 +1051,8 @@ function DiscussionSwitcher({
         aria-haspopup="menu"
         aria-expanded={open}
         aria-controls={open ? menuId : undefined}
-        title="Switch discussion"
-        className="flex max-w-full items-center gap-1 rounded-md px-2 py-0.5 text-left transition-colors hover:bg-panel hover:text-snow"
+        title={`${label} · Switch discussion`}
+        className="flex min-w-0 max-w-full items-center gap-1 rounded-full px-2 py-0.5 text-left transition-colors hover:bg-white/6 hover:text-snow focus-visible:bg-white/6 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-spark/60"
         onClick={() => { edge.current = "first"; setOpen((value) => !value); }}
         onKeyDown={(event) => {
           if (event.nativeEvent.isComposing || (event.key !== "ArrowDown" && event.key !== "ArrowUp")) return;
@@ -1031,7 +1061,7 @@ function DiscussionSwitcher({
           setOpen(true);
         }}
       >
-        <span className="min-w-0 whitespace-normal text-xs text-mist [overflow-wrap:anywhere]">{label}</span>
+        <span className="min-w-0 truncate text-xs text-snow/90">{label}</span>
         <svg viewBox="0 0 16 16" width="10" height="10" aria-hidden="true" className="shrink-0 text-mist">
           <path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
@@ -1044,7 +1074,7 @@ function DiscussionSwitcher({
           role="menu"
           aria-label="Discussions"
           data-testid="coworker-discussion-menu"
-          className="absolute left-2 top-full z-20 mt-1 w-80 max-w-[70vw] rounded-xl border border-line bg-ink/95 p-1.5 shadow-2xl backdrop-blur"
+          className="absolute left-1/2 top-full z-40 mt-2 w-80 max-w-[70vw] -translate-x-1/2 rounded-xl border border-line bg-[#0d121b] p-1.5 shadow-2xl"
           onKeyDown={(event) => {
             if (event.nativeEvent.isComposing) return;
             if (event.key === "Escape" || event.key === "Tab") {
@@ -1100,7 +1130,7 @@ function DiscussionSwitcher({
                     }}
                   >
                     <StatusDot tone={threadTone(item.status)} />
-                    <span className={`min-w-0 flex-1 truncate text-sm ${active ? "font-semibold text-snow" : "text-snow"}`}>
+                    <span className={`min-w-0 flex-1 truncate text-sm ${active ? "font-semibold text-snow" : "text-snow"}`} title={discussionLabel(item.title, defaultTitle, active ? currentUsed : discussionLooksUsed(item))}>
                       {discussionLabel(item.title, defaultTitle, active ? currentUsed : discussionLooksUsed(item))}
                     </span>
                     <span className={`shrink-0 text-xs ${item.status === "busy" || item.status === "retry" ? "text-spark" : "text-mist"}`}>{meta}</span>
@@ -1195,12 +1225,14 @@ function ThreadView({
   summary?: CoworkerSummaryLine | null;
   onOpenSummary?: (kind: SummaryKind) => void;
 }) {
-  const [messages, setMessages] = useState<TranscriptMessage[]>([]);
+  const transcriptCacheKey = `${runtime.serverUrl}:${coworker.workspaceId}:${coworker.slug}:${coworker.createdAt}:${threadId}`;
+  const [cachedTranscript] = useState(() => recentTranscript(transcriptCacheKey));
+  const [messages, setMessages] = useState<TranscriptMessage[]>(cachedTranscript?.messages ?? []);
   const messageReactions = useMessageReactions(kind === "discussion" && browserEligible ? { kind: "private", slug: coworker.slug, threadId } : null, active, coworker.createdAt);
   const [nativeState, setNativeState] = useState<HeadlessThreadSnapshot["native"]>();
   const latestNativeState = useRef(nativeState);
   latestNativeState.current = nativeState;
-  const [transcriptLoaded, setTranscriptLoaded] = useState(false);
+  const [transcriptLoaded, setTranscriptLoaded] = useState(Boolean(cachedTranscript));
   const [confirmationUnknown, setConfirmationUnknown] = useState<string | null>(null);
   const [acceptedMessage, setAcceptedMessage] = useState<string | null>(null);
   const [activeTurn, setActiveTurn] = useState<ActiveTurn | null>(null);
@@ -1226,12 +1258,28 @@ function ThreadView({
   const viewMounted = useRef(true);
   const refreshScope = useMemo(() => ({ active: true, reads: new Map<string, { promise: Promise<void>; again?: () => void }>() }), [threads, threadId, coworker.slug]);
   const refreshReads = refreshScope.reads;
-  const knownMessages = useRef(new Map<string, { role: string; parentId: string | null; ended: boolean }>());
+  const knownMessages = useRef(new Map<string, { role: string; parentId: string | null; ended: boolean }>(cachedTranscript?.messages.map((message) => [message.id, { role: message.role, parentId: message.parentId, ended: message.completedAt !== null || message.error !== null }]) ?? []));
   const retiredReplies = useRef(new Set<string>());
   const observedTurn = useRef("");
   const observedTurnAt = useRef(0);
   const streamTurn = useRef("");
   const { scrollRef, contentRef, away, jumpToLatest } = useConversationScroll(`${coworker.slug}:${coworker.createdAt}:${threadId}`, active, transcriptLoaded);
+  // The floating composer's height, so the conversation always ends just above it.
+  const [dock, setDock] = useState<HTMLDivElement | null>(null);
+  const [dockHeight, setDockHeight] = useState(0);
+  useEffect(() => {
+    if (!dock) return;
+    const observer = new ResizeObserver(() => setDockHeight(Math.ceil(dock.getBoundingClientRect().height)));
+    observer.observe(dock);
+    return () => observer.disconnect();
+  }, [dock]);
+  const readingLatest = useRef(!away);
+  readingLatest.current = !away;
+  useLayoutEffect(() => {
+    // A taller composer (a longer draft, a queued message) must not cover the latest reply.
+    const scroller = scrollRef.current;
+    if (scroller && readingLatest.current) scroller.scrollTop = scroller.scrollHeight;
+  }, [dockHeight, scrollRef]);
   /** Long replies already reported this mount; the store also refuses a repeat by message id. */
   const longRepliesRecorded = useRef(new Set<string>());
   const recordLongReply = useCallback((messageId: string, chars: number) => {
@@ -1241,13 +1289,14 @@ function ThreadView({
   }, [coworker.slug]);
   /** A different connected, tool-capable model to fall back to after a model-related failure. */
   const [recommendedModel, setRecommendedModel] = useState<EngineModelOption | null>(null);
+  const [activeModelLabel, setActiveModelLabel] = useState("");
   const defaultDiscussionTitle = discussionTitle(coworker.name);
   // Until the transcript answers, a discussion carries its default title (which reads as "New
   // discussion" while empty); only an assignment falls back to the generic placeholder.
-  const [title, setTitle] = useState(kind === "discussion" ? defaultDiscussionTitle : kind === "worker" ? "Worker" : "Work thread");
+  const [title, setTitle] = useState(cachedTranscript?.title ?? (kind === "discussion" ? defaultDiscussionTitle : kind === "worker" ? "Worker" : "Work thread"));
   /** The first message sent here, kept until the thread carries a title of its own. */
   const firstPromptRef = useRef("");
-  const titleLoadedRef = useRef(false);
+  const titleLoadedRef = useRef(Boolean(cachedTranscript));
   /** What the engine reports for this thread: idle, busy, or retrying (with its next attempt). */
   const [engineStatus, setEngineStatus] = useState<TurnEngineStatus>({ type: "unknown" });
   const [pending, setPending] = useState<PendingInteractions>({ permissions: [], questions: [] });
@@ -1425,8 +1474,9 @@ function ThreadView({
         return next;
       });
       const loadedTitle = transcript.title ?? "Work thread";
+      const displayedTitle = titleDiscussionAfterFirstMessage(loadedTitle) ?? loadedTitle;
       titleLoadedRef.current = true;
-      setTitle(titleDiscussionAfterFirstMessage(loadedTitle) ?? loadedTitle);
+      setTitle(displayedTitle);
       // A read can report a stalled retry, but only the execution owner or an explicit Stop may cancel it.
       const status = transcript.status;
       const retryStatus = status.type === "retry" ? status : null;
@@ -1437,8 +1487,7 @@ function ThreadView({
         if (!activeTurnRef.current) setFailure(stall);
       }
       setEngineStatus(status);
-      setMessages(
-        transcript.messages.filter((message) => message.role === "user" || message.role === "assistant").map((message) => ({
+      const visible = transcript.messages.filter((message) => message.role === "user" || message.role === "assistant").map((message) => ({
           id: message.id,
           role: message.role,
           parentId: message.parentId,
@@ -1460,12 +1509,13 @@ function ThreadView({
             startedAt: call.startedAt,
             completedAt: call.completedAt,
           })),
-        })),
-      );
+        }));
+      setMessages(visible);
+      rememberTranscript(transcriptCacheKey, displayedTitle, visible);
       setTranscriptLoaded(true);
       setTranscriptReadStartedAt(readStartedAt);
     });
-  }, [coworker.slug, refreshReads, refreshScope, stopScope, threads, threadId, titleDiscussionAfterFirstMessage]);
+  }, [coworker.slug, refreshReads, refreshScope, stopScope, threads, threadId, titleDiscussionAfterFirstMessage, transcriptCacheKey]);
 
   useEffect(() => {
     if (kind !== "discussion" || !assignmentDraft) return;
@@ -1502,13 +1552,27 @@ function ThreadView({
         setLiveStream((current) => applyStreamEvent(current, event, threadId));
       }
     });
-    const timer = window.setInterval(() => void refresh(), 5_000);
+    // Native v2 snapshots read the whole paged history. Live turns still need a
+    // quick check; an idle conversation can rely on its cached view between reads.
+    let lastIdleRead = Date.now();
+    const poll = () => {
+      if (document.visibilityState === "hidden") return;
+      if (!activeTurnRef.current && !turnStateRef.current.pending) {
+        if (Date.now() - lastIdleRead < 15_000) return;
+        lastIdleRead = Date.now();
+      }
+      void refresh();
+    };
+    const visible = () => { if (document.visibilityState === "visible") { lastIdleRead = Date.now(); void refresh(); } };
+    const timer = window.setInterval(poll, 5_000);
+    document.addEventListener("visibilitychange", visible);
     return () => {
       refreshScope.active = false;
       if (refreshGeneration.current === generation) refreshGeneration.current += 1;
       refreshReads.clear();
       unsubscribe();
       window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", visible);
     };
   }, [refresh, refreshReads, refreshScope, threadId, threads]);
 
@@ -1631,7 +1695,7 @@ function ThreadView({
         if (!usesAppConversationDefault(owner) && (!automatic || turnModelId === owner.model || !owner.model)) {
           onCoworkerChanged(await coworkerBridge.coworkers.update(coworker.slug, { model: next.id, modelVariant: carryVariant(owner.modelVariant, next), modelChosenBy: "app", useAppModelDefaults: false }));
         }
-        setProviderRefreshNote(`${turnModelId} could not answer, so ${coworker.name} is trying ${next.modelLabel} instead.`);
+        setProviderRefreshNote(`${coworker.name} is trying ${next.modelLabel} after the previous AI model could not answer.`);
         voiceFollowup = true;
         window.setTimeout(() => void submitTurn(prompt, messageId, { ...send, mode: "retry", attempt, switchedTo: next.modelLabel, voice: voiceIntent }, { ...nextModel, ...(variant ? { variant } : {}) }, excluded, selection), 0);
         return true;
@@ -1954,22 +2018,33 @@ function ThreadView({
     // Closing one assistant message is not the native turn's idle outcome.
     return reply.state === "complete" && outcome !== "succeeded" ? { ...reply, state: "writing" } : reply;
   }, [messages, nativeState, pendingTurn]);
+  const failedModelId = useMemo(() => {
+    const reply = [...messages].reverse().find((message) => message.role === "assistant" && message.parentId === pendingTurn?.messageId && message.model);
+    return reply?.model ? `${reply.model.providerId}/${reply.model.modelId}` : "";
+  }, [messages, pendingTurn?.messageId]);
   const needsModelFallback = failure !== "" || pendingReply.state === "error";
   useEffect(() => {
     if (!needsModelFallback) {
       setRecommendedModel(null);
+      setActiveModelLabel("");
       return;
     }
     let cancelled = false;
-    void threads.listModelCatalog()
-      .then((catalog) => {
-        if (!cancelled) setRecommendedModel(recommendModel(catalog, { exclude: coworker.model }));
+    void Promise.all([threads.listModelCatalog(), coworkerBridge.settings.get()])
+      .then(([catalog, settings]) => {
+        if (!cancelled) {
+          const owner = kind === "discussion" ? coworker : { ...coworker, useAppModelDefaults: false };
+          const selected = resolveDiscussionModel(catalog, owner, turnStateRef.current.pending?.prompt ?? "", settings.modelDefaults).model;
+          const modelId = failedModelId || selected?.id || coworker.model;
+          setRecommendedModel(recommendModel(catalog, { exclude: modelId }));
+          setActiveModelLabel(catalog.models.find((model) => model.id === modelId)?.modelLabel ?? selected?.modelLabel ?? "");
+        }
       })
       .catch(() => {
-        if (!cancelled) setRecommendedModel(null);
+        if (!cancelled) { setRecommendedModel(null); setActiveModelLabel(""); }
       });
     return () => { cancelled = true; };
-  }, [coworker.model, needsModelFallback, threads]);
+  }, [coworker, failedModelId, kind, needsModelFallback, threads]);
 
   /** The moment the turn this view is driving lets go (its wait has ended and its record is settled). */
   const untilTurnReleased = useCallback(() => new Promise<void>((resolve) => {
@@ -2050,7 +2125,13 @@ function ThreadView({
     const submission = composerDraftStore.beginSubmission(snapshot, newMessageId());
     if (!submission) return;
     checkingDraft.current = true;
-    try { sendText(text, submission); }
+    try {
+      // The submission owns these words by message ID now. Clear the composer
+      // before workspace preparation or native acceptance, while the pending
+      // turn renders the same words in the conversation.
+      composerDraftStore.releaseSubmission(submission);
+      sendText(text, submission);
+    }
     catch (cause) { composerDraftStore.finishSubmission(submission, false); setError(cause instanceof Error ? cause.message : String(cause)); }
     finally { checkingDraft.current = false; }
   }
@@ -2122,21 +2203,25 @@ function ThreadView({
       const run = await onSyncProviders();
       if (run.status === "failed") {
         voice.abandonReply(voiceIntent);
-        setProviderRefreshNote(`OpenWork provider refresh failed: ${run.message || "unknown error"}`);
+        setProviderRefreshNote("Providers could not be refreshed. You can still use a suggested model above or choose one in Customize › AI model.");
         return;
       }
       const catalog = await threads.listModelCatalog();
-      const available = !coworker.model.trim() || catalog.models.some((model) => model.id === coworker.model);
-      if (!available) {
+      const settings = await coworkerBridge.settings.get();
+      const selectionOwner = kind === "discussion" ? coworker : { ...coworker, useAppModelDefaults: false };
+      const decision = resolveDiscussionModel(catalog, selectionOwner, turnStateRef.current.pending?.prompt ?? "", settings.modelDefaults);
+      if (!decision.model) {
         voice.abandonReply(voiceIntent);
-        setProviderRefreshNote(`Providers refreshed, but "${coworker.model}" is still unavailable. Choose another AI model in Coworker settings.`);
+        setRecommendedModel(recommendModel(catalog, { exclude: failedModelId || coworker.model }));
+        setProviderRefreshNote("Providers refreshed, but the selected model is still unavailable. Use the suggestion above or choose another AI model in Customize › AI model.");
         return;
       }
       setProviderRefreshNote("");
-      void retryPending(undefined, voiceIntent);
+      const pick = decision.model;
+      void retryPending({ model: { providerId: pick.providerId, modelId: pick.modelId, ...(decision.variant ? { variant: decision.variant } : {}) }, label: pick.modelLabel }, voiceIntent);
     } catch (cause) {
       voice.abandonReply(voiceIntent);
-      setProviderRefreshNote(cause instanceof Error ? cause.message : String(cause));
+      setProviderRefreshNote("Providers could not be refreshed. You can still use a suggested model above or choose one in Customize › AI model.");
     }
   }
 
@@ -2193,8 +2278,7 @@ function ThreadView({
         onOpenProviders();
         return;
       case "refresh-providers":
-        void refreshProvidersAndRetry();
-        return;
+        return refreshProvidersAndRetry();
       case "stop":
         void stop();
         return;
@@ -2321,6 +2405,7 @@ function ThreadView({
   const currentWords = useMemo(() => writingText(correlatedStream, activeReply), [correlatedStream, activeReply]);
   const streamingMessageIds = useMemo(() => new Set(correlatedStream?.parts.filter((part) => part.type === "text").map((part) => part.messageId)), [correlatedStream]);
   const blocks = useMemo(() => conversationBlocks(visibleMessages, (message, index) => working && message.role === "assistant" && (index === lastAssistantIndex || streamingMessageIds.has(message.id))), [visibleMessages, working, lastAssistantIndex, streamingMessageIds]);
+  const conversationWindow = useConversationWindow(scrollRef, blocks, (block) => block.kind === "actions" || block.kind === "documents" ? block.id : block.message.id);
   // What the coworker is doing this moment comes from what is streaming, not from a label:
   // a reasoning part is thinking, a text part is writing, an unsettled tool call is a tool.
   const phase: LivePhase = livePhase({
@@ -2416,10 +2501,13 @@ function ThreadView({
   const freshDiscussion = transcriptLoaded && turnsLoaded && kind === "discussion" && visibleMessages.length === 0 && !working && !needsYou && !error && !outcome;
   const composerWorking = Boolean(stopAttempt) || turnRunning || admissionInFlight || acceptedObservationUnavailable || activeTurn !== null || (engineRunning && !needsYou);
   const statusState = stopAttempt ? stopPending ? "stopping" : "stop-unconfirmed" : needsYou ? "needs-you" : working ? "working" : unconfirmedAdmission || refusedAdmission || acceptedObservationUnavailable ? "unknown" : workspacePreparation.state === "error" ? "unavailable" : workspacePreparation.state === "starting" ? "preparing" : "idle";
+  const stoppable = Boolean(working || needsYou || stopAttempt || unconfirmedAdmission || refusedAdmission || acceptedObservationUnavailable);
   const [controlStatusSlot, setControlStatusSlot] = useState<HTMLDivElement | null>(null);
   const [floatingSlot, setFloatingSlot] = useState<HTMLDivElement | null>(null);
   const [computerOpenRequest, setComputerOpenRequest] = useState(0);
   const [browserOpenRequest, setBrowserOpenRequest] = useState(0);
+  // Computer use is optional: while it is off there is no Computer control to open.
+  const { computerUse } = useFeatures();
 
   return (
     <section className="flex h-full min-h-0 flex-col bg-ink" data-active={active} data-testid={kind === "discussion" ? "coworker-discussion-view" : kind === "worker" ? "coworker-worker-view" : "coworker-assignment-view"}>
@@ -2437,46 +2525,49 @@ function ThreadView({
           />
         ) : (
           <>
-             <span className="min-w-0 whitespace-normal [overflow-wrap:anywhere]">{kind === "worker" ? workerNameFromTitle(title) : title}</span>
+            <span className="min-w-0 truncate text-snow/90" title={kind === "worker" ? workerNameFromTitle(title) : title}>{kind === "worker" ? workerNameFromTitle(title) : title}</span>
             <span className="shrink-0 rounded-full border border-spark/20 bg-spark/8 px-1.5 py-0.5 text-[8px] font-semibold uppercase tracking-[0.08em] text-spark">{kind === "worker" ? "Worker" : "Assignment"}</span>
           </>
         )}
-        actions={(
-          <>
-            {kind !== "discussion" ? <Button variant="ghost" onClick={onBack}>Back</Button> : null}
-            {kind !== "worker" ? (
-              <Button variant="ghost" disabled={!active || stopPending || (!working && !needsYou && !stopAttempt && !unconfirmedAdmission && !refusedAdmission && !acceptedObservationUnavailable)} title={working || needsYou || stopAttempt || unconfirmedAdmission || refusedAdmission || acceptedObservationUnavailable ? "Stop work in this conversation" : "No active work to stop"} data-testid="coworker-stop" onClick={() => void stop()}>{stopLabel}</Button>
-            ) : null}
-          </>
-        )}
+        lead={kind !== "discussion" ? (
+          <IconButton label="Back" tooltip="Back to the discussion" tooltipSide="bottom" onClick={onBack}>
+            <ChevronIcon direction="left" />
+            <span className="sr-only">Back</span>
+          </IconButton>
+        ) : null}
+        actions={kind !== "worker" && stoppable ? (
+          <IconButton label={stopLabel} tooltip={stopPending ? "Stopping this conversation's work" : "Stop work in this conversation"} tooltipSide="bottom" disabled={!active || stopPending} data-testid="coworker-stop" className="border border-line" onClick={() => void stop()}>
+            <StopIcon className="size-3.5" />
+          </IconButton>
+        ) : null}
       />
-      {active && kind === "discussion" && browserEligible && headerSlots.tools ? createPortal(<Suspense fallback={null}><ComputerControl key={`${coworker.slug}:${threadId}`} slug={coworker.slug} threadId={threadId} statusSlot={controlStatusSlot} floatingSlot={floatingSlot} openRequest={computerOpenRequest} onOpenRequestHandled={() => setComputerOpenRequest(0)} onBackToConversation={() => voice.fieldRef.current?.focus()} /></Suspense>, headerSlots.tools) : null}
+      {active && computerUse && kind === "discussion" && browserEligible && headerSlots.tools ? createPortal(<Suspense fallback={null}><ComputerControl key={`${coworker.slug}:${threadId}`} slug={coworker.slug} threadId={threadId} statusSlot={controlStatusSlot} floatingSlot={floatingSlot} openRequest={computerOpenRequest} onOpenRequestHandled={() => setComputerOpenRequest(0)} onBackToConversation={() => voice.fieldRef.current?.focus()} /></Suspense>, headerSlots.tools) : null}
       {/* Progress and problems show inline in the conversation; this keeps the turn state readable to assistive tech and tests. */}
       <div className="@container/discussion min-h-0 min-w-0 flex-1">
       <div className="flex h-full min-h-0 min-w-0 flex-col @min-[760px]/discussion:flex-row">
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col" data-testid="coworker-conversation-column">
+      <div className="relative flex min-h-0 min-w-0 flex-1 flex-col" data-testid="coworker-conversation-column">
       <p data-testid="coworker-thread-status" className="sr-only" aria-live="polite" data-state={statusState} data-outcome={outcome?.kind ?? ""}>
         {!stopAttempt && !working && !needsYou && !unconfirmedAdmission && !refusedAdmission && !acceptedObservationUnavailable && !failed && !settledWord && workspacePreparation.state !== "ready" ? workspacePreparation.state === "starting" ? "Starting AI" : "AI unavailable" : transcriptLoaded && kind === "discussion" && !stopAttempt && !working && !needsYou && !unconfirmedAdmission && !acceptedObservationUnavailable && !failed && !settledWord ? "Ready" : readableStatus}
       </p>
       <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
       <div
         ref={scrollRef}
-        className="min-h-0 flex-1 overflow-y-auto px-5 py-5"
-        style={{ overflowAnchor: "none" }}
+        className="min-h-0 flex-1 overflow-y-auto px-5 pt-[calc(var(--conversation-top,0px)+1.25rem)]"
+        style={{ overflowAnchor: "none", paddingBottom: dockHeight + 20 }}
       >
         <div ref={contentRef} className="mx-auto max-w-3xl space-y-3">
           {activityOpenError ? <p role="alert" className="text-xs text-amber">{activityOpenError}</p> : null}
           {!transcriptLoaded && !readErrors.transcript ? <p role="status" className="text-xs text-mist">Loading conversation...</p> : null}
           {freshDiscussion ? <QuietEmptyConversation coworker={coworker} proposerName={team?.coworkers.find((member) => member.slug === coworker.suggestedBy?.slug)?.name ?? ""} /> : null}
           <TranscriptAppContext.Provider value={{ sessionId: threadId, engine: "v2", readOnly: !active || kind !== "discussion" }}>
-          {blocks.map((block) => {
+          <ConversationWindow items={blocks} {...conversationWindow} render={(block) => {
             const retriedWith = block.kind === "message" ? executionsByMessage.get(block.message.id)?.retryLabel : undefined;
             if (block.kind === "actions") {
                return <ActionLine key={block.id} review={block.review} calls={block.calls} client={mcpClient} />;
             }
             if (block.kind === "documents") {
               return (
-                <div key={block.id} className="flex min-w-0 max-w-[76%] flex-wrap gap-2" data-testid="coworker-document-attachments" data-parent-id={block.parentId}>
+                <div key={block.id} className="flex min-w-0 max-w-[min(76%,38rem)] flex-wrap gap-2" data-testid="coworker-document-attachments" data-parent-id={block.parentId}>
                   {block.cards.map((card) => (
                     <DocumentCard
                       key={`${card.id}:${card.revision ?? "unknown"}`}
@@ -2503,6 +2594,7 @@ function ThreadView({
                   reactions={messageReactions.get(block.message.id)}
                   coworker={coworker}
                   mcpClient={mcpClient}
+                  documents={documents}
                   active={block.active}
                   continued={block.continued}
                   tail={block.tail}
@@ -2520,7 +2612,7 @@ function ThreadView({
                 {retriedWith ? <QuietLine outcome="retried" text={`Retried with ${safeWorkLabel(retriedWith, "the selected model")}`} /> : resolution && block.message.id === resolution.messageId && replyStateFor(visibleMessages, resolution.messageId).state === "complete" ? <QuietLine outcome="retried" text={resolution.note} /> : null}
               </div>
             );
-          })}
+          }} />
           </TranscriptAppContext.Provider>
           <CollaborationReceipts receipts={collaborationReceipts} />
           <InteractionCards
@@ -2547,7 +2639,7 @@ function ThreadView({
               // The words are arriving: the bubble is the live view. It renders in the transcript
               // once the engine has the reply; until then the words stand in here, in the same shape.
               <article className="flex flex-col items-start" data-message-role="assistant" data-live="true">
-                 <ChatReply text={safeLiveMarkdown(writingText(correlatedStream, null))} live className="max-w-[76%]" data-testid="coworker-live-bubble" />
+                 <ChatReply text={safeLiveMarkdown(writingText(correlatedStream, null))} live className="max-w-[min(76%,38rem)]" data-testid="coworker-live-bubble" />
               </article>
             ) : null}
              <LiveRow
@@ -2570,7 +2662,7 @@ function ThreadView({
             <QuietLine outcome={outcome.kind} text={outcome.line} choices={outcome.choices} onChoose={chooseTurnAction} />
           ) : null}
           {outcome?.kind === "failed" ? (
-            <TurnFailureBubble coworkerName={coworker.name} outcome={outcome} onChoose={chooseTurnAction} />
+            <TurnFailureBubble coworkerName={coworker.name} modelLabel={activeModelLabel} outcome={outcome} onChoose={chooseTurnAction} />
           ) : null}
           {providerRefreshNote ? (
             <p className="px-1 text-[11px] leading-relaxed text-mist" data-testid="coworker-provider-refresh">{providerRefreshNote}</p>
@@ -2581,19 +2673,21 @@ function ThreadView({
             void Promise.all([refresh(), waitForObservation(coworkerBridge.turns.activity(coworker.slug, threadId)).then((executions) => { if (viewMounted.current) setNativeActivity({ scope: activityScope, executions }); })])
               .catch(() => setError("Status is still unavailable. You can check again or Stop."))
               .finally(() => { confirmationReading.current = false; });
-          }}>Check again</button> or use Stop.</p> : error || (!working && !needsYou && !acceptedObservationUnavailable && workspacePreparation.error) ? <ErrorNote>{error || workspacePreparation.error}</ErrorNote> : null}
+          }}>Check again</button> or use Stop.</p> : outcome?.kind !== "failed" && (error || (!working && !needsYou && !acceptedObservationUnavailable && workspacePreparation.error)) ? <ConversationErrorCard message={error || workspacePreparation.error || ""} modelLabel={activeModelLabel} /> : null}
           {Object.values(readErrors).some(Boolean) || acceptedObservationUnavailable ? <p role="status" className="px-1 text-xs text-mist">{admissionState === "accepted" ? "Message accepted. Its activity is not available yet; shown messages and queued work are kept." : readErrors.transcript || "Some activity could not be refreshed. Shown messages and queued work are kept."} <button type="button" className="underline" onClick={() => void refresh()}>Try again</button></p> : null}
         </div>
       </div>
       {kind === "discussion" ? (
         <div ref={setFloatingSlot} className="pointer-events-none absolute inset-0 overflow-hidden" data-testid="coworker-browser-float-slot" />
       ) : null}
-      {active && transcriptLoaded && away ? <JumpToLatest onClick={jumpToLatest} /> : null}
+      {active && transcriptLoaded && away ? <JumpToLatest onClick={jumpToLatest} bottom={dockHeight + 12} /> : null}
       </div>
+      {/* The composer and what sits with it float over the conversation, which scrolls to the window's bottom beneath them. */}
+      <div ref={setDock} className="pointer-events-none absolute inset-x-0 bottom-0 z-20 bg-[linear-gradient(to_top,var(--color-ink)_20%,transparent)] [&>*]:pointer-events-auto" data-testid="coworker-composer-dock">
       {kind !== "worker" && turnState.next.length > 0 ? (
         <NextRows items={turnState.next} onEdit={editQueued} onRemove={(id) => commitTurnState((state) => removeQueued(state, id))} onSendNow={(id) => void sendQueuedNow(id)} />
       ) : null}
-      {kind === "discussion" && browserEligible ? <WorkersPanel coworker={coworker} threadId={threadId} compact onOpenComputer={() => setComputerOpenRequest((value) => value + 1)} onOpenBrowser={() => setBrowserOpenRequest((value) => value + 1)} /> : null}
+      {kind === "discussion" && browserEligible ? <WorkersPanel coworker={coworker} threadId={threadId} compact onOpenComputer={computerUse ? () => setComputerOpenRequest((value) => value + 1) : undefined} onOpenBrowser={() => setBrowserOpenRequest((value) => value + 1)} /> : null}
       {kind === "discussion" ? (
         <div ref={setControlStatusSlot} className="shrink-0 space-y-2 px-5 pt-2 empty:hidden" data-testid="coworker-control-status" />
       ) : null}
@@ -2642,6 +2736,7 @@ function ThreadView({
           onOpenSummary={onOpenSummary}
         />
       )}
+      </div>
       </div>
       {kind === "discussion" && browserEligible ? <Suspense fallback={null}><DiscussionBrowser key={`${coworker.slug}:${threadId}`} active={active} slug={coworker.slug} threadId={threadId} actionsSlot={headerSlots.tools} statusSlot={controlStatusSlot} floatingSlot={floatingSlot} openRequest={browserOpenRequest} /></Suspense> : null}
       </div>
@@ -2831,8 +2926,11 @@ const MessageBubble = memo(function MessageBubble({
   onLongReply,
   liveStream = null,
   sentAt = null,
+  documents,
 }: {
   message: TranscriptMessage;
+  /** The coworker's documents and how to open one, for the links and cards a reply's mentions become. */
+  documents?: DocumentHooks;
   reactions?: readonly MessageReaction[];
   coworker: CoworkerSummary;
   mcpClient: CoworkerMcpClient;
@@ -2879,10 +2977,12 @@ const MessageBubble = memo(function MessageBubble({
       return (
         <article className={`flex flex-col items-end ${continued ? "-mt-1.5" : ""}`} data-message-role="user" data-message-id={message.id} data-passed-from={passed.from}>
           <p className="mb-0.5 pr-1 text-[10.5px] font-semibold uppercase tracking-[0.12em] text-mist/80" data-testid="coworker-passed-from">Passed from {passed.from}</p>
-          <div className={`bubble bubble-user max-w-[72%] whitespace-pre-wrap ${tail ? "bubble-tail-right" : ""}`} title={message.createdAt ? new Date(message.createdAt).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }) : undefined}>
-            {passed.message}
+          <div className={`relative max-w-[min(72%,30rem)] ${reactions?.length ? "mt-5" : ""}`}>
+            <div className={`bubble bubble-user whitespace-pre-wrap ${tail ? "bubble-tail-right" : ""}`} title={message.createdAt ? new Date(message.createdAt).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }) : undefined}>
+              {passed.message}
+            </div>
+            <MessageReactions messageId={message.id} reactions={reactions} side="left" />
           </div>
-          <MessageReactions messageId={message.id} reactions={reactions} className="mt-1 max-w-[72%] justify-end" />
         </article>
       );
     }
@@ -2902,7 +3002,7 @@ const MessageBubble = memo(function MessageBubble({
     if (brief) {
       return (
         <article className={`flex justify-end ${continued ? "-mt-1.5" : ""}`} data-message-role="user" data-assignment-brief="true">
-          <div className={`bubble bubble-user max-w-[76%] ${tail ? "bubble-tail-right" : ""}`}>
+          <div className={`bubble bubble-user max-w-[min(76%,30rem)] ${tail ? "bubble-tail-right" : ""}`}>
             <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-white/70">Assignment for {coworker.name}</p>
             <p className="mt-1 whitespace-pre-wrap" data-testid="coworker-assignment-outcome">{brief.outcome}</p>
             {brief.context.length > 0 ? (
@@ -2926,11 +3026,13 @@ const MessageBubble = memo(function MessageBubble({
       );
     }
     return (
-      <article className={`flex flex-col items-end ${continued ? "-mt-1.5" : ""}`} data-message-role="user" data-message-id={message.id} data-continued={continued ? "true" : "false"}>
-        <div className={`bubble bubble-user max-w-[72%] whitespace-pre-wrap ${tail ? "bubble-tail-right" : ""}`} title={message.createdAt ? new Date(message.createdAt).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }) : undefined}>
-          {message.text || "…"}
+      <article className={`flex flex-col items-end ${continued ? "-mt-1.5" : ""} ${message.createdAt && Date.now() - message.createdAt < 4_000 ? "message-enter" : ""}`} data-message-role="user" data-message-id={message.id} data-continued={continued ? "true" : "false"}>
+        <div className={`relative max-w-[min(72%,30rem)] ${reactions?.length ? "mt-5" : ""}`}>
+          <div className={`bubble bubble-user whitespace-pre-wrap ${tail ? "bubble-tail-right" : ""}`} title={message.createdAt ? new Date(message.createdAt).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }) : undefined}>
+            {message.text || "…"}
+          </div>
+          <MessageReactions messageId={message.id} reactions={reactions} side="left" />
         </div>
-        <MessageReactions messageId={message.id} reactions={reactions} className="mt-1 max-w-[72%] justify-end" />
       </article>
     );
   }
@@ -2944,7 +3046,7 @@ const MessageBubble = memo(function MessageBubble({
   // bubble is the live view, in the same place and shape it keeps once the text has landed.
   const liveWords = liveStream ? writingText(liveStream, message) : message.text;
   const live = liveWords !== message.text;
-  const answeredBy = message.model ? `Answered by ${message.model.providerId}/${message.model.modelId}` : "";
+  const answeredBy = message.model ? "Answered by an AI model" : "";
   const tooltip = [answeredBy, speed].filter(Boolean).join(" · ");
   return (
     <article className={`flex flex-col items-start gap-2 ${continued ? "-mt-1" : ""}`} data-message-role="assistant" data-message-id={message.id} data-continued={continued ? "true" : "false"} {...(live ? { "data-live": "true" } : {})}>
@@ -2958,15 +3060,19 @@ const MessageBubble = memo(function MessageBubble({
         {speed ? <span data-testid="coworker-reply-speed">{" "}{speed}</span> : null}
       </p>
       {live ? (
-        <ChatReply text={safeLiveMarkdown(liveWords)} live className="max-w-[76%]" data-testid="coworker-live-bubble" />
+        <div className={`relative min-w-0 max-w-[min(76%,38rem)] ${reactions?.length ? "mt-5" : ""}`}>
+          <ChatReply text={safeLiveMarkdown(liveWords)} live data-testid="coworker-live-bubble" />
+          <MessageReactions messageId={message.id} reactions={reactions} side="right" />
+        </div>
       ) : message.text ? (
-        <div className="min-w-0 max-w-[76%]" title={tooltip || undefined}>
-          <ReplyText message={message} active={active} turnCalls={documentCalls} tail={tail && (active || teamCards.length === 0)} onLongReply={onLongReply} />
+        <div className={`relative min-w-0 max-w-[min(76%,38rem)] ${reactions?.length ? "mt-5" : ""}`} title={tooltip || undefined}>
+          <ReplyText message={message} active={active} turnCalls={documentCalls} tail={tail && (active || teamCards.length === 0)} onLongReply={onLongReply} documents={documents} />
+          <MessageReactions messageId={message.id} reactions={reactions} side="right" />
+          {!active ? <ReplyReferences text={message.text} documents={documents?.list ?? []} excludeDocumentIds={documentCardsFromCalls(documentCalls).map((card) => card.id)} onOpenDocument={documents?.onOpenDocument} /> : null}
         </div>
       ) : !active && message.toolCalls.length === 0 && teamCards.length === 0 ? (
         <div className={`bubble bubble-coworker ${tail ? "bubble-tail-left" : ""} text-mist`}>…</div>
       ) : null}
-      {message.role === "assistant" && liveWords ? <MessageReactions messageId={message.id} reactions={reactions} className="-mt-1 max-w-[76%]" /> : null}
       {team && teamCards.length > 0 && !active ? (
         <TeamCardsForTurn
           cards={teamCards}
@@ -2987,17 +3093,20 @@ const MessageBubble = memo(function MessageBubble({
  * only hidden — and is reported once so the coworker's next turn carries a
  * reminder of how it talks.
  */
-function ReplyText({ message, active, turnCalls, tail, onLongReply }: { message: TranscriptMessage; active: boolean; turnCalls: TranscriptToolCall[]; tail: boolean; onLongReply?: (messageId: string, chars: number) => void }) {
+function ReplyText({ message, active, turnCalls, tail, onLongReply, documents }: { message: TranscriptMessage; active: boolean; turnCalls: TranscriptToolCall[]; tail: boolean; onLongReply?: (messageId: string, chars: number) => void; documents?: DocumentHooks }) {
   const [open, setOpen] = useState(false);
   const long = !active && shouldFoldReply(message.text, turnCalls);
-  const split = useMemo(() => long ? splitReplyLead(message.text) : null, [long, message.text]);
+  // A document the reply names by id or title opens in place from its name.
+  const text = useMemo(() => documents?.list.length ? linkDocumentMentions(message.text, documents.list) : message.text, [documents?.list, message.text]);
+  const onOpenDocument = documents?.onOpenDocument;
+  const split = useMemo(() => long ? splitReplyLead(text) : null, [long, text]);
   useEffect(() => {
     if (long && onLongReply) onLongReply(message.id, message.text.length);
   }, [long, message.id, message.text.length, onLongReply]);
-  if (!split?.rest) return <ChatReply text={message.text} live={active} tail={tail} data-testid="coworker-reply-bubble" />;
+  if (!split?.rest) return <ChatReply text={text} live={active} tail={tail} data-testid="coworker-reply-bubble" onOpenDocument={onOpenDocument} />;
   return (
     <div data-testid="reply-fold" data-open={open ? "true" : "false"}>
-      <div data-testid="reply-fold-lead"><ChatReply text={open ? message.text : split.leadMarkdown} tail={tail} data-testid="coworker-reply-bubble" /></div>
+      <div data-testid="reply-fold-lead"><ChatReply text={open ? text : split.leadMarkdown} tail={tail} data-testid="coworker-reply-bubble" onOpenDocument={onOpenDocument} /></div>
       <button
         type="button"
         className="mt-2 text-[11px] font-medium text-mist underline decoration-mist/40 underline-offset-2 hover:text-snow"
@@ -3070,7 +3179,7 @@ function QuietLine({ outcome, text, choices = [], onChoose }: { outcome: string;
  * (never more than three), with the raw text folded away. It sits at the
  * transcript's bubble width, never across the whole column.
  */
-function TurnFailureBubble({ coworkerName, outcome, onChoose }: { coworkerName: string; outcome: TurnOutcome; onChoose: (choice: TurnChoice) => void }) {
+function TurnFailureBubble({ coworkerName, modelLabel, outcome, onChoose }: { coworkerName: string; modelLabel: string; outcome: TurnOutcome; onChoose: (choice: TurnChoice) => void | Promise<void> }) {
   const [busy, setBusy] = useState("");
   useEffect(() => {
     setBusy("");
@@ -3079,7 +3188,10 @@ function TurnFailureBubble({ coworkerName, outcome, onChoose }: { coworkerName: 
     if (busy) return;
     // Opening a screen is not acting on the turn: the card stays ready for the person's return.
     if (!choiceNavigates(choice.id)) setBusy(choice.id);
-    onChoose(choice);
+    const action = onChoose(choice);
+    // A refresh can leave the same failed turn in place. Restore its choices
+    // when that read finishes, including when the provider remains unavailable.
+    if (choice.id === "refresh-providers") void Promise.resolve(action).finally(() => setBusy(""));
   };
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -3102,6 +3214,7 @@ function TurnFailureBubble({ coworkerName, outcome, onChoose }: { coworkerName: 
         detail={outcome.detail || undefined}
         needsYou
       >
+        {modelLabel ? <p className="mt-3 text-[11px] font-medium text-mist">AI model · {modelLabel}</p> : null}
         <div className="mt-3 divide-y divide-line/70 rounded-xl border border-line/70" role="listbox" aria-label="What to do">
           {outcome.choices.map((choice, index) => (
             <OptionRow
@@ -3118,6 +3231,16 @@ function TurnFailureBubble({ coworkerName, outcome, onChoose }: { coworkerName: 
         {outcome.technical ? <TechnicalText text={outcome.technical} testId="coworker-turn-technical" /> : null}
       </InteractionCard>
     </div>
+  );
+}
+
+function ConversationErrorCard({ message, modelLabel }: { message: string; modelLabel: string }) {
+  const issue = describeConversationError(message);
+  return (
+    <InteractionCard label="Conversation needs attention" title={issue.headline} detail={issue.detail} testId="coworker-conversation-error">
+      {modelLabel && /^Choose an available AI model$/.test(issue.headline) ? <p className="mt-3 text-[11px] font-medium text-mist">AI model · {modelLabel}</p> : null}
+      {issue.technical ? <TechnicalText text={issue.technical} testId="coworker-conversation-error-technical" /> : null}
+    </InteractionCard>
   );
 }
 
@@ -3156,15 +3279,15 @@ function describeUnavailableModel(model: string, available: EngineModelOption[],
   const providerModels = available.filter((option) => option.providerId === providerId);
   if (providerModels.length > 0) {
     const sample = providerModels[0];
-    return `The saved model "${model}" is not offered by ${sample?.providerLabel ?? providerId} (${modelSourceLabel(sample?.source ?? "local")}) any more. Choose one of its ${providerModels.length} available AI model${providerModels.length === 1 ? "" : "s"}.`;
+    return `The saved AI model is no longer offered by ${sample?.providerLabel ?? "its provider"} (${modelSourceLabel(sample?.source ?? "local")}). Choose one of its ${providerModels.length} available AI model${providerModels.length === 1 ? "" : "s"}.`;
   }
   const cloudManaged = isCloudManagedProviderId(providerId);
   if (cloudManaged) {
     return session
-      ? `The saved model "${model}" belongs to an OpenWork Cloud provider that is not available right now. Refresh your OpenWork providers or choose another AI model.`
-      : `The saved model "${model}" belongs to an OpenWork Cloud provider, but no OpenWork account is signed in here. Continue with OpenWork or choose an AI model from this Mac.`;
+      ? "The saved AI model is unavailable through OpenWork Cloud right now. Refresh your OpenWork providers or choose another AI model."
+      : "The saved AI model needs an OpenWork account. Continue with OpenWork or choose an AI model from this Mac.";
   }
-  return `The saved model "${model}" is not available: provider "${providerId}" is not connected on this Mac. Choose another AI model or connect that provider in OpenWork.`;
+  return "The saved AI model is unavailable because its provider is not connected on this Mac. Choose another AI model or connect that provider in OpenWork.";
 }
 
 /** Only safe categories and observed states appear in either level of the receipt. */
@@ -3206,23 +3329,31 @@ function WorkReceipt({ calls, client }: { calls: TranscriptToolCall[]; client: C
   );
 }
 
+/** Chips that fit one row beside a "+N more" control in the conversation column. */
+const ATTACHMENTS_IN_ONE_ROW = 3;
+
 /** Documents and Apps produced by the work, once, beneath the receipt. */
 function ToolAttachments({ calls, client }: { calls: TranscriptToolCall[]; client: CoworkerMcpClient }) {
+  const [expanded, setExpanded] = useState(false);
   const seen = new Set<string>();
+  // One chip per thing the person would recognize (a site, a document), not per URL visited.
   const artifacts = calls
     .filter((call) => call.status === "completed" || call.status === "success")
     .flatMap((call) => artifactsForToolCall(call))
     .filter((artifact) => {
-      const identity = `${artifact.kind}:${artifact.value}`;
+      const identity = `${artifact.kind}:${artifact.label}`;
       if (seen.has(identity)) return false;
       seen.add(identity);
       return true;
     });
+  // One quiet row; the rest open on request.
+  const shown = expanded ? artifacts : artifacts.slice(0, ATTACHMENTS_IN_ONE_ROW);
+  const hidden = artifacts.length - shown.length;
   return (
     <>
       {artifacts.length > 0 ? (
-        <div className="mt-1.5 flex flex-wrap gap-1.5" data-testid="coworker-artifacts">
-          {artifacts.map((artifact) => {
+        <div className={`mt-1.5 flex gap-1.5 ${expanded ? "flex-wrap" : "flex-nowrap overflow-hidden"}`} data-testid="coworker-artifacts">
+          {shown.map((artifact) => {
             const chip = (
               <>
                 <span className="flex size-4 shrink-0 items-center justify-center text-mist"><ArtifactIcon kind={artifact.kind} /></span>
@@ -3246,6 +3377,11 @@ function ToolAttachments({ calls, client }: { calls: TranscriptToolCall[]; clien
               </span>
             );
           })}
+          {hidden > 0 || (expanded && artifacts.length > ATTACHMENTS_IN_ONE_ROW) ? (
+            <button type="button" className="shrink-0 rounded-lg px-2 py-1 text-[11px] text-mist transition-colors hover:bg-white/6 hover:text-snow focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-spark/60" aria-expanded={expanded} data-testid="coworker-artifacts-more" onClick={() => setExpanded((value) => !value)}>
+              {expanded ? "Show less" : `+${hidden} more`}
+            </button>
+          ) : null}
         </div>
       ) : null}
       {/* The coworker's own tools — documents, assignments, memory — answer in the bubble or the panel, never as an App. */}
@@ -3415,6 +3551,8 @@ function DiscussionComposer({
   fixedVariant?: string;
   onEffortChange?: (stop: EffortStop) => void;
 }) {
+  // Recurring work needs Calendar; without it the starting points stay with one-off work.
+  const { calendar: calendarEnabled } = useFeatures();
   const value = assignmentMode ? assignment : message;
   const submit = assignmentMode ? onCreateAssignment : onSend;
   const held = busy || Boolean(waiting);
@@ -3425,7 +3563,7 @@ function DiscussionComposer({
   const stopping = working && !assignmentMode && !value.trim() && Boolean(onStop);
   const submitLabel = busy ? "Working…" : assignmentMode ? "Create assignment" : working ? "Next" : "Send";
   return (
-    <div className="shrink-0 bg-ink px-5 pb-2 pt-2" data-testid="coworker-composer" data-working={working ? "true" : "false"}>
+    <div className="shrink-0 px-3 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 sm:px-5" data-testid="coworker-composer" data-working={working ? "true" : "false"}>
       <div className="mx-auto max-w-3xl">
         {error ? <div className="mb-2"><ErrorNote>{error}</ErrorNote></div> : null}
         {assignmentMode ? (
@@ -3433,7 +3571,7 @@ function DiscussionComposer({
             Something {coworkerName} should own, separate from this chat
           </p>
         ) : null}
-        <div className={`rounded-[24px] border bg-panel/60 p-3 transition-colors focus-within:border-spark/50 ${assignmentMode ? "border-spark/35" : "border-line"}`} data-testid="coworker-input-surface">
+        <div className={`glass-sheen relative rounded-[24px] border bg-panel/55 p-3 shadow-[0_8px_32px_rgb(0_0_0/0.35)] backdrop-blur-xl backdrop-saturate-150 transition-colors focus-within:border-spark/50 ${assignmentMode ? "border-spark/35" : "border-line"}`} data-testid="coworker-input-surface" data-glint="surface">
           {!assignmentMode ? <VoicePanel voice={voice} /> : null}
           {!assignmentMode && skills.length ? <div className="flex flex-wrap gap-2 px-1 pb-2" aria-label="Selected skills">
             {skills.map((skill, index) => <span key={`${skill.id}:${index}`} className="inline-flex max-w-full items-center gap-2 rounded-full border border-line px-2 py-1 text-xs text-snow" data-testid="coworker-selected-skill">
@@ -3475,7 +3613,7 @@ function DiscussionComposer({
                   {[
                     { label: "Turn a goal into a plan", prompt: "Help me turn a goal into a practical plan. Ask what I want to achieve and when I need it, then help me create a short working document with next steps." },
                     { label: "Work through a document", prompt: "Help me improve a document. Ask me to share it and tell you who it is for, then identify the most useful changes before drafting a revision." },
-                    { label: "Take recurring work off my plate", prompt: "Help me choose one recurring task you can take off my plate. Ask about the task, the apps it needs, and when I want the result. Propose a responsibility for me to review before scheduling it." },
+                    ...(calendarEnabled ? [{ label: "Take recurring work off my plate", prompt: "Help me choose one recurring task you can take off my plate. Ask about the task, the apps it needs, and when I want the result. Propose a responsibility for me to review before scheduling it." }] : []),
                   ].map((starter) => <button key={starter.label} type="button" className="block w-full rounded-lg px-2 py-2 text-left text-xs text-snow hover:bg-white/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-spark/45" onClick={() => { onMessageChange(starter.prompt); fieldRef.current?.focus(); }}>{starter.label}</button>)}
                   <p className="pt-2 text-[11px] text-mist">Choose a starting point, edit it, then send.</p>
                 </PopoverDisclosure>
@@ -3600,9 +3738,9 @@ function MessageComposer({
   const fieldRef = useRef<HTMLTextAreaElement>(null);
   useAutoGrow(fieldRef, value);
   return (
-    <div className="bg-ink px-5 pb-2 pt-2" data-testid="coworker-composer" data-working={working ? "true" : "false"}>
+    <div className="px-3 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 sm:px-5" data-testid="coworker-composer" data-working={working ? "true" : "false"}>
       <div className="mx-auto max-w-3xl">
-        <div className="rounded-[24px] border border-line bg-panel/60 p-3 transition-colors focus-within:border-spark/50">
+        <div className="glass-sheen relative rounded-[24px] border border-line bg-panel/55 p-3 shadow-[0_8px_32px_rgb(0_0_0/0.35)] backdrop-blur-xl backdrop-saturate-150 transition-colors focus-within:border-spark/50" data-glint="surface">
           <textarea
             ref={fieldRef}
             aria-label={placeholder.replace("…", "")}

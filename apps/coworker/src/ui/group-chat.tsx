@@ -1,11 +1,11 @@
 import { useComposerDraft } from "@/ui/use-composer-draft";
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ComponentProps, type ReactNode } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type ComponentProps, type ReactNode } from "react";
 import { coworkerBridge, type CollaborationReceipt, type CoworkerGroupSummary, type CoworkerGroupTurn, type CoworkerSummary, type GroupInteraction, type GroupTimelineEvent, type RuntimeInfo } from "@/lib/bridge";
 import { assignmentPrompt, assignmentTitle, timeLabelBetween, type DiscussionMessage } from "@/lib/conversation";
 import { combineSummaryLines, describeCoworkerSummary, type CoworkerSummaryLine } from "@/lib/coworker-summary";
 import { classifyThreads, discussionIds, loadDiscussionRegistry } from "@/lib/discussions";
 import { humanizeDocumentId } from "@/lib/documents";
-import { DocumentCard, lastDocumentsOpened, useDocumentNavigationGuard, type DocumentNavigationGuard } from "@/ui/documents";
+import { DocumentCard, DocumentsIcon, lastDocumentsOpened, useDocumentNavigationGuard, type DocumentNavigationGuard } from "@/ui/documents";
 import { GroupDocuments, type GroupDocumentsApi } from "@/ui/group-documents";
 import {
   publishGroupRun,
@@ -30,15 +30,23 @@ import { safeLiveMarkdown } from "@/lib/live-phase";
 import { LiveRow } from "@/ui/live-row";
 import { ChatReply } from "@/ui/chat-reply";
 import { MessageReactions, useMessageReactions } from "@/ui/message-reactions";
+import { ReplyReferences } from "@/ui/reply-references";
+
+/** Group documents are shared files, not a coworker's own; group replies preview only web links. */
+const NO_DOCUMENT_REFERENCES: never[] = [];
 import { acknowledgeCoworker, CoworkerAvatar, GroupAvatars } from "@/ui/coworker-avatar";
 import { InteractionCard, InteractionCards, LETTERS, OptionRow, typingInField } from "@/ui/interactions";
-import { ActionMenu, Button, ErrorNote, PlusIcon } from "@/ui/kit";
+import { ActionMenu, Button, CONVERSATION_TOP, ChevronIcon, ErrorNote, IconButton, PlusIcon, StopIcon, Tooltip } from "@/ui/kit";
+import { CalendarIcon } from "@/ui/main-content-switch";
 import { CollaborationReceipts, SendButton, SummaryLine } from "@/ui/threads";
 import { useAutoGrow } from "@/ui/use-auto-grow";
 import { JumpToLatest, useConversationScroll } from "@/ui/use-conversation-scroll";
+import { ConversationWindow, useConversationWindow } from "@/ui/conversation-window";
 import { appendVoiceDraft, groupVoiceReply, type VoiceExpectation } from "@/lib/voice";
 import { useVoice } from "@/ui/use-voice";
 import { VoicePanel, VoiceToggle } from "@/ui/voice";
+import { useLayout } from "@/ui/use-layout";
+import { FocusToggle, TeamButton } from "@/ui/layout-controls";
 
 /** How long one coworker may take over one reply before the turn moves on. */
 export const REPLY_TIMEOUT_MS = 180_000;
@@ -157,7 +165,7 @@ const GroupExecutionRow = memo(function GroupExecutionRow({ activity, coworker, 
     <p className="mb-1 px-2 text-[11px] font-medium text-mist [overflow-wrap:anywhere]" data-testid="group-speaker-name">{coworker.name}</p>
     {text ? <div className="flex min-w-0 items-end gap-2" data-message-role="assistant" data-live="true">
       <span className="shrink-0"><CoworkerAvatar identity={coworker.slug} animated={false} motion="quiet" gaze={false} color={coworker.avatarColor} glasses={coworker.avatarGlasses} name={coworker.name} size={24} /></span>
-      <div className="min-w-0 max-w-[76%]" data-testid="group-live-reply"><ChatReply text={safeLiveMarkdown(text)} live tail /></div>
+      <div className="min-w-0 max-w-[min(76%,38rem)]" data-testid="group-live-reply"><ChatReply text={safeLiveMarkdown(text)} live tail /></div>
     </div> : null}
     <LiveRow coworker={coworker} progress={progress} phase={progress.status === "streaming" ? "writing" : "thinking"} wordsArrived={Boolean(text)} />
   </div>;
@@ -246,6 +254,8 @@ function GroupChatView({
   const [loaded, setLoaded] = useState(false);
   const [message, setMessage] = useComposerDraft(`group:${group.id}`);
   const [live, setLive] = useState(false);
+  const liveRef = useRef(live);
+  liveRef.current = live;
   const [liveTurn, setLiveTurn] = useState<CoworkerGroupTurn | null>(null);
   const [queue, setQueue] = useState<QueuedGroupMessage[]>([]);
   const [voiceBaseline, setVoiceBaseline] = useState<{ clientMessageId: string; updatedAt: number; eventIds: string[] } | null>(null);
@@ -255,6 +265,8 @@ function GroupChatView({
   const sending = localSends.some((item) => item.state === "pending" || item.state === "sending");
   const actionAttempts = useRef(new Map<string, GroupActionAttempt>());
   const [busyActions, setBusyActions] = useState<string[]>([]);
+  /** Focus mode or a narrow window: the team opens over the conversation from the header. */
+  const layout = useLayout();
   const mounted = useRef(true);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const submissionRevision = useRef(0);
@@ -279,7 +291,22 @@ function GroupChatView({
   coworkersRef.current = coworkers;
   const eventsRef = useRef(events);
   eventsRef.current = events;
-  const { scrollRef, contentRef, away, jumpToLatest, reveal } = useConversationScroll(`group:${group.id}`, active && !pendingAssignment, observed.groupId === group.id);
+  const { scrollRef, contentRef, away, jumpToLatest, reveal, registerVirtualAnchors } = useConversationScroll(`group:${group.id}`, active && !pendingAssignment, observed.groupId === group.id);
+  // The floating composer's height, so the conversation always ends just above it.
+  const [dock, setDock] = useState<HTMLDivElement | null>(null);
+  const [dockHeight, setDockHeight] = useState(0);
+  useEffect(() => {
+    if (!dock) return;
+    const observer = new ResizeObserver(() => setDockHeight(Math.ceil(dock.getBoundingClientRect().height)));
+    observer.observe(dock);
+    return () => observer.disconnect();
+  }, [dock]);
+  const readingLatest = useRef(!away);
+  readingLatest.current = !away;
+  useLayoutEffect(() => {
+    const scroller = scrollRef.current;
+    if (scroller && readingLatest.current) scroller.scrollTop = scroller.scrollHeight;
+  }, [dockHeight, scrollRef]);
   const revealedActivity = useRef(0);
   const preparedActivity = useRef(0);
   const [activityNotice, setActivityNotice] = useState("");
@@ -347,8 +374,12 @@ function GroupChatView({
     // not stop status, queue or receipt updates; timeline and executions stay paired.
     const poll = <T,>(name: string, read: () => Promise<T>, apply: (value: T) => void) => {
       let reading = false;
-      const refresh = async () => {
-        if (reading) return;
+      let lastRead = 0;
+      const refresh = async (force = false) => {
+        if (reading || document.visibilityState === "hidden") return;
+        const inProgress = liveRef.current || groupSends(group.id).some((item) => ["pending", "sending", "uncertain"].includes(item.state) || (item.state === "accepted" && Date.now() - item.at < 15_000));
+        if (!force && Date.now() - lastRead < (inProgress ? PROGRESS_LIMITS.activityPollMs : 6_000)) return;
+        lastRead = Date.now();
         reading = true;
         try {
           const revision = submissionRevision.current;
@@ -363,10 +394,10 @@ function GroupChatView({
           if (current()) setActivityError(failures.size ? "Reconnecting to group activity. Shown replies and send receipts are kept. Messages are not automatically resent." : "");
         }
       };
-      void refresh();
-      return window.setInterval(() => void refresh(), PROGRESS_LIMITS.activityPollMs);
+      void refresh(true);
+      return { timer: window.setInterval(() => void refresh(), PROGRESS_LIMITS.activityPollMs), refresh };
     };
-    const timers = [
+    const polls = [
       poll("status", () => coworkerBridge.groups.status(group.id), (status) => {
         setLive(status.active); setLiveTurn(status.turn); setQueue(status.queue); setLoaded(true);
         setHumanWaits({ groupId: group.id, entries: status.interactions });
@@ -381,7 +412,13 @@ function GroupChatView({
       poll("activity", async () => ({ readStartedAt: Date.now(), activity: await coworkerBridge.groups.activity(group.id) }), ({ activity, readStartedAt }) => {
         const speakerOrder = [...(groupRef.current.turns.at(-1)?.speakers ?? [])].sort((a, b) => a.order - b.order).map((speaker) => speaker.slug);
         const next = { groupId: group.id, ...reconcileGroupActivity(groupObservations.get(group.id) ?? { timeline: [], executions: [] }, activity, speakerOrder) };
+        groupObservations.delete(group.id);
         groupObservations.set(group.id, next);
+        while (groupObservations.size > 8) {
+          const oldest = groupObservations.keys().next().value;
+          if (oldest === undefined) break;
+          groupObservations.delete(oldest);
+        }
         setObserved(next);
         setActivityReadStartedAt(readStartedAt);
         changeGroupSends(group.id, (items) => items.filter((item) => item.turnId || !next.timeline.some((event) => event.kind === "user" && event.clientMessageId === item.clientMessageId)));
@@ -393,7 +430,9 @@ function GroupChatView({
         setReceipts(work); setReceiptsLoaded(true);
       }),
     ];
-    return () => { cancelled = true; timers.forEach(window.clearInterval); };
+    const visible = () => { if (document.visibilityState === "visible") polls.forEach((entry) => void entry.refresh(true)); };
+    document.addEventListener("visibilitychange", visible);
+    return () => { cancelled = true; polls.forEach((entry) => window.clearInterval(entry.timer)); document.removeEventListener("visibilitychange", visible); };
   }, [group.id]);
 
   useEffect(() => {
@@ -633,6 +672,7 @@ function GroupChatView({
     reply: spokenReply,
     endedTurn: voiceTurn && (["failed", "stopped"].includes(voiceTurn.status) || (["succeeded", "partial"].includes(voiceTurn.status) && (!voiceTurn.speakers.some((speaker) => speaker.status === "succeeded") || (!spokenReply && groupVoiceReply(voiceTurn, events, nameFor))))) ? voiceTurn.clientMessageId : null,
   });
+  const stopAllLabel = busyActions.includes("stop") ? "Stopping…" : actionAttempts.current.get("stop")?.state === "retryable" ? "Retry stop" : "Stop all";
   function stopGroup() { voice.stop("Audio stopped. Your text conversation is kept."); void runAction("stop", () => stopGroupRun(group.id)); }
   const recoveryBusy = localSends.some((item) => item.turnId && (item.state === "pending" || item.state === "sending" || item.state === "accepted"));
   const recoverable = loaded && !activityError && !live && latestTurn && unfinishedSpeakers(latestTurn).length > 0 ? latestTurn : null;
@@ -647,67 +687,12 @@ function GroupChatView({
   const persistedEventIds = useMemo(() => new Set(events.map((event) => event.id)), [events]);
   const viewEvent = eventId && onOpenEvent ? <button type="button" className="font-medium text-snow/80 underline-offset-2 hover:underline" onClick={() => onOpenEvent(eventId)} data-testid="group-event-phase-link">View event</button> : null;
 
-  return (
-    <div className="glass-main flex h-full min-w-0 flex-1" data-testid="group-chat" data-group-id={group.id} data-live={live ? "true" : "false"}>
-      <div className="flex min-w-0 flex-1 flex-col" data-testid="group-conversation">
-      <header className="glass-header window-drag flex min-h-[78px] shrink-0 flex-wrap items-center gap-x-3 gap-y-2 border-b border-line px-4 py-3" data-testid="conversation-header">
-        <GroupAvatars members={members} size={30} motion="navigation" activeSlugs={activeSlugs} gatherKey={active ? group.id : undefined} />
-        <div className="min-w-0 flex-[1_1_10rem]">
-          {renaming ? (
-            <input
-              autoFocus
-              aria-label="Group name"
-              data-testid="group-name-input"
-              className="window-no-drag h-7 w-full max-w-xs rounded-lg border border-line bg-black/18 px-2 text-sm font-semibold text-snow outline-none focus:border-spark/50"
-              value={nameDraft}
-              onChange={(event) => setNameDraft(event.target.value)}
-              onBlur={() => void rename()}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") void rename();
-                if (event.key === "Escape") setRenaming(false);
-              }}
-            />
-          ) : (
-            <h1 className="whitespace-normal text-sm font-semibold text-snow [overflow-wrap:anywhere]" data-testid="group-name">{event?.title ?? group.name}</h1>
-          )}
-          <p className="whitespace-normal text-xs text-mist [overflow-wrap:anywhere]" data-testid="conversation-header-title">{members.map((member) => member.name).join(", ")}</p>
-        </div>
-        <div className="window-no-drag flex shrink-0 items-center gap-1" data-testid="conversation-header-actions">
-          {onExitActivity ? <Button variant="ghost" onClick={onExitActivity}>Go to chat</Button> : null}
-          {eventId && onOpenEvent ? <Button variant="ghost" onClick={() => onOpenEvent(eventId)} data-testid="event-conversation-backlink">View event</Button> : null}
-          {documentsApi ? <Button variant="ghost" onClick={() => sharedDocumentSuspended && sharedDocument ? setSharedDocumentSuspended(false) : openSharedDocument("")} data-testid="group-shared-documents">Shared documents</Button> : null}
-          {live ? <Button variant="ghost" disabled={busyActions.includes("stop")} onClick={stopGroup}>{busyActions.includes("stop") ? "Stopping…" : actionAttempts.current.get("stop")?.state === "retryable" ? "Retry stop" : "Stop all"}</Button> : null}
-          {!event && !group.eventId ? <ActionMenu
-            label="Group chat options"
-            items={[
-              { label: "Rename", onSelect: () => { setNameDraft(group.name); setRenaming(true); } },
-              ...(onOpenDetails ? [{ label: "Group details", onSelect: onOpenDetails }] : []),
-              { label: "Archive", tone: "danger", disabled: live || sending || busyActions.includes("archive"), onSelect: () => void runAction("archive", () => coworkerBridge.groups.archive(group.id), (archived) => { if (mounted.current) onGroupArchived(archived); }) },
-            ]}
-          /> : null}
-        </div>
-        {/* One plain line, no dot: who is replying, or Ready. */}
-        <span data-testid="coworker-top-status" data-tone={statusLine === "Ready" ? "ready" : "mist"} className={`min-w-0 max-w-full whitespace-normal text-xs [overflow-wrap:anywhere] ${statusLine === "Ready" ? "text-ready" : "text-mist"}`}>
-          {statusLine}
-        </span>
-      </header>
-      {event || group.eventId ? <p className="border-b border-line/60 px-5 py-2 text-[11px] text-mist">Event conversation. Change participants and future sessions in the event editor. {group.archivedAt ? "This conversation is archived; its history is kept." : ""}</p> : null}
-      {documentNotice ? <p role="alert" className="border-b border-line px-5 py-2 text-xs text-mist">{documentNotice}<button type="button" className="ml-2 underline" onClick={() => setDocumentNotice("")}>Dismiss</button></p> : null}
-      {activityNotice ? <p role="status" className="border-b border-line px-5 py-2 text-xs text-mist">{activityNotice}<button type="button" className="ml-2 underline" onClick={() => setActivityNotice("")}>Dismiss</button></p> : null}
-      <div className="relative flex min-h-0 flex-1 flex-col">
-      <div ref={scrollRef} style={{ overflowAnchor: "none" }} className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
-        <div ref={contentRef} className="mx-auto max-w-3xl space-y-3">
-          {introduction}
-          {observed.groupId !== group.id && !activityError ? <p role="status" className="text-xs text-mist">Loading conversation…</p> : null}
-          {loaded && observed.groupId === group.id && rows.length === 0 && !introduction ? (
-            <div className="mx-auto flex h-full max-w-md flex-col items-center justify-center py-10 text-center" data-testid="group-chat-empty">
-              <GroupAvatars members={members} size={40} motion="navigation" />
-              <p className="mt-3 text-sm font-semibold text-snow">{group.name}</p>
-              <p className="mt-0.5 text-xs text-mist">{members.map((member) => member.name).join(", ")}</p>
-              <p className="mt-4 text-sm text-mist">What should we work through together? Name a coworker with @ to choose who answers.</p>
-            </div>
-          ) : null}
-          {rows.map((row, index) => {
+  const conversationWindow = useConversationWindow(scrollRef, rows, (row) => "execution" in row ? `execution:${row.execution.executionId}:${row.execution.threadId}:${row.execution.messageId}:${row.execution.slug}` : groupMessageKey(row.event));
+  useLayoutEffect(() => registerVirtualAnchors(conversationWindow.enabled ? {
+    indexFor: (anchor) => rows.findIndex((row) => "event" in row && groupMessageKey(row.event) === anchor),
+    scrollToIndex: (index) => conversationWindow.virtualizer.scrollToIndex(index, { align: "center" }),
+  } : null), [conversationWindow.enabled, conversationWindow.virtualizer, registerVirtualAnchors, rows]);
+  const renderRow = (row: ReturnType<typeof groupConversationRows>[number], index: number) => {
             if ("execution" in row) {
               const execution = row.execution;
               const member = coworkers.find((coworker) => coworker.slug === execution.slug);
@@ -773,11 +758,13 @@ function GroupChatView({
                 <div key={key} data-scroll-anchor={key} data-event-id={persistedEventId} data-client-message-id={event.clientMessageId} data-delivery-state={delivery?.state ?? "recorded"}>
                   {label ? <p className="pb-1 pt-2 text-center text-[11px] font-medium text-mist/80" data-testid="group-time-label">{label}</p> : null}
                   <div className={`flex justify-end ${continued ? "-mt-1.5" : ""}`} data-message-role="user" data-continued={continued ? "true" : "false"}>
-                    <div className={`bubble bubble-user max-w-[72%] whitespace-pre-wrap ${tail ? "bubble-tail-right" : ""}`} title={timeLabel(event.at)}>
-                      {event.text}
+                    <div className={`relative max-w-[min(72%,30rem)] ${persistedEventId && messageReactions.get(persistedEventId)?.length ? "mt-5" : ""}`}>
+                      <div className={`bubble bubble-user whitespace-pre-wrap ${tail ? "bubble-tail-right" : ""}`} title={timeLabel(event.at)}>
+                        {event.text}
+                      </div>
+                      {persistedEventId ? <MessageReactions messageId={persistedEventId} reactions={messageReactions.get(persistedEventId)} side="left" /> : null}
                     </div>
                   </div>
-                  {persistedEventId ? <MessageReactions messageId={persistedEventId} reactions={messageReactions.get(persistedEventId)} className="ml-auto mt-1 max-w-[72%] justify-end" /> : null}
                   {delivery ? <div className="mt-1 flex flex-wrap items-center justify-end gap-x-3 gap-y-1 px-2 text-[11px] text-mist" role="status" data-testid={queued ? "group-queued" : delivery.state === "failed" || delivery.state === "uncertain" ? "group-turn-failed" : "group-send-receipt"}>
                     <span>{eventPhase ? "Managed event phase; its run record owns the status" : queued ? "Next" : delivery.state === "pending" ? "Waiting to send" : delivery.state === "sending" ? "Sending…" : delivery.state === "accepted" ? "Accepted" : delivery.state === "cancelled" ? "Removed from queue" : delivery.state === "uncertain" ? "Confirmation delayed. Checking records." : "Could not send"}</span>
                     {delivery.error ? <span className="max-w-prose [overflow-wrap:anywhere]">{delivery.error}</span> : null}
@@ -796,17 +783,115 @@ function GroupChatView({
                   <span className="w-6 shrink-0">
                     {tail && speaker ? <CoworkerAvatar identity={speaker.slug} animated={false} motion="quiet" gaze={false} color={speaker.avatarColor} glasses={speaker.avatarGlasses} name={speaker.name} size={24} /> : null}
                   </span>
-                  <div className="min-w-0 max-w-[76%]">
+                  <div className="min-w-0 max-w-[min(76%,38rem)]">
                     {!continued ? <p className="mb-0.5 px-2 text-[11px] font-medium text-mist" data-testid="group-speaker-name">{nameFor(event.slug ?? "")}</p> : null}
-                    <div title={timeLabel(event.at)}>
+                    <div className={`relative ${persistedEventId && messageReactions.get(persistedEventId)?.length ? "mt-5" : ""}`} title={timeLabel(event.at)}>
                       <ChatReply text={event.text} tail={tail} />
+                      <ReplyReferences text={event.text} documents={NO_DOCUMENT_REFERENCES} />
+                      {persistedEventId ? <MessageReactions messageId={persistedEventId} reactions={messageReactions.get(persistedEventId)} side="right" /> : null}
                     </div>
                   </div>
                 </div>
-                {persistedEventId ? <MessageReactions messageId={persistedEventId} reactions={messageReactions.get(persistedEventId)} className="ml-8 mt-1 max-w-[76%]" /> : null}
               </div>
             );
-          })}
+
+  };
+  // Notices sit below the floating header; without one, the conversation starts beneath it itself.
+  const groupNotice = Boolean(event || group.eventId || documentNotice || activityNotice);
+  return (
+    <div className="glass-main flex h-full min-w-0 flex-1" data-testid="group-chat" data-group-id={group.id} data-live={live ? "true" : "false"}>
+      <div className="@container/group relative flex min-w-0 flex-1 flex-col" data-testid="group-conversation" style={{ "--conversation-top": groupNotice ? "0px" : CONVERSATION_TOP } as CSSProperties}>
+      {/* No header bar: it floats over the conversation, which scrolls the full height beneath it. A way back on the left,
+          a pill for where you are, this conversation's controls on the right; top and side room clear the rounded corners. */}
+      <header className={`window-drag absolute inset-x-0 top-0 z-30 flex items-center gap-2 pb-3 pt-3 ${layout.chatOnly ? "window-controls-inset-sm bg-[linear-gradient(to_bottom,var(--color-ink)_72%,transparent)] px-3" : "bg-[linear-gradient(to_bottom,var(--color-ink)_40%,transparent)] px-4"}`} data-testid="conversation-header">
+        <div className="flex min-w-fit flex-1 basis-0 items-center gap-1">
+          <TeamButton />
+          {onExitActivity ? <IconButton className="window-no-drag" label="Go to chat" tooltip="Leave Activity and open this chat" tooltipSide="bottom" onClick={onExitActivity}><ChevronIcon direction="left" /></IconButton> : null}
+        </div>
+        <nav aria-label="Where you are" data-glint="surface" className="glass-sheen window-no-drag relative flex min-w-0 max-w-[70%] items-center gap-1 rounded-full border border-line bg-panel/90 py-1 pl-1 shadow-[0_8px_24px_rgb(0_0_0/0.35)] backdrop-blur pr-3" data-testid="conversation-breadcrumbs">
+          {eventId && onOpenEvent ? (
+            <>
+              <Tooltip content="Open this event" side="bottom">
+                <button type="button" aria-label="View event" className="flex shrink-0 items-center gap-1.5 rounded-full px-2 py-1 text-xs text-mist transition-colors hover:bg-white/6 hover:text-snow focus-visible:bg-white/6 focus-visible:text-snow focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-spark/60" onClick={() => onOpenEvent(eventId)} data-testid="event-conversation-backlink">
+                  <CalendarIcon />
+                  <span>Event</span>
+                </button>
+              </Tooltip>
+              <ChevronIcon direction="right" className="size-3 shrink-0 text-mist/60" />
+            </>
+          ) : null}
+          <Tooltip content={`With ${members.map((member) => member.name).join(", ")}`} side="bottom">
+            <span tabIndex={0} aria-label={`Members: ${members.map((member) => member.name).join(", ")}`} className="shrink-0 rounded-full focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-spark/60">
+              <GroupAvatars members={members} size={24} motion="navigation" activeSlugs={activeSlugs} gatherKey={active ? group.id : undefined} />
+            </span>
+          </Tooltip>
+          {renaming ? (
+            <input
+              autoFocus
+              aria-label="Group name"
+              data-testid="group-name-input"
+              className="h-7 w-56 min-w-0 rounded-full border border-line bg-black/18 px-3 text-sm font-semibold text-snow outline-none focus:border-spark/50"
+              value={nameDraft}
+              onChange={(event) => setNameDraft(event.target.value)}
+              onBlur={() => void rename()}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") void rename();
+                if (event.key === "Escape") setRenaming(false);
+              }}
+            />
+          ) : (
+            <h1 className="min-w-0 truncate pl-1 text-sm font-semibold text-snow" title={event?.title ?? group.name} data-testid="group-name">{event?.title ?? group.name}</h1>
+          )}
+          <span className="sr-only" data-testid="conversation-header-title">{members.map((member) => member.name).join(", ")}</span>
+        </nav>
+        <div className="flex min-w-fit flex-1 basis-0 items-center justify-end gap-0.5">
+          <div className="window-no-drag flex shrink-0 items-center gap-0.5" data-testid="conversation-header-actions">
+            {live ? (
+              <IconButton label={stopAllLabel} tooltip="Stop every reply in this chat" tooltipSide="bottom" className="border border-line" disabled={busyActions.includes("stop")} onClick={stopGroup}>
+                <StopIcon className="size-3.5" />
+                <span className="sr-only">{stopAllLabel}</span>
+              </IconButton>
+            ) : null}
+            {/* Focus mode keeps the top to the way back and the way out; only Stop appears, while replies run. */}
+            {documentsApi && !layout.focus ? (
+              <IconButton label="Shared documents" tooltipSide="bottom" onClick={() => sharedDocumentSuspended && sharedDocument ? setSharedDocumentSuspended(false) : openSharedDocument("")} data-testid="group-shared-documents">
+                <DocumentsIcon />
+              </IconButton>
+            ) : null}
+            {!event && !group.eventId && !layout.focus ? <ActionMenu
+              label="Group chat options"
+              items={[
+                { label: "Rename", onSelect: () => { setNameDraft(group.name); setRenaming(true); } },
+                ...(onOpenDetails ? [{ label: "Group details", onSelect: onOpenDetails }] : []),
+                { label: "Archive", tone: "danger", disabled: live || sending || busyActions.includes("archive"), onSelect: () => void runAction("archive", () => coworkerBridge.groups.archive(group.id), (archived) => { if (mounted.current) onGroupArchived(archived); }) },
+              ]}
+            /> : null}
+          </div>
+          {/* One plain line, no dot: who is replying, or Ready. */}
+          <span data-testid="coworker-top-status" data-tone={statusLine === "Ready" ? "ready" : "mist"} title={statusLine} className={`hidden min-w-0 max-w-[12rem] truncate pl-1 text-xs @min-[640px]/group:inline ${statusLine === "Ready" ? "text-ready" : "text-mist"}`}>
+            {statusLine}
+          </span>
+          <FocusToggle />
+        </div>
+      </header>
+      {groupNotice ? <div style={{ height: CONVERSATION_TOP }} className="shrink-0" aria-hidden="true" /> : null}
+      {event || group.eventId ? <p className="border-b border-line/60 px-5 py-2 text-[11px] text-mist">Event conversation. Change participants and future sessions in the event editor. {group.archivedAt ? "This conversation is archived; its history is kept." : ""}</p> : null}
+      {documentNotice ? <p role="alert" className="border-b border-line px-5 py-2 text-xs text-mist">{documentNotice}<button type="button" className="ml-2 underline" onClick={() => setDocumentNotice("")}>Dismiss</button></p> : null}
+      {activityNotice ? <p role="status" className="border-b border-line px-5 py-2 text-xs text-mist">{activityNotice}<button type="button" className="ml-2 underline" onClick={() => setActivityNotice("")}>Dismiss</button></p> : null}
+      <div className="relative flex min-h-0 flex-1 flex-col">
+      <div ref={scrollRef} style={{ overflowAnchor: "none", paddingBottom: dockHeight + 20 }} className="min-h-0 flex-1 overflow-y-auto px-5 pt-[calc(var(--conversation-top,0px)+1.25rem)]">
+        <div ref={contentRef} className="mx-auto max-w-3xl space-y-3">
+          {introduction}
+          {observed.groupId !== group.id && !activityError ? <p role="status" className="text-xs text-mist">Loading conversation…</p> : null}
+          {loaded && observed.groupId === group.id && rows.length === 0 && !introduction ? (
+            <div className="mx-auto flex h-full max-w-md flex-col items-center justify-center py-10 text-center" data-testid="group-chat-empty">
+              <GroupAvatars members={members} size={40} motion="navigation" />
+              <p className="mt-3 text-sm font-semibold text-snow">{group.name}</p>
+              <p className="mt-0.5 text-xs text-mist">{members.map((member) => member.name).join(", ")}</p>
+              <p className="mt-4 text-sm text-mist">What should we work through together? Name a coworker with @ to choose who answers.</p>
+            </div>
+          ) : null}
+          <ConversationWindow items={rows} {...conversationWindow} render={renderRow} />
           <CollaborationReceipts receipts={receipts} canRetry={(receipt) => !receipt.eventRunId && !events.some((entry) => entry.executionId === receipt.id && isEventPhaseRequest(entry.clientMessageId, entry.turnId))} retryUnavailable={viewEvent} />
           {interactions.map((entry) => {
             const member = members.find((member) => member.slug === entry.slug);
@@ -857,14 +942,15 @@ function GroupChatView({
           {activityError ? <ErrorNote>{activityError}</ErrorNote> : null}
         </div>
       </div>
-      {active && away && !pendingAssignment ? <JumpToLatest onClick={jumpToLatest} /> : null}
+      {active && away && !pendingAssignment ? <JumpToLatest onClick={jumpToLatest} bottom={dockHeight + 12} /> : null}
       </div>
-      <div className="px-5 pb-4 pt-2" data-testid="coworker-composer">
+      {/* The composer floats over the conversation, which scrolls to the window's bottom beneath it. */}
+      <div ref={setDock} className="absolute inset-x-0 bottom-0 z-20 bg-[linear-gradient(to_top,var(--color-ink)_20%,transparent)] px-3 pb-[max(1rem,env(safe-area-inset-bottom))] pt-4 sm:px-5" data-testid="coworker-composer">
         <div className="mx-auto max-w-3xl">
           {assignmentMode ? (
             <p className="mb-2 px-2 text-[11px] text-mist" data-testid="group-assignment-mode">Something one of them should own, separate from this chat</p>
           ) : null}
-          <div className={`relative rounded-[24px] border bg-panel/60 p-3 transition-colors focus-within:border-spark/50 ${assignmentMode ? "border-spark/35" : "border-line"}`} data-testid="coworker-input-surface">
+          <div className={`glass-sheen relative rounded-[24px] border bg-panel/55 p-3 shadow-[0_8px_32px_rgb(0_0_0/0.35)] backdrop-blur-xl backdrop-saturate-150 transition-colors focus-within:border-spark/50 ${assignmentMode ? "border-spark/35" : "border-line"}`} data-testid="coworker-input-surface" data-glint="surface">
             {!assignmentMode ? <VoicePanel voice={voice} /> : null}
             {mention && mentionOptions.length > 0 && !assignmentMode ? (
               <ul

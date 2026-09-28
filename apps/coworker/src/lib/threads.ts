@@ -516,11 +516,17 @@ function normalizeV2Permission(value: NativeV2Permission): PendingPermission {
   };
 }
 
-function normalizeQuestion(value: NativeV2Form): PendingQuestion {
-  if (value.metadata?.kind !== "question" || value.fields.some((field) => !["string", "multiselect"].includes(field.type) || field.when?.length)) {
+/**
+ * Native forms the question card can show and answer. Web search asks once which
+ * provider it may use; unanswered, the search is cancelled after a minute.
+ */
+const QUESTION_FORM_KINDS = new Set(["question", "websearch.provider"]);
+
+export function normalizeQuestion(value: NativeV2Form): PendingQuestion {
+  if (!QUESTION_FORM_KINDS.has(String(value.metadata?.kind)) || value.fields.some((field) => !["string", "multiselect"].includes(field.type) || field.when?.length)) {
     throw new Error("This native form cannot be represented by the question controls. It has not been answered or dismissed.");
   }
-  const tool = z.object({ messageID: z.string(), id: z.string() }).safeParse(value.metadata.tool);
+  const tool = z.object({ messageID: z.string(), id: z.string() }).safeParse(value.metadata?.tool);
   return {
     id: value.id,
     sessionID: value.sessionID,
@@ -737,11 +743,13 @@ export function createWorkspaceReadinessCache(limit = 32) {
 export const workspaceReadinessCache = createWorkspaceReadinessCache();
 
 export function projectWorkspaceReadiness(activity: CoworkerActivity | null, preparation?: WorkspaceReadiness): CoworkerActivity {
-  if (activity && (["working", "retrying", "attention", "offline"].includes(activity.state) || (activity.state === "recent" && activity.label !== "Ready" && activity.label !== "Idle"))) return activity;
+  if (activity && (["working", "retrying", "attention", "offline"].includes(activity.state) || (activity.state === "recent" && !["Ready", "Idle", "Available"].includes(activity.label)))) return activity;
   if (preparation?.state === "starting" || preparation?.state === "error") return {
     ...activity, state: preparation.state === "starting" ? "starting" : "offline", label: preparation.state === "starting" ? "Starting AI" : "AI unavailable", detail: preparation.error, updatedAt: 0,
   };
-  return { detail: "", updatedAt: 0, ...activity, state: activity?.state === "recent" ? "recent" : preparation?.state === "ready" ? "ready" : "idle", label: preparation?.state === "ready" ? "Ready" : "Idle" };
+  // No preparation yet means the coworker can be started on demand. Reserve
+  // "Ready" for a verified warm workspace; avoid presenting "Idle" as disabled.
+  return { detail: "", updatedAt: 0, ...activity, state: activity?.state === "recent" ? "recent" : preparation?.state === "ready" ? "ready" : "idle", label: preparation?.state === "ready" ? "Ready" : "Available" };
 }
 
 export function createCoworkerThreads(options: {

@@ -4,7 +4,7 @@ import { useCalendarData } from "@/ui/calendar-data";
 import { useCalendarPreferences } from "@/ui/calendar-preferences";
 import { eventForTarget, groupEventTarget, type EventArtifact } from "@/lib/events";
 import type { DocumentNavigationGuard } from "@/ui/documents";
-import { Component, Suspense, lazy, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { Component, Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { coworkerBridge, type CoworkerActivityItem, type CoworkerGroupSummary, type CoworkerSummary, type CoworkerTemplateSync, type ProviderSyncRun, type RuntimeInfo } from "@/lib/bridge";
 import { acknowledgeCoworker } from "@/ui/coworker-avatar";
 import { publishGroupRun } from "@/lib/group-runs";
@@ -34,7 +34,9 @@ import { GroupChat } from "@/ui/group-chat";
 import { SignInGate } from "@/ui/sign-in";
 import { CoworkerHome, type CoworkerHomeRequest } from "@/ui/coworker-home";
 import { CoworkerRail, type CoworkerMainContent } from "@/ui/coworker-rail";
-import { useResizablePanel } from "@/ui/use-resizable-panel";
+import { FocusHome } from "@/ui/focus-home";
+import { useResizablePanel, type ResizablePanel } from "@/ui/use-resizable-panel";
+import { LayoutContext, useLayoutState } from "@/ui/use-layout";
 import type { PanelBounds } from "@/lib/panel-layout";
 
 /** The team rail: drag it narrower than a row can show and it folds to avatars. */
@@ -42,14 +44,17 @@ const RAIL_BOUNDS: PanelBounds = { min: 220, max: 380, collapsedWidth: 88, colla
 import { OnboardingWelcome } from "@/ui/onboarding";
 import { OnboardingIntents } from "@/ui/onboarding-intents";
 import { OnboardingTeam } from "@/ui/onboarding-team";
-import { chooseOnboardingModel, completeOnboardingDraft, connectOnboardingProvider, emptyOnboardingDraft, loadOnboardingDraft, onboardingDraftForContext, onboardingStepFor, resumeOnboardingDraft, saveOnboardingDraft, toggleIntent, type OnboardingDraft, type OnboardingStep } from "@/lib/onboarding-team";
-import { OnboardingModelDefaults } from "@/ui/app-model-defaults";
+import { completeOnboardingDraft, emptyOnboardingDraft, loadOnboardingDraft, onboardingDraftForContext, onboardingStepFor, resumeOnboardingDraft, saveOnboardingDraft, toggleIntent, type OnboardingDraft, type OnboardingStep } from "@/lib/onboarding-team";
 import { LocalModeScreen } from "@/ui/local-mode";
 import type { TeamRole } from "@/lib/bridge";
 import { AppLoader, CoworkerMark } from "@/ui/brand";
 import type { SettingsSection } from "@/ui/openwork-settings";
 import { VoiceContext } from "@/ui/use-voice";
 import { useActivityInbox } from "@/ui/use-activity-inbox";
+import { useGlints } from "@/ui/glints";
+import { refreshFeatures, useFeatures } from "@/ui/use-features";
+import { CustomizeCoworker, type CustomizeFocus } from "@/ui/customize-coworker";
+import { MarketplaceDialog } from "@/ui/marketplace";
 import type { ActivityDocumentTarget } from "@/ui/activity-inbox";
 
 const ActivityInbox = lazy(() => import("@/ui/activity-inbox").then((module) => ({ default: module.ActivityInbox })));
@@ -85,7 +90,7 @@ function activityForScope(entry: ScopedCoworkerActivity | undefined, scope: Work
   const activity = entry.activity;
   if (entry.scope.configurationKey !== scope.configurationKey
     && (["idle", "ready", "starting"].includes(activity.state) || (activity.state === "offline" && activity.label === "AI unavailable"))) {
-    return { ...activity, state: "idle", label: "Idle", detail: "", updatedAt: 0 };
+    return { ...activity, state: "idle", label: "Available", detail: "", updatedAt: 0 };
   }
   return activity;
 }
@@ -121,7 +126,7 @@ function visibleCoworkerActivity(scope: WorkspacePreparationScope, polled: Cowor
   const candidates = [attention, live, cloud, polled];
   const activity = candidates.find((entry) => entry?.state === "attention")
     ?? candidates.find((entry) => entry?.state === "working" || entry?.state === "retrying")
-    ?? candidates.find((entry) => entry?.state === "offline" || (entry?.state === "recent" && entry.label !== "Ready" && entry.label !== "Idle"))
+    ?? candidates.find((entry) => entry?.state === "offline" || (entry?.state === "recent" && !["Ready", "Idle", "Available"].includes(entry.label)))
     ?? live ?? cloud ?? polled ?? null;
   const projected = projectWorkspaceReadiness(activity, workspaceReadinessCache.peek(scope));
   return { ...projected, ...(projected.last ?? polled?.last ? { last: projected.last ?? polled?.last } : {}), ...(polled?.recent ? { recent: polled.recent } : {}) };
@@ -203,7 +208,10 @@ export default function App() {
   }, []);
   const [calendarRequest, setCalendarRequest] = useState<CalendarRequest | null>(null);
   const [groupDocumentRequest, setGroupDocumentRequest] = useState<{ id: number; groupId: string; documentId: string } | null>(null);
-  const calendar = useCalendarData(coworkers, session, Boolean(runtime));
+  const features = useFeatures();
+  // Now and then light crosses one glass surface on screen.
+  useGlints();
+  const calendar = useCalendarData(coworkers, session, Boolean(runtime) && features.calendar);
   const [calendarPreferences, setCalendarPreferences] = useCalendarPreferences();
 
   const [creatingGroup, setCreatingGroup] = useState(false);
@@ -219,6 +227,16 @@ export default function App() {
   /** A request made of one coworker's view from elsewhere: a group's "Choose AI model" or an assignment it created. */
   const [homeRequest, setHomeRequest] = useState<(CoworkerHomeRequest & { slug: string; createdAt?: string }) | null>(null);
   const [groupDetailsOpen, setGroupDetailsOpen] = useState(false);
+  /** The coworker whose Customize dialog is open, over the team view, which stays as it was underneath. */
+  const [customizing, setCustomizing] = useState<{ slug: string; createdAt: string; focus?: CustomizeFocus; id: number } | null>(null);
+  const [marketplaceOpen, setMarketplaceOpen] = useState(false);
+  // A feature switched off takes its view along: Activity returns to chat and the Marketplace closes.
+  useEffect(() => {
+    if (!features.notifications && mainContent === "activity") navigate("chat", true);
+  }, [features.notifications, mainContent, navigate]);
+  useEffect(() => {
+    if (!features.marketplace) setMarketplaceOpen(false);
+  }, [features.marketplace]);
   const [connecting, setConnecting] = useState(false);
   const [onboardingReady, setOnboardingReady] = useState(false);
   const [onboardingDraft, setOnboardingDraft] = useState<OnboardingDraft>(() => emptyOnboardingDraft());
@@ -316,7 +334,8 @@ export default function App() {
     const observation = runtimeObservation.current;
     const bootSession = sessionRef.current;
     try {
-      const list = await coworkerBridge.coworkers.list();
+      // Optional features are read before the first screen, so nothing turned on appears late.
+      const [list] = await Promise.all([coworkerBridge.coworkers.list(), refreshFeatures()]);
       const info = await coworkerBridge.runtimeInfo();
       // A fresh window runs no group turn, so any still recorded as running was cut off: settle it first.
       await coworkerBridge.groups.recoverInterrupted().catch(() => []);
@@ -324,10 +343,8 @@ export default function App() {
       if (request !== bootGeneration.current || sessionRef.current !== bootSession) return;
       const currentSession = sessionRef.current;
       const restored = onboardingDraftForContext(currentSession && !currentSession.userEmail ? emptyOnboardingDraft() : loadOnboardingDraft(window.sessionStorage), onboardingContext(currentSession));
-      const settings = list.length === 0 && !restored.modelsReviewed && !onboardingStepFor(restored) ? await coworkerBridge.settings.get() : null;
-      if (request !== bootGeneration.current || sessionRef.current !== bootSession) return;
-      const resumed = resumeOnboardingDraft(restored, list.length > 0, settings?.modelDefaults);
-      const saved: OnboardingDraft = currentSession && list.length === 0 && !resumed.modelsReviewed && !onboardingStepFor(resumed) ? { ...resumed, step: "models" } : resumed;
+      const resumed = resumeOnboardingDraft(restored, list.length > 0);
+      const saved: OnboardingDraft = currentSession && list.length === 0 && !resumed.completed && !onboardingStepFor(resumed) ? { ...resumed, step: "intents" } : resumed;
       const step = onboardingStepFor(saved);
       if (observation === runtimeObservation.current) applyRuntime(info);
       setBots(list);
@@ -336,7 +353,7 @@ export default function App() {
         current && list.some((coworker) => coworker.slug === current) ? current : (list[0]?.slug ?? ""),
       );
       updateOnboardingDraft(saved);
-      setOnboardingReady(!step && (list.length > 0 || saved.modelsReviewed === true));
+      setOnboardingReady(!step && (list.length > 0 || saved.completed === true));
       setCreating(step === "create");
       setBootError("");
       setBootReady(true);
@@ -451,13 +468,12 @@ export default function App() {
     if (!first) return;
     setBots((current) => [...current, ...result.created.filter((item) => !current.some((known) => known.slug === item.slug))]);
     setSelectedSlug((current) => current || first.slug);
+    // Coworkers arrived (an import, or the team an organization assigned): the person meets
+    // them, unless they are in the middle of choosing a team of their own.
     const draft = onboardingDraftRef.current;
-    if (onboardingStepFor(draft) || coworkersRef.current.length === 0) {
-      if (!draft.modelsReviewed) {
-        updateOnboardingDraft({ ...onboardingDraftForContext(draft, onboardingContext(sessionRef.current)), step: "models" });
-        setOnboardingReady(false);
-      }
-    } else {
+    const choosingOwnTeam = Boolean(onboardingStepFor(draft)) && (draft.intents.length > 0 || draft.drafts.length > 0);
+    if (!choosingOwnTeam) {
+      if (onboardingStepFor(draft)) updateOnboardingDraft(completeOnboardingDraft(draft));
       setOnboardingReady(true);
       setCreating(false);
     }
@@ -547,7 +563,7 @@ export default function App() {
       const previous = onboardingDraftRef.current;
       const scoped = onboardingDraftForContext(next.userEmail ? previous : emptyOnboardingDraft(), onboardingContext(next));
       if (firstRun) {
-        updateOnboardingDraft({ ...scoped, providerId: undefined, step: "models", modelsReviewed: false });
+        updateOnboardingDraft({ ...scoped, step: "intents" });
         setOnboardingReady(false);
       } else updateOnboardingDraft(scoped);
       clearAccountPresentation();
@@ -859,6 +875,29 @@ export default function App() {
     bounds: RAIL_BOUNDS,
     defaultWidth: 272,
   });
+  /**
+   * Focus mode, or a window too narrow for columns: only the conversation shows.
+   * The team then slides in over it from the left, full size, and leaves again
+   * once the person picks somewhere to go.
+   */
+  const layoutState = useLayoutState();
+  const { chatOnly, closeTeam } = layoutState;
+  const drawerWidth = Math.min(320, Math.round(layoutState.width * 0.86));
+  const railPanel = useMemo<ResizablePanel>(() => chatOnly
+    ? { ...rail, width: drawerWidth, collapsed: false, resizing: false, expand: () => {}, collapse: closeTeam, toggle: closeTeam, reset: () => {} }
+    : rail, [chatOnly, closeTeam, drawerWidth, rail]);
+  const unreadActivity = inbox.items.filter((item) => item.readAt === null && (features.calendar || item.kind !== "event-reminder")).length;
+  const layout = useMemo(() => ({ ...layoutState, teamAttention: features.notifications && unreadActivity > 0, teamUnread: features.notifications ? unreadActivity : 0 }), [features.notifications, layoutState, unreadActivity]);
+  /** A choice made in the team list closes it when it lies over the conversation. */
+  const fromTeam = <Args extends unknown[]>(run: (...args: Args) => void) => (...args: Args) => {
+    run(...args);
+    if (chatOnly) closeTeam();
+  };
+  // Shared by the team list and Focus mode's list of conversations.
+  const startNewCoworker = () => { navigationGeneration.current += 1; if (allowSourceNavigation()) setCreating(true); };
+  const openGroupChat = (id: string) => { navigationGeneration.current += 1; if (!allowSourceNavigation()) return; setActivityGroupRequest(null); setGroupDocumentRequest(null); setHomeRequest(null); setGroupEventSource(null); calendarConversationOrigin.current = null; setSelectedActivityId(null); setSelectedGroupId(id); navigate("chat"); setGroupDetailsOpen(false); };
+  /** In Focus mode the team is a list of conversations covering the window; otherwise, in a narrow window, a drawer. */
+  const drawerOpen = layout.teamOpen && !layout.focus;
 
   // The catalog the onboarding steps propose from, read once when they are first needed.
   useEffect(() => {
@@ -912,6 +951,21 @@ export default function App() {
     setLiveActivityBySlug((current) => mergeActivityReads(current, [{ slug: selectedSlug, scope: selectedPreparation, activity }], currentPreparationScope));
   }, [currentPreparationScope, selectedSlug, selectedPreparation?.runtimeKey, selectedPreparation?.workspaceKey, selectedPreparation?.configurationKey]);
 
+  // Opening a conversation reads it: its activity leaves the unread list, the way
+  // opening a thread clears its badge in a messaging app. Only while the chat is on screen.
+  const openGroupId = groups.some((group) => group.id === selectedGroupId && (features.calendar || !group.eventId)) ? selectedGroupId : "";
+  const readingSlug = openGroupId ? "" : selected?.slug ?? "";
+  const readingCreatedAt = openGroupId ? "" : selected?.createdAt ?? "";
+  const chatOnScreen = mainContent === "chat" && !globalSettings && !factoryResetOpen && !replayOnboarding && !customizing;
+  const unreadInOpenChat = inbox.items.filter((item) => item.readAt === null && item.kind !== "event-reminder" && (openGroupId
+    ? item.target.kind === "group" && item.target.groupId === openGroupId
+    : item.target.kind === "private" && item.slug === readingSlug && item.coworkerCreatedAt === readingCreatedAt)).map((item) => item.id).join(",");
+  const markOpenChatRead = inbox.markRead;
+  useEffect(() => {
+    if (!chatOnScreen || !unreadInOpenChat || document.visibilityState !== "visible") return;
+    void markOpenChatRead(unreadInOpenChat.split(","), true).catch(() => undefined);
+  }, [chatOnScreen, unreadInOpenChat, markOpenChatRead]);
+
   if (bootError) {
     return (
       <div className="window-shell window-drag flex h-full items-center justify-center p-8">
@@ -950,31 +1004,6 @@ export default function App() {
   if (coworkers.length === 0 && calendar.loading && !onboardingStep && !creating) return <AppLoader />;
 
   if (!creating && ((onboardingStep && onboardingStep !== "create") || (coworkers.length === 0 && calendar.events.length === 0 && !onboardingReady))) {
-    if (onboardingStep === "models") {
-      return (
-        <OnboardingModelDefaults
-          key={accountKey}
-          runtime={runtime}
-          session={session}
-          draft={onboardingDraft}
-          onChange={updateOnboardingDraft}
-          onBack={() => setOnboardingStep(onboardingDraft.providerId ? "local" : "welcome")}
-          onManageConnections={() => setOnboardingStep("local")}
-          onSyncProviders={syncProviders}
-          onRuntimeChanged={applyRuntime}
-          onContinue={(modelChoices) => {
-            const current = onboardingDraftRef.current;
-            if (current.step === "create") {
-              updateOnboardingDraft({ ...current, modelChoices, modelsReviewed: true, step: "create" });
-              setOnboardingReady(true);
-              setCreating(true);
-            } else if (current.drafts.length > 0 || current.intents.length > 0 || coworkersRef.current.length === 0) {
-              updateOnboardingDraft({ ...current, modelChoices, modelsReviewed: true, step: current.drafts.length ? "team" : "intents" });
-            } else finishOnboarding();
-          }}
-        />
-      );
-    }
     const teamCatalogNotice = teamCatalogError ? <div role="alert" className="window-no-drag flex shrink-0 items-center gap-3 px-6 py-3">
       <ErrorNote>{teamCatalogError}</ErrorNote>
       <Button variant="ghost" className="shrink-0 text-xs" onClick={() => setTeamCatalogReload((current) => current + 1)}>Retry loading roles</Button>
@@ -1011,7 +1040,7 @@ export default function App() {
               onToggle={(id) => updateOnboardingDraft((current) => ({ ...current, intents: toggleIntent(current.intents, id), drafts: [] }))}
               onContinue={() => void proposeTeam()}
               onOwn={addOwnCoworker}
-              onBack={() => setOnboardingStep("models")}
+              onBack={() => setOnboardingStep(session ? "welcome" : "local")}
             />
           </fieldset>
           {teamCatalogNotice}
@@ -1027,13 +1056,8 @@ export default function App() {
           session={session}
           onConnectAccount={() => setConnecting(true)}
           onRuntimeChanged={refreshRuntime}
-          onProviderConnected={(providerId) => updateOnboardingDraft((current) => connectOnboardingProvider(current, providerId))}
           onBack={() => setOnboardingStep("welcome")}
-          onContinue={(choice) => updateOnboardingDraft((current) => {
-            const scoped = connectOnboardingProvider(current, choice?.providerId);
-            const next = choice?.modelId ? chooseOnboardingModel(scoped, "conversation", { model: choice.modelId, modelVariant: scoped.modelChoices?.conversation?.modelVariant ?? "" }) : scoped;
-            return { ...next, step: "models" };
-          })}
+          onContinue={() => setOnboardingStep("intents")}
         />
       );
     }
@@ -1052,8 +1076,10 @@ export default function App() {
     );
   }
 
-  const liveGroups = groups.filter((group) => !group.archivedAt);
-  const selectedGroup = groups.find((group) => group.id === selectedGroupId) ?? null;
+  // With Calendar off, an Event's conversation is hidden along with the Event.
+  const shownGroup = (group: CoworkerGroupSummary) => features.calendar || !group.eventId;
+  const liveGroups = groups.filter((group) => !group.archivedAt && shownGroup(group));
+  const selectedGroup = groups.find((group) => group.id === selectedGroupId && shownGroup(group)) ?? null;
   const eventGroupIds = new Set(calendar.events.map((event) => event.groupId));
   const selectedEventTarget = selectedGroup ? groupEventTarget(selectedGroup, calendar.events, groupEventSource ?? undefined) : undefined;
   const selectedEvent = selectedEventTarget ? eventForTarget(calendar.events, calendar.eventRuns, selectedEventTarget) : undefined;
@@ -1280,6 +1306,13 @@ export default function App() {
     setSelectedActivityId(`document:coworker:${owner.slug}:${owner.createdAt}:${target.documentId}`);
   }
 
+  function openCustomize(slug: string, focus?: CustomizeFocus) {
+    const coworker = coworkersRef.current.find((member) => member.slug === slug);
+    if (!coworker) return;
+    navigationGeneration.current += 1;
+    setCustomizing({ slug, createdAt: coworker.createdAt, ...(focus ? { focus } : {}), id: nextRequestId() });
+  }
+
   function removeCoworkerFromList(slug: string) {
     const remaining = coworkers.filter((coworker) => coworker.slug !== slug);
     setBots(remaining);
@@ -1288,26 +1321,32 @@ export default function App() {
     }
   }
 
-  const workspaceActive = !globalSettings && !factoryResetOpen && !replayOnboarding;
+  const customizingCoworker = customizing ? coworkers.find((coworker) => coworker.slug === customizing.slug && coworker.createdAt === customizing.createdAt) ?? null : null;
+  const workspaceActive = !globalSettings && !factoryResetOpen && !replayOnboarding && !customizingCoworker;
+  /** The Customize dialog sits over the team view, which stays visible but inactive beneath it. */
+  const customizeOpen = Boolean(customizingCoworker) && !globalSettings && !factoryResetOpen && !replayOnboarding;
   const settingsActive = Boolean(globalSettings) && !factoryResetOpen && !replayOnboarding;
   const activityVisible = mainContent === "activity";
   const contentContext = activityVisible ? activityContext : mainContent;
-  const calendarVisible = contentContext === "calendar" || (contentContext === "chat" && !selected && !selectedGroup);
+  const calendarVisible = features.calendar && (contentContext === "calendar" || (contentContext === "chat" && !selected && !selectedGroup));
   const chatActive = workspaceActive && !calendarVisible;
   const calendarReminder = inbox.items.find((item) => item.kind === "event-reminder" && item.id === calendarRequest?.reminderId);
 
   return (
     <VoiceContext.Provider value={{ accountKey: session ? `${sessionKey(session)}\u0000${session.userEmail}` : "signed-out", openModels: () => openGlobalSettings("models"), signIn: () => setConnecting(true) }}>
-    <div key={accountKey} className="window-shell relative flex h-full overflow-hidden" data-testid="coworker-shell">
+    <LayoutContext.Provider value={layout}>
+    <div key={accountKey} className="window-shell relative flex h-full overflow-hidden" data-testid="coworker-shell" data-layout={chatOnly ? (layoutState.compact ? "compact" : "focus") : "full"}>
       <div
-        className={workspaceActive ? "flex min-w-0 flex-1" : "hidden"}
+        className={workspaceActive || customizeOpen ? "flex min-w-0 flex-1" : "hidden"}
         data-testid="coworker-workspace"
         data-active={workspaceActive ? "true" : "false"}
       >
-        {creating || (!selected && calendar.events.length === 0) ? (
+        {creating || (!selected && (!features.calendar || calendar.events.length === 0)) ? (
           // Creation takes the whole window: the team list returns once the coworker exists.
           <div key="create" className="flex min-w-0 flex-1">
             <NewCoworker
+              runtime={runtime}
+              session={session}
               team={coworkers}
               onAskTeam={(slug, prompt) => { setCreating(false); visitCoworker(slug, prompt); }}
               onCancel={selected || coworkers.length > 0 || calendar.events.length > 0 ? () => setCreating(false) : null}
@@ -1322,7 +1361,16 @@ export default function App() {
           </div>
         ) : (
           <div key="team" className="flex min-w-0 flex-1">
+            {drawerOpen ? <div className="fixed inset-0 z-40 bg-black/45 backdrop-blur-[1px]" onClick={closeTeam} aria-hidden="true" data-testid="team-drawer-scrim" /> : null}
+            {/* In the conversation-only layout the team list is a drawer over the conversation; otherwise it is the left column. */}
+            <div
+              className={chatOnly ? `fixed inset-y-0 left-0 z-50 flex bg-ink transition-transform duration-200 ease-out motion-reduce:transition-none ${drawerOpen ? "translate-x-0 shadow-[24px_0_64px_rgb(0_0_0/0.5)]" : "-translate-x-full"}` : "contents"}
+              data-testid="team-drawer"
+              data-open={drawerOpen ? "true" : "false"}
+              inert={chatOnly && !drawerOpen}
+            >
             <CoworkerRail
+              drawer={chatOnly}
               calendarData={calendar}
               calendarPreferences={calendarPreferences}
               onCalendarPreferencesChange={setCalendarPreferences}
@@ -1332,6 +1380,8 @@ export default function App() {
                 setGroupDetailsOpen(false);
                 navigate(view, view !== "activity");
                 if (view === "activity") { setActivityMounted(true); void inbox.refresh(); }
+                // Activity opens inside the team list; Chat and Calendar leave it for the view.
+                else if (chatOnly) closeTeam();
               }}
               chatAvailable={Boolean(selected || selectedGroup)}
               runtime={runtime}
@@ -1339,21 +1389,22 @@ export default function App() {
               coworkers={coworkers}
               activityBySlug={visibleActivityBySlug}
               selectedSlug={activityVisible || selectedGroup ? "" : selectedSlug}
-              unreadActivity={inbox.items.filter((item) => item.readAt === null).length}
+              unreadActivity={unreadActivity}
               unreadMentions={inbox.items.filter((item) => item.readAt === null && item.kind === "mention").length}
               activityError={Boolean(inbox.error)}
-              panel={rail}
-              onSelect={(slug) => visitCoworker(slug)}
+              panel={railPanel}
+              onSelect={fromTeam((slug: string) => visitCoworker(slug))}
               onOpenCalendar={(slug) => { void requestCalendar({ coworkerSlug: slug }); }}
               eventGroupIds={eventGroupIds}
-              onNewCoworker={() => { navigationGeneration.current += 1; if (allowSourceNavigation()) setCreating(true); }}
-              onOpenOpenWork={() => openGlobalSettings()}
+              onNewCoworker={fromTeam(startNewCoworker)}
+              onOpenOpenWork={fromTeam(() => openGlobalSettings())}
+              onOpenMarketplace={fromTeam(() => setMarketplaceOpen(true))}
               groups={liveGroups}
               groupLines={groupLines}
               groupActiveSlugs={groupActiveSlugs}
               selectedGroupId={activityVisible ? "" : selectedGroup?.id ?? ""}
-              onSelectGroup={(id) => { navigationGeneration.current += 1; if (!allowSourceNavigation()) return; setActivityGroupRequest(null); setGroupDocumentRequest(null); setHomeRequest(null); setGroupEventSource(null); calendarConversationOrigin.current = null; setSelectedActivityId(null); setSelectedGroupId(id); navigate("chat"); setGroupDetailsOpen(false); }}
-              onNewGroup={() => { navigationGeneration.current += 1; if (allowSourceNavigation()) setCreatingGroup(true); }}
+              onSelectGroup={fromTeam(openGroupChat)}
+              onNewGroup={fromTeam(() => { navigationGeneration.current += 1; if (allowSourceNavigation()) setCreatingGroup(true); })}
               activityContent={activityMounted ? (
                 <DeferredView title="Activity" onBack={() => navigate("chat", true)}>
                 <Suspense fallback={<div className="h-full flex-1"><AppLoader message="Opening activity" detail="" /></div>}>
@@ -1362,8 +1413,8 @@ export default function App() {
                     selectedId={selectedActivityId}
                     items={inbox.items} loading={inbox.loading} error={inbox.error} busy={inbox.busy}
                     coworkers={coworkers} groups={liveGroups} activityBySlug={visibleActivityBySlug}
-                    onRefresh={() => void inbox.refresh()} onMarkRead={inbox.markRead} onOpen={openActivityItem}
-                    onOpenDocument={openActivityDocument}
+                    onRefresh={() => void inbox.refresh()} onMarkRead={inbox.markRead} onOpen={async (item) => { await openActivityItem(item); if (chatOnly) closeTeam(); }}
+                    onOpenDocument={async (target) => { await openActivityDocument(target); if (chatOnly) closeTeam(); }}
                     calendar={calendar}
                     onOpenEvent={openActivityEvent}
                     onOpenCalendar={() => { setSelectedActivityId(null); resumeCalendar(); }}
@@ -1373,6 +1424,24 @@ export default function App() {
                 </DeferredView>
               ) : undefined}
             />
+            </div>
+            {layout.focus ? (
+              <FocusHome
+                open={layout.teamOpen}
+                coworkers={coworkers}
+                groups={liveGroups}
+                eventGroupIds={eventGroupIds}
+                activityBySlug={visibleActivityBySlug}
+                groupLines={groupLines}
+                groupActiveSlugs={groupActiveSlugs}
+                items={inbox.items}
+                selectedSlug={activityVisible || selectedGroup ? "" : selectedSlug}
+                selectedGroupId={activityVisible ? "" : selectedGroup?.id ?? ""}
+                onSelect={fromTeam((slug: string) => visitCoworker(slug))}
+                onSelectGroup={fromTeam(openGroupChat)}
+                onNewCoworker={fromTeam(startNewCoworker)}
+              />
+            ) : null}
             {creatingGroup ? (
               <NewGroupSheet
                 coworkers={coworkers}
@@ -1407,11 +1476,7 @@ export default function App() {
               />
             ) : null}
             <div className="flex min-h-0 min-w-0 flex-1 flex-col" onPointerDownCapture={() => { navigationGeneration.current += 1; }} onKeyDownCapture={() => { navigationGeneration.current += 1; }}>
-            {navigationNotice ? <div role="alert" className="flex shrink-0 flex-wrap items-center gap-2 border-b border-line px-4 py-2 text-xs text-mist">
-              <p className="min-w-0 flex-1">{navigationNotice}</p>
-              <Button variant="ghost" className="text-xs" onClick={() => navigate("chat", true)}>Return to chat</Button>
-              <Button variant="ghost" className="text-xs" onClick={() => setNavigationNotice("")}>Dismiss</Button>
-            </div> : null}
+            {navigationNotice ? <NavigationNoticeDialog message={navigationNotice} onReturn={() => navigate("chat", true)} onDismiss={() => setNavigationNotice("")} /> : null}
             <div className={!calendarVisible ? "flex min-h-0 min-w-0 flex-1" : "hidden"} data-testid="chat-main-content" data-active={chatActive}>
             {selectedGroup ? (
               <GroupChat
@@ -1433,9 +1498,7 @@ export default function App() {
                   setSelectedGroupId("");
                 }}
                 onActivityLine={setGroupLine}
-                onChooseModel={(slug) => {
-                  if (visitCoworker(slug)) setHomeRequest({ id: nextRequestId(), slug, kind: "settings", section: "model" });
-                }}
+                onChooseModel={(slug) => openCustomize(slug, "model")}
                 onOpenAssignment={(slug, threadId) => {
                   if (visitCoworker(slug)) setHomeRequest({ id: nextRequestId(), slug, kind: "thread", threadId });
                 }}
@@ -1463,15 +1526,16 @@ export default function App() {
               connect={connectBySlug[selected.slug] ?? null}
               onRepairConnect={() => syncConnect({ force: true, remint: true, slug: selected.slug })}
               onConnectAccount={() => setConnecting(true)}
-              railWidth={activityVisible ? Math.max(RAIL_BOUNDS.min, rail.width) : rail.width}
+              railWidth={chatOnly ? 0 : activityVisible ? Math.max(RAIL_BOUNDS.min, rail.width) : rail.width}
               onCoworkerAdded={addCoworkerToList}
               canHandOff={allowSourceNavigation}
               onHandOff={(slug, prompt) => visitCoworker(slug, prompt)}
               onVisitCoworker={(slug) => visitCoworker(slug)}
+              onCustomize={(focus) => openCustomize(selected.slug, focus)}
             /> : null
             )}
             </div>
-            <div className={calendarVisible ? "flex min-h-0 min-w-0 flex-1" : "hidden"}>
+            {features.calendar ? <div className={calendarVisible ? "flex min-h-0 min-w-0 flex-1" : "hidden"}>
               <CalendarView active={workspaceActive && calendarVisible && !creatingGroup && !groupDetailsOpen} coworkers={coworkers} data={calendar} preferences={calendarPreferences} onPreferencesChange={setCalendarPreferences} request={calendarRequest}
                 onExitActivity={activityVisible ? () => navigate("calendar", true) : undefined}
                 activityReminder={calendarReminder ? { id: calendarReminder.id, read: calendarReminder.readAt !== null, busy: inbox.busy, onMarkRead: () => inbox.markRead([calendarReminder.id]) } : undefined}
@@ -1480,11 +1544,45 @@ export default function App() {
                 if (!visitCoworker(slug)) return;
                 setHomeRequest(threadId ? { id: nextRequestId(), slug, kind: "thread", threadId } : { id: nextRequestId(), slug, kind: "responsibilities" });
               }} />
-            </div>
+            </div> : null}
             </div>
           </div>
         )}
       </div>
+      {marketplaceOpen && workspaceActive && features.marketplace ? (
+        <MarketplaceDialog
+          session={session}
+          team={coworkers}
+          current={selected}
+          connect={(selected ? connectBySlug[selected.slug] : undefined) ?? Object.values(connectBySlug)[0] ?? null}
+          onRepairConnect={() => void syncConnect({ force: true, remint: true })}
+          onClose={() => setMarketplaceOpen(false)}
+          onSignIn={() => { setMarketplaceOpen(false); setConnecting(true); }}
+          onAdded={addCoworkerToList}
+          onOpenCoworker={(slug) => { setMarketplaceOpen(false); visitCoworker(slug); }}
+          onTry={(prompt) => {
+            if (!selected) return;
+            setMarketplaceOpen(false);
+            if (visitCoworker(selected.slug)) setHomeRequest({ id: nextRequestId(), slug: selected.slug, kind: "draft", text: prompt });
+          }}
+        />
+      ) : null}
+      {customizingCoworker && customizeOpen ? (
+        <div className="contents" data-testid="customize-coworker-pane">
+          <CustomizeCoworker
+            key={`${customizingCoworker.slug}:${customizing?.id}`}
+            runtime={runtime}
+            session={session}
+            coworker={customizingCoworker}
+            focus={customizing?.focus}
+            onCoworkerChanged={updateCoworkerInList}
+            onSyncProviders={syncProviders}
+            onOpenAccount={() => openGlobalSettings("account")}
+            onOpenModelDefaults={() => openGlobalSettings("model-defaults")}
+            onDone={() => setCustomizing(null)}
+          />
+        </div>
+      ) : null}
       {globalSettingsMounted ? (
         <div
           className={settingsActive ? "absolute inset-0 flex" : "hidden"}
@@ -1537,6 +1635,26 @@ export default function App() {
       </Suspense>
       </DeferredView> : null}
     </div>
+    </LayoutContext.Provider>
     </VoiceContext.Provider>
+  );
+}
+
+/**
+ * Why a move to another place did not happen (unsaved settings, a document in
+ * the middle of an edit): a small centered dialog, so it is seen wherever the
+ * person is looking, with the way back and a dismiss.
+ */
+function NavigationNoticeDialog({ message, onReturn, onDismiss }: { message: string; onReturn: () => void; onDismiss: () => void }) {
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/45 px-4 backdrop-blur-[2px]" onMouseDown={(event) => { if (event.target === event.currentTarget) onDismiss(); }} onKeyDown={(event) => { if (event.key === "Escape") onDismiss(); }}>
+      <div role="alertdialog" aria-modal="true" aria-labelledby="navigation-notice-text" className="w-full max-w-sm rounded-2xl border border-line bg-panel p-4 shadow-[0_24px_64px_rgb(0_0_0/0.5)]" data-testid="navigation-notice">
+        <p id="navigation-notice-text" className="text-sm leading-relaxed text-snow">{message}</p>
+        <div className="mt-4 flex justify-end gap-2">
+          <Button variant="ghost" className="text-xs" onClick={onDismiss}>Dismiss</Button>
+          <Button autoFocus variant="primary" className="text-xs" onClick={onReturn}>Return to chat</Button>
+        </div>
+      </div>
+    </div>
   );
 }

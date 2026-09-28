@@ -1,11 +1,16 @@
 import { WORK_PATTERNS, rolesForPattern, teamAdvicePrompt, workPattern } from "@/lib/work-patterns";
 import { slugOfName } from "@/lib/onboarding-team";
-import { useEffect, useId, useRef, useState } from "react";
-import { coworkerBridge, type AvatarColor, type AvatarGlasses, type CoworkerSummary, type TeamRole } from "@/lib/bridge";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { coworkerBridge, type AvatarColor, type AvatarGlasses, type CoworkerSummary, type RuntimeInfo, type TeamRole } from "@/lib/bridge";
+import type { DenSession } from "@/lib/den";
+import { resolveModelPreview, type ModelChoicePreview } from "@/lib/model-choice";
+import { createCoworkerThreads, type EngineModelCatalog } from "@/lib/threads";
+import { ModelPicker, type ModelSelection } from "@/ui/model-picker";
 import { acknowledgeCoworker, AvatarControls } from "@/ui/coworker-avatar";
 import { OnboardingMascotStack } from "@/ui/onboarding-mascot";
 import { DEFAULT_PERSONALITY, type Personality } from "@/lib/personalities";
 import { PersonalityPicker } from "@/ui/personality-picker";
+import { useLayout } from "@/ui/use-layout";
 import { Button, ErrorNote, Field, inputClass } from "@/ui/kit";
 import { RetiredCoworkers } from "@/ui/retired-coworkers";
 import { PickTeammateTile } from "@/ui/team-cards";
@@ -17,18 +22,23 @@ const SUGGESTED_ROLES = 3;
 
 /**
  * Creation establishes only a durable identity and workspace: a name and a
- * look, with an optional second step for role, mission, and personality. Each
- * step stays focused; the coworker starts on OpenWork's default AI
- * model, and that choice lives in Coworker settings once it exists. Existing
- * teams first see up to three missing roles, then customize a selected role
- * or start from scratch. Recommendations never crowd the identity form.
+ * look, with an optional second step for role, mission, and personality, and
+ * under Advanced there, the AI model. Each step stays focused; without a
+ * choice the coworker starts on Automatic, and every choice stays editable on
+ * its Customize page. Existing teams first see up to three missing roles, then
+ * customize a selected role or start from scratch. Recommendations never crowd
+ * the identity form.
  */
 export function NewCoworker({
+  runtime,
+  session,
   onCreated,
   onCancel,
   team = [],
   onAskTeam,
 }: {
+  runtime: RuntimeInfo;
+  session: DenSession | null;
   onCreated: (coworker: CoworkerSummary) => void;
   /** Null on first run, when there is no team to go back to. */
   onCancel: (() => void) | null;
@@ -36,6 +46,7 @@ export function NewCoworker({
   team?: readonly CoworkerSummary[];
   onAskTeam?: (slug: string, prompt: string) => void;
 }) {
+  const layout = useLayout();
   const [step, setStep] = useState<Step>(team.length > 0 ? "choose" : "identity");
   const [name, setName] = useState("");
   const previewIdentity = useId();
@@ -45,6 +56,9 @@ export function NewCoworker({
   const [avatarColor, setAvatarColor] = useState<AvatarColor>("blue");
   const [avatarGlasses, setAvatarGlasses] = useState<AvatarGlasses>("round");
   const [personality, setPersonality] = useState<Personality>(DEFAULT_PERSONALITY);
+  /** Null is Automatic. */
+  const [model, setModel] = useState<ModelSelection | null>(null);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   const [roleId, setRoleId] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -96,28 +110,27 @@ export function NewCoworker({
       const fromCatalog = catalog.find((item) => item.id === roleId);
       // The catalog role travels only while the role the person kept is still that role.
       const keptRole = fromCatalog && role.trim() === fromCatalog.role ? fromCatalog.id : "";
-      onCreated(
-        await coworkerBridge.coworkers.create({
-          name: name.trim(),
-          role: role.trim(),
-          mission: mission.trim(),
-          avatarColor,
-          avatarGlasses,
-          personality,
-          ...(keptRole ? { roleId: keptRole } : {}),
-        }),
-      );
+      const created = await coworkerBridge.coworkers.create({
+        name: name.trim(),
+        role: role.trim(),
+        mission: mission.trim(),
+        avatarColor,
+        avatarGlasses,
+        personality,
+        ...(keptRole ? { roleId: keptRole } : {}),
+      });
+      onCreated(model ? await coworkerBridge.coworkers.update(created.slug, { model: model.model, modelVariant: model.modelVariant, modelChosenBy: "person", useAppModelDefaults: false }) : created);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
       setBusy(false);
     }
   }
 
-  const detailsCount = [role.trim(), mission.trim(), personality !== DEFAULT_PERSONALITY ? "personality" : ""].filter(Boolean).length;
+  const detailsCount = [role.trim(), mission.trim(), personality !== DEFAULT_PERSONALITY ? "personality" : "", model ? "model" : ""].filter(Boolean).length;
 
   return (
     <div className="window-shell flex h-full min-w-0 flex-1 flex-col" data-testid="new-coworker">
-      <header className="window-drag flex h-[52px] shrink-0 items-center px-4 pl-20">
+      <header className="window-controls-inset-sm window-drag flex h-[52px] shrink-0 items-center px-4">
         {onCancel ? (
           <button
             type="button"
@@ -129,13 +142,14 @@ export function NewCoworker({
           </button>
         ) : null}
       </header>
-      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-8 pt-2">
-        {/* m-auto centers the card and still lets it scroll from its top edge on a very short window. */}
-        <div className="creation-card m-auto grid min-w-0 w-full max-w-3xl shrink-0 overflow-hidden rounded-[30px] border border-line md:min-h-[540px] md:grid-cols-[290px_1fr]">
-          <div className="avatar-stage flex min-h-[300px] flex-col items-center justify-center border-b border-line p-7 md:border-b-0 md:border-r">
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-3 pt-1 sm:p-8 sm:pt-2 short:p-3 short:pt-0">
+        {/* m-auto centers the card and still lets it scroll from its top edge on a very short window. Its
+            minimum height fits the tallest step (or the window), so moving between steps never changes its size. */}
+        <div className="creation-card glass-sheen relative m-auto grid min-w-0 w-full max-w-3xl shrink-0 overflow-hidden rounded-[22px] border border-line sm:rounded-[30px] md:min-h-[min(660px,calc(100vh-92px))] md:grid-cols-[290px_1fr] short:min-h-[calc(100vh-64px)]" data-glint="surface">
+          <div className="avatar-stage flex min-h-[190px] flex-col items-center justify-center border-b border-line p-5 sm:min-h-[300px] sm:p-7 md:border-b-0 md:border-r">
             <OnboardingMascotStack
               variant={{ kind: "coworker", identity: previewIdentity, name: name.trim() || "New coworker", color: avatarColor, glasses: avatarGlasses }}
-              size={140}
+              size={layout.compact ? 104 : 140}
               sessionKey="new-coworker"
             />
             <p className="mt-3 max-w-full truncate text-lg font-semibold tracking-[-0.025em] text-snow">
@@ -144,7 +158,7 @@ export function NewCoworker({
             {role.trim() ? <p className="mt-1 max-w-full truncate text-xs text-mist">{role.trim()}</p> : null}
           </div>
 
-          <div className="flex min-w-0 flex-col p-6 md:p-7" data-testid={`new-coworker-step-${step}`}>
+          <div className="flex min-w-0 flex-col p-4 sm:p-6 md:p-7 short:p-5" data-testid={`new-coworker-step-${step}`}>
             {step !== "details" ? (
               <>
                 <h1 className="text-2xl font-semibold tracking-[-0.035em] text-snow">Add a coworker</h1>
@@ -152,7 +166,7 @@ export function NewCoworker({
                   {step === "choose" ? "Choose a starting role, or create your own. Every detail is editable." : "Start with a name and a look. You can teach the job in the first assignment."}
                 </p>
                 {step === "choose" ? <>
-                  <label className="mt-4 block text-xs text-mist">
+                  <label className="mt-4 block text-xs text-mist short:mt-3">
                     Suggestions for your work
                     <select className={`${inputClass} mt-1.5 bg-ink`} aria-label="Profession" value={patternId} onChange={(event) => setPatternId(event.target.value)}>
                       <option value="">Any profession</option>
@@ -161,7 +175,7 @@ export function NewCoworker({
                   </label>
                   {workPattern(patternId) ? <p className="mt-2 text-xs leading-relaxed text-mist" data-testid="work-pattern-outcome">{workPattern(patternId)?.outcome}</p> : null}
                   {suggested.length > 0 ? (
-                    <div className="mt-4" data-testid="new-coworker-suggested">
+                    <div className="mt-4 short:mt-3" data-testid="new-coworker-suggested">
                       <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-mist/75">Suggested · tap one to start from it</p>
                       <div className="mt-2 grid min-w-0 gap-2">
                         {suggested.map((item) => (
@@ -177,7 +191,7 @@ export function NewCoworker({
                     </div>
                   ) : null}
                   {team.length > 0 && onAskTeam ? (
-                    <details className="mt-4 rounded-xl border border-line p-3" data-testid="coworker-team-advice">
+                    <details className="mt-4 rounded-xl border border-line p-3 short:mt-3 short:py-2" data-testid="coworker-team-advice">
                       <summary className="cursor-pointer text-xs font-medium text-snow">Ask AI to shape your team</summary>
                       <p className="mt-2 text-xs leading-relaxed text-mist">Describe your work. A coworker can suggest a workflow and a missing teammate; you choose who joins. Uses that coworker's current AI model.</p>
                       <label className="mt-3 block text-xs text-mist">Ask
@@ -228,7 +242,7 @@ export function NewCoworker({
                 <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-spark">Optional</p>
                 <h1 className="mt-1 text-2xl font-semibold tracking-[-0.035em] text-snow">Role, mission, and personality</h1>
                 <p className="mt-1 max-w-sm text-sm leading-relaxed text-mist">
-                  Everything here can be changed later in Coworker settings.
+                  Everything here can be changed later on the coworker's Customize page.
                 </p>
                 <div className="mt-5 space-y-3">
                   <Field label="Role">
@@ -250,12 +264,17 @@ export function NewCoworker({
                   </Field>
                   <PersonalityPicker value={personality} seed={name.trim() || "coworker"} onChange={setPersonality} />
                 </div>
+                <details className="mt-5 border-t border-line pt-4" data-testid="new-coworker-advanced" onToggle={(event) => { if (event.currentTarget.open) setAdvancedOpen(true); }}>
+                  <summary className="cursor-pointer text-sm font-medium text-snow">Advanced</summary>
+                  <p className="mt-1 text-xs text-mist">The AI model {name.trim() || "this coworker"} answers with. Automatic chooses one for you.</p>
+                  {advancedOpen ? <div className="mt-3"><StartingModel runtime={runtime} session={session} value={model} onChange={setModel} /></div> : null}
+                </details>
               </>
             )}
 
             {error ? <div className="mt-4"><ErrorNote>{error}</ErrorNote></div> : null}
 
-            <div className="mt-auto flex items-center justify-between gap-3 pt-6">
+            <div className="mt-auto flex items-center justify-between gap-3 pt-6 short:pt-4">
               {step === "choose" ? (
                 <Button variant="primary" onClick={() => setStep("identity")} data-testid="new-coworker-scratch">Start from scratch</Button>
               ) : step === "identity" ? (
@@ -286,6 +305,54 @@ export function NewCoworker({
           <RetiredCoworkers onRestored={onCreated} />
         </div>
       </div>
+    </div>
+  );
+}
+
+/** The model a new coworker starts on, from the models connected to this app; nothing is read until Advanced opens. */
+function StartingModel({ runtime, session, value, onChange }: {
+  runtime: RuntimeInfo;
+  session: DenSession | null;
+  value: ModelSelection | null;
+  onChange: (value: ModelSelection | null) => void;
+}) {
+  const [catalog, setCatalog] = useState<EngineModelCatalog>({ models: [], connectedProviderIds: [], cloud: null });
+  const [preview, setPreview] = useState<ModelChoicePreview | undefined>(undefined);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    try {
+      if (!runtime.engineManaged) throw new Error("The AI service is not running yet.");
+      const [{ workspaceId }, settings] = await Promise.all([coworkerBridge.coordinator.ensure(), coworkerBridge.settings.get()]);
+      const next = await createCoworkerThreads({ serverUrl: runtime.serverUrl, workspaceId, token: runtime.ownerToken }).listModelCatalog();
+      setCatalog(next);
+      setPreview(resolveModelPreview(next, "conversation", settings.modelDefaults));
+    } catch (cause) {
+      setError(`Models could not be read. ${cause instanceof Error ? cause.message : String(cause)}`);
+    } finally {
+      setLoading(false);
+    }
+  }, [runtime.engineManaged, runtime.ownerToken, runtime.serverUrl]);
+  useEffect(() => { void refresh(); }, [refresh]);
+  return (
+    <div className="space-y-2">
+      <ModelPicker
+        runtime={runtime}
+        session={session}
+        catalog={catalog}
+        catalogLoading={loading}
+        onRefreshCatalog={refresh}
+        defaultPurpose="conversation"
+        value={value?.model ?? ""}
+        modelVariant={value?.modelVariant ?? ""}
+        automaticPreview={preview}
+        previewLoading={loading}
+        compact
+        onChange={(selection) => onChange(selection.model ? selection : null)}
+      />
+      {error ? <p role="status" className="text-[11px] leading-relaxed text-amber">{error}</p> : null}
     </div>
   );
 }

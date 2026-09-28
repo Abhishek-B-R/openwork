@@ -142,6 +142,28 @@ export function ActivityIcon({ className = "size-4" }: { className?: string }) {
   );
 }
 
+/** A window with its left or right column marked: the team list, or the side panel. */
+export function SidebarIcon({ side, className = "size-4" }: { side: "left" | "right"; className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <rect x="1.75" y="2.75" width="12.5" height="10.5" rx="2.25" stroke="currentColor" strokeWidth="1.25" />
+      <path d={side === "left" ? "M6 2.75v10.5" : "M10 2.75v10.5"} stroke="currentColor" strokeWidth="1.25" />
+    </svg>
+  );
+}
+
+/** Corners drawing in (enter Focus mode) or out (leave it). */
+export function FocusIcon({ active = false, className = "size-4" }: { active?: boolean; className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <path
+        d={active ? "M2.5 6h3.5V2.5M13.5 6H10V2.5M2.5 10h3.5v3.5M13.5 10H10v3.5" : "M2.5 5.5v-3h3M13.5 5.5v-3h-3M2.5 10.5v3h3M13.5 10.5v3h-3"}
+        stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 /** Four tiles: Apps & tools. */
 export function AppsIcon({ className = "size-4" }: { className?: string }) {
   return (
@@ -200,6 +222,31 @@ export function PlusIcon({ className = "size-4" }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 16 16" fill="none" aria-hidden="true">
       <path d="M8 3v10M3 8h10" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+/** A page and pencil: start something new, as in a messages app. */
+export function ComposeIcon({ className = "size-4" }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <path d="M7.25 2.75H4.5A1.75 1.75 0 0 0 2.75 4.5v7A1.75 1.75 0 0 0 4.5 13.25h7a1.75 1.75 0 0 0 1.75-1.75V8.75" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" />
+      <path d="M11.9 2.35a1.2 1.2 0 0 1 1.7 1.7L8.5 9.15l-2.25.6.6-2.25 5.05-5.15Z" stroke="currentColor" strokeWidth="1.25" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+/**
+ * The floating conversation header's height. Conversations scroll the full
+ * height beneath it and start their content this far down (see --conversation-top).
+ */
+export const CONVERSATION_TOP = "60px";
+
+/** A rounded square for stopping work in progress. */
+export function StopIcon({ className = "size-4" }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <rect x="4" y="4" width="8" height="8" rx="1.75" fill="currentColor" />
     </svg>
   );
 }
@@ -317,6 +364,11 @@ export function Tooltip({
         : null}
     </>
   );
+}
+
+/** A focusable explanation beside a short settings heading. */
+export function HelpTip({ label, content }: { label: string; content: string }) {
+  return <Tooltip content={content} side="right"><button type="button" aria-label={`About ${label}`} className="inline-flex size-5 shrink-0 items-center justify-center rounded-full border border-line text-[11px] font-medium text-mist hover:border-white/25 hover:text-snow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-spark/60">?</button></Tooltip>;
 }
 
 /**

@@ -61,6 +61,28 @@ test("skill IDs and authorization scopes are stable opaque hashes", () => {
   for (const config of [null, { url: "https://example.test/mcp" }, { ...cloudConfig("t"), enabled: false }, { ...cloudConfig("t"), disabled: true }]) expect(cloudNativeSkillScopeKey(config)).toBeNull();
 });
 
+test("a plain turn can recheck the same empty signed-in skill scope without repeated invalidation", async () => {
+  await withRoot(async (root) => {
+    const cloud = fakeCloud({ index: indexFor([BRIEFING_URI]), bodies: { [BRIEFING_URI]: BRIEFING_BODY } });
+    const registrations: Array<string | null> = [];
+    let config = cloudConfig("a");
+    const sync = createCloudNativeSkillSync({ root, fetcher: cloud.fetcher,
+      readCloudConfig: async () => config, register: async (directory) => { registrations.push(directory); } });
+    await sync.reconcileScope();
+    const generation = sync.generation();
+    await sync.reconcileScope();
+    expect(sync.generation()).toBe(generation);
+    expect(sync.current().root).toBeNull();
+    expect(cloud.reads).toEqual([]);
+    const loaded = await sync.sync();
+    expect(loaded.skills).toHaveLength(1);
+    config = cloudConfig("b");
+    await sync.reconcileScope();
+    expect(sync.current().root).toBeNull();
+    expect(registrations.at(-1)).toBeNull();
+  });
+});
+
 test("fresh same-session bodies are private, update with stable IDs and remove revoked files", async () => {
   await withRoot(async (root) => {
     const bodies: Record<string, string> = { [BRIEFING_URI]: BRIEFING_BODY, [TRIAGE_URI]: TRIAGE_BODY };
@@ -88,6 +110,39 @@ test("fresh same-session bodies are private, update with stable IDs and remove r
     expect(await readFile(second.skills[0]!.location, "utf8")).toBe(catalog.bodies[BRIEFING_URI]);
     expect(await readdir(String(second.root))).toEqual([cloudNativeSkillId(BRIEFING_URI)]);
     expect(await readdir(root)).toEqual([String(cloudNativeSkillScopeKey(cloudConfig("a")))]);
+  });
+});
+
+test("a fresh authorized index reuses only bodies with unchanged revisions", async () => {
+  await withRoot(async (root) => {
+    const bodies: Record<string, string> = { [BRIEFING_URI]: BRIEFING_BODY, [TRIAGE_URI]: TRIAGE_BODY };
+    const index = { skills: [
+      { name: "briefing", type: "skill-md", url: BRIEFING_URI, revision: "briefing-1" },
+      { name: "triage", type: "skill-md", url: TRIAGE_URI, revision: "triage-1" },
+    ] };
+    const cloud = fakeCloud({ index, bodies });
+    let config = cloudConfig("a");
+    const sync = createCloudNativeSkillSync({ root, fetcher: cloud.fetcher,
+      readCloudConfig: async () => config, register: async () => undefined });
+    await sync.sync();
+    await sync.sync();
+    expect(cloud.reads).toEqual([INDEX_URI, BRIEFING_URI, TRIAGE_URI, INDEX_URI]);
+    bodies[BRIEFING_URI] += "Updated.\n";
+    index.skills[0]!.revision = "briefing-2";
+    const updated = await sync.sync();
+    expect(cloud.reads.slice(-2)).toEqual([INDEX_URI, BRIEFING_URI]);
+    expect(await readFile(updated.skills.find((skill) => skill.uri === BRIEFING_URI)!.location, "utf8")).toBe(bodies[BRIEFING_URI]);
+    index.skills.pop();
+    const revoked = await sync.sync();
+    expect(cloud.reads.at(-1)).toBe(INDEX_URI);
+    expect(revoked.skills.map((skill) => skill.uri)).toEqual([BRIEFING_URI]);
+    expect(await exists(join(String(revoked.root), cloudNativeSkillId(TRIAGE_URI)))).toBe(false);
+    index.skills.push({ name: "triage", type: "skill-md", url: TRIAGE_URI, revision: "triage-1" });
+    await sync.sync();
+    expect(cloud.reads.slice(-2)).toEqual([INDEX_URI, TRIAGE_URI]);
+    config = cloudConfig("b");
+    await sync.sync();
+    expect(cloud.reads.slice(-3)).toEqual([INDEX_URI, BRIEFING_URI, TRIAGE_URI]);
   });
 });
 

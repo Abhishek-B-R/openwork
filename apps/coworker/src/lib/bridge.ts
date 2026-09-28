@@ -147,6 +147,9 @@ export type GroupTimelineEvent = {
   revision?: number;
 };
 
+/** What a shared link says about itself, read by the main process. `image` is an inline data URL or "". */
+export type LinkPreview = { url: string; title: string; description: string; siteName: string; image: string; video: boolean };
+
 export type CoworkerSummary = {
   slug: string;
   path: string;
@@ -159,6 +162,8 @@ export type CoworkerSummary = {
   personality: Personality;
   /** The catalog role this coworker was created from; "" when the person shaped it by hand. */
   roleId: string;
+  /** Where a coworker came from when it was not made here: an organization template, or `featured:<id>` from the Marketplace. */
+  templateOrigin?: string;
   /** The teammate who proposed this coworker and why; null when the person added it themselves. */
   suggestedBy: { slug: string; why: string } | null;
   workspaceId: string;
@@ -323,6 +328,8 @@ export type CoworkerSettings = {
   progressSummaryModelId: string;
   automaticMemoryEnabled: boolean;
   memoryModelId: string;
+  /** Optional features, off until turned on in Settings → Features. */
+  features: import("./features.ts").Features;
 };
 
 /** One recorded change to the coworker's memory or soul, by the coworker, the person, or an undo. */
@@ -581,6 +588,10 @@ export const coworkerBridge = {
     cancel: (requestId: string) => invoke<void>("voice.cancel", { requestId }),
     microphone: () => invoke<{ granted: boolean }>("voice.microphone"),
   },
+  appWindow: {
+    /** Dock the window as a small conversation at the right of the screen (hiding the macOS window buttons), or put it back where it was. */
+    focusMode: (on: boolean) => invoke<{ docked: boolean; controlsHidden: boolean }>("window.focusMode", { on }),
+  },
   browser: {
     bind: (slug: string, threadId: string, viewId: string) => invoke<BrowserSnapshot>("browser.bind", { slug, threadId, viewId }),
     detach: (viewId: string) => invoke<void>("browser.detach", { viewId }),
@@ -672,6 +683,15 @@ export const coworkerBridge = {
     updateTurn: (id: string, turnId: string, patch: GroupTurnPatch) => invoke<CoworkerGroupTurn>("groups.updateTurn", { id, turnId, patch }),
     /** Settle every turn a quit or reload cut off; returns which ones it touched. */
     recoverInterrupted: () => invoke<{ groupId: string; turnId: string }[]>("groups.recoverInterrupted"),
+  },
+  marketplace: {
+    /**
+     * Add a coworker featured in the Marketplace; one already on the team is returned as it is.
+     * Playbooks an organization keeps out are named; `notReady` means its first warmup failed and retries when it is opened.
+     */
+    addCoworker: (id: string) => invoke<{ coworker: CoworkerSummary; skippedPlaybooks: string[]; notReady: boolean }>("marketplace.addCoworker", { id }),
+    /** Remove a skill installed in the team's folder on this Mac. */
+    removeSkill: (name: string) => invoke<{ ok: boolean }>("marketplace.removeSkill", { name }),
   },
   /** The hidden workspace the silent facilitator runs in; created and registered on first use. */
   coordinator: {
@@ -797,6 +817,8 @@ export const coworkerBridge = {
   openExternal: (url: string) => invoke<{ ok: boolean }>("shell.openExternal", { url }),
   openUntrustedExternal: (url: string) =>
     invoke<{ ok: boolean; cancelled?: boolean }>("shell.openUntrustedExternal", { url }),
+  /** A messaging-style preview of a shared link: its own title, description, site and inline image. */
+  linkPreview: (url: string) => invoke<LinkPreview | null>("links.preview", { url }),
   /**
    * The signed-in OpenWork account, handed to the embedded server so the
    * member's authorized providers become engine providers — the desktop's

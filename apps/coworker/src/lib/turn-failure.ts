@@ -19,6 +19,31 @@ export type TurnFailure = {
   freeModelLimit: boolean;
 };
 
+/** Friendly copy for a conversation error outside a completed model turn. */
+export function describeConversationError(raw: string): { headline: string; detail: string; technical: string } {
+  const technical = raw.trim();
+  if (/time(?:d)? ?out|aborted due to timeout/i.test(technical)) return {
+    headline: "This is taking longer than expected",
+    detail: "Check this conversation before sending the message again. Your earlier messages are kept.",
+    technical,
+  };
+  if (/\b(?:HTTP|status) ?5\d\d\b|(?:native|local) AI service/i.test(technical)) return {
+    headline: "The AI service had a problem",
+    detail: "Give it a moment, then try again. Your earlier messages are kept.",
+    technical,
+  };
+  if (/^The saved (?:AI )?model\b|^No connected AI model/i.test(technical)) return {
+    headline: "Choose an available AI model",
+    detail: "Open this coworker's AI model settings to pick one that is connected.",
+    technical,
+  };
+  return {
+    headline: "Something got in the way",
+    detail: "Your earlier messages are kept. Check the details if you need help getting started again.",
+    technical,
+  };
+}
+
 /**
  * The engine's error as one line of raw text: its name, the provider's own
  * error type when the engine relayed one ("APIError · FreeUsageLimitError: …"),
@@ -30,7 +55,7 @@ export function failureText(error: { name: string; message: string; providerErro
   return `${name}: ${error.message}`;
 }
 
-const SAVED_MODEL = /^The saved model "([^"]+)"/;
+const SAVED_MODEL = /^The saved (?:AI )?model\b/;
 /** The engine's names for the free model's shared limit: the provider's error type, its retry reason, its own retry line. */
 export const FREE_MODEL_LIMIT = /FreeUsageLimitError|free_tier_limit|free usage exceeded/i;
 
@@ -57,7 +82,7 @@ export function describeTurnFailure(raw: string, coworkerName: string, retryable
   if (/^No connected AI model can use tools\./.test(message)) {
     return {
       headline: "No connected AI model can use tools.",
-      detail: "Connect an AI provider in OpenWork, or choose an AI model in Coworker settings.",
+      detail: "Connect an AI provider in OpenWork, or choose one in Customize › AI model.",
       technical: "",
       modelRelated: true,
       transient: false,

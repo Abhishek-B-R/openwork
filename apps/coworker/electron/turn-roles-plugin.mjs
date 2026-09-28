@@ -122,8 +122,25 @@ export default Plugin.define({ id: "coworker.turn-roles", effect: (ctx) => Effec
     try { return JSON.parse(await readFile(path.join(ctx.location.directory, ".opencode", "coworker-context.json"), "utf8")).mode === "team"; }
     catch (error) { if (error.code === "ENOENT") return false; throw error; }
   }, catch: () => new Tool.Error({ message: "The native coworker connection is unavailable." }) }).pipe(Effect.orDie);
+  // Tools of an app feature that is turned off (Calendar, Computer use), listed by the
+  // app beside the team config: never offered to the model, and refused if called.
+  let offText = "";
+  let offList = [];
+  const offTools = teamMode ? Effect.promise(async () => {
+    let text = "";
+    try { text = await readFile(path.join(ctx.location.directory, ".opencode", "coworker-features.json"), "utf8"); }
+    catch (error) { if (error.code !== "ENOENT") throw error; }
+    if (text !== offText) {
+      const listed = text ? JSON.parse(text).off : [];
+      offList = Array.isArray(listed) ? listed.filter((pattern) => typeof pattern === "string" && pattern) : [];
+      offText = text;
+    }
+    return offList;
+  }) : Effect.succeed([]);
+  const isOff = (list, name) => list.some((pattern) => pattern.endsWith("*") ? name.startsWith(pattern.slice(0, -1)) : name === pattern);
   let homePolicyText = teamMode ? yield* Effect.promise(() => readFile(path.join(ctx.location.directory, "opencode.json"), "utf8")) : "";
-  const homePolicyCounts = new Map(Object.entries(teamMode ? JSON.parse(homePolicyText).agents ?? {} : {}).map(([id, agent]) => [id, agent.permissions?.length ?? 0]));
+  let homePolicy = teamMode ? JSON.parse(homePolicyText) : {};
+  const homePolicyCounts = new Map(Object.entries(homePolicy.agents ?? {}).map(([id, agent]) => [id, agent.permissions?.length ?? 0]));
   const refreshPolicy = Effect.gen(function* () {
     if (!teamMode) return;
     const text = yield* Effect.promise(() => readFile(path.join(ctx.location.directory, "opencode.json"), "utf8"));
@@ -132,26 +149,26 @@ export default Plugin.define({ id: "coworker.turn-roles", effect: (ctx) => Effec
     const unrelated = (config) => ({ ...config, agents: Object.fromEntries(Object.entries(config.agents ?? {}).filter(([id]) => !id.startsWith("coworker-owner-"))) });
     if (JSON.stringify(unrelated(previous)) !== JSON.stringify(unrelated(next))) throw new Error("Non-owner native configuration changed; refresh that configuration before admission.");
     if (typeof ctx.agent.reload !== "function") throw new Error("This runtime cannot refresh native owner policies.");
+    // Native config-agent reloads its own file snapshot from a watched event.
+    // A newly written teammate may reach this RPC before that event does. The
+    // app owns only coworker-owner-* entries, so materialize those exact entries
+    // in our existing agent transform instead of waiting for a watcher or
+    // restarting the engine. Other native config remains under its own plugin.
+    homePolicy = next;
     homePolicyCounts.clear();
     for (const [id, agent] of Object.entries(next.agents ?? {})) homePolicyCounts.set(id, agent.permissions?.length ?? 0);
-    for (let attempt = 0; attempt < 50; attempt++) {
-      yield* ctx.agent.reload().pipe(Effect.catchCause(() => Effect.void));
-      let ready = true;
-      for (const [id, expected] of Object.entries(next.agents ?? {})) {
-        if (!id.startsWith("coworker-owner-")) continue;
-        const result = yield* ctx.agent.get({ agentID: id }).pipe(Effect.match({ onFailure: () => null, onSuccess: (value) => value }));
-        const rules = expected.permissions ?? [];
-        if (!result?.data || !result.data.system?.endsWith(expected.system) || (rules.length && JSON.stringify(result.data.permissions.slice(-rules.length)) !== JSON.stringify(rules))) ready = false;
+    yield* ctx.agent.reload();
+    for (const [id, expected] of Object.entries(next.agents ?? {})) {
+      if (!id.startsWith("coworker-owner-")) continue;
+      const result = yield* ctx.agent.get({ agentID: id });
+      const rules = expected.permissions ?? [];
+      if (!result.data.system?.endsWith(expected.system) || (rules.length && JSON.stringify(result.data.permissions.slice(-rules.length)) !== JSON.stringify(rules))) {
+        throw new Error("The native owner policy did not match the current configuration.");
       }
-      if (ready) {
-        const current = yield* Effect.promise(() => readFile(path.join(ctx.location.directory, "opencode.json"), "utf8"));
-        if (current !== text) throw new Error("Native owner policies changed again during preparation.");
-        homePolicyText = text;
-        return;
-      }
-      yield* Effect.promise(() => new Promise((resolve) => setTimeout(resolve, 100)));
     }
-    throw new Error("Native owner policies did not reach the current configuration.");
+    const current = yield* Effect.promise(() => readFile(path.join(ctx.location.directory, "opencode.json"), "utf8"));
+    if (current !== text) throw new Error("Native owner policies changed again during preparation.");
+    homePolicyText = text;
   });
   const checkPolicy = teamMode ? Effect.tryPromise({ try: async () => {
     if (await readFile(path.join(ctx.location.directory, "opencode.json"), "utf8") !== homePolicyText) throw new Error("The team configuration changed. Reload native configuration before another tool invocation.");
@@ -159,8 +176,13 @@ export default Plugin.define({ id: "coworker.turn-roles", effect: (ctx) => Effec
   if (teamMode) yield* ctx.agent.transform((editor) => {
     const build = editor.get("build");
     if (!build) throw new Error("The native build policy is unavailable.");
-    for (const id of homePolicyCounts.keys()) if (id.startsWith("coworker-owner-") && !editor.get(id)) editor.update(id, (agent) => {
-      Object.assign(agent, structuredClone(build), { id, name: id, mode: "primary", hidden: false });
+    const owners = Object.entries(homePolicy.agents ?? {}).filter(([id]) => id.startsWith("coworker-owner-"));
+    const ownerIds = new Set(owners.map(([id]) => id));
+    for (const agent of editor.list()) if (agent.id.startsWith("coworker-owner-") && !ownerIds.has(agent.id.split(separator)[0])) editor.remove(agent.id);
+    for (const [id, spec] of owners) editor.update(id, (agent) => {
+      Object.assign(agent, structuredClone(build), { id, name: id, mode: spec.mode, hidden: false,
+        description: spec.description, system: spec.system,
+        permissions: [...structuredClone(build.permissions), ...structuredClone(spec.permissions ?? [])] });
     });
   });
   yield* ctx.tool.transform((editor) => {
@@ -178,14 +200,25 @@ export default Plugin.define({ id: "coworker.turn-roles", effect: (ctx) => Effec
       });
     }
   });
-  yield* ctx.session.hook("context", (event) => Effect.sync(() => {
+  yield* ctx.session.hook("context", (event) => Effect.gen(function* () {
     const blocked = denied.get(event.agent);
     if (blocked && !prepared) throw new Error("Native turn role inheritance is not ready.");
     if (blocked) for (const name of Object.keys(event.tools)) if (blocked.has(name)) delete event.tools[name];
+    const off = yield* offTools;
+    if (off.length) for (const name of Object.keys(event.tools)) if (isOff(off, name)) delete event.tools[name];
+    // With OpenWork Connect on this turn, web search goes through its capabilities.
+    // Removing the native tool also removes its provider-consent prompt.
+    if (event.tools["openwork-cloud_search_capabilities"] && event.tools.websearch) {
+      delete event.tools.websearch;
+      event.system.push({ type: "text", text: "Search the web through OpenWork Connect: call openwork-cloud_search_capabilities for a web search capability, then openwork-cloud_execute_capability with the exact returned identifier. If Connect has no web search, read known pages with webfetch or the built-in browser." });
+    }
     if ((event.agent === "build" || event.agent.startsWith("coworker-") || blocked) && event.tools.execute) event.system.push({ type: "text", text: "Use native execute for eligible multi-step tool reads: combine independent reads, filter the results, and return a concise answer. Discover exact available signatures from the native tool catalog; do not guess names or copy an inventory. Keep Coworker's mutations, rich receipts, delegation, and browser/computer controls on their direct tools. Code Mode does not grant permissions or bypass this turn's role. Do not retry an uncertain action." });
   }));
   yield* ctx.tool.hook("execute.before", (event) => checkPolicy.pipe(Effect.andThen(() => denied.has(event.agent) && (!prepared || denied.get(event.agent).has(event.tool))
-    ? Effect.fail(new Tool.Error({ message: "This native turn role cannot use " + event.tool + "." })) : Effect.void)));
+    ? Effect.fail(new Tool.Error({ message: "This native turn role cannot use " + event.tool + "." })) : Effect.void),
+    Effect.andThen(() => offTools),
+    Effect.andThen((off) => isOff(off, event.tool)
+      ? Effect.fail(new Tool.Error({ message: "This is turned off in Open Coworker. The person can turn it on in Settings, Features." })) : Effect.void)));
 }) });
 `;
 
@@ -207,10 +240,34 @@ export async function awaitNativePluginActivation(request, { apiContract = "beta
   }
 }
 
-export async function prepareNativeTurnRoles(request, { requireFilesystemScope = false } = {}) {
-  const result = await request("POST", "/api/rpc/coworker.turn-roles/prepare", { input: {} });
-  if (result?.output?.ready !== true) throw new Error("Native turn role inheritance is not ready.");
-  if (requireFilesystemScope && result.output.filesystemScopeRequired !== true) throw new Error("The admitted filesystem scope hook is not ready.");
+/**
+ * Right after the team configuration is rewritten (a feature switched in
+ * Settings, a teammate added), the engine can still hold the previous owner
+ * policies for a moment, and prepare fails ("The native owner policy did not
+ * match the current configuration") until its own watcher reloads them. That
+ * failure arrives as a bare HTTP 500, so a 500 is tried again for about ten
+ * seconds before it reaches the person. Any definite answer (not ready, a
+ * stopped service) is final at once.
+ */
+const PREPARE_RETRY_DELAYS_MS = [150, 300, 600, 1_000, 1_500, 2_500, 4_000];
+
+function transientPrepareFailure(error) {
+  return /answered with HTTP 5\d\d\b/.test(error instanceof Error ? error.message : String(error));
+}
+
+export async function prepareNativeTurnRoles(request, { requireFilesystemScope = false, retryDelaysMs = PREPARE_RETRY_DELAYS_MS, wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms)) } = {}) {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      const result = await request("POST", "/api/rpc/coworker.turn-roles/prepare", { input: {} });
+      if (result?.output?.ready !== true) throw new Error("Native turn role inheritance is not ready.");
+      if (requireFilesystemScope && result.output.filesystemScopeRequired !== true) throw new Error("The admitted filesystem scope hook is not ready.");
+      return;
+    } catch (error) {
+      const delay = retryDelaysMs[attempt];
+      if (delay === undefined || !transientPrepareFailure(error)) throw error;
+      await wait(delay);
+    }
+  }
 }
 
 export async function installTurnRolesPlugin(coworker) {

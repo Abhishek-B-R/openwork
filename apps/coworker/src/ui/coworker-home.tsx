@@ -1,22 +1,24 @@
-import { Suspense, lazy, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { Suspense, lazy, useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { coworkerBridge, type CoworkerSummary, type LocalResponsibility, type ProviderSyncRun, type RuntimeInfo, type TeamStates } from "@/lib/bridge";
 import { abilitiesSummary } from "@/lib/abilities";
 import { CoworkerAbilitiesEditor } from "@/ui/coworker-abilities";
 import { describeHeaderStatus, describeNow, describeOutcome, mergeRecentWork, relativeTime } from "@/lib/activity-summary";
 import type { ConnectState } from "@/lib/connect";
-import { describeCoworkerSummary, showSummaryLine, summaryRowTitle, type CoworkerSummaryLine, type SummaryKind } from "@/lib/coworker-summary";
+import { describeCoworkerSummary, showSummaryLine, summaryRowTitle, type CoworkerSummaryLine, type SummaryKind, type SummaryPart } from "@/lib/coworker-summary";
 import { referralPrompt } from "@/lib/conversation";
 import type { DenSession } from "@/lib/den";
 import { markAutoPicked, peekStartingModel, takeStartingModel } from "@/lib/model-choice";
 import { InlineLoader } from "@/ui/brand";
-import { CoworkerModelSettings } from "@/ui/coworker-model-settings";
 import { createCoworkerThreads, recommendModel, type CoworkerActivity, type ThreadListItem } from "@/lib/threads";
-import { acknowledgeCoworker, AvatarControls, CoworkerAvatar } from "@/ui/coworker-avatar";
-import { PersonalityPicker } from "@/ui/personality-picker";
-import { ActivityIcon, AppsIcon, Button, ErrorNote, IconButton, MemoryIcon, SlidersIcon } from "@/ui/kit";
+import { CoworkerAvatar } from "@/ui/coworker-avatar";
+import type { CustomizeFocus } from "@/ui/customize-coworker";
+import { useFeatures } from "@/ui/use-features";
+import { useLayout } from "@/ui/use-layout";
+import { FocusToggle, TeamButton } from "@/ui/layout-controls";
+import { ActivityIcon, AppsIcon, Button, CONVERSATION_TOP, ChevronIcon, ErrorNote, IconButton, MemoryIcon, SidebarIcon, SlidersIcon } from "@/ui/kit";
 import { useResizablePanel } from "@/ui/use-resizable-panel";
 import { PanelContent, PanelHeader, PanelLevel, usePanelNavigation } from "@/ui/panel-nav";
-import { isBackShortcut, pushCrumb, routeDepth, type PanelCrumb } from "@/lib/panel-route";
+import { isBackShortcut, pushCrumb, rootRoute, routeDepth, type PanelCrumb } from "@/lib/panel-route";
 import {
   ABILITIES_CRUMB,
   ACTIVITY_CRUMBS,
@@ -35,12 +37,13 @@ import {
 import { panelViewTooltip } from "@/lib/tooltip";
 import type { PanelBounds } from "@/lib/panel-layout";
 import { MemoryPanel } from "@/ui/memory";
-import { DocumentBesidePane, DocumentsPanel, lastDocumentsOpened, useDocuments, useDocumentNavigationGuard, type DocumentNavigationGuard } from "@/ui/documents";
+import { DocumentBesidePane, DocumentRow, DocumentsPanel, lastDocumentsOpened, useDocuments, useDocumentNavigationGuard, type DocumentNavigationGuard } from "@/ui/documents";
 import { ThreadsPanel, type DocumentHooks } from "@/ui/threads";
 import type { TeamHooks } from "@/ui/team-cards";
 import { WorkersPanel } from "@/ui/workers";
 import { AssignmentsPanel } from "@/ui/assignments";
 import type { WorkerSummary } from "@/lib/workers";
+import type { CoworkerDocumentSummary } from "@/lib/documents";
 import { Row, RowList, useReturnFocus } from "@/ui/rows";
 import type { SettingsSection } from "@/ui/openwork-settings";
 
@@ -48,6 +51,8 @@ import type { SettingsSection } from "@/ui/openwork-settings";
 const CapabilitiesPanel = lazy(() => import("@/ui/capabilities").then((module) => ({ default: module.CapabilitiesPanel })));
 
 const CONTEXT_PANEL_WIDTH_KEY = "open-coworker.context-panel-width";
+const NO_DOCUMENTS: never[] = [];
+const NO_SCHEDULED: LocalResponsibility[] = [];
 const CONTEXT_PANEL_DEFAULT_WIDTH = 360;
 const MAIN_WORKSPACE_MIN_WIDTH = 520;
 /** The context panel: drag it narrower than it can usefully be and it folds to an icon strip. */
@@ -70,6 +75,17 @@ const NARROW_WINDOW = 900;
 /** Which Activity level each part of the summary line opens. */
 const SUMMARY_LEVELS: Record<SummaryKind, ActivityLevel> = { assignments: "assignments", workers: "workers", documents: "documents" };
 
+/** Activity's tabs: its overview, then each level. */
+type ActivityTab = "root" | ActivityLevel;
+const ACTIVITY_TABS: ReadonlyArray<{ tab: ActivityTab; title: string }> = [
+  { tab: "root", title: "Overview" },
+  { tab: "documents", title: "Documents" },
+  { tab: "workers", title: "Workers" },
+  { tab: "assignments", title: "Assignments" },
+];
+/** How many documents in play the overview shows before "All". */
+const OVERVIEW_DOCUMENTS = 3;
+
 /** The rail and transcript show activity; the header reserves its right edge for Stop. */
 export function HeaderStatusWord({ activity, engineManaged }: { activity: CoworkerActivity | undefined; engineManaged: boolean }) {
   const status = describeHeaderStatus(activity, engineManaged);
@@ -78,14 +94,15 @@ export function HeaderStatusWord({ activity, engineManaged }: { activity: Cowork
   );
 }
 
-/** A request another view makes of this one: open a settings section, open one thread, or send a message in the open discussion (a request a teammate passed on). */
+/** A request another view makes of this one: open one thread, or send a message in the open discussion (a request a teammate passed on). */
 export type CoworkerHomeRequest =
-  | { id: number; kind: "settings"; section: "model" }
   | { id: number; kind: "thread"; threadId: string }
   | { id: number; kind: "discussion"; threadId: string; onOpened?: () => Promise<void> }
   | { id: number; kind: "activity"; threadId: string }
   | { id: number; kind: "document"; documentId: string }
   | { id: number; kind: "responsibilities" }
+  /** Put a message in the open discussion's composer for the person to send. */
+  | { id: number; kind: "draft"; text: string }
   | { id: number; kind: "turn"; prompt: string };
 
 /**
@@ -155,8 +172,11 @@ export function CoworkerHome({
   onVisitCoworker,
   onExitActivity,
   navigationGuard,
+  onCustomize,
 }: {
   navigationGuard?: DocumentNavigationGuard;
+  /** Open this coworker's Customize page, optionally with one part in view. */
+  onCustomize: (focus?: CustomizeFocus) => void;
   active: boolean;
   runtime: RuntimeInfo;
   session: DenSession | null;
@@ -190,7 +210,6 @@ export function CoworkerHome({
   request?: CoworkerHomeRequest | null;
   onExitActivity?: () => void;
 }) {
-  const [settingsFocus, setSettingsFocus] = useState<{ id: number; section: "model" } | null>(null);
   const [assignmentDraft, setAssignmentDraft] = useState<{ id: number; text: string } | null>(null);
   const [discussionDraft, setDiscussionDraft] = useState<{ id: number; text: string; skill?: import("@/lib/skill-selection").SelectedSkill } | null>(null);
   const [openThreadRequest, setOpenThreadRequest] = useState<{ id: number; threadId: string; kind?: "thread" | "discussion" | "activity"; onOpened?: () => Promise<void> } | null>(null);
@@ -204,6 +223,8 @@ export function CoworkerHome({
   }, []);
   /** From a card's Open: show this document in the Documents level; the id makes repeats distinct. */
   const [openDocumentRequest, setOpenDocumentRequest] = useState<{ id: number; documentId: string } | null>(null);
+  /** Choosing the Documents tab while a document is open returns to the list; the count remounts it. */
+  const [documentsReset, setDocumentsReset] = useState(0);
   /** The document open in the reading pane beside the conversation, when the window has room. */
   const [besideDocumentId, setBesideDocumentId] = useState("");
   const documentNavigation: DocumentNavigationGuard = useRef(null);
@@ -225,9 +246,16 @@ export function CoworkerHome({
   const [windowWidth, setWindowWidth] = useState(() => window.innerWidth);
   const { documents, refresh: refreshDocuments, error: documentsError } = useDocuments(coworker.slug);
   const holdings = useCoworkerHoldings(coworker.slug);
+  // Optional features: what is off is not shown. Scheduled assignments belong to Calendar.
+  const features = useFeatures();
+  const scheduled = features.calendar ? holdings.scheduled : NO_SCHEDULED;
+  const panelViews = PANEL_VIEWS.filter((view) => view !== "memory" || features.memory);
+  /** Focus mode or a narrow window: the conversation alone, the side panel opening over it. */
+  const layout = useLayout();
   /** The conversation views place their own title line and actions into the one header. */
   const [headerTitleSlot, setHeaderTitleSlot] = useState<HTMLElement | null>(null);
   const [headerActionsSlot, setHeaderActionsSlot] = useState<HTMLElement | null>(null);
+  const [headerLeadSlot, setHeaderLeadSlot] = useState<HTMLElement | null>(null);
   const [discussionToolsSlot, setDiscussionToolsSlot] = useState<HTMLDivElement | null>(null);
   const contextPanelRoom = useCallback(() => Math.max(CONTEXT_PANEL_BOUNDS.min, window.innerWidth - railWidth - MAIN_WORKSPACE_MIN_WIDTH), [railWidth]);
   const contextPanel = useResizablePanel({
@@ -280,13 +308,6 @@ export function CoworkerHome({
     navigateTo(activityRoute(level));
     expandContextPanel();
   }, [allowDocumentNavigation, expandContextPanel, navigateTo]);
-  /** Coworker settings at its own rows, brought to one section; never deeper in Apps & tools. */
-  const openSettingsSection = useCallback((section: "model", id: number) => {
-    if (!allowDocumentNavigation()) return;
-    navigateTo({ view: "settings", path: [] });
-    expandContextPanel();
-    setSettingsFocus({ id, section });
-  }, [allowDocumentNavigation, expandContextPanel, navigateTo]);
   /** A request passed from a teammate, to send in the open discussion; the id makes repeats distinct. */
   const [turnRequest, setTurnRequest] = useState<{ id: number; prompt: string } | null>(null);
   const handledRequestRef = useRef(0);
@@ -312,23 +333,23 @@ export function CoworkerHome({
       setTurnRequest({ id: request.id, prompt: request.prompt });
       return;
     }
+    if (request.kind === "draft") {
+      setDiscussionDraft({ id: request.id, text: request.text });
+      return;
+    }
     if (request.kind === "document") {
       setOpenDocumentRequest({ id: request.id, documentId: request.documentId });
       openActivityLevel("documents");
       return;
     }
-    if (request.kind === "responsibilities") {
-      openActivityLevel("assignments");
-      return;
-    }
-    openSettingsSection(request.section, request.id);
-  }, [allowDocumentNavigation, openActivityLevel, openSettingsSection, request]);
+    openActivityLevel("assignments");
+  }, [allowDocumentNavigation, openActivityLevel, request]);
   useEffect(() => {
     const onResize = () => setWindowWidth(window.innerWidth);
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
   }, []);
-  const panelWidth = contextPanel.collapsed ? CONTEXT_PANEL_BOUNDS.collapsedWidth : contextPanel.width;
+  const panelWidth = layout.chatOnly ? 0 : contextPanel.collapsed ? CONTEXT_PANEL_BOUNDS.collapsedWidth : contextPanel.width;
   const canOpenBeside = windowWidth - railWidth - panelWidth - BESIDE_PANE_WIDTH >= MAIN_WORKSPACE_MIN_WIDTH;
 
   /** An App or skill detail open in a column beside the conversation, while the window is wide enough; its path is the levels below Apps & tools. */
@@ -351,11 +372,18 @@ export function CoworkerHome({
       row?.focus();
     });
   }
-  const overlayPanel = windowWidth < NARROW_WINDOW && !contextPanel.collapsed;
-  useDocumentNavigationGuard(navigationGuard, () => documentNavigation.current?.() || besideNavigation.current?.()
-    || (!contextPanel.collapsed && contextView === "settings" ? "Close coworker settings before opening another source. Your settings have been kept." : null)
-    || (overlayPanel ? "Close the current sidebar before opening another source. Its contents have been kept." : null));
+  const overlayPanel = (windowWidth < NARROW_WINDOW || layout.chatOnly) && !contextPanel.collapsed;
+  /** Over the conversation the panel keeps its width, or takes the whole window on a phone. */
+  const overlayWidth = layout.width < 480 ? layout.width : Math.min(contextPanel.width, layout.width);
+  // The side panel never has to be closed to go somewhere else. Only a document draft asks first.
+  // A narrow window's overlay panel steps aside instead of blocking.
+  useDocumentNavigationGuard(navigationGuard, () => {
+    const message = documentNavigation.current?.() || besideNavigation.current?.() || null;
+    if (!message && overlayPanel) collapseContextPanel();
+    return message;
+  });
   const documentHooks: DocumentHooks = {
+    list: documents ?? NO_DOCUMENTS,
     onOpenDocument: (documentId) => {
       if (!allowDocumentNavigation()) return;
       openActivityLevel("documents");
@@ -373,7 +401,7 @@ export function CoworkerHome({
   };
   const summary = describeCoworkerSummary({
     assignments: assignmentThreads,
-    scheduled: holdings.scheduled,
+    scheduled,
     workers: holdings.workers,
     documents: documents ?? [],
     documentsSeenAt: lastDocumentsOpened(coworker.slug),
@@ -490,27 +518,81 @@ export function CoworkerHome({
 
   const activityLevel = activityScreen(nav.route.path);
   const settingsLevel = settingsScreen(nav.route.path);
+  /** The Activity tabs move sideways between levels from anywhere; the open Documents tab again returns a document to the list. */
+  function selectActivityTab(tab: ActivityTab): void {
+    if (!allowDocumentNavigation()) return;
+    if (tab === activityLevel.kind) {
+      if (tab === "documents") {
+        setOpenDocumentRequest(null);
+        setDocumentsReset((count) => count + 1);
+      }
+      return;
+    }
+    nav.navigate(tab === "root" ? rootRoute<PanelView>("overview") : activityRoute(tab), "none");
+  }
+  // A feature turned off while its view is open leaves for the nearest place still there.
+  const leaveMemory = nav.route.view === "memory" && !features.memory;
+  const leaveSettingsLevel = nav.route.view === "settings"
+    && ((settingsLevel.kind === "abilities" && !features.abilities) || (settingsLevel.kind === "apps-tools" && !features.appsTools));
+  useEffect(() => {
+    if (leaveMemory) toRoot("overview");
+    else if (leaveSettingsLevel) toRoot("settings");
+  }, [leaveMemory, leaveSettingsLevel, toRoot]);
+
+  // Notices sit below the floating header; without one, the conversation starts beneath it itself.
+  const headerNotice = Boolean(documentNotice || (besideDocumentId && !canOpenBeside) || !runtime.engineManaged);
+
+  // The browser and computer controls: in the strip beside the panel icons, or in the header while only the conversation shows.
+  // Focus mode keeps them mounted but out of sight, so a coworker's browser or computer still opens over the conversation.
+  const toolsHost = (
+    <div
+      ref={setDiscussionToolsSlot}
+      role="group"
+      aria-label="Discussion tools"
+      data-testid="coworker-discussion-tools"
+      className={`window-no-drag shrink-0 items-center gap-1 empty:hidden ${layout.focus ? "hidden" : "flex"} ${layout.chatOnly ? "flex-row" : "flex-col"}`}
+    />
+  );
 
   return (
     <div className="glass-main relative flex h-full min-w-0 flex-1">
-      <div className="flex min-w-0 flex-1 flex-col">
-        <header className="glass-header window-drag flex min-h-[78px] items-center gap-3 border-b border-line px-6 py-2" data-testid="conversation-header">
-          <CoworkerAvatar
-            identity={coworker.slug}
-            motion="attentive"
-            color={coworker.avatarColor}
-            glasses={coworker.avatarGlasses}
-            name={coworker.name}
-            size={40}
-          />
-          <div className="min-w-0 flex-1">
-            <h1 className="whitespace-normal text-sm font-semibold text-snow [overflow-wrap:anywhere]">{coworker.name}</h1>
-            <div ref={setHeaderTitleSlot} className="window-no-drag flex min-h-[18px] min-w-0 items-center gap-2 text-xs text-mist" data-testid="conversation-header-title" />
+      <div className="relative flex min-w-0 flex-1 flex-col" style={{ "--conversation-top": headerNotice ? "0px" : CONVERSATION_TOP } as CSSProperties}>
+        {/* No header bar: it floats over the conversation, which scrolls the full height beneath it. A way back on the left,
+            a pill for where you are, this conversation's controls on the right; top and side room clear the rounded corners. */}
+        <header className={`window-drag absolute inset-x-0 top-0 z-30 flex items-center gap-2 pb-3 pt-3 ${layout.chatOnly ? "window-controls-inset-sm bg-[linear-gradient(to_bottom,var(--color-ink)_72%,transparent)] px-3" : "bg-[linear-gradient(to_bottom,var(--color-ink)_40%,transparent)] px-4"}`} data-testid="conversation-header">
+          <div className="flex min-w-fit flex-1 basis-0 items-center gap-1">
+            <TeamButton />
+            {onExitActivity ? <IconButton className="window-no-drag" label="Go to coworker" tooltip={`Leave Activity and open ${coworker.name}`} tooltipSide="bottom" onClick={onExitActivity}><ChevronIcon direction="left" /></IconButton> : null}
+            <div ref={setHeaderLeadSlot} className="window-no-drag flex items-center empty:hidden" />
           </div>
-          {onExitActivity ? <Button variant="ghost" className="window-no-drag shrink-0 text-xs" onClick={onExitActivity}>Go to coworker</Button> : null}
-          <div ref={setHeaderActionsSlot} className="window-no-drag flex shrink-0 items-center gap-1" data-testid="conversation-header-actions" />
-          <HeaderStatusWord activity={activity} engineManaged={runtime.engineManaged} />
+          <nav aria-label="Where you are" data-glint="surface" className="glass-sheen window-no-drag relative flex min-w-0 max-w-[70%] items-center gap-1 rounded-full border border-line bg-panel/90 py-1 pl-1 shadow-[0_8px_24px_rgb(0_0_0/0.35)] backdrop-blur pr-1.5" data-testid="conversation-breadcrumbs">
+            <CoworkerAvatar
+              identity={coworker.slug}
+              motion="attentive"
+              color={coworker.avatarColor}
+              glasses={coworker.avatarGlasses}
+              name={coworker.name}
+              size={26}
+            />
+            {/* On a phone the face names the coworker; the room goes to the discussion. */}
+            <h1 className={layout.compact ? "sr-only" : "min-w-[3rem] max-w-[14rem] shrink-[2] truncate pl-1 text-sm font-semibold text-snow"} title={coworker.name}>{coworker.name}</h1>
+            {layout.compact ? null : <ChevronIcon direction="right" className="size-3 shrink-0 text-mist/60" />}
+            <div ref={setHeaderTitleSlot} className="flex min-w-0 items-center gap-1.5 text-xs text-mist" data-testid="conversation-header-title" />
+          </nav>
+          <div className="flex min-w-fit flex-1 basis-0 items-center justify-end gap-1">
+            <div ref={setHeaderActionsSlot} className="window-no-drag flex shrink-0 items-center gap-0.5" data-testid="conversation-header-actions" />
+            {layout.chatOnly ? toolsHost : null}
+            {layout.chatOnly && !layout.focus ? (
+              <IconButton label="Show panel" tooltip={`${coworker.name}'s activity, memory and settings`} tooltipSide="bottom" className="window-no-drag relative" data-testid="context-panel-open" onClick={() => showContext(contextView)}>
+                <SidebarIcon side="right" />
+                {documentsChanged > 0 ? <span className="absolute right-1 top-1 size-1.5 rounded-full bg-spark" aria-hidden="true" /> : null}
+              </IconButton>
+            ) : null}
+            <FocusToggle />
+            <HeaderStatusWord activity={activity} engineManaged={runtime.engineManaged} />
+          </div>
         </header>
+        {headerNotice ? <div style={{ height: CONVERSATION_TOP }} className="shrink-0" aria-hidden="true" /> : null}
         {documentNotice || (besideDocumentId && !canOpenBeside) ? <p role="status" className="border-b border-line px-6 py-2 text-xs text-mist">{documentNotice || "Your reading pane is kept while space is limited. Close Activity or make room to return to it."}</p> : null}
         {!runtime.engineManaged ? (
           <AiUnavailableNote coworkerName={coworker.name} technical={runtime.engineError} onRestart={onRestartRuntime} />
@@ -520,7 +602,7 @@ export function CoworkerHome({
             <p className="max-w-full break-words text-sm text-snow">{startingModel}</p>
             {startingModelError ? <div role="alert"><ErrorNote>{startingModelError}</ErrorNote></div> : <InlineLoader label="Saving your starting model" />}
             {startingModelError ? <div className="flex items-center gap-2">
-              <Button variant="ghost" onClick={() => openSettingsSection("model", Date.now())}>Choose model</Button>
+              <Button variant="ghost" onClick={() => onCustomize("model")}>Choose model</Button>
               <Button variant="primary" onClick={() => setStartingModelRetry((current) => current + 1)}>Retry</Button>
             </div> : null}
           </div> : <ThreadsPanel
@@ -535,8 +617,8 @@ export function CoworkerHome({
             discussionDraft={discussionDraft}
             openThreadRequest={openThreadRequest}
             onAssignmentsChange={onAssignmentsChange}
-            headerSlots={{ title: headerTitleSlot, actions: headerActionsSlot, tools: discussionToolsSlot }}
-            onOpenModelSettings={() => openSettingsSection("model", Date.now())}
+            headerSlots={{ lead: headerLeadSlot, title: headerTitleSlot, actions: headerActionsSlot, tools: discussionToolsSlot }}
+            onOpenModelSettings={() => onCustomize("model")}
             onOpenAccount={() => onOpenOpenWork("account")}
             onOpenProviders={() => onOpenOpenWork("models")}
             onActivityChange={onActivityChange}
@@ -563,7 +645,7 @@ export function CoworkerHome({
         </div>
       ) : null}
 
-      {besidePath && besideAppsAvailable ? (
+      {besidePath && besideAppsAvailable && features.appsTools ? (
         <section
           className="flex h-full flex-1 flex-col border-l border-line"
           style={{ minWidth: BESIDE_APPS_MIN_WIDTH }}
@@ -604,8 +686,8 @@ export function CoworkerHome({
         <div className="absolute inset-0 z-30 bg-black/40" data-testid="context-panel-scrim" onClick={closeContextPanel} aria-hidden="true" />
       ) : null}
       <aside
-        className={`glass-context flex h-full shrink-0 flex-col border-l border-line ${overlayPanel ? "absolute inset-y-0 right-0 z-40 shadow-[-24px_0_48px_rgba(0,0,0,0.45)]" : "relative"} ${contextPanel.resizing ? "" : "transition-[width] duration-[180ms] ease-out motion-reduce:transition-none"}`}
-        style={{ width: contextPanel.width }}
+        className={`glass-context h-full shrink-0 flex-col border-l border-line ${layout.chatOnly && contextPanel.collapsed ? "hidden" : "flex"} ${overlayPanel ? "absolute inset-y-0 right-0 z-40 shadow-[-24px_0_48px_rgba(0,0,0,0.45)]" : "relative"} ${contextPanel.resizing ? "" : "transition-[width] duration-[180ms] ease-out motion-reduce:transition-none"}`}
+        style={{ width: overlayPanel ? overlayWidth : contextPanel.width }}
         data-testid="context-panel"
         data-collapsed={contextPanel.collapsed ? "true" : "false"}
         data-view={contextView}
@@ -618,6 +700,7 @@ export function CoworkerHome({
       >
         <div
           {...contextPanel.separatorProps}
+          hidden={layout.compact}
           onPointerDown={(event) => { if (allowDocumentNavigation()) contextPanel.separatorProps.onPointerDown(event); }}
           onClick={() => { if (allowDocumentNavigation()) contextPanel.separatorProps.onClick(); }}
           onKeyDown={(event) => { if (allowDocumentNavigation()) contextPanel.separatorProps.onKeyDown(event); else event.preventDefault(); }}
@@ -630,7 +713,7 @@ export function CoworkerHome({
         </div>
         {/* Keep the portal host mounted when the strip folds away, preserving discussion controls and their activity. */}
         <nav aria-label="Coworker panels" className={`window-drag flex-col items-center gap-1 px-2 pb-3 pt-[23px] ${contextPanel.collapsed ? "flex" : "hidden"}`}>
-          {PANEL_VIEWS.map((view) => {
+          {panelViews.map((view) => {
             const Icon = CONTEXT_ICONS[view];
             const active = view === contextView;
             return (
@@ -654,13 +737,7 @@ export function CoworkerHome({
               </IconButton>
             );
           })}
-          <div
-            ref={setDiscussionToolsSlot}
-            role="group"
-            aria-label="Discussion tools"
-            data-testid="coworker-discussion-tools"
-            className="window-no-drag flex shrink-0 flex-col items-center gap-1 empty:hidden"
-          />
+          {layout.chatOnly ? null : toolsHost}
         </nav>
         {!contextPanel.collapsed ? (
           <>
@@ -671,9 +748,23 @@ export function CoworkerHome({
           onBack={() => { if (allowDocumentNavigation()) nav.back(); }}
           onToDepth={(depth) => { if (allowDocumentNavigation()) nav.toDepth(depth); }}
           actions={(
-            <IconButton label="Close sidebar" className="window-no-drag" data-testid="context-panel-close" onClick={closeContextPanel}>
-              <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" className="size-4" aria-hidden="true"><path d="m5 5 10 10M15 5 5 15" /></svg>
-            </IconButton>
+            <>
+              {/* Over the conversation there is no strip, so the panel carries its own way between views. */}
+              {layout.chatOnly ? panelViews.map((view) => {
+                const Icon = CONTEXT_ICONS[view];
+                const current = view === contextView;
+                return (
+                  <IconButton key={view} label={PANEL_VIEW_TITLES[view]} tooltipSide="bottom" aria-current={current ? "true" : undefined} data-testid={`context-view-${view}`}
+                    className={`window-no-drag ${current ? "bg-white/8 text-snow" : ""}`}
+                    onClick={() => { if (!allowDocumentNavigation()) return; if (current) nav.toRoot(view); else nav.showView(view); }}>
+                    <Icon />
+                  </IconButton>
+                );
+              }) : null}
+              <IconButton label="Close sidebar" className="window-no-drag" data-testid="context-panel-close" onClick={closeContextPanel}>
+                <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" className="size-4" aria-hidden="true"><path d="m5 5 10 10M15 5 5 15" /></svg>
+              </IconButton>
+            </>
           )}
           leading={contextView !== "overview" ? (
             <IconButton label="Back to activity" className="window-no-drag" onClick={() => { if (allowDocumentNavigation()) nav.toRoot("overview"); }}>
@@ -681,6 +772,7 @@ export function CoworkerHome({
             </IconButton>
           ) : undefined}
         />
+        {contextView === "overview" ? <ActivityTabs current={activityLevel.kind} rows={summary.rows} onSelect={selectActivityTab} /> : null}
         <PanelContent route={nav.route} containerRef={setPanelContentElement}>
           {documentNotice && overlayPanel ? <p role="alert" className="text-xs text-mist">{documentNotice}</p> : null}
           {contextView === "overview" && activityLevel.kind === "root" ? (
@@ -689,9 +781,10 @@ export function CoworkerHome({
                 coworker={coworker}
                 activity={activity}
                 engineManaged={runtime.engineManaged}
-                scheduled={holdings.scheduled}
-                summary={summary}
+                scheduled={scheduled}
+                documents={documents ?? NO_DOCUMENTS}
                 onOpenThread={openThread}
+                onOpenDocument={documentHooks.onOpenDocument}
                 onOpenLevel={(kind) => nav.push(ACTIVITY_CRUMBS[SUMMARY_LEVELS[kind]], `activity:${kind}`)}
               />
             </PanelLevel>
@@ -699,6 +792,7 @@ export function CoworkerHome({
           {contextView === "overview" && activityLevel.kind === "documents" ? (
             <PanelLevel key="documents" direction={nav.direction}>
               <DocumentsPanel
+                key={documentsReset}
                 coworker={coworker}
                 documents={documents}
                 error={documentsError}
@@ -727,7 +821,7 @@ export function CoworkerHome({
                 coworker={coworker}
                 assignments={assignmentThreads}
                 attentionBySession={assignmentAttention}
-                scheduled={holdings.scheduled}
+                scheduled={scheduled}
                 onScheduledChanged={holdings.setScheduled}
                 onCoworkerChanged={onCoworkerChanged}
                 onConnect={() => onOpenOpenWork()}
@@ -737,26 +831,19 @@ export function CoworkerHome({
               />
             </PanelLevel>
           ) : null}
-          {contextView === "memory" ? <MemoryPanel coworker={coworker} /> : null}
+          {contextView === "memory" && features.memory ? <MemoryPanel coworker={coworker} /> : null}
           {contextView === "settings" && settingsLevel.kind === "root" ? (
             <PanelLevel key="settings" direction={nav.direction}>
               <CoworkerSettings
-                runtime={runtime}
-                session={session}
                 coworker={coworker}
-                onCoworkerChanged={onCoworkerChanged}
+                onCustomize={() => { if (allowDocumentNavigation()) onCustomize(); }}
                 onCoworkerRemoved={onCoworkerRemoved}
-                onSyncProviders={onSyncProviders}
-                onOpenAccount={() => onOpenOpenWork("account")}
-                onOpenModelDefaults={() => onOpenOpenWork("model-defaults")}
-                onOpenMemory={() => nav.showView("memory")}
-                onOpenAppsTools={() => nav.push(APPS_TOOLS_CRUMB, APPS_TOOLS_CRUMB.id)}
-                onOpenAbilities={() => nav.push(ABILITIES_CRUMB, ABILITIES_CRUMB.id)}
-                focus={settingsFocus}
+                onOpenAppsTools={features.appsTools ? () => nav.push(APPS_TOOLS_CRUMB, APPS_TOOLS_CRUMB.id) : undefined}
+                onOpenAbilities={features.abilities ? () => nav.push(ABILITIES_CRUMB, ABILITIES_CRUMB.id) : undefined}
               />
             </PanelLevel>
           ) : null}
-          {contextView === "settings" && settingsLevel.kind === "abilities" ? (
+          {contextView === "settings" && settingsLevel.kind === "abilities" && features.abilities ? (
             <PanelLevel key="abilities" direction={nav.direction}>
               <CoworkerAbilitiesEditor
                 key={`${coworker.slug}:${coworker.createdAt}`}
@@ -765,7 +852,7 @@ export function CoworkerHome({
               />
             </PanelLevel>
           ) : null}
-          {contextView === "settings" && settingsLevel.kind === "apps-tools" ? (
+          {contextView === "settings" && settingsLevel.kind === "apps-tools" && features.appsTools ? (
             <Suspense fallback={null}>
             <CapabilitiesPanel
               runtime={runtime}
@@ -805,18 +892,69 @@ export function CoworkerHome({
 }
 
 /**
- * The Activity root, as flat rows with hairlines: what is happening now (the
- * subject, its note, the time), then what the coworker holds — Documents,
- * Workers, Assignments — each opening its level, then Recent. The header owns
- * the state word, so nothing here repeats it.
+ * Activity's levels as tabs under the header, so moving between Documents,
+ * Workers and Assignments is one click from anywhere instead of back and in
+ * again. A tab shows its count, and Documents a dot for changes since the
+ * person last looked; the full words ("2 assignments") are there for screen readers.
+ */
+function ActivityTabs({ current, rows, onSelect }: { current: ActivityTab; rows: readonly SummaryPart[]; onSelect: (tab: ActivityTab) => void }) {
+  const listRef = useRef<HTMLDivElement>(null);
+  return (
+    <div
+      ref={listRef}
+      role="tablist"
+      aria-label="Activity"
+      className="flex shrink-0 items-center gap-0.5 overflow-x-auto border-b border-line px-3 [scrollbar-width:none]"
+      data-testid="activity-tabs"
+      onKeyDown={(event) => {
+        if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+        const index = ACTIVITY_TABS.findIndex(({ tab }) => tab === current);
+        const next = ACTIVITY_TABS[(index + (event.key === "ArrowRight" ? 1 : ACTIVITY_TABS.length - 1)) % ACTIVITY_TABS.length];
+        if (!next) return;
+        event.preventDefault();
+        onSelect(next.tab);
+        window.requestAnimationFrame(() => listRef.current?.querySelector<HTMLElement>('[aria-selected="true"]')?.focus());
+      }}
+    >
+      {ACTIVITY_TABS.map(({ tab, title }) => {
+        const row = tab === "root" ? undefined : rows.find((candidate) => candidate.kind === tab);
+        const selected = current === tab;
+        return (
+          <button
+            key={tab}
+            type="button"
+            role="tab"
+            aria-selected={selected}
+            tabIndex={selected ? 0 : -1}
+            title={row?.note || undefined}
+            data-testid={tab === "root" ? "activity-tab-overview" : `activity-row-${tab}`}
+            onClick={() => onSelect(tab)}
+            className={`-mb-px flex shrink-0 items-center gap-1 border-b-2 px-2 pb-2 pt-2.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-spark/60 ${selected ? "border-snow text-snow" : "border-transparent text-mist hover:text-snow"}`}
+          >
+            {title}
+            {row && row.count > 0 ? <span aria-hidden="true" className="text-[10px] tabular-nums text-mist">{row.count}</span> : null}
+            {row && row.changed > 0 ? <span aria-hidden="true" className="size-1.5 rounded-full bg-spark" data-testid="activity-tab-changed" /> : null}
+            {row && row.count > 0 ? <span className="sr-only">, {summaryRowTitle(row)}{row.changed > 0 ? `, ${row.changed} new` : ""}</span> : null}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/**
+ * The Activity overview: what is happening now (the subject, its note, the
+ * time), the documents in play as files to open, then Recent. The tabs above
+ * reach every level; the header owns the state word, so nothing here repeats it.
  */
 function CoworkerOverview({
   coworker,
   activity,
   engineManaged,
   scheduled,
-  summary,
+  documents,
   onOpenThread,
+  onOpenDocument,
   onOpenLevel,
 }: {
   coworker: CoworkerSummary;
@@ -824,13 +962,15 @@ function CoworkerOverview({
   engineManaged: boolean;
   /** Scheduled assignments on this Mac, for the Recent list's finished runs. */
   scheduled: LocalResponsibility[];
-  summary: CoworkerSummaryLine;
+  documents: readonly CoworkerDocumentSummary[];
   onOpenThread: (threadId: string) => void;
+  onOpenDocument: (documentId: string) => void;
   onOpenLevel: (kind: SummaryKind) => void;
 }) {
   const now = describeNow(activity);
   const nowNote = now.note;
   const recent = mergeRecentWork(activity, scheduled);
+  const inPlay = documents.filter((document) => document.status === "active").sort((a, b) => b.updatedAt - a.updatedAt);
   const nowTime = relativeTime(activity?.updatedAt ?? 0);
   const canOpenSubject = Boolean(activity?.threadId);
   const showNow = Boolean(now.subject) || Boolean(engineManaged && nowNote);
@@ -870,19 +1010,23 @@ function CoworkerOverview({
         ) : null}
       </section>
 
-      <RowList label={`What ${coworker.name} holds`} testId="coworker-holdings" divided>
-        {summary.rows.map((row) => (
-          <Row
-            key={row.kind}
-            id={`activity:${row.kind}`}
-            title={summaryRowTitle(row)}
-            status={row.note || undefined}
-            mark={row.changed > 0}
-            onOpen={() => onOpenLevel(row.kind)}
-            testId={`activity-row-${row.kind}`}
-          />
-        ))}
-      </RowList>
+      {inPlay.length > 0 ? (
+        <section aria-label="Documents in play" data-testid="overview-documents">
+          <div className="mb-1 flex items-center justify-between gap-2 px-1">
+            <h3 className="text-[11px] font-medium text-mist">Documents</h3>
+            {documents.length > OVERVIEW_DOCUMENTS || inPlay.length < documents.length ? (
+              <button type="button" className="text-[11px] text-mist transition-colors hover:text-snow" onClick={() => onOpenLevel("documents")} data-testid="overview-documents-all">
+                All {documents.length}
+              </button>
+            ) : null}
+          </div>
+          <ul className="-mx-1 space-y-0.5">
+            {inPlay.slice(0, OVERVIEW_DOCUMENTS).map((document) => (
+              <DocumentRow key={document.id} document={document} coworkerName={coworker.name} onSelect={() => onOpenDocument(document.id)} testId="overview-document" />
+            ))}
+          </ul>
+        </section>
+      ) : null}
 
       {recent.length > 0 ? (
         <section aria-label="Recent activity" className="border-t border-line pt-3" data-testid="coworker-recent-activity">
@@ -971,44 +1115,26 @@ function AiUnavailableNote({
   );
 }
 
+/**
+ * Coworker settings, kept short: who the coworker is with a way into its
+ * Customize page, the optional Apps & tools and Abilities when they are on,
+ * its folder on this Mac, and retiring it.
+ */
 function CoworkerSettings({
-  runtime,
-  session,
   coworker,
-  onCoworkerChanged,
+  onCustomize,
   onCoworkerRemoved,
-  onSyncProviders,
-  onOpenAccount,
-  onOpenModelDefaults,
-  onOpenMemory,
   onOpenAppsTools,
   onOpenAbilities,
-  focus,
 }: {
-  runtime: RuntimeInfo;
-  session: DenSession | null;
   coworker: CoworkerSummary;
-  onCoworkerChanged: (coworker: CoworkerSummary) => void;
+  onCustomize: () => void;
   onCoworkerRemoved: (slug: string) => void;
-  onSyncProviders: () => Promise<ProviderSyncRun>;
-  onOpenAccount: () => void;
-  onOpenModelDefaults: () => void;
-  onOpenMemory: () => void;
-  /** Apps & tools is the first level under these settings. */
-  onOpenAppsTools: () => void;
-  onOpenAbilities: () => void;
-  /** Section to bring into view on open; the id makes repeat requests distinct. */
-  focus: { id: number; section: "model" } | null;
+  /** Present only while Apps & tools is turned on. */
+  onOpenAppsTools?: () => void;
+  /** Present only while Abilities is turned on. */
+  onOpenAbilities?: () => void;
 }) {
-  const modelSectionRef = useRef<HTMLElement>(null);
-  useEffect(() => {
-    if (focus?.section === "model") modelSectionRef.current?.scrollIntoView({ block: "start" });
-  }, [focus]);
-  const [role, setRole] = useState(coworker.role);
-  const [mission, setMission] = useState(coworker.mission);
-  const [avatarColor, setAvatarColor] = useState(coworker.avatarColor);
-  const [avatarGlasses, setAvatarGlasses] = useState(coworker.avatarGlasses);
-  const [personality, setPersonality] = useState(coworker.personality);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [confirmingRetire, setConfirmingRetire] = useState(false);
@@ -1023,26 +1149,6 @@ function CoworkerSettings({
     return () => window.clearTimeout(timer);
   }, [confirmingRetire]);
 
-  async function saveProfile() {
-    setBusy(true);
-    setError("");
-    try {
-      onCoworkerChanged(
-        await coworkerBridge.coworkers.update(coworker.slug, {
-          role: role.trim(),
-          mission: mission.trim(),
-          avatarColor,
-          avatarGlasses,
-          personality,
-        }),
-      );
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
-    } finally {
-      setBusy(false);
-    }
-  }
-
   async function retire() {
     setBusy(true);
     setError("");
@@ -1055,106 +1161,49 @@ function CoworkerSettings({
     }
   }
 
-  const dirty = role.trim() !== coworker.role
-    || mission.trim() !== coworker.mission
-    || avatarColor !== coworker.avatarColor
-    || avatarGlasses !== coworker.avatarGlasses
-    || personality !== coworker.personality;
-  const flatInput = "w-full rounded-lg border border-transparent bg-white/[0.04] px-2.5 py-1.5 text-sm text-snow outline-none placeholder:text-mist/60 focus:border-spark/40";
-
   return (
-    <div className="space-y-7">
-      {/* What the coworker can reach comes first: Apps & tools is a level of these settings. */}
-      <RowList label="Coworker settings" testId="coworker-settings-rows">
-        <Row
-          id={APPS_TOOLS_CRUMB.id}
-          icon={<AppsIcon />}
-          title={APPS_TOOLS_CRUMB.title}
-          status="Browse available apps, skills, and tools"
-          onOpen={onOpenAppsTools}
-          testId="settings-row-apps-tools"
-        />
-        <Row
-          id={ABILITIES_CRUMB.id}
-          icon={<SlidersIcon />}
-          title={ABILITIES_CRUMB.title}
-          status={abilitiesSummary(coworker.abilities)}
-          onOpen={onOpenAbilities}
-          testId="settings-row-abilities"
-        />
-      </RowList>
-
-      {/* Who the coworker is, laid out as rows on the panel itself rather than as a card inside a card. */}
-      <section data-testid="coworker-profile-settings">
-        <div className="flex items-center gap-3.5 pb-3">
-          <CoworkerAvatar identity={`${coworker.slug}:profile-preview`} motion="playful" color={avatarColor} glasses={avatarGlasses} name={coworker.name} size={56} />
-          <div className="min-w-0">
-            <p className="truncate text-base font-semibold tracking-[-0.02em] text-snow">{coworker.name}</p>
-            <p className="truncate text-xs text-mist">{role.trim() || "Coworker"}</p>
-          </div>
-        </div>
-        <h3 className="text-[10px] font-semibold uppercase tracking-[0.14em] text-mist">Profile</h3>
-        <div className="mt-1 divide-y divide-line/60">
-          <AvatarControls
-            layout="rows"
-            color={avatarColor}
-            glasses={avatarGlasses}
-            onColorChange={(color) => {
-              setAvatarColor(color);
-              if (color !== avatarColor) acknowledgeCoworker(`${coworker.slug}:profile-preview`);
-            }}
-            onGlassesChange={(glasses) => {
-              setAvatarGlasses(glasses);
-              if (glasses !== avatarGlasses) acknowledgeCoworker(`${coworker.slug}:profile-preview`);
-            }}
-          />
-          <label className="flex items-center gap-3 py-2.5">
-            <span className="w-20 shrink-0 text-xs text-mist">Role</span>
-            <input className={flatInput} value={role} placeholder="Research partner" onChange={(event) => setRole(event.target.value)} />
-          </label>
-          <label className="flex items-start gap-3 py-2.5">
-            <span className="w-20 shrink-0 pt-1.5 text-xs text-mist">Mission</span>
-            <textarea className={`${flatInput} min-h-16 resize-y`} value={mission} placeholder="What this coworker is here to move forward" onChange={(event) => setMission(event.target.value)} />
-          </label>
-          <PersonalityPicker layout="row" value={personality} seed={coworker.slug} onChange={setPersonality} />
-        </div>
-        {dirty ? (
-          <div className="flex justify-end pt-3">
-            <Button variant="primary" disabled={busy} onClick={() => void saveProfile()}>
-              {busy ? "Saving…" : "Save changes"}
-            </Button>
-          </div>
-        ) : null}
+    <div className="space-y-6">
+      <section className="flex flex-col items-center pt-2 text-center" data-testid="coworker-profile-settings">
+        <CoworkerAvatar identity={`${coworker.slug}:profile-preview`} motion="playful" color={coworker.avatarColor} glasses={coworker.avatarGlasses} name={coworker.name} size={72} />
+        <p className="mt-2 max-w-full truncate text-base font-semibold tracking-[-0.02em] text-snow">{coworker.name}</p>
+        <p className="max-w-full truncate text-xs text-mist">{coworker.role || "Coworker"}</p>
+        <Button className="mt-3 rounded-full px-4 text-xs" onClick={onCustomize} data-testid="customize-coworker-button">Customize</Button>
       </section>
 
-      <section ref={modelSectionRef}>
-        <CoworkerModelSettings
-          runtime={runtime}
-          session={session}
-          coworker={coworker}
-          onCoworkerChanged={onCoworkerChanged}
-          onSyncProviders={onSyncProviders}
-          onOpenAccount={onOpenAccount}
-          onOpenModelDefaults={onOpenModelDefaults}
-        />
-      </section>
+      {onOpenAppsTools || onOpenAbilities ? (
+        <RowList label="Coworker settings" testId="coworker-settings-rows">
+          {onOpenAppsTools ? (
+            <Row
+              id={APPS_TOOLS_CRUMB.id}
+              icon={<AppsIcon />}
+              title={APPS_TOOLS_CRUMB.title}
+              status="Browse available apps, skills, and tools"
+              onOpen={onOpenAppsTools}
+              testId="settings-row-apps-tools"
+            />
+          ) : null}
+          {onOpenAbilities ? (
+            <Row
+              id={ABILITIES_CRUMB.id}
+              icon={<SlidersIcon />}
+              title={ABILITIES_CRUMB.title}
+              status={abilitiesSummary(coworker.abilities)}
+              onOpen={onOpenAbilities}
+              testId="settings-row-abilities"
+            />
+          ) : null}
+        </RowList>
+      ) : null}
 
       <section className="flex items-center justify-between gap-3 border-t border-line/60 pt-4">
         <div className="min-w-0">
-          <h3 className="text-[10px] font-semibold uppercase tracking-[0.14em] text-mist">Memory</h3>
-          <p className="mt-1 text-xs leading-relaxed text-mist">Read or edit what {coworker.name} remembers about you and your work.</p>
+          <h3 className="text-sm font-semibold text-snow">Personal folder</h3>
+          <p className="mt-0.5 truncate text-xs text-mist" title={coworker.path}>Files {coworker.name} keeps on this Mac.</p>
         </div>
-        <Button variant="ghost" className="shrink-0 text-xs" onClick={onOpenMemory}>View memory</Button>
-      </section>
-
-      <section className="border-t border-line/60 pt-4">
-        <h3 className="text-xs font-semibold text-snow">Coworker folder</h3>
-        <p className="mt-1 text-xs leading-relaxed text-mist">{coworker.name}'s files and saved configuration on this Mac.</p>
-        <p className="my-2 break-all text-[11px] text-mist">{coworker.path}</p>
-        <Button variant="ghost" className="text-xs" onClick={() => {
+        <Button variant="ghost" className="shrink-0 text-xs" onClick={() => {
           setError("");
           void coworkerBridge.coworkers.openFolder(coworker.slug).catch((cause) => setError(cause instanceof Error ? cause.message : String(cause)));
-        }}>Open folder</Button>
+        }}>Open</Button>
       </section>
 
       {error ? <ErrorNote>{error}</ErrorNote> : null}

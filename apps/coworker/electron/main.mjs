@@ -16,14 +16,18 @@ import { homedir } from "node:os";
 import { createServer as createPortProbe } from "node:net";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { BrowserWindow, Menu, app, dialog, ipcMain, nativeTheme, shell, systemPreferences } from "electron";
+import { BrowserWindow, Menu, app, dialog, ipcMain, nativeTheme, screen, shell, systemPreferences } from "electron";
 import { createVoice, installVoicePermissions } from "./voice.mjs";
 import { bindWindowAppearance, windowMaterial } from "./window-appearance.mjs";
+import { createFocusWindow } from "./focus-window.mjs";
 import { globalOpencodeConfigDir, openworkConfigDir } from "@openwork/paths";
 import { createHeadlessThreadClientV2 as createHeadlessThreadClient, createNativeV2Client, createNativeV2Id, nativeCatalogProviders, toTranscript } from "@openwork/headless-threads/v2";
 import { configureNativePluginBundles, verifyNativePluginBundles } from "./native-plugin.mjs";
 import { nativeTurnAgent, coworkerAgent, NATIVE_COORDINATOR_AGENT } from "./native-turns.mjs";
-import { assertTeamCompatibleHomes, teamWorkspaceDirectory, teamWorkspaceId, updateTeamWorkspaceConfig } from "./team-workspace.mjs";
+import { assertTeamCompatibleHomes, teamWorkspaceDirectory, teamWorkspaceId, updateTeamWorkspaceConfig, writeTeamFeatures } from "./team-workspace.mjs";
+import { createLinkPreviews } from "./link-preview.mjs";
+import { DEFAULT_FEATURES, INTERFACE_FEATURES } from "../src/lib/features.ts";
+import { featuredCoworker, featuredInstructions, featuredOrigin, routineInstructions } from "../src/lib/featured-coworkers.ts";
 import { assertOwnedNativeTool, createTeamSessionRegistry, resolveNativeFilesystemScope } from "./team-sessions.mjs";
 import { awaitNativePluginActivation, prepareNativeTurnRoles } from "./turn-roles-plugin.mjs";
 import { dispatchNativeTurn, nativeTurnReceipt, waitForNativeTurn, verifyNativeTurnSkills } from "./native-recovery.mjs";
@@ -36,6 +40,7 @@ import { createMessageReactionRuntime } from "./message-reactions-context.mjs";
 import { readExecutionActivity } from "../src/lib/progress-activity.ts";
 import { PROGRESS_LIMITS } from "../src/lib/progress-config.ts";
 import { createGroupExecution, repairGroupSelection } from "./group-execution.mjs";
+import { assertGroupActionToolContext, createGroupActions } from "./group-actions.mjs";
 import { installCollaborationPlugin } from "./collaboration-plugin.mjs";
 import { createAbilitiesRuntime, readAbilitiesCatalog } from "./abilities.mjs";
 import { installAbilitiesPlugin } from "./abilities-plugin.mjs";
@@ -65,6 +70,7 @@ import { assignmentToolCatalog, createAssignmentToolHandlers, createSelfToolHand
 import {
   createCoworker,
   createLongTermMemory,
+  slugifyCoworkerName,
   defaultCoworkersDir,
   deleteLongTermMemory,
   deleteRetiredCoworker,
@@ -302,6 +308,7 @@ function admitLocalRun(decide) {
 }
 /** @type {BrowserWindow | null} */
 let mainWindow = null;
+const focusWindow = createFocusWindow(screen);
 
 function parseExternalUrl(value) {
   const parsed = new URL(String(value ?? ""));
@@ -1059,6 +1066,7 @@ const collaboration = createCollaboration({
   }),
 });
 const activityInbox = createActivityInbox({ collaboration, coworkers: () => listCoworkers(coworkersDir), groups: () => listGroups(coworkersDir) });
+const linkPreviews = createLinkPreviews();
 const messageReactions = createMessageReactionRuntime({
   directory: coworkersDir, collaboration,
   coworkerFor: (slug) => getCoworker(coworkersDir, slug),
@@ -1172,29 +1180,42 @@ const events = createEvents({
   assignments: async () => (await Promise.all((await listCoworkers(coworkersDir)).map(async (coworker) =>
     (await listLocalResponsibilities(coworkersDir, coworker.slug)).map((item) => ({ id: item.id, slug: coworker.slug, title: item.name, state: item.state, schedule: item.schedule, nextDueAt: item.nextDueAt }))))).flat().slice(0, 200),
 });
+const groupActions = createGroupActions({
+  coworkersDir,
+  coworkers: () => listCoworkers(coworkersDir),
+  resolveContext: (slug, context, expected) => collaboration.context(slug, context, expected, assertGroupActionToolContext),
+});
 
 async function ordinaryGroup(id) {
   if ((await getGroup(coworkersDir, id)).eventId) throw new Error("This group is managed through Events.");
 }
 
-async function collaborationClient(slug, { threadId, kind = "reply", sessionKind = "private", requestText, model, agent, observationOnly = false, signal } = {}) {
+async function collaborationClient(slug, { threadId, kind = "reply", sessionKind = "private", requestText, model, agent, observationOnly = false, prepareOnly = false, signal } = {}) {
   maintenanceAdmission.assertOpen();
   const stored = slug === ".coordinator" ? observationOnly ? await readCoordinator(coworkersDir) : await ensureCoordinatorWorkspace() : await getCoworker(coworkersDir, slug);
-  const coworker = slug === ".coordinator" && stored ? { ...stored, slug, createdAt: "coordinator" } : stored;
+  let coworker = slug === ".coordinator" && stored ? { ...stored, slug, createdAt: "coordinator" } : stored;
   const handle = await ensurePlatformServer();
+  if (!coworker?.workspaceId && !observationOnly && slug !== ".coordinator") {
+    signal?.throwIfAborted();
+    const legacy = handle.config.workspaces.find((workspace) => workspace.workspaceType === "local" && path.resolve(workspace.path) === path.resolve(coworker.path));
+    const workspaceId = legacy?.id ?? await registerCoworkerWorkspace(coworker, handle);
+    signal?.throwIfAborted();
+    const current = await getCoworker(coworkersDir, slug);
+    if (current.createdAt !== coworker.createdAt || current.path !== coworker.path) throw new Error("The coworker changed while its AI workspace was starting.");
+    coworker = current.workspaceId ? current : await updateCoworker(coworkersDir, slug, { workspaceId });
+  }
   if (!coworker?.workspaceId) throw new Error("The AI service is not ready. Your work has been kept.");
   const binding = threadId ? await sessionBinding(coworker, threadId) : null;
-  if (!observationOnly && binding && binding.nativeWorkspaceId !== teamWorkspace().workspaceId) await prepareLegacySession(coworker, binding);
-  else if (!observationOnly && slug !== ".coordinator") {
-    const server = await ensureToolsServer();
-    await installNativeCoworkerPlugins(coworker, server);
-    if (!toolsRegistered.has(slug)) await registerCoworkerTools(coworker, 120_000);
+  if ((!observationOnly || prepareOnly) && binding && binding.nativeWorkspaceId !== teamWorkspace().workspaceId) await prepareLegacySession(coworker, binding);
+  else if ((!observationOnly || prepareOnly) && slug !== ".coordinator") {
+    // Warm-up already installs the current plug-ins and registers the shared
+    // tools endpoint. Doing both here repeated that work before every turn.
     await warmCoworkerWorkspace(coworker);
   }
   signal?.throwIfAborted();
   // Legacy admissions have no model pin. Observe their native work without
   // consulting today's catalog or turning a missing selection into a failure.
-  const resolvedModel = model ?? (observationOnly ? undefined : await localRunModel(coworker, kind, requestText));
+  const resolvedModel = model ?? (observationOnly || prepareOnly ? undefined : await localRunModel(coworker, kind, requestText));
   const options = { baseUrl: handle.url, workspaceId: coworker.workspaceId, nativeWorkspaceId: binding?.nativeWorkspaceId ?? teamWorkspace().workspaceId, token: ownerToken, defaultModel: resolvedModel, defaultAgent: agent ?? (slug === ".coordinator" ? NATIVE_COORDINATOR_AGENT : binding && binding.nativeWorkspaceId !== teamWorkspace().workspaceId ? "build" : coworkerAgent(slug)), captureSkillOrigin: slug !== ".coordinator" };
   const client = ownedSessionClient(coworker, options, slug === ".coordinator" ? "coordinator" : sessionKind);
   client.resolvedModel = resolvedModel;
@@ -1482,9 +1503,12 @@ async function installNativeCoworkerPlugins(coworker, server) {
     if (coworker.slug && !coworkers.some((current) => current.slug === coworker.slug && current.createdAt === coworker.createdAt)) throw new Error("This coworker was replaced before its tools were prepared.");
     const context = { mode: "team", url: server.url.replace(/\/mcp$/, "/context"), token: coworkerToolToken(".team") };
     const configured = await assertTeamCompatibleHomes(coworkers);
-    const revision = JSON.stringify([configured.map(({ slug, createdAt, name, nativePermissions }) => ({ slug, createdAt, name, nativePermissions })), context]);
+    // The optional features shape every coworker's contract and which tools are off.
+    const { features } = await readSettings(settingsPath);
+    const revision = JSON.stringify([configured.map(({ slug, createdAt, name, nativePermissions }) => ({ slug, createdAt, name, nativePermissions })), context, features]);
     if (installedTeamRevision === revision) return;
-    await updateTeamWorkspaceConfig(coworkersDir, coworkers);
+    await updateTeamWorkspaceConfig(coworkersDir, coworkers, features);
+    await writeTeamFeatures(coworkersDir, features);
     await installCollaborationPlugin(team, context);
     await installComputerPlugin(team);
     await installBrowserPlugin(team);
@@ -1628,10 +1652,14 @@ function skillAwareClient({ captureSkillOrigin = false, nativeWorkspaceId, ...op
     const accountKey = skillAccountKey(session);
     const preparationSignal = signal ? AbortSignal.any([signal, AbortSignal.timeout(15_000)]) : AbortSignal.timeout(15_000);
     const assertCurrent = () => {
+      if (preparationSignal.aborted && preparationSignal.reason?.name === "TimeoutError") {
+        throw new Error("Checking skills took too long before OpenCode received your message. Your message is kept; nothing was sent.");
+      }
       preparationSignal.throwIfAborted();
       if (denSession !== session || skillAccountKey(denSession) !== accountKey) throw new Error("The OpenWork account changed while checking selected skills. Your words are kept.");
     };
     let binding = null;
+    let emptyNativeSkillOrigin = false;
     if (session) {
       try {
         const handle = !validated && !turn.skills?.length && !turn.skillSelections?.length && typeof serverHandle?.nativeSkillOriginSnapshot === "function" ? serverHandle : null;
@@ -1648,23 +1676,29 @@ function skillAwareClient({ captureSkillOrigin = false, nativeWorkspaceId, ...op
           const hint = await handle.nativeSkillOriginSnapshot({ workspaceId: preparationWorkspaceId, directory, signal: preparationSignal });
           assertCurrent();
           return hintCurrent() && Array.isArray(hint?.scopes) && Object.isFrozen(hint) && Object.isFrozen(hint.scopes)
-            && hint.scopes.length === 1 && typeof hint.scopes[0] === "string" && /^[0-9a-f]{64}$/.test(hint.scopes[0]) ? hint : null;
+            && (hint.scopes.length === 0 || hint.scopes.length === 1 && typeof hint.scopes[0] === "string" && /^[0-9a-f]{64}$/.test(hint.scopes[0])) ? hint : null;
         };
         try {
           const hint = await readHint();
           if (hint) {
-            const account = (await currentSkillAccount(session, preparationSignal)).scope;
-            assertCurrent();
-            if (await readHint() === hint) {
-              assertSkillSession(session);
-              binding = { account, scope: hint.scopes[0] };
+            if (hint.scopes.length === 0) {
+              emptyNativeSkillOrigin = await readHint() === hint;
+            } else {
+              const account = (await currentSkillAccount(session, preparationSignal)).scope;
+              assertCurrent();
+              if (await readHint() === hint) {
+                assertSkillSession(session);
+                binding = { account, scope: hint.scopes[0] };
+              }
             }
           }
         } catch (error) {
           assertCurrent();
           if (error?.name === "AbortError") throw error;
         }
-        if (!binding) {
+        // Only an explicit, stable empty native snapshot can skip discovery.
+        // A missing hint can mean that Cloud skills are present but stale.
+        if (!binding && !emptyNativeSkillOrigin) {
           const catalog = await client.nativeSkills.listSkills(preparationSignal);
           assertCurrent();
           const scopes = [...new Set(catalog.flatMap((skill) => skill.source ? [skill.source.scope] : []))];
@@ -1799,6 +1833,9 @@ async function syncWorkerNote(slug, worker, finding = null) {
 async function spawnWorker(slug, input, spawnedBy) {
   if (input.control !== undefined) {
     workerControlRequest(input.control);
+    if (input.control === "computer" && !(await readSettings(settingsPath)).features.computerUse) {
+      throw new Error("Computer use is off in this app. The person can turn it on in Settings, Features.");
+    }
     await computerDiscussion(slug, input.spawnedFromThreadId);
     if (input.purpose === "thinking" || input.lifespan?.kind === "open") throw new Error("Control needs a bounded delivery Worker.");
   }
@@ -2194,7 +2231,9 @@ async function recoverInterruptedWorkers() {
 }
 
 async function runDueLocalResponsibilities() {
-  await events.tick().catch((error) => console.warn("[open-coworker] Event scheduling could not advance:", error.message));
+  // Calendar drives every automation: while it is off, Events and scheduled assignments do not run.
+  const { features } = await readSettings(settingsPath).catch(() => ({ features: DEFAULT_FEATURES }));
+  if (features.calendar) await events.tick().catch((error) => console.warn("[open-coworker] Event scheduling could not advance:", error.message));
   const now = Date.now();
   await recoverInterruptedWorkers().catch((error) => {
     console.warn("[open-coworker] Worker recovery failed", error);
@@ -2209,14 +2248,14 @@ async function runDueLocalResponsibilities() {
       for (const item of items) {
         const key = `${coworker.slug}:${item.id}`;
         const persistedQueue = item.runs.find((run) => run.status === "queued");
-        if (persistedQueue && !activeLocalRuns.has(key) && !isQueued(key)) {
+        if (features.calendar && persistedQueue && !activeLocalRuns.has(key) && !isQueued(key)) {
           queuedLocalRuns.push(queuedResponsibilityRun(coworker.slug, item.id, persistedQueue.id));
         }
       }
       return items;
     }).catch(() => []);
     for (const responsibility of responsibilities) {
-      if (responsibility.state !== "active" || !responsibility.nextDueAt || responsibility.nextDueAt > now) continue;
+      if (!features.calendar || responsibility.state !== "active" || !responsibility.nextDueAt || responsibility.nextDueAt > now) continue;
       const trigger = now - responsibility.nextDueAt > 30_000 ? "recovery" : "scheduled";
       await startLocalResponsibilityRun(coworker.slug, responsibility.id, trigger);
     }
@@ -2239,6 +2278,13 @@ function startLocalResponsibilitiesScheduler() {
 /** Register the coworker directory as a native OpenWork workspace. */
 async function registerCoworkerWorkspace(coworker, readyHandle) {
   const handle = readyHandle ?? await ensurePlatformServer();
+  const team = teamWorkspace();
+  const matches = handle.config.workspaces.filter((workspace) => workspace.id === team.workspaceId
+    || (typeof workspace.path === "string" && path.resolve(workspace.path) === path.resolve(team.path)));
+  const exact = matches.length === 1 && matches[0].id === team.workspaceId && matches[0].workspaceType === "local"
+    && typeof matches[0].path === "string" && path.resolve(matches[0].path) === path.resolve(team.path);
+  if (matches.length && !exact) throw new Error("The shared coworker workspace conflicts with its saved registration.");
+  if (exact && handle.config.authorizedRoots.some((root) => path.resolve(root) === path.resolve(team.path))) return team.workspaceId;
   const tokens = await loadOrCreateTokens();
   const payload = await fetchJson(`${handle.url}/workspaces/local`, {
     method: "POST",
@@ -2246,10 +2292,10 @@ async function registerCoworkerWorkspace(coworker, readyHandle) {
       "Content-Type": "application/json",
       "X-OpenWork-Host-Token": tokens.hostToken,
     },
-    body: JSON.stringify({ folderPath: teamWorkspace().path, name: teamWorkspace().name, preset: "minimal" }),
+    body: JSON.stringify({ folderPath: team.path, name: team.name, preset: "minimal" }),
   });
   const workspaceId = typeof payload?.activeId === "string" ? payload.activeId : "";
-  if (!workspaceId) throw new Error("Workspace registration did not return an id");
+  if (workspaceId !== team.workspaceId) throw new Error("Workspace registration did not return the shared team id");
   return workspaceId;
 }
 
@@ -2332,10 +2378,6 @@ async function runCoworkerWorkspaceWarmup(coworker, signal = AbortSignal.timeout
   coworker = teamWorkspace();
   signal.throwIfAborted();
   if (scope !== workspaceReadinessScope(coworker) || pendingWorkspaceReadinessChanges(coworker).length) throw new Error("The native AI service changed during workspace preparation.");
-  if (coworker.slug) {
-    const contextServer = await ensureToolsServer();
-    await installNativeCoworkerPlugins(coworker, contextServer);
-  }
   const handle = await ensurePlatformServer();
   if (!coworker?.workspaceId) throw new Error("The native workspace is not registered yet.");
   if (!toolsRegistered.has(coworker.workspaceId)) await registerCoworkerTools(coworker, 120_000);
@@ -2363,7 +2405,11 @@ async function runCoworkerWorkspaceWarmup(coworker, signal = AbortSignal.timeout
 
 async function warmCoworkerWorkspace(coworker) {
   if (!coworker?.workspaceId) throw new Error("The native workspace is not registered yet.");
-  await installNativeCoworkerPlugins(coworker, await ensureToolsServer());
+  // Every coworker's owner agent lives in the one team config. Bring it up to
+  // date first (a no-op when the team is unchanged), so a coworker added after
+  // startup changes the readiness scope instead of reusing an older warmup
+  // that never defined its agent.
+  await installNativeCoworkerPlugins(teamWorkspace(), await ensureToolsServer());
   coworker = teamWorkspace();
   const scope = workspaceReadinessScope(coworker);
   if (warmedCoworkerWorkspaces.has(coworker.workspaceId) && warmedCoworkerScopes.get(coworker.workspaceId) === scope) return Promise.resolve();
@@ -2463,6 +2509,7 @@ async function ensureToolsServer() {
       if (Object.hasOwn(COMPUTER_TOOLS, name)) return computerControl.execute(slug, { name, args, context, cancel });
       if (Object.hasOwn(BROWSER_TOOLS, name)) return browserControl.execute(slug, { name, args, context, cancel });
       if (groupDocumentTools.has(name)) return groupDocuments.executeNative(slug, { name, args, context });
+      if (name === "group_manage") return groupActions.executeNative(slug, { args, context }, transportSignal);
       if (Object.hasOwn(eventNativeSchemas, name)) return events.executeNative(slug, { name, args, context }, transportSignal);
       if (admitted && Object.hasOwn(ordinaryHandlers, name) && name !== "worker_spawn" && !WORKER_MANAGEMENT.includes(name)) {
         const handle = await ensurePlatformServer();
@@ -2873,6 +2920,72 @@ function shortDate(at) {
 
 const installTemplates = createTemplateInstaller(coworkersDir, addCoworker);
 
+/**
+ * Add a coworker featured in the Marketplace: its playbooks (installed for the
+ * whole team, like any skill), its starting instructions, what it already
+ * knows, and, while Calendar is on, its jobs on a schedule. An organization
+ * that manages skills keeps the playbooks out; the coworker joins without them
+ * and its instructions name only what was installed. Adding one that is
+ * already on the team returns it instead of a second copy.
+ */
+async function addFeaturedCoworker(id) {
+  const source = featuredCoworker(String(id ?? ""));
+  if (!source) throw new Error("That coworker is not in the Marketplace.");
+  const current = await listCoworkers(coworkersDir);
+  const existing = current.find((member) => member.templateOrigin === featuredOrigin(source.id));
+  if (existing) return { coworker: existing, skippedPlaybooks: [], notReady: false };
+  const handle = await ensurePlatformServer();
+  const installed = [];
+  const skippedPlaybooks = [];
+  for (const skill of source.skills) {
+    try {
+      await fetchJson(`${handle.url}/workspace/${encodeURIComponent(teamWorkspace().workspaceId)}/skills`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${ownerToken}` },
+        body: JSON.stringify({ name: skill.name, description: skill.description, content: skill.body }),
+      }, 30_000);
+      installed.push(skill);
+    } catch (error) {
+      skippedPlaybooks.push(skill.title);
+      console.warn(`[open-coworker] the ${skill.name} playbook was not installed`, error instanceof Error ? error.message : error);
+    }
+  }
+  let name = source.name;
+  for (let suffix = 2; current.some((member) => member.slug === slugifyCoworkerName(name)); suffix += 1) name = `${source.name} ${suffix}`;
+  let coworker;
+  let notReady = false;
+  try {
+    coworker = await addCoworker({
+      name, role: source.role, mission: source.mission, avatarColor: source.avatarColor, avatarGlasses: source.avatarGlasses, personality: source.personality,
+      templateInstructions: featuredInstructions({ ...source, skills: installed }), templateOrigin: featuredOrigin(source.id), templateVersion: "1",
+      firstNote: `Joined from the Marketplace on ${shortDate(Date.now())}.`,
+    });
+  } catch (error) {
+    // The coworker is written before its first warmup, which retries when it
+    // is opened. Finish what it knows and its routines instead of leaving a
+    // half-imported coworker that a second Add would return as it is.
+    coworker = (await listCoworkers(coworkersDir)).find((member) => member.templateOrigin === featuredOrigin(source.id));
+    if (!coworker) throw error;
+    notReady = true;
+    console.warn(`[open-coworker] ${source.name} joined but is not ready yet`, error instanceof Error ? error.message : error);
+  }
+  for (const memory of source.memories) {
+    const created = await createLongTermMemory(coworkersDir, coworker.slug, { title: memory.title, summary: memory.summary });
+    await writeTrackedFile(coworkersDir, coworker.slug, `memory/long-term/${created.file}`, `# ${memory.title}\n\n${memory.body}\n`);
+  }
+  // Routines come along only while Calendar is on; with it off the person sees none, so none are made.
+  const { features } = await readSettings(settingsPath);
+  const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  for (const routine of features.calendar ? source.routines : []) {
+    await createLocalResponsibility(coworkersDir, coworker.slug, {
+      name: routine.name,
+      instructions: routineInstructions(routine, source.skills, new Set(installed.map((skill) => skill.name))),
+      schedule: { kind: "weekly", timezone, daysOfWeek: routine.days, hour: routine.hour, minute: routine.minute },
+    }, Date.now(), await localScheduleOptions());
+  }
+  return { coworker: await getCoworker(coworkersDir, coworker.slug), skippedPlaybooks, notReady };
+}
+
 async function checkedSessionCoworker(input) {
   const coworker = await getCoworker(coworkersDir, input.slug);
   if (coworker.createdAt !== input.createdAt) throw new Error("The original coworker is no longer available.");
@@ -3003,6 +3116,21 @@ const commands = {
     return runtimeInfo();
   },
   "coworkers.list": async () => listPreparedCoworkers(),
+  "marketplace.addCoworker": async ({ id }) => addFeaturedCoworker(id),
+  // Only a skill installed in the team's own folder on this Mac can be removed here;
+  // organization skills are managed in OpenWork.
+  "marketplace.removeSkill": async ({ name }) => {
+    const skill = String(name ?? "").trim();
+    if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(skill)) throw new Error("Choose a skill to remove.");
+    const folder = path.join(teamWorkspace().path, ".opencode", "skills", skill);
+    if (!existsSync(path.join(folder, "SKILL.md"))) throw new Error("That skill is not installed on this Mac.");
+    const handle = await ensurePlatformServer();
+    await fetchJson(`${handle.url}/workspace/${encodeURIComponent(teamWorkspace().workspaceId)}/skills/${encodeURIComponent(skill)}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${ownerToken}` },
+    }, 30_000);
+    return { ok: true };
+  },
   "coworkers.get": async ({ slug }) => repairGroupSelection(await getCoworker(coworkersDir, slug), await listGroups(coworkersDir), (owner, patch) => updateCoworker(coworkersDir, owner, patch)),
   "coworkers.openFolder": async ({ slug }) => {
     if (slug !== undefined && typeof slug !== "string") throw new Error("Coworker slug must be a string.");
@@ -3353,9 +3481,17 @@ const commands = {
     return (transport?.models ?? []).map(({ id, label, cost }) => ({ id, label, cost }));
   },
   "settings.update": async (patch) => {
+    const previous = await readSettings(settingsPath);
     const next = await updateSettings(settingsPath, patch);
     progressSummaries.configure(next);
     conversationMemory.configure(next);
+    const changed = Object.keys(next.features).filter((id) => previous.features[id] !== next.features[id]);
+    if (changed.some((id) => !INTERFACE_FEATURES.includes(id))) {
+      // Rewrite every coworker's contract and denied tools now; the next turn prepares against them.
+      // Features that only show or hide part of the app leave the coworkers as they are.
+      await installNativeCoworkerPlugins(teamWorkspace(), await ensureToolsServer());
+      invalidateWorkspaceReadiness();
+    }
     if (patch?.maxParallelLocalRuns !== undefined) void drainLocalRunQueue();
     return next;
   },
@@ -3367,6 +3503,8 @@ const commands = {
   // Links supplied by an MCP App are untrusted. The native confirmation keeps
   // the destination visible and requires a fresh user gesture before leaving.
   "shell.openUntrustedExternal": async ({ url }) => confirmAndOpenExternal(url),
+  // Metadata for a link shared in a conversation; public hosts only, fetched here, never by the renderer.
+  "links.preview": async ({ url }) => linkPreviews.read(url),
   /** Signed-in account → embedded server → engine providers. Returns the sync outcome. */
   "den.session.set": async (payload) => {
     const session = parseDenSessionPayload(payload);
@@ -3430,6 +3568,8 @@ const commands = {
   "voice.speech": (input) => voice.speech(input),
   "voice.cancel": ({ requestId }) => voice.cancel(requestId),
   "voice.microphone": () => voice.microphone(),
+  /** Focus mode on a desktop docks the window as a small conversation beside your work; leaving it puts the window back. */
+  "window.focusMode": ({ on } = {}) => focusWindow.set(mainWindow, on === true),
   /** The renderer drains deep links queued while it was loading. */
   "deepLinks.subscribe": async () => {
     deepLinkListenerReady = true;
@@ -3667,7 +3807,7 @@ function registerIpc() {
       return { ok: false, error: "Open Coworker commands are only available to the main app frame." };
     }
     const command = typeof request?.command === "string" ? request.command : "";
-    if ((command === "coworkers.openFolder" || command.startsWith("events.") || command.startsWith("voice.") || command.startsWith("computer.") || command.startsWith("browser.") || command.startsWith("workers.") || command.startsWith("groups.documents.")) && !trustedComputerSender(event, mainWindow?.webContents, rendererUrl())) {
+    if ((command === "coworkers.openFolder" || command.startsWith("events.") || command.startsWith("voice.") || command.startsWith("window.") || command.startsWith("computer.") || command.startsWith("browser.") || command.startsWith("workers.") || command.startsWith("groups.documents.")) && !trustedComputerSender(event, mainWindow?.webContents, rendererUrl())) {
       return { ok: false, error: "Native controls require the trusted Open Coworker window and renderer URL." };
     }
     if (command === "voice.microphone" && request?.userGesture !== true) {
@@ -3754,8 +3894,9 @@ async function createMainWindow() {
     backgroundColor: "#090c12",
     width: 1280,
     height: 860,
-    minWidth: 960,
-    minHeight: 640,
+    // Down to phone width: below 760 px only the conversation shows and the team and panel open over it.
+    minWidth: 360,
+    minHeight: 520,
     title: APP_NAME,
     icon: APP_ICON_PATH,
     ...macWindowChrome,

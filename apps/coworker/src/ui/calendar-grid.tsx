@@ -44,9 +44,17 @@ export function calendarRange(at: number, mode: CalendarMode) {
   };
 }
 
-const HOUR_HEIGHT = 64;
+/**
+ * Hours are as tall as the window allows: the working day (widened to any
+ * entry shown, and to now) fills the view without scrolling, between a
+ * readable minimum and the roomy maximum. The rest of the day stays a scroll away.
+ */
+const MAX_HOUR_HEIGHT = 64;
+const MIN_HOUR_HEIGHT = 36;
+const WORKDAY_START = 7;
+const WORKDAY_END = 20;
+const HEADER_HEIGHT = 48;
 const MIN_ITEM_HEIGHT = 36;
-const DAY_HEIGHT = 24 * HOUR_HEIGHT;
 const clockMinutes = (at: number) => {
   const date = new Date(at);
   return date.getHours() * 60 + date.getMinutes();
@@ -60,31 +68,56 @@ const onDay = (item: CalendarItem, day: Date) =>
   item.startsAt < plusDays(day, 1).getTime() &&
   (item.endsAt ?? item.startsAt + 1) > day.getTime();
 
-/** Visual minimums participate in packing, so even five-minute entries remain separate targets. */
-function timedItems(items: CalendarItem[], day: Date) {
+/** An entry's minutes on one day, from its start to its end (or a 30-minute default). */
+function dayMinutes(item: CalendarItem, day: Date) {
   const end = plusDays(day, 1).getTime();
+  const starts = Math.max(item.startsAt, day.getTime());
+  const minute = clockMinutes(starts);
+  let finish =
+    item.endsAt === null
+      ? minute + 30
+      : item.endsAt >= end
+        ? 1440
+        : clockMinutes(item.endsAt);
+  // A repeated clock hour can make the wall-clock end precede the start.
+  if (finish <= minute)
+    finish = minute + Math.max(1, ((item.endsAt ?? starts) - starts) / 60000);
+  return { minute, finish: Math.min(1440, finish) };
+}
+
+/** The hours to fit in view: the working day, widened to every entry shown and to the current time. */
+function focusHours(items: CalendarItem[], days: Date[], now: number) {
+  let start = WORKDAY_START;
+  let end = WORKDAY_END;
+  for (const day of days)
+    for (const item of items) {
+      if (!onDay(item, day)) continue;
+      const { minute, finish } = dayMinutes(item, day);
+      start = Math.min(start, Math.floor(minute / 60));
+      end = Math.max(end, Math.ceil(finish / 60));
+    }
+  if (days.some((day) => calendarDate(day) === calendarDate(new Date(now)))) {
+    const hour = clockMinutes(now) / 60;
+    start = Math.min(start, Math.floor(hour));
+    end = Math.max(end, Math.min(24, Math.floor(hour) + 1));
+  }
+  return { start, end: Math.max(end, start + 1) };
+}
+
+/** Visual minimums participate in packing, so even five-minute entries remain separate targets. */
+function timedItems(items: CalendarItem[], day: Date, hourHeight: number) {
+  const dayHeight = 24 * hourHeight;
   const positions = items
     .filter((item) => onDay(item, day))
     .map((item) => {
-      const starts = Math.max(item.startsAt, day.getTime());
-      const minute = clockMinutes(starts);
-      let finish =
-        item.endsAt === null
-          ? minute + 30
-          : item.endsAt >= end
-            ? 1440
-            : clockMinutes(item.endsAt);
-      // A repeated clock hour can make the wall-clock end precede the start.
-      if (finish <= minute)
-        finish =
-          minute + Math.max(1, ((item.endsAt ?? starts) - starts) / 60000);
+      const { minute, finish } = dayMinutes(item, day);
       const top = Math.min(
-        (minute * HOUR_HEIGHT) / 60,
-        DAY_HEIGHT - MIN_ITEM_HEIGHT,
+        (minute * hourHeight) / 60,
+        dayHeight - MIN_ITEM_HEIGHT,
       );
       const bottom = Math.min(
-        DAY_HEIGHT,
-        Math.max(top + MIN_ITEM_HEIGHT, (finish * HOUR_HEIGHT) / 60),
+        dayHeight,
+        Math.max(top + MIN_ITEM_HEIGHT, (finish * hourHeight) / 60),
       );
       return { item, top, bottom, lane: 0, lanes: 1 };
     })
@@ -150,15 +183,46 @@ export function CalendarGrid({
     const timer = window.setInterval(() => setNow(Date.now()), 60000);
     return () => window.clearInterval(timer);
   }, [active]);
+  // The room below the day headers, followed as the window resizes.
+  const [room, setRoom] = useState(0);
+  useEffect(() => {
+    const element = scroll.current;
+    if (!element || mode === "month") return;
+    const measure = () => setRoom(element.clientHeight - HEADER_HEIGHT);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [mode]);
+  const focus = useMemo(() => focusHours(items, days, now), [items, days, now]);
+  const hourHeight =
+    room > 0
+      ? Math.max(
+          MIN_HOUR_HEIGHT,
+          Math.min(
+            MAX_HOUR_HEIGHT,
+            Math.floor(room / (focus.end - focus.start)),
+          ),
+        )
+      : MAX_HOUR_HEIGHT;
+  const dayHeight = 24 * hourHeight;
   useEffect(() => {
     if (!active || !scroll.current || shownMode.current === mode) return;
-    scroll.current.scrollTop = mode === "month" ? 0 : 7 * HOUR_HEIGHT;
     scroll.current.scrollLeft = 0;
     shownMode.current = mode;
   }, [active, mode]);
+  // The focused hours start at the top: on opening, and again when their size or start changes.
+  useEffect(() => {
+    if (!active || !scroll.current) return;
+    scroll.current.scrollTop =
+      mode === "month" ? 0 : Math.max(0, focus.start * hourHeight - 8);
+  }, [active, mode, focus.start, hourHeight]);
   const layout = useMemo(
-    () => (mode === "month" ? [] : days.map((day) => timedItems(items, day))),
-    [days, items, mode],
+    () =>
+      mode === "month"
+        ? []
+        : days.map((day) => timedItems(items, day, hourHeight)),
+    [days, items, mode, hourHeight],
   );
   const today = calendarDate(new Date(now));
   const describe = (item: CalendarItem) =>
@@ -304,14 +368,14 @@ export function CalendarGrid({
         ))}
         <div
           className="sticky left-0 z-30 border-r border-line bg-ink"
-          style={{ height: DAY_HEIGHT }}
+          style={{ height: dayHeight }}
           aria-hidden="true"
         >
           {Array.from({ length: 24 }, (_, hour) => (
             <span
               key={hour}
               className="absolute right-2 text-[10px] tabular-nums text-mist/70"
-              style={{ top: hour * HOUR_HEIGHT + (hour === 0 ? 3 : -7) }}
+              style={{ top: hour * hourHeight + (hour === 0 ? 3 : -7) }}
             >
               {String(hour).padStart(2, "0")}:00
             </span>
@@ -327,7 +391,7 @@ export function CalendarGrid({
               })}
               data-date={calendarDate(day)}
               className={`relative border-r border-line ${isToday ? "bg-spark/[0.025]" : ""}`}
-              style={{ height: DAY_HEIGHT }}
+              style={{ height: dayHeight }}
             >
               {Array.from({ length: 48 }, (_, slot) => {
                 const at = new Date(day);
@@ -367,8 +431,8 @@ export function CalendarGrid({
                     }}
                     className={`absolute inset-x-0 outline-none hover:bg-spark/5 focus-visible:z-10 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-spark/60 ${slot % 2 === 0 ? "border-t border-line" : "border-t border-dashed border-white/[0.035]"} ${!exists ? "bg-white/5" : ""}`}
                     style={{
-                      top: (slot * HOUR_HEIGHT) / 2,
-                      height: HOUR_HEIGHT / 2,
+                      top: (slot * hourHeight) / 2,
+                      height: hourHeight / 2,
                     }}
                   />
                 );
@@ -435,7 +499,7 @@ export function CalendarGrid({
                 <div
                   className="pointer-events-none absolute inset-x-0 z-20 border-t border-rose/80"
                   data-testid="calendar-now"
-                  style={{ top: (clockMinutes(now) * HOUR_HEIGHT) / 60 }}
+                  style={{ top: (clockMinutes(now) * hourHeight) / 60 }}
                 >
                   <span className="absolute -left-1 -top-1 size-2 rounded-full bg-rose" />
                   <span className="sr-only">Current time {time(now)}</span>

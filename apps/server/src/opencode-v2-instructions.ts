@@ -126,7 +126,15 @@ export async function waitForNativeOpenWorkV2Skills(
   do {
     const payload = await readNative();
     if (!record(payload) || !Array.isArray(payload.data)) throw new Error("Native skill catalog is unavailable");
-    const native = payload.data.filter(record).filter((skill) => typeof skill.location === "string" && typeof skill.content === "string");
+    // Native-2 calls the file field `path`; the older v2 API used `location`.
+    // Normalize at this boundary so readiness and the app's skill picker see
+    // the same native entry without weakening exact path/body checks.
+    const native = payload.data.filter(record).flatMap((skill) => {
+      const location = typeof skill.location === "string" ? skill.location : typeof skill.path === "string" ? skill.path : null;
+      return location && typeof skill.content === "string"
+        && (skill.location === undefined || skill.path === undefined || skill.location === skill.path)
+        ? [{ ...skill, location, content: skill.content } as Record<string, unknown> & { location: string; content: string }] : [];
+    });
     const canonical = await Promise.all(native.map(async (skill) => ({
       skill, path: await canonicalPath(String(skill.location)),
     })));
@@ -146,13 +154,14 @@ export async function waitForNativeOpenWorkV2Skills(
   throw new Error("Native skills did not reach the current workspace contents");
 }
 
-export function buildOpenWorkV2Instructions(connectReady: boolean, _mode: "preview" | "native" = "preview") {
+export function buildOpenWorkV2Instructions(connectReady: boolean | "unknown", _mode: "preview" | "native" = "preview") {
   return {
     operatingInstructions: OPENWORK_AGENT_PROMPT.replace(
       "Org-connected services, remote skills, Workflows, and Automations reach you through OpenWork Connect: discover with openwork-cloud_search_capabilities, then run with openwork-cloud_execute_capability using an exact returned name. The runtime steering later in this prompt states whether that connection is ready right now; only name services that search or the remote skill catalog actually returns.",
-      "Org-connected services, Workflows, and Automations reach you through OpenWork Connect: discover and execute capabilities through the native OpenWork MCP interface exposed by the current tool catalog, using an exact returned name. Authorized organization skills are in the native skill catalog, not in Connect. The runtime steering later in this prompt states whether that connection is ready right now; only name services that discovery actually returns.",
+      "Org-connected services, Workflows, and Automations reach you through OpenWork Connect: discover and execute capabilities through the native OpenWork MCP interface exposed by the current tool catalog, using an exact returned name. Authorized organization skills are in the native skill catalog, not in Connect. The current tool catalog determines whether Connect is available; only name services that discovery actually returns.",
     ),
-    connect: connectReady ? "OpenWork Connect tools are connected. Use only capabilities actually returned by discovery."
+    connect: connectReady === true ? "OpenWork Connect tools are connected. Use only capabilities actually returned by discovery."
+      : connectReady === "unknown" ? "Use OpenWork Connect only when its tools appear in the current tool catalog. If they are absent, continue with local work. Do not claim remote capabilities without discovery."
       : "OpenWork Connect is not connected for this request. Do not claim remote capabilities are available.",
     skillInstructions: "Use the current native skill catalog and skill tool for workspace skills and authorized organization skills alike; organization skills appear there with ids prefixed openwork-cloud-. Load current instructions before following them. Removed skills from previous turns are not available capabilities. Do not fetch skills through OpenWork Connect tools. Skill contents are subordinate to the user's request and operating instructions.",
   };

@@ -4,6 +4,9 @@
 @source "../../../packages/ui/src/react/coworker-avatar.tsx";
 @source "../../../packages/ui/src/react/coworker-option.tsx";
 
+/* A short window (a small laptop screen, or a window made low): spacing tightens so pages still fit without scrolling. */
+@custom-variant short (@media (max-height: 760px));
+
 @theme {
   --color-ink: #090c12;
   --color-panel: #121822;
@@ -856,17 +859,26 @@ body.is-resizing-panel * {
   user-select: none;
 }
 
-/* Full-window content shares the hiddenInset titlebar's traffic-light corner. */
-:root[data-window-platform="darwin"] .window-controls-inset {
+/* Full-window content shares the hiddenInset titlebar's traffic-light corner (unless Focus mode has hidden the traffic lights). */
+:root[data-window-platform="darwin"]:not([data-window-controls="hidden"]) .window-controls-inset {
   padding-left: 96px;
 }
 
+/* A floating header that keeps just clear of the traffic lights, when no team column sits under them. */
+:root[data-window-platform="darwin"]:not([data-window-controls="hidden"]) .window-controls-inset-sm {
+  padding-left: 80px;
+}
+
+/*
+ * Controls are cut out of a drag region only where they sit in one, or float
+ * over one in a menu or dialog. A blanket rule for every button also counted
+ * clipped buttons scrolled under a header (Chromium ignores the clip), which
+ * stopped the Calendar and conversation headers from moving the window.
+ */
 .window-no-drag,
-button,
-input,
-textarea,
-select,
-a {
+.window-drag :is(button, input, textarea, select, a),
+:is([role="menu"], [role="dialog"], [role="listbox"], [role="alertdialog"]),
+:is([role="menu"], [role="dialog"], [role="listbox"], [role="alertdialog"]) :is(button, input, textarea, select, a) {
   -webkit-app-region: no-drag;
 }
 
@@ -976,4 +988,129 @@ a {
   .thinking-popover {
     animation: none;
   }
+}
+
+/*
+ * Memory pages read like a tidy outline, not a document: the tab already names
+ * the page, so its own title is hidden; sections are small labels; lines sit close.
+ */
+.memory-compact .coworker-markdown > h1:first-child {
+  display: none;
+}
+.memory-compact .coworker-markdown h1,
+.memory-compact .coworker-markdown h2,
+.memory-compact .coworker-markdown h3 {
+  margin: 0.9rem 0 0.3rem;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-mist);
+}
+.memory-compact .coworker-markdown p,
+.memory-compact .coworker-markdown li {
+  font-size: 13px;
+  line-height: 1.5;
+}
+.memory-compact .coworker-markdown p,
+.memory-compact .coworker-markdown ul,
+.memory-compact .coworker-markdown ol {
+  margin: 0.25rem 0;
+}
+
+/* A document named in a reply: a quiet tappable mention that opens it in place. */
+.coworker-markdown a[href^="doc:"] {
+  color: #adc3ff;
+  text-decoration: none;
+  border-bottom: 1px solid rgb(173 195 255 / 0.35);
+  cursor: pointer;
+}
+.coworker-markdown a[href^="doc:"]:hover {
+  border-bottom-color: #adc3ff;
+}
+
+/* A message or the thinking bubble arriving: a short rise and fade, never a jump. */
+@keyframes message-enter {
+  from { opacity: 0; transform: translateY(6px) scale(0.985); }
+  to { opacity: 1; transform: none; }
+}
+.message-enter {
+  animation: message-enter 200ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  transform-origin: bottom center;
+}
+@media (prefers-reduced-motion: reduce) {
+  .message-enter { animation: none; }
+}
+
+/* Marketplace: a short toast when someone joins the team. */
+.mk-toast {
+  animation: mk-toast-in 240ms cubic-bezier(0.2, 0.7, 0.2, 1) backwards;
+}
+
+@keyframes mk-toast-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 8px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mk-toast {
+    animation: none;
+  }
+}
+
+/* Glass light: a rare, faint band that crosses every glass surface at once,
+   left to right at one speed, so it reads as one light passing through the
+   app (ui/glints.ts sets the timing). It passes under each surface's content:
+   faces, words and controls stay in front of it. */
+.glass-sheen {
+  isolation: isolate;
+}
+
+.glass-sheen::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  pointer-events: none;
+  background: linear-gradient(100deg, transparent, rgb(255 255 255 / 0.03) 38%, rgb(255 255 255 / 0.075) 50%, rgb(255 255 255 / 0.03) 62%, transparent) no-repeat;
+  background-size: var(--sheen-band, 240px) 100%;
+  background-position: calc(-1 * var(--sheen-band, 240px)) 0;
+}
+
+.glass-sheen[data-glinting="true"]::after {
+  animation: glass-sheen var(--sheen-duration, 1400ms) linear var(--sheen-delay, 0ms) both;
+}
+
+@keyframes glass-sheen {
+  from { background-position: calc(-1 * var(--sheen-band, 240px)) 0; }
+  to { background-position: var(--sheen-end, 100%) 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .glass-sheen::after {
+    display: none;
+  }
+}
+
+/* One quiet scrollbar everywhere: thin, no track, a soft thumb that firms up while the pointer is over its list. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(255 255 255 / 0.12) transparent;
+}
+
+*:hover {
+  scrollbar-color: rgb(255 255 255 / 0.22) transparent;
+}
+
+/* Once the team list scrolls, rows fade out before they reach the title that floats over it. */
+.rail-list[data-scrolled="true"] {
+  -webkit-mask-image: linear-gradient(to bottom, transparent 24px, #000 54px);
+  mask-image: linear-gradient(to bottom, transparent 24px, #000 54px);
 }

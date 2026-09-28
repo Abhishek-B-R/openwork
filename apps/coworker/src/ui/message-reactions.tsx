@@ -107,33 +107,49 @@ export function useMessageReactions(scope: MessageReactionScope | null, active: 
   }, [key, observed]);
 }
 
-export const MessageReactions = memo(function MessageReactions({ messageId, reactions, className = "" }: {
+export const MessageReactions = memo(function MessageReactions({ messageId, reactions, side, className = "" }: {
   messageId: string;
   reactions?: readonly MessageReaction[];
+  /** The corner toward the middle of the conversation: left on the person's bubbles, right on replies. */
+  side: "left" | "right";
   className?: string;
 }) {
   if (!reactions?.length) return null;
+  // A touch lighter than reply bubbles so it lifts off them; only the round
+  // bubble is ringed, so the tail dots blend smoothly into it.
+  const surface = "bg-[#2b3547]";
+  const ring = "shadow-[0_0_0_2.5px_var(--color-ink)]";
+  // As in Messages, the tail dots trail outward from the small speech bubble,
+  // away from the message, so they rest on the page rather than the bubble.
+  const toward = side;
   return (
-    <div className={`flex flex-wrap gap-1 ${className}`} role="group" aria-label="Message reactions" data-testid="message-reactions" data-message-id={messageId}>
-      {reactions.map((reaction) => {
-        const label = `${reaction.actor.name} reacted ${reaction.emoji}`;
-        return (
-          <Tooltip key={`${reaction.actor.slug}:${reaction.actor.createdAt}`} content={label}>
-            <span
-              role="img"
-              tabIndex={0}
-              aria-label={label}
-              data-testid="message-reaction"
-              data-actor-slug={reaction.actor.slug}
-              data-actor-created-at={reaction.actor.createdAt}
-              data-emoji={reaction.emoji}
-              className="inline-flex min-h-6 min-w-7 cursor-default select-none items-center justify-center rounded-full border border-line bg-panel/80 px-1.5 py-0.5 text-[13px] leading-none text-snow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-spark/50"
-            >
-              {reaction.emoji}
-            </span>
-          </Tooltip>
-        );
-      })}
+    // A tapback: a small speech bubble on the message's top corner facing the
+    // conversation, ringed in the page color so it reads as resting on top.
+    // The parent is the message bubble's positioned wrapper.
+    <div className={`absolute -top-5 z-10 ${side === "left" ? "-left-4" : "-right-4"} ${className}`} role="group" aria-label="Message reactions" data-testid="message-reactions" data-message-id={messageId}>
+      <span aria-hidden="true" className={`absolute -bottom-1 size-2.5 rounded-full ${surface} ${toward === "right" ? "-right-0.5" : "-left-0.5"}`} />
+      <span aria-hidden="true" className={`absolute -bottom-2.5 size-1.5 rounded-full ${surface} ${toward === "right" ? "-right-1.5" : "-left-1.5"}`} />
+      <div className={`relative flex h-7 min-w-7 items-center justify-center gap-0.5 rounded-full px-1 ${surface} ${ring}`}>
+        {reactions.map((reaction) => {
+          const label = `${reaction.actor.name} reacted ${reaction.emoji}`;
+          return (
+            <Tooltip key={`${reaction.actor.slug}:${reaction.actor.createdAt}`} content={label}>
+              <span
+                role="img"
+                tabIndex={0}
+                aria-label={label}
+                data-testid="message-reaction"
+                data-actor-slug={reaction.actor.slug}
+                data-actor-created-at={reaction.actor.createdAt}
+                data-emoji={reaction.emoji}
+                className="inline-flex cursor-default select-none items-center justify-center rounded-full text-[15px] leading-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-spark/50"
+              >
+                {reaction.emoji}
+              </span>
+            </Tooltip>
+          );
+        })}
+      </div>
     </div>
   );
 });

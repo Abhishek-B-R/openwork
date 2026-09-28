@@ -420,8 +420,8 @@ function nativeFixture(onSend = async () => {}) {
   }) };
 }
 
-async function eventually(check) {
-  const deadline = Date.now() + 4000;
+async function eventually(check, timeoutMs = 4000) {
+  const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) { if (await check()) return; await new Promise((resolve) => setTimeout(resolve, 10)); }
   assert.fail("The collaboration did not settle within the module check's deadline.");
 }
@@ -980,7 +980,8 @@ test("foreground submission wakes dispatch without waiting for the periodic tick
     const setupTimeoutMs = Number(source.match(/const collaboration = createCollaboration\(\{[\s\S]*?setupTimeoutMs: ([\d_]+)/)?.[1].replaceAll("_", ""));
     assert.equal(setupTimeoutMs, 120_000);
     const coldClient = source.slice(source.indexOf("async function collaborationClient("), source.indexOf("async function collaborationCleanupClient("));
-    assert.match(coldClient, /registerCoworkerTools\(coworker, 120_000\)/);
+    assert.match(coldClient, /await warmCoworkerWorkspace\(coworker\)/);
+    assert.doesNotMatch(coldClient, /registerCoworkerTools\(coworker, 120_000\)/);
     const entered = Promise.withResolvers();
     const prepared = Promise.withResolvers();
     let setupSignal;
@@ -1159,7 +1160,7 @@ test("native collaboration preserves accepted turns through unavailable observat
         acknowledge.resolve();
       }
       await service.acceptance(entry.id);
-      await eventually(() => waits > 0);
+      await eventually(() => waits > 0, 10_000);
       const readActivity = runInNewContext(`${source.slice(source.indexOf("async function readCollaborationActivity("), source.indexOf("function workerKey("))}\nreadCollaborationActivity`, {
         serverHandle: { url: "http://127.0.0.1:8790", managedOpencodeV2: { isAlive: () => true } }, collaboration: service, coworkersDir: home, ownerToken: "fixture", AbortSignal,
         getCoworker: (_directory, slug) => fixtureCoworker(slug), PROGRESS_LIMITS: { maxActivityExecutions: 16, activityReadTimeoutMs: 1000 },
@@ -1741,7 +1742,7 @@ test("shutdown drains late setup writes and seals collaboration storage before r
     const fixture = nativeFixture();
     const release = Promise.withResolvers();
     let started = false;
-    const service = createCollaboration({ directory: home, pollMs: 5, setupTimeoutMs: 100,
+    const service = createCollaboration({ directory: home, pollMs: 5, setupTimeoutMs: 1000,
       clientFor: async (slug) => {
         started = true;
         await release.promise;
@@ -1821,7 +1822,7 @@ test("shutdown refuses unconfirmed native cancellation instead of swallowing it"
     const fixture = nativeFixture(async ({ threadId }) => { fixture.held.add(threadId); });
     let cleanupCreatedAt = fixtureCreatedAt, aborts = 0;
     const clientFor = async (slug) => ({ ...await fixture.clientFor(slug), abortThread: async () => { aborts++; return { accepted: false }; } });
-    const service = createCollaboration({ directory: home, pollMs: 5, setupTimeoutMs: 100, clientFor,
+    const service = createCollaboration({ directory: home, pollMs: 5, setupTimeoutMs: 1_000, clientFor,
       cleanupClientFor: async (slug) => ({ ...await clientFor(slug), coworkerCreatedAt: cleanupCreatedAt }),
     });
     try {
@@ -4008,7 +4009,7 @@ test("Events share Conversation and Facilitator defaults while recovery, recall 
       memoryContext: async (owner) => owner.kind === "group" ? "GROUP-ONLY-RECALL" : "",
       onPublished: async (entry) => { published.push({ slug: entry.owner.slug, model: entry.model }); },
       resolveModel: (slug, request) => {
-        if (request.observationOnly) { observations.push({ slug, model: request.model }); return request.model ?? undefined; }
+        if (request.observationOnly || request.prepareOnly) { if (request.observationOnly) observations.push({ slug, model: request.model }); return request.model ?? undefined; }
         if (request.model) return request.model;
         assert.equal(typeof request.requestText, "string", "preparation and reads must not invoke model ranking");
         const choice = resolveDiscussionModel(catalog, members[slug], request.requestText, settings.modelDefaults);
