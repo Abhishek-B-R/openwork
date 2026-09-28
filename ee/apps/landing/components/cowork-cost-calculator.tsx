@@ -552,19 +552,6 @@ export function CoworkCostCalculator({
 
   const lines: ChartLine[] = [
     { key: "claude", label: claudeLabel, series: claudeLine, stroke: claudeGray, width: 2.25, pattern: "solid", opacity: 1 },
-    ...(claudeSide === "plan"
-      ? [
-          {
-            key: "3p",
-            label: claude3pLabel,
-            series: result.claude3p,
-            stroke: claudeGray,
-            width: 1.75,
-            pattern: "dotted" as const,
-            opacity: 0.75
-          }
-        ]
-      : []),
     { key: "openwork", label: openworkLabel, series: result.openwork, stroke: accent, width: 2.75, pattern: "solid", opacity: 1 },
     ...(result.openModel
       ? [
