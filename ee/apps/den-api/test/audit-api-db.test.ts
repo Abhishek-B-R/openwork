@@ -778,7 +778,8 @@ dbTest("settings reject unauthenticated, member, foreign org and forged configur
   for (const extra of [{ entitlement: { enabled: true } }, { source: "operator" }, { allowance: 999 }, { excessMode: "keep_all" }, { categories: ["read"] }, { enabled: true }, { captureOn: "false" }, { expectedRevision: -1 }, { expectedRevision: 1.1 }, { expectedRevision: Number.MAX_SAFE_INTEGER + 1 }, { organizationId: foreign.org }]) assert.equal((await f.toggle(false, 1, extra)).status, 400)
   Object.assign(environment.env, { auditVisibilityEnabled: false })
   try { assert.equal((await f.toggle(false, 1)).status, 403) } finally { Object.assign(environment.env, { auditVisibilityEnabled: true }) }
-  f.session.createdAt = new Date(Date.now() - 3600000)
+  const { PRIVILEGED_SESSION_MAX_AGE_MS } = await import("../src/routes/org/shared.js")
+  f.session.createdAt = new Date(Date.now() - PRIVILEGED_SESSION_MAX_AGE_MS - 1000)
   const reauth = await f.toggle(false, 1)
   assert.equal(reauth.status, 403)
   assert.equal((await reauth.json()).error, "reauth")
