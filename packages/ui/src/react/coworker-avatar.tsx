@@ -4,10 +4,10 @@ import { useCallback, useRef } from "react";
 import { StaticCoworkerAvatar, type StaticCoworkerAvatarProps, type AvatarColor, type AvatarGlasses } from "./coworker-avatar-artwork";
 import { useAvatarMotion, type AvatarGather } from "./coworker-avatar-motion";
 
-export type { AvatarColor, AvatarGlasses } from "./coworker-avatar-artwork";
+export type { AvatarColor, AvatarExpression, AvatarGlasses } from "./coworker-avatar-artwork";
 export { avatarFill } from "./coworker-avatar-artwork";
-export { acknowledgeCoworker } from "./coworker-avatar-motion";
-export type { AvatarMotion, AvatarReaction } from "./coworker-avatar-motion";
+export { acknowledgeCoworker, expressCoworker } from "./coworker-avatar-motion";
+export type { AvatarCue, AvatarMotion, AvatarReaction } from "./coworker-avatar-motion";
 
 /** Two rows: the original soft colors, then bolder ones that stand out in a busy team. */
 const AVATAR_COLOR_ROWS: Array<Array<{ id: AvatarColor; label: string; swatch: string }>> = [
@@ -54,6 +54,7 @@ function AnimatedAvatar({
   size = 96,
   animated = true,
   working = false,
+  expression = "none",
   svgRef,
   identity = name,
   motion = size <= 44 ? "quiet" : "attentive",
@@ -69,7 +70,7 @@ function AnimatedAvatar({
     if (svgRef) svgRef.current = node;
   }, [motionRef, svgRef]);
 
-  return <StaticCoworkerAvatar name={name} color={color} glasses={glasses} size={size} animated={animated} working={working} identity={identity} motion={motion} svgRef={setRef} />;
+  return <StaticCoworkerAvatar name={name} color={color} glasses={glasses} size={size} animated={animated} working={working} expression={expression} identity={identity} motion={motion} svgRef={setRef} />;
 }
 
 export type GroupAvatarsProps = {

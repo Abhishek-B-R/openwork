@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { CoworkerActivityItem, CoworkerGroupSummary, CoworkerSummary } from "@/lib/bridge";
 import { describeRailLine } from "@/lib/rail-status";
 import type { CoworkerActivity } from "@/lib/threads";
-import { CoworkerAvatar, GroupAvatars } from "@/ui/coworker-avatar";
+import { CoworkerAvatar, GroupAvatars, faceFor } from "@/ui/coworker-avatar";
 import { ChevronIcon, ComposeIcon, IconButton, SearchIcon } from "@/ui/kit";
 import { FocusToggle } from "@/ui/layout-controls";
 import { useFeatures } from "@/ui/use-features";
@@ -106,7 +106,7 @@ export function FocusHome({
       working,
       selected: coworker.slug === selectedSlug && !selectedGroupId,
       search: `${coworker.name} ${coworker.role} ${preview}`.toLowerCase(),
-      face: <CoworkerAvatar identity={coworker.slug} motion="navigation" color={coworker.avatarColor} glasses={coworker.avatarGlasses} name={coworker.name} size={46} working={working} />,
+      face: <CoworkerAvatar identity={coworker.slug} motion="navigation" color={coworker.avatarColor} glasses={coworker.avatarGlasses} name={coworker.name} size={46} working={working} expression={faceFor(activity)} />,
       open: () => onSelect(coworker.slug),
     };
   });

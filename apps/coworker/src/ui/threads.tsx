@@ -116,7 +116,7 @@ import { useAutoGrow } from "@/ui/use-auto-grow";
 import { JumpToLatest, useConversationScroll } from "@/ui/use-conversation-scroll";
 import { ConversationWindow, useConversationWindow } from "@/ui/conversation-window";
 import { InteractionCard, InteractionCards, LETTERS, OptionRow, typingInField } from "@/ui/interactions";
-import { acknowledgeCoworker, CoworkerAvatar } from "@/ui/coworker-avatar";
+import { acknowledgeCoworker, CoworkerAvatar, expressCoworker } from "@/ui/coworker-avatar";
 import { InlineLoader } from "@/ui/brand";
 import { Button, ChevronIcon, Empty, ErrorNote, IconButton, PlusIcon, StatusDot, StopIcon, ToolIcon } from "@/ui/kit";
 import { ChatReply } from "@/ui/chat-reply";
@@ -2351,6 +2351,15 @@ function ThreadView({
   useEffect(() => {
     if (outcome?.kind === "replied" && !activeTurnRef.current) commitTurnState(clearPending);
   }, [commitTurnState, outcome?.kind]);
+  // The face reacts as a turn it was working on ends: a smile when the reply lands, a sorry look when it fails.
+  const faceTurn = useRef<{ messageId?: string; kind?: string }>({});
+  useEffect(() => {
+    const before = faceTurn.current;
+    faceTurn.current = { messageId: outcome?.messageId, kind: outcome?.kind };
+    if (!outcome || outcome.messageId !== before.messageId || !["working", "slow", "retrying"].includes(before.kind ?? "")) return;
+    if (outcome.kind === "replied") expressCoworker(coworker.slug, "happy");
+    else if (outcome.kind === "failed") expressCoworker(coworker.slug, "sorry");
+  }, [coworker.slug, outcome?.kind, outcome?.messageId]);
 
   const turnRunning = outcome?.kind === "working" || outcome?.kind === "slow" || outcome?.kind === "retrying";
   // The engine can be busy on a turn this view never sent (a Worker's review, a scheduled run): still working.

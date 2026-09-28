@@ -10,7 +10,7 @@ import type { DenSession } from "@/lib/den";
 import { markAutoPicked, peekStartingModel, takeStartingModel } from "@/lib/model-choice";
 import { InlineLoader } from "@/ui/brand";
 import { createCoworkerThreads, recommendModel, type CoworkerActivity, type ThreadListItem } from "@/lib/threads";
-import { CoworkerAvatar } from "@/ui/coworker-avatar";
+import { CoworkerAvatar, faceFor } from "@/ui/coworker-avatar";
 import type { CustomizeFocus } from "@/ui/customize-coworker";
 import { useFeatures } from "@/ui/use-features";
 import { useLayout } from "@/ui/use-layout";
@@ -571,6 +571,7 @@ export function CoworkerHome({
               glasses={coworker.avatarGlasses}
               name={coworker.name}
               size={26}
+              expression={faceFor(activity)}
             />
             {/* On a phone the face names the coworker; the room goes to the discussion. */}
             <h1 className={layout.compact ? "sr-only" : "min-w-[3rem] max-w-[14rem] shrink-[2] truncate pl-1 text-sm font-semibold text-snow"} title={coworker.name}>{coworker.name}</h1>

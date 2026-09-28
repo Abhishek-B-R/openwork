@@ -4,6 +4,8 @@ import { useEffect, useRef } from "react";
 
 export type AvatarMotion = "quiet" | "navigation" | "attentive" | "playful" | "presentation";
 export type AvatarReaction = "engage" | "wake";
+/** A short face for something the coworker just did: happy when a reply lands, sorry when a turn fails. */
+export type AvatarCue = "happy" | "sorry";
 /** Body cues share one attribute: intentional reactions plus the rare idle gestures the avatar picks itself. */
 type BodyCue = AvatarReaction | "shake" | "perk";
 type IdleGesture = "glance" | "blink" | "double-blink" | "tilt" | BodyCue;
@@ -32,6 +34,29 @@ const identities = new Map<string, {
 }>();
 const groups = new Map<string, { at: number; owner: object }>();
 const listeners = new Set<(identity: string) => void>();
+
+const CUE_FACE_DURATION: Record<AvatarCue, number> = { happy: 1_700, sorry: 1_900 };
+/* A face in the background (window behind, scrolled away) plays a recent cue when it comes back,
+ * so a reply that landed while you were elsewhere still gets its smile. */
+const CUE_FACE_RETENTION = 12_000;
+/* Two sources reporting the same moment (the open conversation and the team list) make one reaction. */
+const CUE_FACE_ECHO = 10_000;
+const cueFaces = new Map<string, { cue: AvatarCue; at: number }>();
+const cueFaceListeners = new Set<(identity: string) => void>();
+
+/** Every face of this coworker shows the cue once: now if in view, or when it next comes into view while the cue is recent. */
+export function expressCoworker(identity: string, cue: AvatarCue): void {
+  const now = Date.now();
+  const last = cueFaces.get(identity);
+  if (last && last.cue === cue && now - last.at < CUE_FACE_ECHO) return;
+  cueFaces.delete(identity);
+  cueFaces.set(identity, { cue, at: now });
+  if (cueFaces.size > 128) {
+    const oldest = cueFaces.keys().next().value;
+    if (oldest !== undefined) cueFaces.delete(oldest);
+  }
+  for (const listener of cueFaceListeners) listener(identity);
+}
 
 function memory(identity: string) {
   let entry = identities.get(identity);
@@ -144,6 +169,7 @@ export function useAvatarMotion({
 }) {
   const ref = useRef<SVGSVGElement>(null);
   const seenCue = useRef<{ identity: string; at: number } | null>(null);
+  const seenFace = useRef<{ identity: string; at: number } | null>(null);
   const regard = useRef({ x: regardX, y: regardY });
   const retarget = useRef<() => void>(() => {});
   const groupKey = gather?.key;
@@ -175,6 +201,8 @@ export function useAvatarMotion({
     let interacting = false;
     let reacting = false;
     let removePointer: (() => void) | undefined;
+    // A cue's face runs on its own timer, so idle gestures and reactions never cut it short.
+    let faceTimer: number | undefined;
 
     avatar.dataset.avatarMotion = "true";
     avatar.dataset.motion = motion;
@@ -292,6 +320,23 @@ export function useAvatarMotion({
       else play();
     }
 
+    function endFace() {
+      if (faceTimer !== undefined) window.clearTimeout(faceTimer);
+      faceTimer = undefined;
+      avatar.dataset.cue = "none";
+    }
+
+    function showFace(eventIdentity: string) {
+      if (eventIdentity !== identity || paused) return;
+      const face = cueFaces.get(identity);
+      if (!face || Date.now() - face.at > CUE_FACE_RETENTION) return;
+      if (seenFace.current?.identity === identity && seenFace.current.at === face.at) return;
+      seenFace.current = { identity, at: face.at };
+      endFace();
+      avatar.dataset.cue = face.cue;
+      faceTimer = window.setTimeout(endFace, CUE_FACE_DURATION[face.cue]);
+    }
+
     function receive(eventIdentity: string) {
       if (eventIdentity !== identity || paused) return;
       const cue = memory(identity).cue;
@@ -360,10 +405,12 @@ export function useAvatarMotion({
           reacting = false;
           interacting = false;
           avatar.dataset.reaction = "none";
+          endFace();
           neutral();
         } else {
           neutral();
           receive(identity);
+          showFace(identity);
           if (!reacting && (!started || Date.now() - awaySince >= WAKE_COOLDOWN)) wake(started);
           if (prominent && motion !== "quiet") memory(identity).appeared = true;
           started = true;
@@ -391,7 +438,9 @@ export function useAvatarMotion({
     };
     neutral();
     avatar.dataset.reaction = "none";
+    avatar.dataset.cue = "none";
     listeners.add(receive);
+    cueFaceListeners.add(showFace);
     observer?.observe(avatar);
     reduced.addEventListener("change", sync);
     finePointer.addEventListener("change", sync);
@@ -408,9 +457,11 @@ export function useAvatarMotion({
       removePointer?.();
       neutral();
       avatar.dataset.reaction = "none";
+      endFace();
       avatar.dataset.motionPaused = "true";
       if (prominent && started) memory(identity).leftAt = leftAt;
       listeners.delete(receive);
+      cueFaceListeners.delete(showFace);
       observer?.disconnect();
       reduced.removeEventListener("change", sync);
       finePointer.removeEventListener("change", sync);

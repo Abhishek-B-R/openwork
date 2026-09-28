@@ -5,6 +5,13 @@ export type AvatarColor =
   | "blue" | "violet" | "mint" | "orange" | "rose" | "slate" | "sand" | "sage"
   | "sky" | "lagoon" | "lime" | "lemon" | "coral" | "grape";
 export type AvatarGlasses = "round" | "square" | "oval" | "none" | "sunglasses" | "monocle" | "star";
+/**
+ * A face held while something lasts: `thinking` (eyes up and aside, a small
+ * "hmm" mouth) while a reply is being worked out, `curious` (a gentle tilt,
+ * round eyes, a small "o") while the coworker waits on the person. Short
+ * reactions, happy or sorry, are cues instead (see `expressCoworker`).
+ */
+export type AvatarExpression = "none" | "thinking" | "curious";
 
 /* Soft colors keep their original values. The bold six share the same lightness steps
  * (fill, edge, depth) at two to three times the chroma, so glasses stay legible and the
@@ -38,6 +45,7 @@ export type StaticCoworkerAvatarProps = {
   size?: number;
   animated?: boolean;
   working?: boolean;
+  expression?: AvatarExpression;
   identity?: string;
   motion?: AvatarMotion;
   svgRef?: Ref<SVGSVGElement>;
@@ -51,6 +59,7 @@ export function StaticCoworkerAvatar({
   size = 96,
   animated = false,
   working = false,
+  expression = "none",
   svgRef,
   identity = name,
   motion = size <= 44 ? "quiet" : "attentive",
@@ -69,6 +78,8 @@ export function StaticCoworkerAvatar({
       data-animated={animated}
       data-motion-paused="true"
       data-reaction="none"
+      data-expression={expression}
+      data-cue="none"
       data-glasses={glasses}
       role="img"
       style={{ width: size, height: size }}
@@ -105,8 +116,13 @@ export function StaticCoworkerAvatar({
               <g className="coworker-avatar__pointer-gaze">
                 <g className="coworker-avatar__gaze">
                   <g className="coworker-avatar__pupils" fill="#0b0e14">
-                    <rect x="34.5" y="50" width="6" height="14" rx="3" />
-                    <rect x="79.5" y="50" width="6" height="14" rx="3" />
+                    <rect className="coworker-avatar__mood" x="34.5" y="50" width="6" height="14" rx="3" />
+                    <rect className="coworker-avatar__mood" x="79.5" y="50" width="6" height="14" rx="3" />
+                  </g>
+                  {/* Closed, smiling eyes for a happy moment; hidden until one plays. */}
+                  <g className="coworker-avatar__happy-eyes" fill="none" stroke="#0b0e14" strokeLinecap="round" strokeWidth="4.5">
+                    <path className="coworker-avatar__mood" d="M31.5 60.5q6-7.5 12 0" opacity="0" />
+                    <path className="coworker-avatar__mood" d="M76.5 60.5q6-7.5 12 0" opacity="0" />
                   </g>
                 </g>
               </g>
@@ -152,6 +168,14 @@ export function StaticCoworkerAvatar({
                   {size > 36 ? <path className="coworker-avatar__monocle-chain" d="M98 70c5 6 6 16 0 20-3 2-5 1-5-2" strokeWidth="1.25" strokeOpacity="0.7" /> : null}
                 </g>
               ) : null}
+              {/* A small mouth, shown only with an expression: "hmm" while thinking, "o" when curious, a smile or a frown for a moment.
+                  Hidden by attribute so artwork rendered without the stylesheet (a social image) shows the plain face. */}
+              <g className="coworker-avatar__mouth" fill="none" stroke="#11151d" strokeLinecap="round" strokeLinejoin="round" strokeWidth="3.4">
+                <path className="coworker-avatar__mood coworker-avatar__mouth-hmm" d="M55 89.5q4.5-3.6 9.5-0.6" opacity="0" />
+                <ellipse className="coworker-avatar__mood coworker-avatar__mouth-o" cx="60" cy="89" rx="2.6" ry="3.2" strokeWidth="2.8" opacity="0" />
+                <path className="coworker-avatar__mood coworker-avatar__mouth-smile" d="M53.5 86.5q6.5 6 13 0" opacity="0" />
+                <path className="coworker-avatar__mood coworker-avatar__mouth-frown" d="M54.5 91q5.5-4.2 11 0" opacity="0" />
+              </g>
             </g>
           </g>
         </g>

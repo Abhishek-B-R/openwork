@@ -5,7 +5,7 @@ import { describeRailLine } from "@/lib/rail-status";
 import type { DenSession } from "@/lib/den";
 import type { CoworkerActivity } from "@/lib/threads";
 import { CoworkerMark } from "@/ui/brand";
-import { CoworkerAvatar, GroupAvatars } from "@/ui/coworker-avatar";
+import { CoworkerAvatar, GroupAvatars, expressCoworker, faceFor } from "@/ui/coworker-avatar";
 import { Button, IconButton, PlusIcon, SearchIcon, StatusDot, Tooltip } from "@/ui/kit";
 import type { ResizablePanel } from "@/ui/use-resizable-panel";
 import { CalendarIcon, MainContentSwitch, type MainContent } from "@/ui/main-content-switch";
@@ -121,6 +121,17 @@ export function CoworkerRail({
   unreadMentions?: number;
   activityError?: boolean;
 }) {
+  // A coworker that finishes its work smiles, wherever its face shows (a background assignment included).
+  const faceStates = useRef<Record<string, CoworkerActivity["state"]>>({});
+  useEffect(() => {
+    for (const [slug, activity] of Object.entries(activityBySlug)) {
+      const before = faceStates.current[slug];
+      faceStates.current[slug] = activity.state;
+      if ((before === "working" || before === "retrying") && (activity.state === "recent" || activity.state === "idle" || activity.state === "ready")) {
+        expressCoworker(slug, "happy");
+      }
+    }
+  }, [activityBySlug]);
   // Without Calendar there are no events: no Chat/Calendar switch, no calendar shortcuts,
   // and group chats need no filter because they are the only kind. Without
   // Notifications there is no Activity bell; without Marketplace, no store icon.
@@ -321,6 +332,7 @@ export function CoworkerRail({
                     name={coworker.name}
                     size={44}
                     working={activity?.state === "working"}
+                    expression={faceFor(activity)}
                   />
                   <span
                     aria-hidden="true"
@@ -424,6 +436,7 @@ export function CoworkerRail({
                       name={coworker.name}
                       size={44}
                       working={activity?.state === "working"}
+                      expression={faceFor(activity)}
                     />
                   </span>
                   {/* Every text slot is one fixed-height line: changing words truncate instead of wrapping or moving the row. */}

@@ -261,6 +261,120 @@
   22%, 72% { transform: scaleY(0.1); }
 }
 
+/* Expressions. A held face (data-expression) lasts while its state does: thinking while a reply is
+ * worked out, curious while the coworker waits on the person. A cue (data-cue) is one short moment:
+ * happy when a reply lands, sorry when a turn fails. Poses hold even while motion is paused; the
+ * small loops run only while the face is in view, and never with reduced motion. */
+.coworker-avatar .coworker-avatar__mood {
+  transform-box: fill-box;
+  transform-origin: center;
+  transition: opacity 180ms ease-out, transform 280ms ease-out;
+}
+
+.coworker-avatar :is(.coworker-avatar__happy-eyes, .coworker-avatar__mouth) .coworker-avatar__mood {
+  opacity: 0;
+}
+
+/* Thinking: eyes go up and to one side, drifting slowly across; a small "hmm" mouth ponders. */
+.coworker-avatar[data-expression="thinking"] .coworker-avatar__pupils .coworker-avatar__mood {
+  transform: translate(3px, -4px) scaleY(0.74);
+}
+
+.coworker-avatar[data-expression="thinking"] .coworker-avatar__mouth-hmm {
+  opacity: 1;
+}
+
+.coworker-avatar[data-expression="thinking"][data-motion-paused="false"] .coworker-avatar__pupils .coworker-avatar__mood {
+  animation: avatar-think-look 4.4s ease-in-out infinite;
+}
+
+.coworker-avatar[data-expression="thinking"][data-motion-paused="false"] .coworker-avatar__mouth-hmm {
+  animation: avatar-hmm 2.8s ease-in-out infinite;
+}
+
+/* Curious: round eyes, a small "o", and the face tilting gently while it waits for an answer. */
+.coworker-avatar[data-expression="curious"] .coworker-avatar__pupils .coworker-avatar__mood {
+  transform: scale(1.14, 0.8);
+}
+
+.coworker-avatar[data-expression="curious"] .coworker-avatar__mouth-o {
+  opacity: 1;
+}
+
+.coworker-avatar[data-expression="curious"][data-motion-paused="false"] .coworker-avatar__features {
+  animation: avatar-curious-tilt 3.8s ease-in-out infinite;
+}
+
+/* Happy: the eyes close into smiles, a small smile, and a little hop. */
+.coworker-avatar[data-cue="happy"] .coworker-avatar__pupils .coworker-avatar__mood {
+  opacity: 0;
+  transform: scaleY(0.2);
+}
+
+.coworker-avatar[data-cue="happy"] :is(.coworker-avatar__happy-eyes .coworker-avatar__mood, .coworker-avatar__mouth-smile) {
+  opacity: 1;
+}
+
+.coworker-avatar[data-cue="happy"] .coworker-avatar__happy-eyes .coworker-avatar__mood {
+  animation: avatar-happy-eyes 1.7s ease-out both;
+}
+
+.coworker-avatar[data-cue="happy"] .coworker-avatar__pointer-body {
+  animation: avatar-happy-hop 900ms ease-in-out;
+}
+
+/* Sorry: eyes lower, a small frown, and the body sinks a touch before it recovers. */
+.coworker-avatar[data-cue="sorry"] .coworker-avatar__pupils .coworker-avatar__mood {
+  transform: translateY(3px) scaleY(0.5);
+}
+
+.coworker-avatar[data-cue="sorry"] .coworker-avatar__mouth-frown {
+  opacity: 1;
+}
+
+.coworker-avatar[data-cue="sorry"] .coworker-avatar__pointer-body {
+  animation: avatar-sorry-sink 1.9s ease-in-out;
+}
+
+/* A cue's mouth replaces the held one for its moment. */
+.coworker-avatar:is([data-cue="happy"], [data-cue="sorry"]) :is(.coworker-avatar__mouth-hmm, .coworker-avatar__mouth-o) {
+  opacity: 0;
+  animation: none;
+}
+
+@keyframes avatar-think-look {
+  0%, 36%, 100% { transform: translate(3px, -4px) scaleY(0.74); }
+  50%, 86% { transform: translate(-2.4px, -3.6px) scaleY(0.74); }
+}
+
+@keyframes avatar-hmm {
+  0%, 100% { transform: translateX(0) scaleX(1); }
+  30% { transform: translateX(1px) scaleX(0.8); }
+  62% { transform: translateX(-0.6px) scaleX(0.95); }
+}
+
+@keyframes avatar-curious-tilt {
+  0%, 100% { transform: rotate(-3.2deg); }
+  50% { transform: rotate(1.4deg); }
+}
+
+@keyframes avatar-happy-eyes {
+  0% { transform: translateY(1.5px) scaleY(0.35); }
+  16%, 100% { transform: translateY(0) scaleY(1); }
+}
+
+@keyframes avatar-happy-hop {
+  0%, 100% { transform: translateY(0) rotate(0deg); }
+  30% { transform: translateY(-3.2px) rotate(-1.2deg); }
+  56% { transform: translateY(0.4px) rotate(0.6deg); }
+  76% { transform: translateY(-1px) rotate(0deg); }
+}
+
+@keyframes avatar-sorry-sink {
+  0%, 100% { transform: translateY(0) rotate(0deg); }
+  25%, 70% { transform: translateY(1.6px) rotate(-1deg); }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .coworker-avatar,
   .coworker-mark {
@@ -280,5 +394,11 @@
   .coworker-avatar-group__bubble circle {
     animation: none !important;
     opacity: 1;
+  }
+
+  /* Expressions still show, as still poses. */
+  .coworker-avatar .coworker-avatar__mood {
+    animation: none !important;
+    transition: none !important;
   }
 }
