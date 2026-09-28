@@ -607,6 +607,12 @@ test.skipIf(!enabled)(title, { timeout: 1_200_000 }, async ({ evidence }) => {
   await click(app, '[data-testid="onboarding-local-choice"]');
   await waitFor(app, () => Boolean(document.querySelector('[data-testid="local-mode"]')), { timeoutMs: 60_000, label: "the Use this Mac step" });
   await clickButton(app, "Continue", { timeoutMs: 120_000 });
+  // Keep Simple, preselected: this journey needs no optional feature.
+  await waitFor(app, () => {
+    const next = document.querySelector<HTMLElement>('[data-testid="onboarding-experience-continue"]');
+    next?.click();
+    return Boolean(next);
+  }, { timeoutMs: 120_000, label: "the experience step" });
   await waitFor(app, () => Boolean(document.querySelector('select[aria-label="Profession"]')), { timeoutMs: 60_000, label: "profession selection" });
   await select(app, 'select[aria-label="Profession"]', "marketing");
   await click(app, '[data-testid="onboarding-intents-continue"]');

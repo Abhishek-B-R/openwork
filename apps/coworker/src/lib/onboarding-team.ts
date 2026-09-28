@@ -8,7 +8,7 @@
 import type { TeamDraft, TeamRole } from "./bridge.ts";
 
 /** No model step: coworkers start on Automatic, and a model is chosen per coworker under Advanced. */
-export type OnboardingStep = "welcome" | "local" | "intents" | "team" | "create";
+export type OnboardingStep = "welcome" | "local" | "experience" | "intents" | "team" | "create";
 
 export const ONBOARDING_DRAFT_KEY = "open-coworker.onboarding-team.v1";
 export const MAX_TEAM_DRAFTS = 6;
@@ -65,7 +65,7 @@ export function loadOnboardingDraft(storage: DraftStorage | null): OnboardingDra
 }
 
 function isOnboardingStep(value: unknown): value is OnboardingStep {
-  return value === "welcome" || value === "local" || value === "intents" || value === "team" || value === "create";
+  return value === "welcome" || value === "local" || value === "experience" || value === "intents" || value === "team" || value === "create";
 }
 
 export function onboardingDraftForContext(draft: OnboardingDraft, contextKey: string): OnboardingDraft {

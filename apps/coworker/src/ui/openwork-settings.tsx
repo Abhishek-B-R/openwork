@@ -110,13 +110,13 @@ function SettingsRow({ label, value, hint, tone, action }: { label: string; valu
 
 const PROFILES = [
   { id: "simple", label: "Simple", detail: "Coworkers and conversations. Everything below stays off until you turn it on." },
-  { id: "advanced", label: "Advanced", detail: "Every feature on: the Marketplace, notifications, calendar and more." },
+  { id: "advanced", label: "Power user", detail: "Every feature on: the Marketplace, notifications, calendar and more." },
 ] as const;
 
 /**
- * Optional features: Simple (all off, how everyone starts) or Advanced (all
- * on) in one choice, then each one switch. Turning one on brings in its
- * interface, what coworkers know about it, and any automation it drives.
+ * Optional features: Simple (all off) or Power user (all on) in one choice,
+ * the same one onboarding asks, then each one switch. Turning one on brings in
+ * its interface, what coworkers know about it, and any automation it drives.
  */
 function FeaturesSettings() {
   const features = useFeatures();

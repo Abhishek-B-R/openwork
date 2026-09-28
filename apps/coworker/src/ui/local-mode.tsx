@@ -55,7 +55,7 @@ export function LocalModeScreen(props: LocalModeProps) {
 
       <footer className="window-no-drag flex shrink-0 items-center justify-between gap-4 border-t border-line/60 px-6 py-4 md:px-8">
         <span className="text-[11px] text-mist">{props.replay ? "Your team and conversations are right where you left them." : "You can change all of this later under OpenWork › AI models."}</span>
-        <Button variant="primary" onClick={onContinue} data-testid="local-mode-continue">{props.replay ? "Back to my team" : "Continue"}</Button>
+        <Button variant="primary" onClick={onContinue} data-testid="local-mode-continue">Continue</Button>
       </footer>
     </div>
   );

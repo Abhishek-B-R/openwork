@@ -1,8 +1,9 @@
 /**
- * Optional features. A new person starts with a small, calm app; each of these
- * is off until they turn it on in Settings → Features. Off means off
- * everywhere: the interface for it is gone, coworkers are not told about it
- * and cannot use its tools, and any automation it drives does not run.
+ * Optional features. Onboarding offers a small, calm app (Simple, every one of
+ * these off) or everything (Power user); after that each one is a switch in
+ * Settings → Features. Off means off everywhere: the interface for it is gone,
+ * coworkers are not told about it and cannot use its tools, and any automation
+ * it drives does not run.
  * Turning a feature off never deletes what it holds; turning it back on
  * brings it back as it was.
  */
@@ -53,8 +54,9 @@ export const DEFAULT_FEATURES: Features = { marketplace: false, notifications: f
 export const INTERFACE_FEATURES: readonly FeatureId[] = ["marketplace", "notifications"];
 
 /**
- * Simple is how everyone starts: every feature off. Advanced turns every
- * feature on. Anything in between, set one switch at a time, is Custom.
+ * Simple turns every feature off; it is also the default, until onboarding
+ * asks. Power user ("advanced") turns every feature on. Anything in between,
+ * set one switch at a time, is Custom.
  */
 export type FeatureProfile = "simple" | "advanced" | "custom";
 

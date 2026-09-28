@@ -395,6 +395,7 @@ test.skipIf(!enabled)(previewOnly ? "Coworker Fresh start fullscreen preview wit
   await waitFor(app, () => Boolean(document.querySelector('[data-testid="onboarding-replay"] [data-testid="onboarding-welcome"]')), { timeoutMs: 30_000, label: "read-only onboarding replay" });
   await clickCoworkerControl(app, { testId: "onboarding-replay-ai" });
   await clickCoworkerControl(app, { testId: "local-mode-continue" });
+  await clickCoworkerControl(app, { testId: "onboarding-experience-continue" });
   await settings();
   await clickCoworkerControl(app, { testId: "fresh-start-defaults" });
   await waitForText(app, "App defaults restored.");
@@ -649,6 +650,7 @@ test.skipIf(!enabled)(title, async ({ evidence }) => {
     );
   } else {
     await clickButton(app, "Continue");
+    await clickCoworkerControl(app, { testId: "onboarding-experience-continue" });
   }
   await waitFor(app, () => {
     const own = document.querySelector('[data-testid="onboarding-intents-own"]');

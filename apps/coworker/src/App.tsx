@@ -43,6 +43,7 @@ import type { PanelBounds } from "@/lib/panel-layout";
 /** The team rail: drag it narrower than a row can show and it folds to avatars. */
 const RAIL_BOUNDS: PanelBounds = { min: 220, max: 380, collapsedWidth: 88, collapseBelow: 170 };
 import { OnboardingWelcome } from "@/ui/onboarding";
+import { OnboardingExperience } from "@/ui/onboarding-experience";
 import { OnboardingIntents } from "@/ui/onboarding-intents";
 import { OnboardingTeam } from "@/ui/onboarding-team";
 import { completeOnboardingDraft, emptyOnboardingDraft, loadOnboardingDraft, onboardingDraftForContext, onboardingStepFor, resumeOnboardingDraft, saveOnboardingDraft, toggleIntent, type OnboardingDraft, type OnboardingStep } from "@/lib/onboarding-team";
@@ -271,8 +272,9 @@ export default function App() {
   const [activityMounted, setActivityMounted] = useState(false);
   const [activityGroupRequest, setActivityGroupRequest] = useState<{ id: number; groupId: string; eventId: string; onOpened?: () => Promise<void> } | null>(null);
   const inbox = useActivityInbox(Boolean(runtime) && !factoryResetOpen);
-  // A read-only tour, deliberately separate from first-run flags and persisted team drafts.
-  const [replayOnboarding, setReplayOnboarding] = useState<"welcome" | "ai" | null>(null);
+  // A tour that changes no account or team (its last step can switch Simple or Power user),
+  // deliberately separate from first-run flags and persisted team drafts.
+  const [replayOnboarding, setReplayOnboarding] = useState<"welcome" | "ai" | "experience" | null>(null);
   const [activityBySlug, setActivityBySlug] = useState<CoworkerActivitySnapshots>({});
   const [liveActivityBySlug, setLiveActivityBySlug] = useState<CoworkerActivitySnapshots>({});
   const [attentionBySlug, setAttentionBySlug] = useState<CoworkerActivitySnapshots>({});
@@ -345,7 +347,7 @@ export default function App() {
       const currentSession = sessionRef.current;
       const restored = onboardingDraftForContext(currentSession && !currentSession.userEmail ? emptyOnboardingDraft() : loadOnboardingDraft(window.sessionStorage), onboardingContext(currentSession));
       const resumed = resumeOnboardingDraft(restored, list.length > 0);
-      const saved: OnboardingDraft = currentSession && list.length === 0 && !resumed.completed && !onboardingStepFor(resumed) ? { ...resumed, step: "intents" } : resumed;
+      const saved: OnboardingDraft = currentSession && list.length === 0 && !resumed.completed && !onboardingStepFor(resumed) ? { ...resumed, step: "experience" } : resumed;
       const step = onboardingStepFor(saved);
       if (observation === runtimeObservation.current) applyRuntime(info);
       setBots(list);
@@ -564,7 +566,7 @@ export default function App() {
       const previous = onboardingDraftRef.current;
       const scoped = onboardingDraftForContext(next.userEmail ? previous : emptyOnboardingDraft(), onboardingContext(next));
       if (firstRun) {
-        updateOnboardingDraft({ ...scoped, step: "intents" });
+        updateOnboardingDraft({ ...scoped, step: "experience" });
         setOnboardingReady(false);
       } else updateOnboardingDraft(scoped);
       clearAccountPresentation();
@@ -1054,7 +1056,7 @@ export default function App() {
               onToggle={(id) => updateOnboardingDraft((current) => ({ ...current, intents: toggleIntent(current.intents, id), drafts: [] }))}
               onContinue={() => void proposeTeam()}
               onOwn={addOwnCoworker}
-              onBack={() => setOnboardingStep(session ? "welcome" : "local")}
+              onBack={() => setOnboardingStep("experience")}
             />
           </fieldset>
           {teamCatalogNotice}
@@ -1071,9 +1073,12 @@ export default function App() {
           onConnectAccount={() => setConnecting(true)}
           onRuntimeChanged={refreshRuntime}
           onBack={() => setOnboardingStep("welcome")}
-          onContinue={() => setOnboardingStep("intents")}
+          onContinue={() => setOnboardingStep("experience")}
         />
       );
+    }
+    if (onboardingStep === "experience") {
+      return <OnboardingExperience onBack={() => setOnboardingStep(session ? "welcome" : "local")} onContinue={() => setOnboardingStep("intents")} />;
     }
     return (
       <OnboardingWelcome

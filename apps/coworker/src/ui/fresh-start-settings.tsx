@@ -30,7 +30,7 @@ export function FreshStartSettings({ onReplay, onFactoryReset }: { onReplay: () 
     <p className="mt-2 text-sm leading-relaxed text-mist">Choose just the fresh start you need.</p>
     <div className="mt-6 divide-y divide-line rounded-2xl border border-line bg-panel/45">
       <div className="flex flex-wrap items-center justify-between gap-4 p-5">
-        <div className="min-w-[180px] flex-1"><h3 className="text-sm font-semibold text-snow">Replay onboarding</h3><p className="mt-1 text-xs leading-5 text-mist">Revisit the welcome and AI setup tour. Return to this team without changing your account or adding anyone.</p></div>
+        <div className="min-w-[180px] flex-1"><h3 className="text-sm font-semibold text-snow">Replay onboarding</h3><p className="mt-1 text-xs leading-5 text-mist">Revisit the welcome, the AI setup and the choice of Simple or Power user. Return to this team without changing your account or adding anyone.</p></div>
         <Button type="button" onClick={onReplay} disabled={restoring} data-testid="fresh-start-replay">Replay onboarding</Button>
       </div>
       <div className="flex flex-wrap items-center justify-between gap-4 p-5">

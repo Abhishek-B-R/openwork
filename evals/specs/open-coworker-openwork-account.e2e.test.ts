@@ -705,8 +705,13 @@ test.skipIf(!enabled)(title, { timeout: 900_000 }, async ({ evidence, skip }) =>
   );
   await clickButton(app, "Connect");
 
-  // The exchange happened against the mock Den and the account moved on to the team steps; this
-  // journey takes the blank Add screen instead of a proposed team.
+  // The exchange happened against the mock Den and the account moved on to the experience and team
+  // steps; this journey keeps Simple and takes the blank Add screen instead of a proposed team.
+  await waitFor(app, () => {
+    const next = document.querySelector<HTMLElement>('[data-testid="onboarding-experience-continue"]');
+    next?.click();
+    return Boolean(next);
+  }, { timeoutMs: 120_000, label: "the experience step" });
   await waitFor(app, () => {
     const own = document.querySelector('[data-testid="onboarding-intents-own"]');
     if (!(own instanceof HTMLElement)) return false;
