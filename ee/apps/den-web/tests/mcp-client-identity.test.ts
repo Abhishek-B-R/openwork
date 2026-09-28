@@ -67,7 +67,7 @@ describe("unverified application warning", () => {
   });
 
   test("recognizes only the exact HTTPS CIMD domain", () => {
-    for (const id of [null, "dcr-client", "http://claude.ai/oauth/client", "https://claude.ai/", "https://claude.ai.evil.example/client", "https://sub.claude.ai/client", "https://claude.ai@evil.example/client", "https://evil.example@claude.ai/client", "https://claude.ai:8443/client", "https://claude.ai/client#fragment", "https://chatgpt.com.evil.example/oauth/client.json", "https://www.chatgpt.com/oauth/client.json", "https://vscode.dev.evil.example/oauth/client-metadata.json", "https://insiders.vscode.dev/oauth/client-metadata.json", "https://evil.example/vscode.dev/oauth/client-metadata.json"]) {
+    for (const id of [null, "dcr-client", "http://claude.ai/oauth/client", "https://claude.ai/", "https://claude.ai.evil.example/client", "https://sub.claude.ai/client", "https://claude.ai@evil.example/client", "https://evil.example@claude.ai/client", "https://claude.ai:8443/client", "https://claude.ai/client#fragment", "https://chatgpt.com.evil.example/oauth/client.json", "https://www.chatgpt.com/oauth/client.json", "https://vscode.dev.evil.example/oauth/client-metadata.json", "https://insiders.vscode.dev/oauth/client-metadata.json", "https://evil.example/vscode.dev/oauth/client-metadata.json", "https://claude.ai/share/client.json", "https://chatgpt.com/g/client.json", "https://vscode.dev/client-metadata.json", "https://claude.ai/oauth", "https://claude.ai/OAuth/client.json", "https://claude.ai/oauth/../share/client.json", "https://claude.ai/oauth/%2e%2e/share/client.json"]) {
       expect(knownMcpCimdDomain(id)).toBeNull();
     }
   });
@@ -80,7 +80,7 @@ describe("unverified application warning", () => {
     expect(markup).toContain("claude.ai");
     expect(markup).not.toContain("Unverified application");
     expect(renderToStaticMarkup(createElement(McpReturnLine, { redirect, client }))).toContain('data-testid="mcp-loopback-warning"');
-    for (const changed of [{ ...client, metadataResolved: false }, { ...client, loaded: false }, { ...client, clientId: "dcr-client" }, { ...client, clientId: "https://unknown.example/client" }]) {
+    for (const changed of [{ ...client, metadataResolved: false }, { ...client, loaded: false }, { ...client, clientId: "dcr-client" }, { ...client, clientId: "https://unknown.example/client" }, { ...client, clientId: "https://claude.ai/share/client.json" }]) {
       expect(renderToStaticMarkup(createElement(McpUnverifiedAppWarning, { redirect: describeMcpRedirect("https://claude.ai/api/mcp/auth_callback"), client: changed }))).toContain("Unverified application");
     }
   });
