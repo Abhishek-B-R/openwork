@@ -12,6 +12,16 @@ import { readdir, readFile } from 'node:fs/promises';
 // journey-ci.test.mjs checks these against what each spec and world guards.
 const PACKAGED_BINARY = { env: ['OPENWORK_EVAL_ELECTRON_BINARY'] };
 const definitions = {
+  'opencode-v2-context-activity.e2e.test.ts': {
+    cases: [{ id: 'V2-CONTEXT-ACTIVITY', engines: ['v2'], optIns: ['OPENWORK_EVAL_E2E_TESTS'], example: { placement: '--local', engine: 'v2' } }],
+  },
+  'edit-running-message.e2e.test.ts': {
+    name: 'Replace a running message without queueing the edit', placement: 'local',
+    cases: [{ id: 'EDIT-BUSY', engines: ['v1', 'v2'], optIns: ['OPENWORK_EVAL_E2E_TESTS'], example: { placement: '--local', engine: 'v2' } }],
+  },
+  'opencode-v2-session-home.e2e.test.ts': {
+    cases: ['HOME-01', 'HOME-02', 'HOME-03'].map(id => ({ id, engines: ['v2'], optIns: ['OPENWORK_EVAL_E2E_TESTS'], example: { placement: '--local', engine: 'v2' } })),
+  },
   'gateway-usage-policy.e2e.test.ts': { name: 'Request and approve a Gateway usage extension', placement: 'local' },
   'composer-model-picker-no-subscribe-promo.e2e.test.ts': {
     cases: [{ id: 'MODEL-01', engines: ['v2'], optIns: ['OPENWORK_EVAL_E2E_TESTS'], example: { placement: '--local', engine: 'v2' } }],
@@ -40,11 +50,6 @@ const definitions = {
   // Drives a real AppKit window through the native Computer Use helper; only a local macOS host can run it.
   'computer-use-window-scope.e2e.test.ts': { placement: 'local', needs: { platform: 'darwin' } },
   'org-team-lifecycle-critical-path.e2e.test.ts': { name: 'Set up a working two-person team', critical: true, model: 'live' },
-  'desktop-policy-restricted-mode.e2e.test.ts': {
-    // The rollback case severs local child IPC and faults its loopback transport.
-    name: 'Apply organization and team permissions', critical: true, placement: 'local',
-    cases: [{ id: 'POLICY-ROLLBACK', engines: ['v1', 'v2'], optIns: ['OPENWORK_EVAL_E2E_TESTS'], example: { placement: '--local', engine: 'v1' } }],
-  },
   'cross-server-handoff-atomic-commit.e2e.test.ts': { name: 'Switch servers and recover enrollment', critical: true, placement: 'local' },
   // Flips sso_connection directly in the testkit database; Daytona Den exposes no database.
   'scim-okta-lifecycle.e2e.test.ts': { name: 'Provision members from an Okta-shaped SCIM client', placement: 'local' },
@@ -82,16 +87,19 @@ const definitions = {
       { id: 'APP-DRAFT-ROUTING', engines: ['v1', 'v2'], optIns: ['OPENWORK_EVAL_E2E_TESTS'], example: { placement: '--local', engine: 'v1' } },
     ],
   },
-  // Its Cloud endpoint is an in-process loopback MCP fixture reachable only from the spec process.
+  'engine-live-chat.e2e.test.ts': { name: 'Use real models for conversations, skills and connections', placement: 'local', model: 'live' },
+  // Native workspace skill tests use local watcher and loopback model fixtures.
   'opencode-v2-skill-jit.e2e.test.ts': {
-    name: 'Use Cloud and workspace skills just in time', placement: 'local',
+    name: 'Use workspace skills just in time', placement: 'local',
     cases: [
       { id: 'SKILL-ATTACH', engines: ['v1', 'v2'], optIns: ['OPENWORK_EVAL_E2E_TESTS'], example: { placement: '--local', engine: 'v2' } },
       { id: 'SKILL-MISSING', engines: ['v2'], optIns: ['OPENWORK_EVAL_E2E_TESTS'], example: { placement: '--local', engine: 'v2' } },
-      { id: 'SKILL-CLOUD-01', engines: ['v2'], optIns: ['OPENWORK_EVAL_E2E_TESTS'], example: { placement: '--local', engine: 'v2' } },
-      { id: 'SKILL-CLOUD-02', engines: ['v2'], optIns: ['OPENWORK_EVAL_E2E_TESTS'], example: { placement: '--local', engine: 'v2' } },
       { id: 'SKILL-NATIVE-01', engines: ['v2'], optIns: ['OPENWORK_EVAL_E2E_TESTS'], example: { placement: '--local', engine: 'v2' } },
     ],
+  },
+  'opencode-v2-reads-during-mcp-startup.e2e.test.ts': {
+    name: 'Keep the conversation responsive while a connection starts', placement: 'local',
+    cases: [{ id: 'UPKEEP-01', engines: ['v2'], optIns: ['OPENWORK_EVAL_E2E_TESTS'], example: { placement: '--local', engine: 'v2' } }],
   },
 };
 

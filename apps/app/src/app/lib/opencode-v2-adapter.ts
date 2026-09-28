@@ -19,8 +19,9 @@ import type {
 import { createClient, createDesktopFetch, type FieldsResult } from "./opencode";
 import type { OpenworkSessionHistory } from "./openwork-server";
 import { isDesktopRuntime } from "./runtime-env";
-import type { OpencodeEvent } from "../types";
+import type { McpStatusMap, OpencodeEvent } from "../types";
 import { normalizeDirectoryPath } from "../utils";
+import { dispatchProviderCatalogChanged } from "./provider-events";
 
 type RequestOptions = {
   signal?: AbortSignal;
@@ -50,7 +51,11 @@ type PromptPart = {
 };
 
 function selectedSkill(part: PromptPart): Record<string, unknown> | null {
-  return part.type === "text" && part.synthetic === true ? readRecord(part.metadata, "openworkSelectedSkill") : null;
+  const selection = part.type === "text" && part.synthetic === true ? readRecord(part.metadata, "openworkSelectedSkill") : null;
+  // Older drafts marked remote capabilities as native attachments. Preserve
+  // their Connect instruction instead of resolving them in the local registry.
+  const id = readString(selection, "id");
+  return id && /^(?:skill|plugin):/.test(id) ? null : selection;
 }
 
 /** The exact native prompt body, also used to correlate text-only user acknowledgements. */
@@ -374,11 +379,13 @@ function mapV2Session(value: unknown, directory: string | undefined, eventCreate
   const updated = readNumber(time, "updated") ?? readNumber(source, "updated") ?? created;
   const archived = readNumber(time, "archived");
   const parentID = readString(source, "parentID");
+  const revert = readRecord(source, "revert");
+  const revertMessageID = revert && readString(revert, "messageID");
   const mapped: Session = {
     id,
     slug: readString(source, "slug") ?? id,
     projectID: readString(source, "projectID") ?? "v2",
-    directory: readString(source, "directory") ?? readString(location, "directory") ?? directory ?? "",
+    directory: readString(source, "openworkHomeDirectory") ?? readString(source, "directory") ?? readString(location, "directory") ?? directory ?? "",
     // Keep native untitled sessions eligible for compatibility title recovery.
     title: readString(source, "title") || `New session - ${new Date(created).toISOString()}`,
     version: readString(source, "version") ?? "v2",
@@ -388,6 +395,7 @@ function mapV2Session(value: unknown, directory: string | undefined, eventCreate
       ...(archived === undefined ? {} : { archived }),
     },
     ...(parentID ? { parentID } : {}),
+    ...(revertMessageID ? { revert: { messageID: revertMessageID } } : {}),
   };
   return mapped;
 }
@@ -1050,6 +1058,15 @@ export function translateV2Event(
   const properties = eventProperties(value);
   const sessionID = readSessionID(properties);
 
+  if (type === "session.moved") {
+    // The server keeps this stream attached to the conversation's home while
+    // routing native operations to its current working directory.
+    const home = readString(readRecord(value, "location") ?? {}, "directory");
+    return sessionID && home ? [{ type: "session.updated", properties: {
+      info: { id: sessionID, directory: home },
+    } }] : null;
+  }
+
   if (type === "session.inbox.enqueued") {
     const messageID = readString(properties, "inboxID");
     const item = readRecord(properties, "item");
@@ -1386,6 +1403,27 @@ export function translateV2Event(
     return [{ type: "session.updated", properties: { info: { id: sessionID, title } } }];
   }
 
+  if (type === "session.revert.staged") {
+    const revert = readRecord(properties, "revert");
+    const messageID = revert && readString(revert, "messageID");
+    return sessionID && messageID
+      ? [{ type: "session.updated", properties: { info: { id: sessionID, revert: { messageID } } } }]
+      : null;
+  }
+
+  if (type === "session.revert.committed") {
+    const messageID = readString(properties, "to");
+    if (!sessionID || !messageID) return null;
+    return [
+      { type: "session.history.truncated", properties: { sessionID, messageID } },
+      { type: "session.updated", properties: { info: { id: sessionID, revert: undefined } } },
+    ];
+  }
+
+  if (type === "session.revert.cleared") {
+    return sessionID ? [{ type: "session.updated", properties: { info: { id: sessionID, revert: undefined } } }] : null;
+  }
+
   if (type === "session.deleted") {
     const info = mapV2Session(properties, readString(readRecord(value, "location") ?? {}, "directory"));
     const deletedSessionID = sessionID || info?.id || "";
@@ -1411,6 +1449,7 @@ function translateV2Events(
   fetchSession: (sessionID: string, signal: AbortSignal) => Promise<Session | null>,
   taskSessions: TaskSessionAssociations,
   directory?: string,
+  onCatalogChanged?: (directory: string | undefined) => void,
 ): AsyncGenerator<OpencodeEvent> {
   const reader = response.body?.getReader();
   const decoder = new TextDecoder();
@@ -1511,6 +1550,10 @@ function translateV2Events(
           }
           const eventDirectory = isRecord(event) ? readString(readRecord(event, "location") ?? {}, "directory") : undefined;
           if (directory && (!eventDirectory || normalizeDirectoryPath(directory) !== normalizeDirectoryPath(eventDirectory))) continue;
+          if (isRecord(event) && event.type === "catalog.updated") {
+            onCatalogChanged?.(eventDirectory);
+            continue;
+          }
           if (isRecord(event) && event.type === "session.forked") {
             const sessionID = readSessionID(eventProperties(event));
             if (!sessionID || discoveredForks.has(sessionID) || lookups.has(sessionID)) continue;
@@ -1591,6 +1634,28 @@ function failedResult<T>(transport: TransportResult): FieldsResult<T> {
   };
 }
 
+/**
+ * Map the native v2 `/api/mcp` catalog (`[{ name, status: { status, error? } }]`)
+ * onto the v1 name-keyed status map the rest of the app consumes. `pending`
+ * servers are omitted so callers treat them as not-yet-known instead of failed.
+ */
+export function mapV2McpStatuses(payload: unknown): McpStatusMap | null {
+  const entries = responseData(payload);
+  if (!Array.isArray(entries)) return null;
+  const statuses: McpStatusMap = {};
+  for (const entry of entries) {
+    const name = readString(entry, "name");
+    const detail = isRecord(entry) ? entry.status : undefined;
+    const status = readString(detail, "status");
+    if (!name || !status) continue;
+    const error = readString(detail, "error") ?? "MCP connection failed";
+    if (status === "connected" || status === "disabled" || status === "needs_auth") statuses[name] = { status };
+    else if (status === "failed" || status === "needs_client_registration") statuses[name] = { status, error };
+    else if (status !== "pending") statuses[name] = { status: "failed", error: `Unknown MCP status: ${status}` };
+  }
+  return statuses;
+}
+
 function localResult<T>(baseUrl: string, path: string, data: T): FieldsResult<T> {
   return {
     data,
@@ -1617,7 +1682,7 @@ export function isOpencodeV2BaseUrl(baseUrl: string): boolean {
 
 const v2Clients = new WeakSet<ReturnType<typeof createClient>>();
 
-export function isOpencodeV2Client(client: ReturnType<typeof createClient>): boolean {
+export function isOpencodeV2Client(client: ReturnType<typeof createClient>): client is OpencodeV2Client {
   return v2Clients.has(client);
 }
 
@@ -1751,13 +1816,15 @@ export function createClientV2(
   };
 
   const listQuestions = async (
-    _parameters: DirectoryParameters = {}, options?: RequestOptions,
+    parameters: DirectoryParameters & { sessionID?: string } = {}, options?: RequestOptions,
   ): Promise<FieldsResult<QuestionRequest[]>> => {
-    const result = await request("GET", "/api/form/request", undefined, options?.signal);
+    const path = parameters.sessionID
+      ? `/api/session/${encodeURIComponent(parameters.sessionID)}/form` : "/api/form/request";
+    const result = await request("GET", path, undefined, options?.signal);
     if (!result.response.ok) return failedResult(result);
     const questions = responseItems(result.payload).flatMap((item) => {
       const question = mapV2Question(item);
-      if (!question) return [];
+      if (!question || (parameters.sessionID && question.request.sessionID !== parameters.sessionID)) return [];
       questionFormsByID.set(question.request.id, question);
       return [question.request];
     });
@@ -1765,12 +1832,23 @@ export function createClientV2(
   };
 
   const settleQuestion = async (
-    parameters: DirectoryParameters & { requestID: string; answers?: string[][] },
+    parameters: DirectoryParameters & { requestID: string; sessionID?: string; answers?: string[][] },
     options?: RequestOptions,
   ): Promise<FieldsResult<boolean>> => {
-    // SSE and interaction clients have separate lifetimes. A question received
-    // live must also be answerable without having appeared in the initial list.
-    if (!questionFormsByID.has(parameters.requestID)) {
+    // The UI knows the owning session even when this interaction client never
+    // listed the live form. Never make its reply depend on other conversations.
+    const cached = questionFormsByID.get(parameters.requestID);
+    if (parameters.sessionID && (!cached || cached.request.sessionID !== parameters.sessionID)) {
+      const result = await request("GET",
+        `/api/session/${encodeURIComponent(parameters.sessionID)}/form/${encodeURIComponent(parameters.requestID)}`,
+        undefined, options?.signal);
+      if (!result.response.ok) return failedResult(result);
+      const question = mapV2Question(responseData(result.payload));
+      if (!question || question.request.id !== parameters.requestID || question.request.sessionID !== parameters.sessionID) {
+        return failedResult({ ...result, payload: { name: "InvalidV2QuestionResponse" } });
+      }
+      questionFormsByID.set(parameters.requestID, question);
+    } else if (!cached) {
       const listed = await listQuestions(parameters, options);
       if (listed.data === undefined) return { error: listed.error, request: listed.request, response: listed.response };
     }
@@ -1895,7 +1973,9 @@ export function createClientV2(
         const items = responseData(result.payload);
         const hasCursor = isRecord(result.payload) && "cursor" in result.payload;
         const cursor = readRecord(result.payload, "cursor");
-        const next = cursor?.next;
+        // The native binary serializes an exhausted page as next:null, while
+        // the JS server may omit next. Both are terminal cursor values.
+        const next = cursor?.next ?? undefined;
         if (!Array.isArray(items)
           || (hasCursor && (!cursor || (next !== undefined && (typeof next !== "string" || !next))))
           || (hasCursor && Array.isArray(items) && (items.length > 0) !== (next !== undefined))
@@ -2060,9 +2140,36 @@ export function createClientV2(
       );
       return result.response.ok ? successfulResult(result, true) : failedResult(result);
     },
-    fork: async (): Promise<FieldsResult<Session>> => unsupportedResult(baseUrl, "session.fork"),
-    revert: async (): Promise<FieldsResult<Session>> => unsupportedResult(baseUrl, "session.revert"),
-    unrevert: async (): Promise<FieldsResult<Session>> => unsupportedResult(baseUrl, "session.unrevert"),
+    fork: async (
+      parameters: SessionParameters & { messageID?: string },
+      options?: RequestOptions,
+    ): Promise<FieldsResult<Session>> => {
+      // Both adapters exclude the supplied boundary. Omitting it copies the
+      // complete conversation; native v2 calls this a "through" boundary.
+      const result = await request("POST", `/api/session/${encodeURIComponent(parameters.sessionID)}/fork`, {
+        boundary: parameters.messageID ? { type: "before", messageID: parameters.messageID } : { type: "through" },
+      }, options?.signal);
+      if (!result.response.ok) return failedResult(result);
+      const mapped = mapV2Session(result.payload, directory);
+      return mapped ? successfulResult(result, mapped) : failedResult({ ...result, payload: { name: "InvalidV2SessionResponse" } });
+    },
+    revert: async (
+      parameters: SessionParameters & { messageID: string; partID?: string },
+      options?: RequestOptions,
+    ): Promise<FieldsResult<Session>> => {
+      if (parameters.partID) return unsupportedResult(baseUrl, "session.revert.part");
+      const result = await request("POST", `/api/session/${encodeURIComponent(parameters.sessionID)}/revert/stage`, {
+        messageID: parameters.messageID, files: true,
+      }, options?.signal);
+      return result.response.ok ? getSession(parameters, options) : failedResult(result);
+    },
+    unrevert: async (
+      parameters: SessionParameters,
+      options?: RequestOptions,
+    ): Promise<FieldsResult<Session>> => {
+      const result = await request("POST", `/api/session/${encodeURIComponent(parameters.sessionID)}/revert/clear`, undefined, options?.signal);
+      return result.response.ok ? getSession(parameters, options) : failedResult(result);
+    },
     summarize: async (): Promise<FieldsResult<boolean>> => unsupportedResult(baseUrl, "session.summarize"),
     shell: async (): Promise<FieldsResult<Record<string, never>>> => unsupportedResult(baseUrl, "session.shell"),
     command: async (): Promise<FieldsResult<Record<string, never>>> => unsupportedResult(baseUrl, "session.command"),
@@ -2160,7 +2267,16 @@ export function createClientV2(
       files: async (): Promise<FieldsResult<never[]>> => localResult(baseUrl, "/api/fs/find", []),
     },
     mcp: {
-      status: async (): Promise<FieldsResult<Record<string, never>>> => localResult(baseUrl, "/api/mcp", {}),
+      status: async (
+        _parameters: DirectoryParameters = {},
+        options?: RequestOptions,
+      ): Promise<FieldsResult<McpStatusMap>> => {
+        const result = await request("GET", "/api/mcp", undefined, options?.signal);
+        if (!result.response.ok) return failedResult(result);
+        const statuses = mapV2McpStatuses(result.payload);
+        if (!statuses) return failedResult({ ...result, payload: { name: "InvalidV2McpCatalogResponse" } });
+        return successfulResult(result, statuses);
+      },
     },
     event: {
       subscribe: async (
@@ -2183,7 +2299,7 @@ export function createClientV2(
           stream: translateV2Events(response, options?.signal, async (sessionID, signal) => {
             const result = await request("GET", `/api/session/${encodeURIComponent(sessionID)}`, undefined, signal);
             return result.response.ok ? mapV2Session(result.payload, undefined) : null;
-          }, taskSessions, directory),
+          }, taskSessions, directory, (eventDirectory) => dispatchProviderCatalogChanged({ baseUrl, directory: eventDirectory ?? directory })),
         };
       },
     },
@@ -2202,7 +2318,12 @@ export function createClientV2(
   Object.assign(compatibilityClient.mcp, adapter.mcp);
   Object.assign(compatibilityClient.event, adapter.event);
   v2Clients.add(compatibilityClient);
-  return Object.assign(compatibilityClient, { listSessionsPage: session.list, listMessagesPage: session.messages });
+  return Object.assign(compatibilityClient, {
+    listSessionsPage: session.list, listMessagesPage: session.messages,
+    listSessionQuestions: (parameters: SessionParameters, options?: RequestOptions) => listQuestions(parameters, options),
+    replySessionQuestion: (parameters: SessionParameters & { requestID: string; answers: string[][] }, options?: RequestOptions) =>
+      settleQuestion(parameters, options),
+  });
 }
 
 export type OpencodeV2Client = ReturnType<typeof createClientV2>;

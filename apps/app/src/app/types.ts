@@ -190,6 +190,7 @@ export const SETTINGS_TAB_VALUES = [
   "preferences",
   "permissions",
   "cloud-account",
+  "usage",
   "connect",
   "cloud-marketplaces",
   "cloud-providers",
@@ -198,6 +199,7 @@ export const SETTINGS_TAB_VALUES = [
   "environment",
   "advanced",
   "appearance",
+  "shortcuts",
   "updates",
   "recovery",
   "debug",
@@ -437,6 +439,7 @@ export type ModelOption = {
   isRecommended?: boolean;
   /** "cloud" for org-managed providers (lpr_*), undefined for local. */
   source?: "cloud";
+  gatewayAuthorization?: { cloudProviderId: string; credentialSetId: string };
 };
 
 export type SelectedSessionSnapshot = {

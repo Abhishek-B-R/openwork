@@ -1,109 +1,96 @@
 ---
 name: open-a-pr
-description: Open a PR, write or rewrite a PR description, "the PR body is too long", update the PR body after evidence lands, or review whether a PR description is readable. Use whenever a PR is created or its body is edited.
+description: Open a PR, write or rewrite a PR description, "the PR body is too long", or check whether a PR description is readable. Use whenever a PR is created or its body is edited.
 ---
 
 # Skill: Open a PR
 
-A PR body is read by a human in thirty seconds, on a phone, before the diff.
-It answers four questions and nothing else. Everything a reviewer might want
-later lives in the commit messages, the spec, and the evidence report; the PR
-body links to them, it does not repeat them.
+A PR body is read in thirty seconds, before the diff. It answers a few
+questions and stops. Everything else lives in the commit messages, the spec,
+and the report CI posts.
 
 ## The shape
 
-`.github/pull_request_template.md` is the template. Fill every heading; add
-none.
+`.github/pull_request_template.md`. Fill every heading; add none. Under ~250
+words total.
 
 ```markdown
 ## What is this about?
-One or two sentences. Name the surface and the change in plain words.
+One or two sentences, plain words: the surface and the change.
 
 ## What problem does it solve?
-The pain a person felt, or the risk we carried. Not the mechanism.
+The pain a person felt or the risk we carried. Not the mechanism.
 
 ## What was the situation before?
-What the person saw or could not do. Concrete, so the reviewer can
-recognise it in the "before" screenshot.
+What the person saw or could not do. Concrete enough to recognise in the
+"before" screenshot.
+
+## How is this implemented?
+Two to five bullets for the reviewer: the main pieces that changed and how
+they connect, so the diff reads in order. File paths, tool names, routes and
+flags go here, not in the sections above.
+
+## What else changed?
+Anything in the diff that is not part of the main task: drive-by fixes,
+refactors, renames, dependency bumps, test or tooling tweaks. One bullet
+each, so the reviewer is not surprised by them. `none` if nothing.
+
+## Release note
+One sentence for people who use OpenWork, or `none`.
 
 ## Evidence
-- before → after, one line per proof, linking the report
+The spec that proves it, and in one line what its before → after shows.
 ```
 
-Budget: the whole body under ~200 words. If you need more, you are explaining
-the fix rather than the change. Move that text to the commit message.
+The release note feeds the changelog agent directly
+(`scripts/release/collect-release-prs.mjs`). Write what a user can now do or
+no longer hits, in words they see in the product: "Connecting an account in
+chat no longer gets stuck on 'Checking connection request…'." Write `none`
+for CI, tests, review tooling, or refactors nobody will notice; the PR is
+then left out of the changelog. A change that removes or alters something
+users rely on always needs a note.
 
-Title: conventional commit, imperative, under 70 characters
-(`fix(app): preserve background streaming across conversation returns`).
+Title: conventional commit, imperative, under 70 characters.
 
-## Evidence points, it does not restate
+## Evidence
 
-The evidence is the spec and the report the publisher generates from it. The
-report's headings and captions are the spec's title, `before:` / `after:`
-step names and assertion claims (`write-a-spec` is the contract). The PR body
-names the spec and says in one line what the reader will see:
+CI runs every spec the PR changes on the PR head and posts one sticky
+`<!-- test-evidence -->` comment linking the report. You never run the
+publisher or attach screenshots by hand. The body names the spec and says
+what the reader will see; it does not copy verdicts, SHAs, screenshots or
+links, which go stale.
 
 ```markdown
 ## Evidence
 `evals/specs/browser-tabs-owned-by-thread.e2e.test.ts` — before: the toolbar
 shows Suspend; after: it does not, and a page still opens and can be used.
-Report and verdict: the test-evidence comment on this PR.
 ```
 
-Rules:
-
-- The `before:` here and "What was the situation before?" describe the same
+- The `before:` here and "What was the situation before?" are the same
   moment. If they disagree, fix one.
-- Verdict, head SHA and screenshots live in the sticky comment and the report.
-  Do not copy them into the body; they go stale when the head moves.
-- If the evidence is red, say so in one sentence and why ("Evidence is red
-  before it reaches the new assertions: the approval button is not found").
-  Never soften it and never omit it.
-- Changes with no user-visible behaviour (CI scripts, pure functions) list the
-  command and its exit: `node --test .github/scripts/pr-proof.test.mjs — 6 passed`.
-  One line per check. "No E2E; unit-tested" is a valid line.
-- UI changes cite the DESIGN.md rule ids in one trailing line:
-  `Design: P3, S4, C6`.
-- If the report is hard to read, the fix is in the spec, not in the PR body.
+- No spec changed? Say why in one line: `No E2E; unit-tested` or
+  `node --test .github/scripts/pr-proof.test.mjs — 6 passed`. If no evidence
+  comment appears, that is why; do not run a spec locally and paste its output.
+- Red evidence needs no sentence in the body: CI's comment says Failed on
+  that SHA and flips on its own when the head goes green. Fix the spec or the
+  code; do not narrate the verdict.
+- Evidence binds to a commit. After a rebase or cherry-pick, wait for CI to
+  rerun on the new head; do not cite the old comment.
+- UI changes: one trailing line `Design: P3, S4, C6` (DESIGN.md rule ids).
 
 ## Leave out
 
-These were common in past PRs and none of them helped a reviewer decide:
+Root-cause narrative (commit message). Suite counts and CI matrices (the
+Required verification check). Image digests, worktree setup, credential
+notes (the spec's world). Other PRs' failures (an issue). Risk, Rollback,
+Out-of-scope boilerplate. Caveats about your caveats.
 
-- Root-cause narrative, GC timers, cache internals → commit message body.
-- CI status matrices, "N passed / 0 failed" for every suite → the Required
-  verification check already reports this on the head.
-- Pinned image digests, worktree setup, credential injection notes → the
-  spec's world, or the report.
-- Failures observed in other PRs → open an issue and link it in one line if
-  it blocks this PR; otherwise nothing.
-- Risk / Rollback / Out of scope boilerplate. If a real risk exists, it is a
-  sentence under "What is this about?".
-- Restating that screenshots are not proof, that flake is not certified, that
-  coverage is not v2. The publisher's verdict carries those caveats.
-- Qualifications of your own qualifications.
-
-## Create or update
+## Do it
 
 ```bash
 gh pr create --base dev --title "<type>(<scope>): <change>" --body-file /tmp/pr-body.md
-gh pr edit <n> --body-file /tmp/pr-body.md     # after evidence lands or the head moves
+gh pr edit <n> --body-file /tmp/pr-body.md
 ```
 
-Write the body to a file first and read it back as the reviewer would. If any
-section makes you scroll, cut it.
-
-The publisher posts and updates the sticky test-evidence comment on its own;
-the body does not need to change when evidence lands or the head moves.
-
-## Reviewing a body
-
-Before reading the diff, check the body in this order and ask for a rewrite
-if any fails; the fix is cheaper than a misread review:
-
-1. Can you say in one sentence what changes for a person using the product?
-2. Does "situation before" match the `before:` caption in the report?
-3. Open the report from the sticky comment: do its captions tell the same
-   before → after story as the body, on the current head SHA?
-4. Is anything in the body that you would not need to approve? Ask for it to
-   be removed, not moved into `<details>`.
+Write the file first and read it as the reviewer would. If a section makes
+you scroll, cut it.

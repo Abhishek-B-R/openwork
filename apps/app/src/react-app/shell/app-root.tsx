@@ -1,5 +1,4 @@
 import { ComputerUseControls } from "../domains/session/surface/computer-use-controls";
-import { desktopSigninRequired } from "@openwork/types/den/desktop-policies";
 /** @jsxImportSource react */
 
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
@@ -76,8 +75,11 @@ const subscribeToDenBootstrap = (onStoreChange: () => void) => {
 /**
  * Forced-signin gate ported from the Solid shell.
  *
- * Desktop policy enforcement is suspended, so persisted bootstrap sign-in
- * requirements cannot hold local work at `/signin`. Web sign-in still applies.
+ * When the desktop bootstrap config has `requireSignin: true` (always the case
+ * for enterprise and cloud builds, and opt-in for public builds through
+ * `desktop-bootstrap.json`), the UI is held at `/signin` until the user
+ * authenticates with Den. This is a build property, not a desktop policy, so
+ * it is independent of DESKTOP_POLICY_ENFORCEMENT_ENABLED.
  * When sign-in is NOT required, we
  * never let users land on `/signin` — redirect them to `/session` instead.
  *
@@ -95,11 +97,13 @@ function DenSigninGate({ children }: DenSigninGateProps) {
     readDenBootstrapSnapshot,
     readDenBootstrapSnapshot,
   );
-  const requireSignin = desktopSigninRequired(bootstrap.requireSignin, isDesktopRuntime());
+  // Enterprise and cloud builds always persist requireSignin: true; the
+  // bootstrap file can only raise it (apps/desktop/electron/workspace-store.mjs).
+  const requireSignin = bootstrap.requireSignin;
   const path = location.pathname.toLowerCase();
   const onSignin = path === "/signin" || path.startsWith("/signin/");
   const onOnboarding = path === "/onboarding" || path.startsWith("/onboarding/");
-  const hasPreparedBootstrap = Boolean(bootstrap.prepared) && (!isDesktopRuntime() || requireSignin);
+  const hasPreparedBootstrap = Boolean(bootstrap.prepared);
   const redirectingPreparedWorkspace =
     denAuth.status !== "checking" &&
     !requireSignin &&
@@ -243,14 +247,19 @@ function DenAuthControlActions() {
     args: [
       { name: "grant", type: "string", required: true, description: "The raw handoff grant string." },
       { name: "baseUrl", type: "string", required: false, description: "Optional Den base URL." },
+      { name: "apiBaseUrl", type: "string", required: false, description: "Optional Den API URL for a separately hosted API." },
     ],
     execute: async (args) => {
-      const { grant, baseUrl: argBaseUrl } = (args ?? {}) as { grant?: string; baseUrl?: string };
+      const value = args && typeof args === "object" ? args : {};
+      const grant = "grant" in value && typeof value.grant === "string" ? value.grant : undefined;
+      const argBaseUrl = "baseUrl" in value && typeof value.baseUrl === "string" ? value.baseUrl : undefined;
+      const apiBaseUrl = "apiBaseUrl" in value && typeof value.apiBaseUrl === "string" ? value.apiBaseUrl : undefined;
       if (!grant?.trim()) return { ok: false, error: "grant is required" };
       const settings = readDenSettings();
       const targetBaseUrl = argBaseUrl?.trim() || settings.baseUrl;
       const result = await exchangeHandoffAndSignIn(grant.trim(), {
         baseUrl: targetBaseUrl,
+        apiBaseUrl,
         // Automation surface: commit the exchange-reported org directly; a
         // UI chooser would strand a headless driver.
         desktopInitiated: false,
