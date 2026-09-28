@@ -23,6 +23,7 @@ const test = spec.world(async (seed, { place }) => {
 test("private self-host signup admits the bootstrap owner and invited outsider, but not an uninvited outsider", async ({ world, user, probe, seed, step }) => {
   let orgId = "";
   await step("the configured bootstrap administrator auto-joins without an invitation", async () => {
+    await user.navigate(world.den.ref.webUrl);
     const verified = await seed.api(world.anonymous, "/v1/auth/bootstrap/verify", { method: "POST", body: JSON.stringify({ email: world.owner.email, code: world.bootstrapCode }), signal: AbortSignal.timeout(15_000) });
     expect(verified.response.status, verified.text).toBe(200);
     const grant = text(record(verified.body).grant);
@@ -58,8 +59,8 @@ test("private self-host signup admits the bootstrap owner and invited outsider, 
     const ownerBefore = membersFor(await witness.org(orgId), world.owner.email);
     await user.navigate(invite.link);
     await user.see({ text: world.outsider.email }, { timeoutMs: 90_000 });
-    await user.type({ role: "textbox", label: "Name" }, world.outsider.name);
-    await user.type({ role: "textbox", label: "Password" }, world.outsider.password);
+    await user.type({ role: "textbox", label: /^name$/i }, world.outsider.name);
+    await user.type({ role: "textbox", label: /^password$/i }, world.outsider.password);
     await user.click({ role: "button", label: "Create account" });
     const org = await probe.eventually(() => witness.org(orgId), { within: 30_000, label: "invited outsider joins the private workspace", until: (value) => membersFor(value, world.outsider.email).length === 1 });
     expect(membersFor(org, world.outsider.email)).toEqual([expect.objectContaining({ role: "member" })]);
@@ -68,7 +69,7 @@ test("private self-host signup admits the bootstrap owner and invited outsider, 
     expect(invitationsFor(org, world.outsider.email).filter((entry) => entry.status === "pending")).toEqual([]);
     expect(membersFor(org, world.owner.email)).toEqual(ownerBefore);
     expect(membersFor(org, world.rejected.email)).toEqual([]);
-    await user.notSee({ role: "textbox", label: "Verification code" });
+    await user.notSee({ role: "textbox", label: /^verification code$/i });
     await user.reload();
     expect(membersFor(await witness.org(orgId), world.outsider.email)).toHaveLength(1);
     const member = await witness.sessionFor(world.outsider);

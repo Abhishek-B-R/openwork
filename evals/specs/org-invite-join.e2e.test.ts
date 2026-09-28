@@ -4,7 +4,7 @@ import { invitationWitnesses, invitationsFor, membersFor, orgInvite, rows, text 
 
 const test = spec.world(orgInvite, { resources: { surfaces: ["web"], services: ["den"] }, timeout: 900_000 });
 
-test("OPE-82: cloud invitations retain identity and organization through authentication", { timeout: 900_000 }, async ({ world, user, probe, seed, step }) => {
+test("OPE-82: cloud invitations retain identity and organization through authentication", { timeout: 900_000 }, async ({ world, user, probe, seed, step, evidence }) => {
   const { witnesses, identity } = world;
   const orgId = text(world.organization.id);
   const otherId = text(world.otherOrg.id);
@@ -69,7 +69,14 @@ test("OPE-82: cloud invitations retain identity and organization through authent
     await user.reload();
     await joined(person.email);
     const session = await witnesses.sessionFor(person);
-    expect((await invitationWitnesses(session).orgs()).map((org) => org.id)).toEqual([orgId]);
+    const memberships = await invitationWitnesses(session).orgs();
+    expect(memberships.map((org) => org.id)).toEqual([orgId]);
+    evidence.recordAssertionEvidence("The invitee joins only after mailbox verification and explicit Join", `${memberships.length} organization membership; wrong OTP created no browser token or membership; the owner's Pending label disappeared without a reload`, true);
+    await ownerActor.screenshot();
+    // Completed browser processes keep rendering/recording until stopped. Keep
+    // only the actors needed by the current scenario on constrained runners.
+    await ownerSurface.stop();
+    await world.web.stop();
   });
 
   await step("a different current account cannot consume an invite and can switch to the invited account", async () => {
@@ -106,9 +113,13 @@ test("OPE-82: cloud invitations retain identity and organization through authent
     await actor.notSee({ role: "textbox", label: /^verification code$/i });
     expect(await witnesses.emails("verification", person.email)).toHaveLength(verificationBefore.length + 1);
     expect(membersFor(await witnesses.org(orgId), world.other.email).map((member) => member.id)).toEqual(wrongAccountMembershipIds);
+    evidence.recordAssertionEvidence("Switching accounts preserves the invite and its admin role", `Invited account joined once as admin; the other account retained its ${wrongAccountMembershipIds.length} original membership(s)`, true);
+    await actor.screenshot();
+    await surface.stop();
   });
 
   await step("canceled and domain-blocked invites do not authenticate or add members", async () => {
+    const outcomes: { state: string; memberships: number; verificationEmails: number }[] = [];
     for (const state of ["canceled", "blocked"]) {
       const person = identity(`${state}-invitee`);
       const invite = await witnesses.invite(person.email, orgId);
@@ -131,8 +142,12 @@ test("OPE-82: cloud invitations retain identity and organization through authent
         const org = await witnesses.org(orgId);
         expect(membersFor(org, person.email)).toHaveLength(0);
         expect(invitationsFor(org, person.email).some((entry) => entry.status === "accepted")).toBe(false);
-        expect(await witnesses.emails("verification", person.email)).toEqual(before);
+        const after = await witnesses.emails("verification", person.email);
+        expect(after).toEqual(before);
         await noCrossOrg();
+        outcomes.push({ state, memberships: membersFor(org, person.email).length, verificationEmails: after.length - before.length });
+        await actor.screenshot();
+        await surface.stop();
       } finally {
         if (state === "blocked") {
           const restored = await witnesses.api("/v1/org", { method: "PATCH", headers: { "x-openwork-org-id": orgId }, body: JSON.stringify({ allowedEmailDomains: [] }) });
@@ -140,6 +155,7 @@ test("OPE-82: cloud invitations retain identity and organization through authent
         }
       }
     }
+    evidence.recordAssertionEvidence("Invalid invitations never offer signup or consume the invite", JSON.stringify(outcomes), true);
   });
 
   await step("a generic sign-up 403 is an error, not an email-verification challenge", async () => {
@@ -160,5 +176,8 @@ test("OPE-82: cloud invitations retain identity and organization through authent
     await actor.notSee({ role: "button", label: "Resend code" });
     expect(await witnesses.emails("verification", person.email)).toEqual(before);
     await pending(person.email);
+    const deniedRequests = (await proxy.requestLog()).filter((request) => request.faulted && request.status === 403);
+    evidence.recordAssertionEvidence("A policy rejection remains an error instead of opening verification", `${deniedRequests.length} observed policy 403; no new verification email or membership`, true);
+    await actor.screenshot();
   });
 });

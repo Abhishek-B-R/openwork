@@ -1127,6 +1127,7 @@ export type OrganizationSsoConnection = {
   acsUrl: string | null;
   metadataUrl: string | null;
   domainVerified: boolean;
+  emailDomainVerified: boolean;
   domainVerificationHost: string;
   domainVerificationDnsName: string;
   oidc: OrganizationOidcSsoConfig | null;

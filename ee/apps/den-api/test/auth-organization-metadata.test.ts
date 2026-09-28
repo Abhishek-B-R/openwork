@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, expect, mock, spyOn, test } from "bun:test"
-import { createAuthMiddleware } from "better-auth/api"
+import { APIError, createAuthMiddleware } from "better-auth/api"
+import { createDenTypeId } from "@openwork-ee/utils/typeid"
 import type { SQL } from "@openwork-ee/den-db/drizzle"
 import { createDenDb, InvitationTable } from "@openwork-ee/den-db"
 
@@ -53,7 +54,150 @@ beforeAll(async () => {
 
 afterAll(() => mock.restore())
 
-async function beforeCreate(metadata: unknown) {
+function invokeAuthMiddleware<Result>(
+  middleware: (input: { request?: Request }) => Promise<Result>,
+  input: { path: string; request?: Request; body?: unknown; params?: Record<string, string>; context: Awaited<typeof auth.$context> & { returned?: unknown; responseHeaders?: Headers } },
+) {
+  // The SDK middleware input type omits the route metadata that its dispatcher
+  // supplies at runtime. Forward it through the registered middleware boundary.
+  return middleware(input)
+}
+
+const ssoCallbackPaths = ["/sso/callback/:providerId", "/sso/saml2/sp/acs/:providerId"]
+
+function callbackSession() {
+  const userId = createDenTypeId("user")
+  return {
+    user: { id: userId, name: "SSO Member", email: "member@example.test", emailVerified: false, createdAt: new Date(), updatedAt: new Date() },
+    session: { id: createDenTypeId("session"), userId, token: "sso-callback-test-token", expiresAt: new Date(Date.now() + 60_000), createdAt: new Date(), updatedAt: new Date() },
+  }
+}
+
+test.each(ssoCallbackPaths)("SSO session creation waits for JIT instead of reconciling or bootstrapping: %s", async (path) => {
+  const orgs = await import("../src/orgs.js")
+  const activeOrganization = await import("../src/active-organization.js")
+  const reconcile = spyOn(orgs, "reconcilePendingInvitationsForUser").mockResolvedValue(0)
+  const initialOrganization = spyOn(activeOrganization, "getInitialActiveOrganizationIdForUser").mockResolvedValue(null)
+  try {
+    const { session } = callbackSession()
+    const invoke = createAuthMiddleware(async (context) => auth.options.databaseHooks.session.create.before(session, context))
+    await invokeAuthMiddleware(invoke, { path, params: { providerId: "test-provider" }, context: await auth.$context })
+    expect(reconcile).not.toHaveBeenCalled()
+    expect(initialOrganization).not.toHaveBeenCalled()
+  } finally {
+    reconcile.mockRestore()
+    initialOrganization.mockRestore()
+  }
+})
+
+test.each(["/sign-in/email", "/sign-up/email", "/callback/:id"])("ordinary authentication defers membership until the account transaction commits: %s", async (path) => {
+  const orgs = await import("../src/orgs.js")
+  const activeOrganization = await import("../src/active-organization.js")
+  const organizationId = createDenTypeId("organization")
+  const reconcile = spyOn(orgs, "reconcilePendingInvitationsForUser").mockResolvedValue(1)
+  const initialOrganization = spyOn(activeOrganization, "getInitialActiveOrganizationIdForUser").mockResolvedValue(organizationId)
+  const context = await auth.$context
+  const updateSession = spyOn(context.internalAdapter, "updateSession").mockResolvedValue(null)
+  try {
+    const newSession = callbackSession()
+    const { session } = newSession
+    const invoke = createAuthMiddleware(async (context) => auth.options.databaseHooks.session.create.before(session, context))
+    const result = await invokeAuthMiddleware(invoke, { path, context })
+    expect(result.data.activeOrganizationId).toBeNull()
+    expect(reconcile).not.toHaveBeenCalled()
+    expect(initialOrganization).not.toHaveBeenCalled()
+    await invokeAuthMiddleware(auth.options.hooks.after, { path, context: { ...context, newSession } })
+    expect(reconcile).toHaveBeenCalledWith(session.userId)
+    expect(initialOrganization).toHaveBeenCalledWith(session.userId)
+    expect(updateSession).toHaveBeenCalledWith(session.token, { activeOrganizationId: organizationId })
+  } finally {
+    updateSession.mockRestore()
+    reconcile.mockRestore()
+    initialOrganization.mockRestore()
+  }
+})
+
+test.each(ssoCallbackPaths)("successful SSO callback reconciles only its authenticated user and provider after JIT: %s", async (path) => {
+  const orgs = await import("../src/orgs.js")
+  const reconcile = spyOn(orgs, "reconcileSsoInvitationsForUser").mockResolvedValue(1)
+  const broadReconcile = spyOn(orgs, "reconcilePendingInvitationsForUser").mockResolvedValue(0)
+  try {
+    const newSession = callbackSession()
+    // The SDK can retain a stale false flag here after independently verifying
+    // the user. The org helper, not this hook snapshot, checks current DB proof.
+    await invokeAuthMiddleware(auth.options.hooks.after, {
+      path, params: { providerId: "test-provider" },
+      context: { ...await auth.$context, newSession, returned: new APIError("FOUND"), responseHeaders: new Headers({ location: "http://127.0.0.1:8790/" }) },
+    })
+    expect(reconcile).toHaveBeenCalledTimes(1)
+    expect(reconcile).toHaveBeenCalledWith({ userId: newSession.user.id, providerId: "test-provider" })
+    expect(broadReconcile).not.toHaveBeenCalled()
+  } finally {
+    reconcile.mockRestore()
+    broadReconcile.mockRestore()
+  }
+})
+
+test.each(ssoCallbackPaths)("failed or incomplete SSO callbacks never reconcile: %s", async (path) => {
+  const orgs = await import("../src/orgs.js")
+  const reconcile = spyOn(orgs, "reconcileSsoInvitationsForUser").mockResolvedValue(0)
+  try {
+    const context = await auth.$context
+    await invokeAuthMiddleware(auth.options.hooks.after, {
+      path, params: { providerId: "test-provider" },
+      context: { ...context, newSession: null, responseHeaders: new Headers({ location: "http://127.0.0.1:8790/?error=access_denied" }) },
+    })
+    await invokeAuthMiddleware(auth.options.hooks.after, {
+      path, params: { providerId: "test-provider" },
+      context: { ...context, newSession: callbackSession(), returned: new APIError("FORBIDDEN"), responseHeaders: new Headers({ location: "http://127.0.0.1:8790/" }) },
+    })
+    await invokeAuthMiddleware(auth.options.hooks.after, {
+      path, params: { providerId: "test-provider" },
+      context: { ...context, newSession: callbackSession(), returned: new APIError("FOUND"), responseHeaders: new Headers({ location: "http://127.0.0.1:8790/?error=access_denied" }) },
+    })
+    await invokeAuthMiddleware(auth.options.hooks.after, { path, params: { providerId: "test-provider" }, context: { ...context, newSession: callbackSession(), responseHeaders: new Headers() } })
+    await invokeAuthMiddleware(auth.options.hooks.after, { path, context: { ...context, newSession: callbackSession() } })
+    expect(reconcile).not.toHaveBeenCalled()
+  } finally {
+    reconcile.mockRestore()
+  }
+})
+
+test.each(ssoCallbackPaths)("SSO configuration tests retain identity completion and remove the temporary session without accepting invites: %s", async (path) => {
+  const orgs = await import("../src/orgs.js")
+  const lifecycle = await import("../src/sso-test-lifecycle.js")
+  const { cache } = await import("../src/cache.js")
+  const context = await auth.$context
+  const reconcile = spyOn(orgs, "reconcileSsoInvitationsForUser").mockResolvedValue(0)
+  // A mismatched identity still gets passed to the original completion check,
+  // and its temporary session must be removed even though the test is rejected.
+  const complete = spyOn(lifecycle, "completeOrganizationSsoTestIntent").mockResolvedValue({ ok: false })
+  const fail = spyOn(lifecycle, "failOrganizationSsoTestIntent").mockResolvedValue(true)
+  const deleteSession = spyOn(context.internalAdapter, "deleteSession").mockResolvedValue(undefined)
+  const revokeSession = spyOn(cache.auth, "revokeSession").mockResolvedValue(undefined)
+  try {
+    const newSession = callbackSession()
+    const responseHeaders = new Headers({ location: "http://127.0.0.1:8790/sso/test/complete?openworkSsoTest=test-intent" })
+    responseHeaders.append("set-cookie", `${context.authCookies.sessionToken.name}=temporary; Path=/`)
+    responseHeaders.append("set-cookie", "unrelated=retained; Path=/")
+    await invokeAuthMiddleware(auth.options.hooks.after, { path, params: { providerId: "test-provider" }, context: { ...context, newSession, responseHeaders } })
+    expect(complete).toHaveBeenCalledWith({ intentId: "test-intent", providerId: "test-provider", authenticatedUserId: newSession.user.id })
+    expect(deleteSession).toHaveBeenCalledWith(newSession.session.token)
+    expect(revokeSession).toHaveBeenCalledWith(newSession.session.token)
+    expect(responseHeaders.getSetCookie()).toEqual(["unrelated=retained; Path=/"])
+    await invokeAuthMiddleware(auth.options.hooks.after, { path, params: { providerId: "test-provider" }, context: { ...context, newSession: null, responseHeaders } })
+    expect(fail).toHaveBeenCalledWith("test-intent", "authentication")
+    expect(reconcile).not.toHaveBeenCalled()
+  } finally {
+    reconcile.mockRestore()
+    complete.mockRestore()
+    fail.mockRestore()
+    deleteSession.mockRestore()
+    revokeSession.mockRestore()
+  }
+})
+
+async function beforeCreate(metadata: unknown): Promise<{ data?: { metadata?: unknown } } | undefined> {
   // Invoke the registered hook, not the DB-backed organization creation endpoint.
   for (const plugin of auth.options.plugins ?? []) {
     if (plugin.id === "organization") {
@@ -133,7 +277,7 @@ test.each([
   const invoke = createAuthMiddleware(async (context) => auth.options.databaseHooks.user.create.before({
     id: "test-user", name: "Member", email, emailVerified: false, createdAt: new Date(), updatedAt: new Date(),
   }, context))
-  const result = await invoke({
+  const result = await invokeAuthMiddleware(invoke, {
     path: "/sign-up/email",
     request: new Request(`http://127.0.0.1:8790/api/auth/sign-up/email${token ? `?invite=${token}` : ""}`),
     context: await auth.$context,
@@ -152,7 +296,7 @@ test.each([
   { token: "", email: "member@example.test", status: "pending", expired: false, allowed: false },
 ])("private single-org signup admission: $token / $email / $status / expired=$expired", async ({ token, email, status, expired, allowed }) => {
   invitation = { ...invitation, status, expiresAt: new Date(Date.now() + (expired ? -60_000 : 60_000)) }
-  const result = auth.options.hooks.before({
+  const result = invokeAuthMiddleware(auth.options.hooks.before, {
     path: "/sign-up/email", body: { email },
     request: new Request(`http://127.0.0.1:8790/api/auth/sign-up/email?invite=${token}`),
     context: await auth.$context,
@@ -165,7 +309,7 @@ test("SSO requirement still rejects password signup with a valid invitation", as
   invitation = { ...invitation, status: "pending", expiresAt: new Date(Date.now() + 60_000) }
   requireSso = true
   try {
-    await expect(auth.options.hooks.before({
+    await expect(invokeAuthMiddleware(auth.options.hooks.before, {
       path: "/sign-up/email",
       body: { email: invitation.email },
       request: new Request("http://127.0.0.1:8790/api/auth/sign-up/email?invite=raw-invitation-token"),
@@ -187,7 +331,7 @@ test("body-only invite claims do not prove email and non-password user creation 
       const invoke = createAuthMiddleware(async (context) => auth.options.databaseHooks.user.create.before({
         id: "test-user", name: "Member", email: invitation.email, emailVerified, createdAt: new Date(), updatedAt: new Date(),
       }, context))
-      const result = await invoke({
+      const result = await invokeAuthMiddleware(invoke, {
         path,
         body: { invite: "raw-invitation-token", emailVerified: true },
         request: new Request(`http://127.0.0.1:8790/api/auth${path}`),
@@ -217,7 +361,7 @@ test("only independently verified users skip email; unverified users get canonic
         }
         throw new Error("Email OTP plugin missing")
       })
-      await invoke({
+      await invokeAuthMiddleware(invoke, {
         path: "/sign-up/email",
         request: new Request("https://untrusted.example.test/api/auth/sign-up/email", { headers: { origin: "https://untrusted.example.test" } }),
         context: authContext,
