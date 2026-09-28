@@ -9,10 +9,11 @@ import {
   lifespanFromChoice,
   workerTone,
   type LifespanChoice,
+  type WorkerEvent,
   type WorkerSummary,
   type WorkerPurpose,
 } from "@/lib/workers";
-import { Button, ErrorNote, StatusDot, inputClass } from "@/ui/kit";
+import { Button, ErrorNote, inputClass } from "@/ui/kit";
 import { WorkerDetail } from "@/ui/worker-detail";
 
 type WorkersPanelProps = {
@@ -29,16 +30,65 @@ export function WorkersPanel({ coworker, threadId = coworker.conversationThreadI
   return <WorkerList key={`${coworker.slug}:${threadId}`} coworker={coworker} threadId={threadId} {...props} />;
 }
 
+/** Finished Workers stay beside the chat this long, so the outcome is seen instead of the row vanishing. */
+const RECENTLY_ENDED_MS = 10 * 60_000;
+
+/** What a Worker last said about its work: its latest finding, or for one that ended, how it ended. */
+type WorkerNote = { key: string; text: string; at: number; kind: "finding" | "decision" | "done" | "status" };
+
+function noteKey(worker: WorkerSummary): string {
+  return `${worker.status}:${worker.lastFindingAt ?? 0}:${worker.updatedAt}`;
+}
+
+function latestNote(events: readonly WorkerEvent[], worker: WorkerSummary): Omit<WorkerNote, "key"> | null {
+  const finding = [...events].reverse().find((event) => event.kind === "finding" && event.text.trim());
+  if (finding) return { text: finding.text.trim(), at: finding.at, kind: finding.report === "decision" ? "decision" : finding.report === "done" ? "done" : "finding" };
+  if (isLiveWorker(worker)) return null;
+  const status = [...events].reverse().find((event) => event.kind === "status" && event.text.trim());
+  // The row already says how it ended; the note keeps only the why.
+  const why = status?.text.trim().replace(/^(?:Didn't finish|Done|Stopped|Finished)[:.]\s*/i, "") ?? "";
+  return status && why ? { text: why, at: status.at, kind: "status" } : null;
+}
+
+function recentlyEnded(worker: WorkerSummary, now: number): boolean {
+  return !isLiveWorker(worker) && worker.endedAt !== null && now - worker.endedAt < RECENTLY_ENDED_MS;
+}
+
 function WorkerList({ coworker, threadId, compact = false, onOpenThread, onOpenComputer, onOpenBrowser }: WorkersPanelProps & { threadId: string }) {
   const [workers, setWorkers] = useState<WorkerSummary[] | null>(null);
+  const [notes, setNotes] = useState<Record<string, WorkerNote>>({});
   const [expandedId, setExpandedId] = useState("");
   const [creating, setCreating] = useState(false);
   // Beside the chat the shelf starts as a small pill; the full Workers view is always in the panel.
   const [open, setOpen] = useState(!compact);
   const [error, setError] = useState("");
+  const [now, setNow] = useState(() => Date.now());
   const request = useRef(0);
   const reading = useRef(false);
+  const noteKeys = useRef(new Map<string, string>());
   const live = (workers ?? []).some(isLiveWorker);
+
+  // Only the Workers on show say what they last did; each is read again only when it changed.
+  async function readNotes(shown: readonly WorkerSummary[], version: number) {
+    for (const worker of shown) {
+      const key = noteKey(worker);
+      if (noteKeys.current.get(worker.id) === key) continue;
+      try {
+        const events = await coworkerBridge.workers.findings(coworker.slug, worker.id, 8);
+        if (version !== request.current) return;
+        noteKeys.current.set(worker.id, key);
+        const note = latestNote(events, worker);
+        setNotes((current) => {
+          const next = { ...current };
+          if (note) next[worker.id] = { key, ...note };
+          else delete next[worker.id];
+          return next;
+        });
+      } catch {
+        // The row keeps its status line; the note returns with the next read.
+      }
+    }
+  }
 
   async function refresh(): Promise<void> {
     if (reading.current) return;
@@ -47,8 +97,12 @@ function WorkerList({ coworker, threadId, compact = false, onOpenThread, onOpenC
     try {
       const items = await coworkerBridge.workers.list(coworker.slug);
       if (version !== request.current) return;
-      setWorkers(items.filter((worker) => worker.slug === coworker.slug && worker.spawnedFromThreadId === threadId));
+      const mine = items.filter((worker) => worker.slug === coworker.slug && worker.spawnedFromThreadId === threadId);
+      setWorkers(mine);
+      setNow(Date.now());
       setError("");
+      const at = Date.now();
+      await readNotes(mine.filter((worker) => isLiveWorker(worker) || recentlyEnded(worker, at) || !compact), version);
     } catch (cause) {
       if (version === request.current) setError(`Task updates unavailable. Last known tasks are kept. ${cause instanceof Error ? cause.message : String(cause)}`);
     } finally { reading.current = false; }
@@ -71,9 +125,11 @@ function WorkerList({ coworker, threadId, compact = false, onOpenThread, onOpenC
   }
 
   const all = workers ?? [];
-  // Beside the chat only work still under way shows; finished Workers stay in the Workers view.
-  const items = compact ? all.filter(isLiveWorker) : all;
-  const needsApproval = items.filter((worker) => isLiveWorker(worker) && worker.control?.state === "needs-approval").length;
+  // Beside the chat: work under way, and what just ended, for a few minutes. Everything stays in the Workers view.
+  const items = compact ? all.filter((worker) => isLiveWorker(worker) || recentlyEnded(worker, now)) : all;
+  const liveItems = items.filter(isLiveWorker);
+  const needsApproval = liveItems.filter((worker) => worker.control?.state === "needs-approval").length;
+  const deciding = liveItems.filter((worker) => worker.status === "waiting" && worker.waitingFor === "decision").length;
   const approvalOpened = useRef(false);
   useEffect(() => {
     if (!compact) return;
@@ -82,28 +138,41 @@ function WorkerList({ coworker, threadId, compact = false, onOpenThread, onOpenC
   }, [compact, needsApproval]);
   if (compact && items.length === 0 && !error && !creating) return null;
 
+  // The newest thing any of them said, for the pill.
+  const freshest = items
+    .map((worker) => ({ worker, note: notes[worker.id] }))
+    .filter((entry): entry is { worker: WorkerSummary; note: WorkerNote } => Boolean(entry.note))
+    .sort((a, b) => b.note.at - a.note.at)[0];
+  const headline = shelfHeadline(items, liveItems.length, deciding, needsApproval);
+
   if (compact && !open && !creating) return (
-    <div className="mx-5 mt-2 flex" data-testid="coworker-worker-shelf" data-origin-thread={threadId} data-open="false">
+    <div className="mx-5 mt-2 flex min-w-0" data-testid="coworker-worker-shelf" data-origin-thread={threadId} data-open="false">
       <button type="button" aria-expanded={false} onClick={() => setOpen(true)} data-testid="coworker-worker-shelf-toggle"
-        className="inline-flex items-center gap-2 rounded-full border border-line bg-panel/60 px-3 py-1 text-xs text-snow backdrop-blur-xl transition-colors hover:bg-panel focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-spark/50">
-        <span aria-hidden="true" className="size-1.5 rounded-full bg-spark motion-safe:animate-pulse" />
-        {items.length === 1 ? "1 Worker working" : `${items.length} Workers working`}
-        {needsApproval > 0 ? <span className="text-amber">· {needsApproval} needs approval</span> : null}
-        <span aria-hidden="true" className="text-mist">▸</span>
+        className="inline-flex min-w-0 max-w-full items-center gap-2 rounded-full border border-line bg-panel/60 py-1 pl-2 pr-3 text-xs text-snow backdrop-blur-xl transition-colors hover:bg-panel focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-spark/50">
+        <span className="flex shrink-0 -space-x-1" aria-hidden="true">
+          {items.slice(0, 3).map((worker) => <WorkerMark key={worker.id} worker={worker} size="small" />)}
+        </span>
+        <span className="shrink-0 font-medium">{headline}</span>
+        {freshest ? <span className="min-w-0 truncate text-mist" data-testid="coworker-worker-shelf-latest">· {freshest.worker.name}: {freshest.note.text}</span> : null}
+        <span aria-hidden="true" className="shrink-0 text-mist">▸</span>
       </button>
     </div>
   );
 
   return (
-    <div className={compact ? "mx-5 mt-2 flex max-h-[32dvh] min-h-0 shrink flex-col rounded-xl border border-line bg-panel/60 px-3 py-1" : "flex min-h-full flex-col gap-5"} data-testid={compact ? "coworker-worker-shelf" : "coworker-workers"} data-origin-thread={threadId}>
-      <section className={compact ? "flex min-h-0 flex-col" : ""} aria-label={compact ? "Work beside this conversation" : "Workers in this discussion"}>
-        <div className="mb-1 flex shrink-0 items-center justify-between px-1">
-          {compact ? <button type="button" className="min-w-0 py-2 text-left text-xs text-snow focus-visible:outline-spark" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
-            Work beside chat · {items.length}{needsApproval > 0 ? <span className="ml-2 text-amber">{needsApproval} needs approval</span> : null}<span aria-hidden="true" className="ml-2 text-mist">{open ? "− Minimize" : "+"}</span>
+    <div className={compact ? "mx-5 mt-2 flex max-h-[34dvh] min-h-0 shrink flex-col rounded-2xl border border-line bg-panel/70 px-3 pb-1 pt-1 backdrop-blur-xl" : "flex min-h-full flex-col gap-5"} data-testid={compact ? "coworker-worker-shelf" : "coworker-workers"} data-origin-thread={threadId} data-open={compact ? "true" : undefined}>
+      <section className={compact ? "flex min-h-0 flex-col" : ""} aria-label={compact ? `${coworker.name}'s Workers beside this conversation` : "Workers in this discussion"}>
+        <div className="mb-0.5 flex shrink-0 items-center justify-between gap-2 px-1">
+          {compact ? <button type="button" className="flex min-w-0 items-baseline gap-2 py-2 text-left focus-visible:outline-spark" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
+            <span className="shrink-0 text-xs font-semibold text-snow">{coworker.name}'s Workers</span>
+            <span className="truncate text-[11px] text-mist">{headline}</span>
           </button> : <h3 className="text-[11px] font-semibold text-mist">Workers in this discussion</h3>}
-          {!creating ? (
-            <Button variant="ghost" className="shrink-0 px-2 text-xs" onClick={() => { setCreating(true); setOpen(true); }} data-testid="new-worker-button">New Worker</Button>
-          ) : null}
+          <div className="flex shrink-0 items-center gap-1">
+            {!creating ? (
+              <Button variant="ghost" className="shrink-0 px-2 text-xs" onClick={() => { setCreating(true); setOpen(true); }} data-testid="new-worker-button">New Worker</Button>
+            ) : null}
+            {compact ? <Button variant="ghost" className="shrink-0 px-2 text-xs text-mist" onClick={() => setOpen(false)} data-testid="coworker-worker-shelf-minimize">Minimize</Button> : null}
+          </div>
         </div>
         {error ? <div className="mb-2"><p role="alert" className="text-xs text-amber">{error}</p><Button variant="ghost" className="text-xs" onClick={() => void refresh()}>Check tasks</Button></div> : null}
         <div hidden={!open} className={compact ? "min-h-0 overflow-y-auto overscroll-contain" : ""}>
@@ -125,36 +194,16 @@ function WorkerList({ coworker, threadId, compact = false, onOpenThread, onOpenC
           </p>
         ) : null}
         {items.length > 0 ? (
-          <ul className="divide-y divide-line" data-testid="worker-list">
+          <ul className="space-y-1.5 pb-1.5" data-testid="worker-list">
             {items.map((worker) => {
               const expanded = expandedId === worker.id;
               return (
-                <li key={worker.id} data-testid="worker-row" data-status={worker.status} data-expanded={expanded ? "true" : "false"}>
-                  <button
-                    type="button"
-                    className="flex w-full items-start gap-3 px-1 py-2.5 text-left transition-colors hover:bg-white/[0.04]"
-                    onClick={() => setExpandedId(expanded ? "" : worker.id)}
-                    aria-expanded={expanded}
-                    data-testid="worker-toggle"
-                  >
-                    <span className="mt-1.5 shrink-0"><StatusDot tone={workerTone(worker)} /></span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-xs font-medium text-snow" data-testid="worker-name">{worker.name}</span>
-                      <span className="mt-0.5 block truncate text-[11px] text-mist" title={worker.goal}>{worker.goal}</span>
-                      <span className="mt-0.5 block truncate text-[11px] text-mist" data-testid="worker-line">
-                        {describeWorkerStatus(worker)}
-                        {isLiveWorker(worker) ? ` · ${describeLifespan(worker.lifespan)}` : ""}
-                        {worker.lastFindingAt ? ` · Last update ${relativeTime(worker.lastFindingAt) || "now"} ago` : ""}
-                      </span>
-                      {worker.control ? <span className={`mt-0.5 block text-[11px] ${worker.control.state === "approved" ? "text-mist" : "text-amber"}`}>{worker.control.surface === "browser" ? "Discussion browser" : "This Mac"} · {worker.control.state === "approved" ? "Task access approved" : worker.control.state === "revoked" ? "Access revoked" : "Review access request"}</span> : null}
-                      {!compact ? <span className="mt-0.5 block truncate text-[11px] text-mist" data-testid="worker-model">
-                        {worker.purpose === "thinking" ? "Deep thinking" : "Delivery"} · {worker.modelSnapshot ? `${worker.modelSnapshot.providerId}/${worker.modelSnapshot.modelId} · ${worker.modelSnapshot.variant || "model default"} effort` : "Coworker model (legacy)"}
-                      </span> : null}
-                    </span>
-                    <span className="shrink-0 text-mist" aria-hidden="true">{expanded ? "▾" : "›"}</span>
-                  </button>
+                <li key={worker.id} className={`overflow-hidden rounded-xl border transition-colors ${expanded ? "border-white/12 bg-white/[0.04]" : "border-transparent"}`} data-testid="worker-row" data-status={worker.status} data-expanded={expanded ? "true" : "false"}>
+                  <WorkerRow worker={worker} note={notes[worker.id] ?? null} now={now} expanded={expanded} detailed={!compact} onToggle={() => setExpandedId(expanded ? "" : worker.id)} />
                   {expanded ? (
-                    <WorkerDetail key={worker.id} coworker={coworker} initialWorker={worker} onChanged={changed} onOpenThread={onOpenThread} onOpenComputer={onOpenComputer} onOpenBrowser={onOpenBrowser} />
+                    <div className="px-2 pb-2">
+                      <WorkerDetail key={worker.id} coworker={coworker} initialWorker={worker} onChanged={changed} onOpenThread={onOpenThread} onOpenComputer={onOpenComputer} onOpenBrowser={onOpenBrowser} />
+                    </div>
                   ) : null}
                 </li>
               );
@@ -164,6 +213,113 @@ function WorkerList({ coworker, threadId, compact = false, onOpenThread, onOpenC
         </div>
       </section>
     </div>
+  );
+}
+
+/** The shelf's one line: what needs the person first, then how many are at it and how many just ended. */
+function shelfHeadline(items: readonly WorkerSummary[], live: number, deciding: number, needsApproval: number): string {
+  const parts: string[] = [];
+  if (needsApproval > 0) parts.push(needsApproval === 1 ? "1 needs your approval" : `${needsApproval} need your approval`);
+  if (deciding > 0) parts.push(deciding === 1 ? "1 needs a decision" : `${deciding} need a decision`);
+  const working = live - needsApproval - deciding;
+  if (working > 0) parts.push(parts.length ? `${working} working` : working === 1 ? "1 Worker working" : `${working} Workers working`);
+  const done = items.filter((worker) => worker.status === "finished").length;
+  const unfinished = items.length - live - done;
+  if (done > 0) parts.push(parts.length ? `${done} done` : done === 1 ? "1 Worker done" : `${done} Workers done`);
+  if (unfinished > 0) parts.push(parts.length ? `${unfinished} didn't finish` : unfinished === 1 ? "1 Worker didn't finish" : `${unfinished} Workers didn't finish`);
+  return parts.join(" · ");
+}
+
+/** "just now", "3m ago", "2h ago". */
+function ago(at: number, now: number): string {
+  const since = relativeTime(at, now);
+  return !since || since === "now" ? "just now" : `${since} ago`;
+}
+
+function elapsed(from: number, to: number): string {
+  const seconds = Math.max(0, Math.round((to - from) / 1000));
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  return `${hours} h ${minutes % 60} min`;
+}
+
+/** One Worker at a glance: what it is, what state it is in, what it last said, and how much of its budget is spent. */
+function WorkerRow({ worker, note, now, expanded, detailed, onToggle }: {
+  worker: WorkerSummary;
+  note: WorkerNote | null;
+  now: number;
+  expanded: boolean;
+  detailed: boolean;
+  onToggle: () => void;
+}) {
+  const alive = isLiveWorker(worker);
+  const tone = workerTone(worker);
+  const turns = worker.lifespan.kind === "turns" ? worker.lifespan : null;
+  const since = alive ? `for ${elapsed(worker.createdAt, now)}` : worker.endedAt ? ago(worker.endedAt, now) : "";
+  const noteText = note?.text ?? (alive ? (worker.status === "starting" ? "Getting started…" : worker.goal) : worker.error || worker.goal);
+  return (
+    <button
+      type="button"
+      className="flex w-full items-start gap-3 rounded-xl px-2 py-2.5 text-left transition-colors hover:bg-white/[0.04] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-spark/50"
+      onClick={onToggle}
+      aria-expanded={expanded}
+      data-testid="worker-toggle"
+    >
+      <span className="mt-0.5 shrink-0"><WorkerMark worker={worker} /></span>
+      <span className="min-w-0 flex-1">
+        <span className="flex min-w-0 items-baseline justify-between gap-2">
+          <span className="truncate text-xs font-semibold text-snow" data-testid="worker-name">{worker.name}</span>
+          <span className={`shrink-0 text-[10px] ${tone === "amber" ? "text-amber" : tone === "rose" ? "text-rose" : tone === "mint" ? "text-mint" : "text-mist"}`} data-testid="worker-line">
+            {describeWorkerStatus(worker)}{since ? ` · ${since}` : ""}
+          </span>
+        </span>
+        <span className={`mt-1 line-clamp-2 text-[11px] leading-snug ${note ? "text-snow/85" : "text-mist"}`} title={noteText} data-testid="worker-note" data-kind={note?.kind ?? "goal"}>
+          {note?.kind === "decision" ? <span className="font-medium text-amber">Needs a decision: </span> : null}
+          {noteText}
+          {note ? <span className="whitespace-nowrap text-mist"> · {ago(note.at, now)}</span> : null}
+        </span>
+        {alive && turns ? (
+          <span className="mt-1.5 flex items-center gap-2" data-testid="worker-budget">
+            <span className="h-1 w-20 overflow-hidden rounded-full bg-white/8" aria-hidden="true">
+              <span className="block h-full rounded-full bg-spark/70 transition-[width] duration-500" style={{ width: `${Math.min(100, Math.round((turns.used / Math.max(1, turns.max)) * 100))}%` }} />
+            </span>
+            <span className="text-[10px] text-mist">{describeLifespan(worker.lifespan, now)}</span>
+          </span>
+        ) : alive ? <span className="mt-1 block text-[10px] text-mist" data-testid="worker-budget">{describeLifespan(worker.lifespan, now)}</span> : null}
+        {worker.control ? <span className={`mt-1 block text-[11px] ${worker.control.state === "approved" ? "text-mist" : "text-amber"}`}>{worker.control.surface === "browser" ? "Discussion browser" : "This Mac"} · {worker.control.state === "approved" ? "Task access approved" : worker.control.state === "revoked" ? "Access revoked" : "Review access request"}</span> : null}
+        {detailed ? <span className="mt-0.5 block truncate text-[10px] text-mist" data-testid="worker-model">
+          {worker.purpose === "thinking" ? "Deep thinking" : "Delivery"} · {worker.modelSnapshot ? `${worker.modelSnapshot.providerId}/${worker.modelSnapshot.modelId} · ${worker.modelSnapshot.variant || "model default"} effort` : "Coworker model (legacy)"}
+        </span> : null}
+      </span>
+      <span className="mt-0.5 shrink-0 text-mist" aria-hidden="true">{expanded ? "▾" : "›"}</span>
+    </button>
+  );
+}
+
+/** A Worker's state as a small mark: a turning ring while it works, a check when done, amber when it needs the person. */
+function WorkerMark({ worker, size = "regular" }: { worker: WorkerSummary; size?: "regular" | "small" }) {
+  const tone = workerTone(worker);
+  const box = size === "small" ? "size-4" : "size-5";
+  const working = worker.status === "running" || worker.status === "starting";
+  const color = { spark: "text-spark", mint: "text-mint", amber: "text-amber", rose: "text-rose", mist: "text-mist" }[tone];
+  return (
+    <span className={`relative inline-flex ${box} shrink-0 items-center justify-center rounded-full bg-ink ring-1 ring-line ${color}`} data-testid="worker-mark" data-tone={tone}>
+      {working ? (
+        <svg viewBox="0 0 20 20" className="size-full motion-safe:animate-[loading-spin_1.1s_linear_infinite]" aria-hidden="true"><circle cx="10" cy="10" r="7" fill="none" stroke="currentColor" strokeOpacity="0.25" strokeWidth="2" /><path d="M10 3a7 7 0 0 1 7 7" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg>
+      ) : worker.status === "finished" ? (
+        <svg viewBox="0 0 20 20" className="size-3/5" aria-hidden="true"><path d="m5 10.5 3.2 3L15 6.5" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" /></svg>
+      ) : worker.status === "paused" ? (
+        <svg viewBox="0 0 20 20" className="size-1/2" aria-hidden="true"><path d="M7 5v10M13 5v10" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" /></svg>
+      ) : worker.status === "waiting" && worker.waitingFor !== "decision" && tone === "spark" ? (
+        <span className="size-1.5 rounded-full bg-current motion-safe:animate-pulse" aria-hidden="true" />
+      ) : tone === "amber" || tone === "rose" ? (
+        <span className="text-[10px] font-bold leading-none" aria-hidden="true">!</span>
+      ) : (
+        <span className="size-1.5 rounded-sm bg-current" aria-hidden="true" />
+      )}
+    </span>
   );
 }
 
