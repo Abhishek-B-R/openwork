@@ -530,6 +530,10 @@ export async function artifactCodeBrowserWorld(seed: Seed) {
     ...base,
     tableMarkdown,
     fileLinkPath,
+    // Native Electron menus are OS widgets without DOM/CDP targets. Use the
+    // existing development bridge to observe and dismiss the real popup.
+    nativeMenu: () => seed.evalIn(base.app, () => window.__OPENWORK_ELECTRON__.contextMenu.inspect(), { awaitPromise: true }),
+    dismissMenu: () => seed.evalIn(base.app, () => window.__OPENWORK_ELECTRON__.contextMenu.dismiss(), { awaitPromise: true }),
     async visibleArtifactCode() {
       return seed.evalIn(base.app, () => {
         const root = document.querySelector<HTMLElement>("[data-artifact-code-view]");
