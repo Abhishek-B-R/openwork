@@ -5,6 +5,29 @@ import { artifactCodeBrowserWorld } from "../worlds/first-run.ts";
 const test = spec.world(artifactCodeBrowserWorld);
 
 test("artifact editor renders code with Pierre and browses workspace files", async ({ world, user, probe, step, evidence, place }) => {
+  const expectCodeBesideTree = async (language: string) => {
+    const [tree] = (await probe.dom("[data-workspace-file-tree]")).elements;
+    const [viewer] = (await probe.dom("[data-artifact-code-view]")).elements;
+    if (!tree || !viewer) throw new Error("The workspace tree and code viewer must both be mounted.");
+    expect(tree.rect.width).toBeGreaterThan(0);
+    expect(tree.rect.height).toBeGreaterThan(0);
+    expect(viewer.rect.width).toBeGreaterThan(0);
+    expect(viewer.rect.height).toBeGreaterThan(0);
+    expect(tree.rect.right).toBeLessThanOrEqual(viewer.rect.left + 1);
+    expect(Math.max(tree.rect.top, viewer.rect.top)).toBeLessThan(Math.min(tree.rect.bottom, viewer.rect.bottom));
+    const presentation = await probe.eventually(() => world.artifactCodePresentation(), {
+      within: 10_000,
+      label: "the code viewer has visible syntax-highlighted tokens",
+      until: (value) => value.colors.length > 1,
+    });
+    expect(presentation.error).toBeNull();
+    await user.notSee({ role: "alert" });
+    expect((await probe.dom('[role="dialog"], dialog[open]')).elements).toHaveLength(0);
+    evidence.recordAssertionEvidence(`The workspace tree sits beside highlighted ${language} code`,
+      `Tree width ${tree.rect.width}px; code viewer width ${viewer.rect.width}px; ${presentation.colors.length} visible token colors; no render error, alert, or dialog.`, true);
+    await user.screenshot();
+  };
+
   await step("An artifact opens with workspace files collapsed", async () => {
     await user.click("Select tab: overflow-tab-12.md");
     await user.see({ role: "button", label: "Show workspace files" });
@@ -26,11 +49,8 @@ test("artifact editor renders code with Pierre and browses workspace files", asy
       until: (value) => typeof value === "string" && value.includes("export const artifactEditor = true"),
     });
     expect(code).toContain("export const artifactEditor = true");
-    await user.looks([
-      "The artifact panel visibly shows a workspace file tree beside a syntax-highlighted TypeScript code viewer",
-      "The code viewer visibly contains the TypeScript declaration export const artifactEditor = true",
-      "No error dialog, blank artifact surface, or crash message is visible",
-    ]);
+    evidence.recordAssertionEvidence("The TypeScript file shows its declaration", "The visible code contains export const artifactEditor = true.", true);
+    await expectCodeBesideTree("TypeScript");
   });
 
   await step("Workspace files can be hidden and reopened while the artifact stays visible", async () => {
@@ -81,10 +101,7 @@ test("artifact editor renders code with Pierre and browses workspace files", asy
     expect(code).toContain('{"artifactEditor":true}');
     expect(code).not.toContain("export const artifactEditor");
     evidence.recordAssertionEvidence("The JSON file replaces the TypeScript content", 'The code viewer contains {"artifactEditor":true} and no export const artifactEditor declaration.', true);
-    await user.looks([
-      "The artifact panel visibly shows the workspace file tree beside a syntax-highlighted JSON code viewer",
-      "No error dialog, blank artifact surface, or crash message is visible",
-    ]);
+    await expectCodeBesideTree("JSON");
   });
 
   await step("table context clicks preserve the preview; a plain cell click edits only its source row", async () => {
