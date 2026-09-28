@@ -553,9 +553,7 @@ export function registerAgentMcpRoutes<T extends { Variables: RequestIdVariables
     if (appServersEnabled) {
       const appActor = (): PluginArchActorContext => {
         if (!libraryContext) throw new AppBuilderError("mcp_membership_revoked", "The OpenWork Cloud membership for this connection is unavailable.")
-        // A non-interactive token principal, like an API key: its write scope
-        // and editor access gate App writes, with no browser session to renew.
-        return { ...libraryContext, mcpToken: true }
+        return libraryContext
       }
       const appOperation = async <Result,>(run: () => Promise<Result>): Promise<Result> => {
         try {
@@ -775,8 +773,8 @@ export function registerAgentMcpRoutes<T extends { Variables: RequestIdVariables
           }
         }
         try {
-          await requirePluginArchCapability(libraryContext, "plugin.create", false)
-          await requirePluginArchCapability(libraryContext, "config_object.create", false)
+          await requirePluginArchCapability(libraryContext, "plugin.create")
+          await requirePluginArchCapability(libraryContext, "config_object.create")
           const plugin = await createPluginBundle({
             context: libraryContext,
             name: pluginName,
@@ -848,7 +846,6 @@ export function registerAgentMcpRoutes<T extends { Variables: RequestIdVariables
             context: libraryContext,
             configObjectId,
             reason,
-            requireFreshSession: false,
             value: { rawSourceText: skillMarkdown },
           })
           const memberships = await listConfigObjectPlugins({ context: libraryContext, configObjectId })

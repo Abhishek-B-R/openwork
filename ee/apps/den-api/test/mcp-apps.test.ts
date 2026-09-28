@@ -605,21 +605,17 @@ describe.skipIf(!process.env.DEN_TEST_DATABASE_URL)("authored MCP Apps with isol
     await expect(apps.loadMcpAppResource({ ...access(context), ...ids(app) })).rejects.toThrow("not available")
   })
 
-  test("shared writes preserve session freshness while source reads and private edits do not require step-up", async () => {
+  test("App writes need editor access, not a fresh session, even once the App is shared", async () => {
     const context = await actor(undefined, "owner")
     const viewer = await actor(access(context).organizationId)
     const stale = { ...context, session: { createdAt: new Date(0) } }
     const app = await apps.createMcpApp({ resolveTools, context: stale, ...source })
-    const updated = await apps.updateMcpApp({ resolveTools, context: stale, ...source, appId: app.appId, expectedRevisionId: app.revisionId })
     await grantPlugin(context, app, viewer)
+    const updated = await apps.updateMcpApp({ resolveTools, context: stale, ...source, appId: app.appId, expectedRevisionId: app.revisionId })
+    expect(updated.revisionId).not.toBe(app.revisionId)
     await expect(apps.readMcpApp({ context: stale, appId: app.appId })).resolves.toBeDefined()
-    await expect(apps.updateMcpApp({ resolveTools, context: stale, ...source, appId: app.appId, expectedRevisionId: updated.revisionId })).rejects.toMatchObject({ error: "reauth" })
-    await expect(apps.createMcpApp({ resolveTools, context: stale, ...source, pluginId: app.pluginId })).rejects.toMatchObject({ error: "reauth" })
-    // A Connect MCP token has no browser session to step up; editor access still gates it, as for API keys.
-    const viaConnect = await apps.updateMcpApp({ resolveTools, context: { ...stale, mcpToken: true }, ...source, appId: app.appId, expectedRevisionId: updated.revisionId })
-    expect(viaConnect.revisionId).not.toBe(updated.revisionId)
-    await expect(apps.updateMcpApp({ resolveTools, context: { ...viewer, mcpToken: true }, ...source, appId: app.appId, expectedRevisionId: viaConnect.revisionId })).rejects.toThrow("Missing editor access")
-    await expect(apps.createMcpApp({ resolveTools, context: { ...stale, mcpToken: true }, ...source, title: "Second shared App", pluginId: app.pluginId })).resolves.toMatchObject({ pluginId: app.pluginId })
+    await expect(apps.updateMcpApp({ resolveTools, context: viewer, ...source, appId: app.appId, expectedRevisionId: updated.revisionId })).rejects.toThrow("Missing editor access")
+    await expect(apps.createMcpApp({ resolveTools, context: stale, ...source, title: "Second shared App", pluginId: app.pluginId })).resolves.toMatchObject({ pluginId: app.pluginId })
   })
 
   test("an update keeps the CSS and description it omits, and clears them when given empty values", async () => {

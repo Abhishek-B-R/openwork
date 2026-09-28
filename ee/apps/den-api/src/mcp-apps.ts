@@ -29,7 +29,6 @@ import type { McpMemberIdentity } from "./mcp/external-capabilities.js"
 import { buildMarketplaceCapabilityName, listAccessibleMarketplaceCapabilityReferences, parseMarketplaceCapabilityName } from "./mcp/marketplace-capabilities.js"
 import {
   PluginArchAuthorizationError,
-  pluginArchResourceHasExpandedAudience,
   requirePluginArchResourceRole,
   type PluginArchActorContext,
 } from "./routes/org/plugin-system/access.js"
@@ -115,26 +114,16 @@ async function latestRevision(organizationId: DenTypeId<"organization">, id: Den
   return row ?? null
 }
 
-/**
- * Shared writes step up to a fresh browser session. Connect's MCP token
- * actors are non-interactive and skip that step, as API keys do; their write
- * scope and editor access still gate every write.
- */
-async function requireEditor(context: PluginArchActorContext, id: DenTypeId<"configObject">, write: boolean) {
-  await requirePluginArchResourceRole({
-    context,
-    resourceId: id,
-    resourceKind: "config_object",
-    role: "editor",
-    requireFreshSession: write && await pluginArchResourceHasExpandedAudience({ context, resourceId: id, resourceKind: "config_object" }),
-  })
+/** Editor access gates every App write; the MCP write scope is checked before a write starts. */
+async function requireEditor(context: PluginArchActorContext, id: DenTypeId<"configObject">) {
+  await requirePluginArchResourceRole({ context, resourceId: id, resourceKind: "config_object", role: "editor" })
 }
 
-async function editableApp(context: PluginArchActorContext, id: DenTypeId<"configObject">, write: boolean) {
+async function editableApp(context: PluginArchActorContext, id: DenTypeId<"configObject">) {
   const organizationId = context.organizationContext.organization.id
   const row = await activeApp(organizationId, id)
   if (!row) return notFound()
-  await requireEditor(context, row.id, write)
+  await requireEditor(context, row.id)
   const version = await latestRevision(organizationId, row.id)
   const payload = version && compiledRevision(version)
   if (!version || !payload) return notFound()
@@ -155,13 +144,7 @@ async function editablePlugin(context: PluginArchActorContext, id: string) {
     isNull(PluginTable.deletedAt),
   )).limit(1)
   if (!plugin) throw new McpAppError(404, "plugin_not_found", "Plugin is not available.")
-  await requirePluginArchResourceRole({
-    context,
-    resourceId: pluginId,
-    resourceKind: "plugin",
-    role: "editor",
-    requireFreshSession: await pluginArchResourceHasExpandedAudience({ context, resourceId: pluginId, resourceKind: "plugin" }),
-  })
+  await requirePluginArchResourceRole({ context, resourceId: pluginId, resourceKind: "plugin", role: "editor" })
   return pluginId
 }
 
@@ -356,7 +339,7 @@ export async function updateMcpApp({ context, resolveTools, ...source }: UpdateM
   const input = parsed.data
   const id = appId(input.appId)
   const expectedId = revisionId(input.expectedRevisionId)
-  const current = await editableApp(context, id, true)
+  const current = await editableApp(context, id)
   if (current.version.id !== expectedId) throw new McpAppError(409, "mcp_app_revision_conflict", "This MCP App has changed. Read it again before updating.")
   const pluginId = normalizeDenTypeId("plugin", current.payload.pluginId)
   // Omitted CSS, description, and tools keep the App's current ones; stored
@@ -370,7 +353,7 @@ export async function updateMcpApp({ context, resolveTools, ...source }: UpdateM
   }, pluginId, throughPlugin(resolved, pluginId))
   // Rechecked after compiling, outside the transaction so a slow check never
   // holds the row lock and a second pool connection at once.
-  await requireEditor(context, id, true)
+  await requireEditor(context, id)
   await addWorkflows(context, pluginId, workflows)
   const organizationId = context.organizationContext.organization.id
   return db.transaction(async (tx) => {
@@ -410,7 +393,7 @@ export async function updateMcpApp({ context, resolveTools, ...source }: UpdateM
 }
 
 export async function readMcpApp(input: { context: PluginArchActorContext; appId: string }): Promise<ReadMcpAppOutput> {
-  const { version, payload } = await editableApp(input.context, appId(input.appId), false)
+  const { version, payload } = await editableApp(input.context, appId(input.appId))
   const source = storedSource(version, payload)
   return { app: summarizeMcpAppRevision({ appId: version.configObjectId, revisionId: version.id, payload }), ...source }
 }

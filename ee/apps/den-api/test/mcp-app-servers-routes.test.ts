@@ -45,8 +45,6 @@ const bindings: McpAppToolBinding[] = [
   },
 ]
 const declarations = bindings.map(({ name, description, capability, mode }) => ({ name, description, capability, mode }))
-// Connect's App operations run as a non-interactive MCP token actor.
-const tokenContext = { ...context, mcpToken: true }
 const source = {
   title: "Project explorer",
   textFallback: "Open Project explorer.",
@@ -181,13 +179,13 @@ beforeAll(async () => {
   })
   spyOn(apps, "updateMcpApp").mockImplementation(async ({ resolveTools, ...request }) => {
     if (mutationError) throw mutationError
-    expect(request.context).toEqual(tokenContext)
+    expect(request.context).toEqual(context)
     expect(await resolveTools(request.tools ?? [])).toEqual(bindings)
     current = nextSummary
     return current
   })
   spyOn(apps, "readMcpApp").mockImplementation(async (request) => {
-    expect(request.context).toEqual(tokenContext)
+    expect(request.context).toEqual(context)
     if (!editor) throw new access.PluginArchAuthorizationError(403, "forbidden", "Editor access is required.")
     return { app: current ?? appSummary, reactSource: source.reactSource, cssSource: "" }
   })
@@ -261,7 +259,7 @@ test("create_app builds an App that opens in OpenWork and names its own MCP serv
     expect(createdResult.structuredContent).toEqual({ app: appSummary, input: {}, mcpUrl: appUrl })
     expect(createdResult._meta).toEqual(launchMeta(appSummary))
     expect(JSON.stringify(createdResult.content)).toContain(appUrl)
-    expect(created).toEqual([{ ...source, context: tokenContext, resolved: bindings }])
+    expect(created).toEqual([{ ...source, context: context, resolved: bindings }])
     expect(resolverCalls).toEqual([{ scopes: ["mcp:read", "mcp:write"], member, tools: declarations }])
     expect(workflowCreations).toBe(0)
     expect(normalExecutions).toEqual([])

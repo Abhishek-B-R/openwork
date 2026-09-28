@@ -1,3 +1,4 @@
+import { createV2ContextBridge } from "./opencode-v2-context-bridge.js";
 import { migrateOpencodeV1History, opencodeV1DatabasePath, type EngineV2MigrationStatus } from "./opencode-v2-migration.js";
 import { executionRules } from "./managed-policy-rules.js";
 import { waitForEngineSkillChanges } from "./opencode-v2-skill-settle.js";
@@ -20,6 +21,7 @@ import {
   onRuntimeOpencodeConfigWrite,
   readGlobalRuntimeOpencodeConfig,
   readEffectiveRuntimeOpencodeConfig,
+  runtimeDisabledProviderList,
   runtimeMcpMap,
   runtimeProviderMap,
 } from "./runtime-opencode-config-store.js";
@@ -35,8 +37,9 @@ const UNSET_API_KEY = "openwork-engine-v2-preview-unset";
 const CATALOG_MIRROR_TIMEOUT_MS = 60_000;
 // Upkeep waits are bounded and never fail a request, as in v1: the engine
 // serves what it has, and OpenWork only improves the next turn's odds.
-// A registration the engine rejected is retried after `mcpRetryMs`, or at once
-// when its configuration changes, instead of on every prompt.
+// A registration the engine rejected, or a connection that failed to start, is
+// retried after `mcpRetryMs`, or at once when its configuration changes,
+// instead of on every prompt.
 export const ENGINE_V2_UPKEEP_WAITS: Readonly<Record<"providerPushJoinMs" | "workspaceProviderReadyMs" | "mcpSettleMs" | "mcpRetryMs", number>> = Object.freeze({
   providerPushJoinMs: 10_000,
   workspaceProviderReadyMs: 8_000,
@@ -331,10 +334,27 @@ export function mapRuntimeMcpToV2(value: unknown): Record<string, unknown> | und
     ...(oauth === undefined ? {} : { oauth }), ...shared };
 }
 
+/** Live MCP status per name for one location, or undefined when unknown. */
+async function readLiveMcpStatus(
+  active: Pick<ManagedOpencodeV2Server, "fetchJson">,
+  directory: string,
+): Promise<Map<string, string> | undefined> {
+  const result = await active.fetchJson("/api/mcp", { directory, timeoutMs: 5_000 }).catch(() => undefined);
+  const entries = isRecord(result?.json) ? result.json.data : undefined;
+  if (result?.status !== 200 || !Array.isArray(entries)) return undefined;
+  const statuses = new Map<string, string>();
+  for (const entry of entries) {
+    if (!isRecord(entry) || typeof entry.name !== "string") continue;
+    statuses.set(entry.name, isRecord(entry.status) && typeof entry.status.status === "string" ? entry.status.status : "unknown");
+  }
+  return statuses;
+}
+
 export function createEngineV2Preview(options: {
   config: ServerConfig;
   env?: Pick<EnvService, "list" | "onChange">;
   deferStart?: boolean;
+  hostReadRequest?: (path: string, init?: RequestInit) => Promise<unknown>;
   waits?: Partial<typeof ENGINE_V2_UPKEEP_WAITS>;
 }): EngineV2Preview {
   const { config } = options;
@@ -359,6 +379,7 @@ export function createEngineV2Preview(options: {
   let lastWarning: string | undefined;
   const warn = (message: string) => { lastWarning = `${new Date().toISOString()} ${message}`; };
   let sidecar: ManagedOpencodeV2Server | undefined;
+  let contextBridge: Awaited<ReturnType<typeof createV2ContextBridge>> | undefined;
   let unsubscribe: (() => void) | undefined;
   let startPromise: Promise<void> | undefined;
   let mirrorInFlight: Promise<void> | undefined;
@@ -398,6 +419,11 @@ export function createEngineV2Preview(options: {
       }));
       const applied = workspaceMcp.get(directory) ?? new Map<string, string>();
       workspaceMcp.set(directory, applied);
+      // The engine's live status, not our record of what we sent, decides
+      // whether a connection is healthy. A 204 only means the engine accepted
+      // the config; the connection starts afterwards and can fail (a local app
+      // that was closed), and the engine never retries it on its own.
+      const live = await readLiveMcpStatus(active, directory);
       let changed = false;
       // Remove first so a failed replacement cannot leave an old credential or
       // revoked tool active. Only touch registrations owned by this mirror.
@@ -416,7 +442,11 @@ export function createEngineV2Preview(options: {
       mcpRejected.set(directory, rejected);
       for (const [name, mcpConfig] of desired) {
         const fingerprint = JSON.stringify(mcpConfig);
-        if (applied.get(name) === fingerprint) continue;
+        // Leave a healthy or still-starting connection alone: re-registering
+        // replaces and closes a client a running turn may be using. Register
+        // again when the config changed, the engine lost it, or it failed.
+        const liveStatus = live?.get(name);
+        if (applied.get(name) === fingerprint && (!live || (liveStatus !== undefined && liveStatus !== "failed"))) continue;
         const previousRejection = rejected.get(name);
         if (previousRejection?.fingerprint === fingerprint && Date.now() - previousRejection.at < waits.mcpRetryMs) continue;
         const status = await active.fetchJson(`/api/mcp/${encodeURIComponent(name)}`, {
@@ -436,13 +466,21 @@ export function createEngineV2Preview(options: {
         // next turn; a slow server only delays that, it never refuses it.
         const deadline = Date.now() + waits.mcpSettleMs;
         while (true) {
-          const result = await active.fetchJson("/api/mcp", { directory, timeoutMs: 5_000 }).catch(() => undefined);
-          const entries = isRecord(result?.json) ? result.json.data : undefined;
-          const pending = result?.status !== 200 || !Array.isArray(entries) || [...applied.keys()].some((name) => {
-            const entry = entries.find((entry) => isRecord(entry) && entry.name === name);
-            return !isRecord(entry) || !isRecord(entry.status) || entry.status.status === "pending";
+          const statuses = await readLiveMcpStatus(active, directory);
+          const pending = !statuses || [...applied.keys()].some((name) => {
+            const status = statuses.get(name);
+            return status === undefined || status === "pending";
           });
-          if (!pending) break;
+          if (!pending) {
+            // A connection that failed to start is backed off like a rejected
+            // registration, and the next sync after `mcpRetryMs` tries again.
+            for (const [name, fingerprint] of applied) {
+              if (statuses?.get(name) !== "failed" || rejected.get(name)?.fingerprint === fingerprint) continue;
+              rejected.set(name, { fingerprint, at: Date.now() });
+              warn(`MCP ${name}: connection failed; will retry`);
+            }
+            break;
+          }
           if (Date.now() >= deadline) {
             warn("MCP: connections were still starting when the request proceeded");
             break;
@@ -455,14 +493,11 @@ export function createEngineV2Preview(options: {
       }
     })();
     mcpInFlight.set(directory, pending);
+    // A failed sync keeps its record as is: only successful registrations are
+    // recorded, and the live status check above catches anything unhealthy.
+    // Clearing every record here would make the next sync remove and re-add
+    // every connection, so tools vanish and return between turns.
     try { await pending; }
-    catch (error) {
-      // Retain ownership for removals, but never cache a failed readiness
-      // attempt as an applied configuration.
-      const applied = workspaceMcp.get(directory);
-      if (applied) for (const name of applied.keys()) applied.set(name, "");
-      throw error;
-    }
     finally { if (mcpInFlight.get(directory) === pending) mcpInFlight.delete(directory); }
   }
 
@@ -499,20 +534,26 @@ export function createEngineV2Preview(options: {
   }
 
   async function pushAndConfirmProviders(active: ManagedOpencodeV2Server, pushed: () => void): Promise<void> {
-    const configured = runtimeProviderMap(await readGlobalRuntimeOpencodeConfig(config));
+    const globalRuntime = await readGlobalRuntimeOpencodeConfig(config);
+    const configured = runtimeProviderMap(globalRuntime);
+    // Same list v1 receives as `disabled_providers` (e.g. a disconnected
+    // OpenCode Zen). Re-enabling removes the entry and this mirror restores it.
+    const disabledProviderIds = runtimeDisabledProviderList(globalRuntime);
+    const disabled = new Set(disabledProviderIds);
     const localKeys = await readLocalProviderApiKeys();
     const providerMap = { ...await localProviderDefinitions(config, localKeys, configured), ...configured };
     const credentials = new Map((await options.env?.list() ?? []).map((entry) => [entry.key, entry.value]));
     const mapped = mapRuntimeProvidersToV2Specs(providerMap, credentials, localKeys);
-    const nextMirroredProviderIds = mapped.specs.map((spec) => spec.id);
-    await active.setProviders(mapped.specs);
-    mirroredSpecs = mapped.specs;
+    const specs = mapped.specs.filter((spec) => !disabled.has(spec.id));
+    const nextMirroredProviderIds = specs.map((spec) => spec.id);
+    await active.setProviders(specs, disabledProviderIds);
+    mirroredSpecs = specs;
     workspaceReadiness.clear();
     mirroredProviderIds = nextMirroredProviderIds;
     skippedProviderIds = [...mapped.skippedProviderIds];
     lastMirroredAt = new Date().toISOString();
     pushed();
-    const expectedModelIds = mapped.specs.flatMap((spec) => spec.models
+    const expectedModelIds = specs.flatMap((spec) => spec.models
       .filter(model => (spec.whitelist === undefined || spec.whitelist.includes(model.id)) && !spec.blacklist?.includes(model.id))
       .map((model) => model.id));
     const deadline = Date.now() + CATALOG_MIRROR_TIMEOUT_MS;
@@ -571,9 +612,10 @@ export function createEngineV2Preview(options: {
     running = false;
     version = undefined;
     pid = undefined;
-    if (!active) return;
+    const bridge = contextBridge;
+    contextBridge = undefined;
     try {
-      await active.close();
+      await Promise.all([bridge?.close(), active?.close()]);
     } catch (error) {
       lastError = errorMessage(error);
     }
@@ -588,7 +630,9 @@ export function createEngineV2Preview(options: {
     // skills now use the same metadata/on-demand Connect path as v1.
     await rm(join(rootDir, "cloud-skills"), { recursive: true, force: true });
     const opencodeModelsUrl = await resolveOpencodeModelsUrl();
+    contextBridge = options.hostReadRequest ? await createV2ContextBridge(options.hostReadRequest) : undefined;
     const managed = await createManagedOpencodeV2Server({
+      contextTools: contextBridge,
       bin: resolved.bin,
       rootDir,
       env: { OPENCODE_MODELS_URL: opencodeModelsUrl },
@@ -639,7 +683,7 @@ export function createEngineV2Preview(options: {
       await startPromise;
       return;
     }
-    const pending = startSidecar();
+    const pending = startSidecar().catch(async error => { await closeSidecar(); throw error; });
     startPromise = pending;
     try {
       await pending;

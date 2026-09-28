@@ -806,7 +806,18 @@ export async function startServer(
     logger,
   });
   setEngineInstanceReaperForConfig(config, engineInstanceReaper);
-  const engineV2Preview = createEngineV2Preview({ config, env, deferStart: true });
+  const engineV2Preview = createEngineV2Preview({ config, env, deferStart: true,
+    hostReadRequest: async (path, init) => {
+      // Internal dispatch retains the host credential in this process. The
+      // native plugin receives only the context bridge's restricted token.
+      const response = await serverOptions.fetch(new Request(`http://127.0.0.1${path}`, {
+        ...init, headers: { Authorization: `Bearer ${config.token}`, "Content-Type": "application/json" },
+      }));
+      const payload: unknown = await response.json();
+      if (!response.ok) throw new Error(`OpenWork read failed (${response.status})`);
+      return payload;
+    },
+  });
   const cloudProviderSync = new CloudProviderSync({
     config,
     env,
@@ -3132,6 +3143,14 @@ function createRoutes(
       updatedAt,
     };
     return jsonResponse(response);
+  });
+
+  // OpenCode v2 keeps its engine config private, so clients read the shared
+  // disabled list here (ids only) to offer "Enable" for hidden providers.
+  addRoute(routes, "GET", "/workspace/:id/runtime-config/disabled-providers", "client", async (ctx) => {
+    await resolveWorkspace(config, ctx.params.id);
+    const runtime = await readGlobalRuntimeOpencodeConfig(config);
+    return jsonResponse({ ok: true, disabledProviders: runtimeDisabledProviderList(runtime) });
   });
 
   addRoute(routes, "POST", "/workspace/:id/runtime-config/disabled-providers", "client", async (ctx) => {

@@ -241,6 +241,8 @@ async function withFakeSidecar(
   input: {
     reply: (path: string, method: string) => FakeSidecarReply | Promise<FakeSidecarReply>;
     providers?: Record<string, unknown>;
+    disabledProviders?: string[];
+    onSetProviders?: (specs: managedV2.OpencodeV2ProviderSpec[], disabled: string[] | undefined) => void;
     mcp?: Record<string, Record<string, unknown>>;
     waits?: Parameters<typeof createEngineV2Preview>[0]["waits"];
   },
@@ -251,7 +253,9 @@ async function withFakeSidecar(
   const fake = {
     url: "http://127.0.0.1:1", username: "opencode", password: "fixture", childPid: 1, exitCode: null, stdout: "", stderr: "",
     health: async () => ({ healthy: true, version: "fixture", pid: 1 }),
-    injectProvider: async () => {}, setProviders: async () => {}, setSkills: async () => {}, close: async () => {},
+    injectProvider: async () => {},
+    setProviders: async (specs: managedV2.OpencodeV2ProviderSpec[], disabled?: string[]) => { input.onSetProviders?.(specs, disabled); },
+    setSkills: async () => {}, close: async () => {},
     async fetchJson(path: string, init: { method?: string } = {}) {
       const method = init.method ?? "GET";
       calls.push(`${method} ${path}`);
@@ -261,7 +265,10 @@ async function withFakeSidecar(
   const spies = [
     spyOn(managedV2, "createManagedOpencodeV2Server").mockResolvedValue(fake),
     spyOn(localAuth, "readLocalProviderApiKeys").mockResolvedValue(new Map()),
-    spyOn(runtimeConfig, "readGlobalRuntimeOpencodeConfig").mockResolvedValue({ provider: input.providers ?? {} }),
+    spyOn(runtimeConfig, "readGlobalRuntimeOpencodeConfig").mockResolvedValue({
+      provider: input.providers ?? {},
+      ...(input.disabledProviders ? { disabled_providers: input.disabledProviders } : {}),
+    }),
     spyOn(runtimeConfig, "readEffectiveRuntimeOpencodeConfig").mockResolvedValue({ mcp: input.mcp ?? {} }),
   ];
   const previousBin = process.env.OPENWORK_OPENCODE2_BIN;
@@ -282,6 +289,23 @@ async function withFakeSidecar(
 }
 
 const orgProvider = { orga: { name: "Org A", options: { baseURL: "https://example.test/v1", apiKey: "fixture-key" }, models: { m1: { name: "M1" } } } };
+
+test("the v2 mirror applies the same disabled_providers as v1, so Disconnect hides OpenCode Zen in both engines", async () => {
+  const pushes: Array<{ ids: string[]; disabled: string[] | undefined }> = [];
+  await withFakeSidecar({
+    providers: { ...orgProvider, orgb: { name: "Org B", options: { baseURL: "https://b.example.test/v1", apiKey: "fixture-key" }, models: { m2: {} } } },
+    disabledProviders: ["opencode", "orgb"],
+    onSetProviders: (specs, disabled) => pushes.push({ ids: specs.map((spec) => spec.id), disabled }),
+    reply: (path) => path === "/api/model"
+      ? { status: 200, json: { data: [{ id: "m1", providerID: "orga" }] } }
+      : { status: 200, json: { data: [] } },
+  }, async (preview) => {
+    await preview.refreshProviders();
+    expect(pushes.at(-1)).toEqual({ ids: ["orga"], disabled: ["opencode", "orgb"] });
+    expect(preview.status().mirroredProviderIds).toEqual(["orga"]);
+    expect(preview.status().lastError).toBeUndefined();
+  });
+});
 
 test("folder readiness joins the provider push, not the slow catalog confirmation", async () => {
   const started = Date.now();
@@ -336,6 +360,56 @@ test("a connection the engine rejects is skipped and backed off; a slow one only
     expect(calls.filter((call) => call === "PUT /api/mcp/good")).toHaveLength(1);
     expect(preview.status().lastWarning).toMatch(/still starting|registration failed/);
     expect(preview.status().lastError).toBeUndefined();
+  });
+});
+
+test("a connection that failed to start is registered again once its app is up", async () => {
+  // Accepted with 204, then the local app was closed: the engine reports failed
+  // and never retries on its own. Once the app is up, the next sync after the
+  // back-off registers it again, and a healthy connection is then left alone.
+  let appUp = false;
+  let liveStatus = "pending";
+  await withFakeSidecar({
+    waits: { mcpSettleMs: 150, mcpRetryMs: 1_000 },
+    mcp: { "paper-local": { type: "remote", url: "http://127.0.0.1:29979/mcp" } },
+    reply: (path, method) => {
+      if (method === "PUT") { liveStatus = appUp ? "connected" : "failed"; return { status: 204, json: null }; }
+      if (path === "/api/mcp") return { status: 200, json: { data: [{ name: "paper-local", status: { status: liveStatus } }] } };
+      return { status: 200, json: { data: [] } };
+    },
+  }, async (preview, root, calls) => {
+    const puts = () => calls.filter((call) => call === "PUT /api/mcp/paper-local").length;
+    await preview.syncWorkspaceMcp("ws_1", root);
+    expect(puts()).toBe(1);
+    expect(preview.status().lastWarning).toContain("paper-local: connection failed");
+    // Within the back-off a failed connection is not hammered on every prompt.
+    await preview.syncWorkspaceMcp("ws_1", root);
+    expect(puts()).toBe(1);
+    appUp = true;
+    await new Promise((resolve) => setTimeout(resolve, 1_050));
+    await preview.syncWorkspaceMcp("ws_1", root);
+    expect(puts()).toBe(2);
+    await new Promise((resolve) => setTimeout(resolve, 1_050));
+    await preview.syncWorkspaceMcp("ws_1", root);
+    expect(puts()).toBe(2);
+    expect(calls).not.toContain("DELETE /api/mcp/paper-local");
+  });
+});
+
+test("a connection the engine no longer lists is registered again", async () => {
+  let listed = true;
+  await withFakeSidecar({
+    mcp: { good: { type: "remote", url: "https://good.example/mcp" } },
+    reply: (path, method) => {
+      if (method === "PUT") { listed = true; return { status: 204, json: null }; }
+      if (path === "/api/mcp") return { status: 200, json: { data: listed ? [{ name: "good", status: { status: "connected" } }] : [] } };
+      return { status: 200, json: { data: [] } };
+    },
+  }, async (preview, root, calls) => {
+    await preview.syncWorkspaceMcp("ws_1", root);
+    listed = false;
+    await preview.syncWorkspaceMcp("ws_1", root);
+    expect(calls.filter((call) => call === "PUT /api/mcp/good")).toHaveLength(2);
   });
 });
 

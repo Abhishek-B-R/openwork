@@ -108,8 +108,6 @@ return a JSON-RPC error.
 route its tool through that Plugin, so sharing the Plugin shares the Workflows;
 adding one requires Workflow manager access. `update_app` keeps omitted
 `cssSource`, `description`, and `tools`, reusing stored bindings as published.
-Connect runs these writes as an `mcpToken` actor, which skips the
-fresh-session step-up the way API keys do.
 
 The Connect server index lists accessible Apps only to the App host
 (`mcp-app-host-v1` with the app-host scope), with `exposeDirectly: false`, so
