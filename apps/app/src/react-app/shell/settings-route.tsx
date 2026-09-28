@@ -107,6 +107,7 @@ import {
   type ConnectCapabilityInventory,
 } from "@/react-app/domains/session/surface/connect-capability-inventory";
 import {
+  CLOUD_INVENTORY_CHANGED_EVENT,
   loadConnectCapabilities,
   readCachedConnectCapabilities,
 } from "@/react-app/domains/connections/cloud-inventory-cache";
@@ -1020,6 +1021,17 @@ function SettingsRouteContent(props: SettingsSurfaceProps = {}) {
   useEffect(() => {
     void refreshConnectCapabilities({ force: true });
   }, [refreshConnectCapabilities]);
+  // Deleting or restoring a Library plugin can retire the connections it owns;
+  // re-read them so a deleted plugin's connector does not linger as its own row.
+  const refreshOrgMcpConnections = orgMcpConnections.refresh;
+  useEffect(() => {
+    const refresh = () => {
+      void refreshConnectCapabilities({ force: true });
+      void refreshOrgMcpConnections();
+    };
+    window.addEventListener(CLOUD_INVENTORY_CHANGED_EVENT, refresh);
+    return () => window.removeEventListener(CLOUD_INVENTORY_CHANGED_EVENT, refresh);
+  }, [refreshConnectCapabilities, refreshOrgMcpConnections]);
 
   const hasOpenWorkCloudProvider = useMemo(
     () =>
