@@ -3,9 +3,17 @@
  * Exact matches only: adding a host trusts every metadata path on that host.
  * Do not add shared/user-content hosting domains or wildcard subdomains.
  * This controls consent copy only, not authorization or software attestation.
- * Claude Code publishes https://claude.ai/oauth/claude-code-client-metadata.
+ * Only clients that present a CIMD URL can match; dynamically registered
+ * clients keep the generic warning because their names are self-asserted.
+ *
+ * - claude.ai: Claude web, desktop, mobile, and Cowork
+ *   (/oauth/mcp-oauth-client-metadata) and Claude Code
+ *   (/oauth/claude-code-client-metadata).
+ * - chatgpt.com: ChatGPT (/oauth/client.json or /oauth/<callback_id>/client.json)
+ *   and Codex (/oauth/codex/<callback_id>/client.json).
+ * - vscode.dev: VS Code (/oauth/client-metadata.json).
  */
-export const KNOWN_MCP_CIMD_DOMAINS: readonly string[] = ["claude.ai"];
+export const KNOWN_MCP_CIMD_DOMAINS: readonly string[] = ["claude.ai", "chatgpt.com", "vscode.dev"];
 
 export function mcpCimdDomain(clientId: string | null): string | null {
   if (!clientId) return null;

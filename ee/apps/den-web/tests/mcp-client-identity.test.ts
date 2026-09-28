@@ -55,9 +55,19 @@ describe("MCP consent client identity", () => {
 });
 
 describe("unverified application warning", () => {
+  test.each([
+    ["https://claude.ai/oauth/mcp-oauth-client-metadata", "claude.ai"],
+    ["https://claude.ai/oauth/claude-code-client-metadata", "claude.ai"],
+    ["https://chatgpt.com/oauth/client.json", "chatgpt.com"],
+    ["https://chatgpt.com/oauth/abc123/client.json", "chatgpt.com"],
+    ["https://chatgpt.com/oauth/codex/abc123/client.json", "chatgpt.com"],
+    ["https://vscode.dev/oauth/client-metadata.json", "vscode.dev"],
+  ])("recognizes the published CIMD document %s", (clientId, domain) => {
+    expect(knownMcpCimdDomain(clientId)).toBe(domain);
+  });
+
   test("recognizes only the exact HTTPS CIMD domain", () => {
-    expect(knownMcpCimdDomain("https://claude.ai/oauth/claude-code-client-metadata")).toBe("claude.ai");
-    for (const id of [null, "dcr-client", "http://claude.ai/oauth/client", "https://claude.ai/", "https://claude.ai.evil.example/client", "https://sub.claude.ai/client", "https://claude.ai@evil.example/client", "https://evil.example@claude.ai/client", "https://claude.ai:8443/client", "https://claude.ai/client#fragment"]) {
+    for (const id of [null, "dcr-client", "http://claude.ai/oauth/client", "https://claude.ai/", "https://claude.ai.evil.example/client", "https://sub.claude.ai/client", "https://claude.ai@evil.example/client", "https://evil.example@claude.ai/client", "https://claude.ai:8443/client", "https://claude.ai/client#fragment", "https://chatgpt.com.evil.example/oauth/client.json", "https://www.chatgpt.com/oauth/client.json", "https://vscode.dev.evil.example/oauth/client-metadata.json", "https://insiders.vscode.dev/oauth/client-metadata.json", "https://evil.example/vscode.dev/oauth/client-metadata.json"]) {
       expect(knownMcpCimdDomain(id)).toBeNull();
     }
   });
