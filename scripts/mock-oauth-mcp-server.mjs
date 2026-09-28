@@ -257,8 +257,11 @@ function validateAgentWorkloads(value) {
       if (step.allowUnadvertisedTool !== undefined && typeof step.allowUnadvertisedTool !== "boolean") {
         throw new Error(`agent workload ${promptMarker} allowUnadvertisedTool must be a boolean`);
       }
+      if (step.text !== undefined && (typeof step.text !== "string" || !step.text.trim())) {
+        throw new Error(`agent workload ${promptMarker} tool ${step.tool} text must be a non-empty string`);
+      }
       return { tool: step.tool.trim(), arguments: structuredClone(step.arguments), argumentsFrom: step.argumentsFrom,
-        allowUnadvertisedTool: step.allowUnadvertisedTool === true };
+        allowUnadvertisedTool: step.allowUnadvertisedTool === true, text: step.text };
     });
     if (workload.matchAll !== undefined && typeof workload.matchAll !== "boolean")
       throw new Error(`agent workload ${promptMarker} matchAll must be a boolean`);
@@ -583,6 +586,7 @@ async function handleAgentCompletion(req, res, entry) {
       codes: [...value.matchAll(/"(?:error|code)"\s*:\s*"([a-z_]{2,80})"/g)].map(match => match[1]),
       isError: /"isError"\s*:\s*true/.test(value),
       hasAppMetadata: value.includes("openwork/mcpApp"),
+      hasAppShownNote: value.includes("the person now sees this App right above your reply"),
       hasDraftResult: value.includes("Draft ready for Test recipient"),
     };
   });
@@ -677,6 +681,7 @@ async function handleAgentCompletion(req, res, entry) {
   };
   agentStream(res, model, [
     agentChunk(model, { role: "assistant" }),
+    ...(step.text ? [agentChunk(model, { content: step.text })] : []),
     agentChunk(model, {
       tool_calls: [{
         index: 0,

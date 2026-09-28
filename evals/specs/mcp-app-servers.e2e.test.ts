@@ -1,6 +1,6 @@
 import { expect } from "vitest";
 import { spec } from "@openwork/testkit";
-import { appSource, appTitle, buildPrompt, buildReply, chatPrompt, chatReply, launchInput, mcpAppServers, mcpAppServersChat, payload, pricerTitle, record, reservationId, rows, toolNames } from "../worlds/mcp-app-servers.ts";
+import { appSource, appTitle, buildPrompt, buildReply, chatLeadIn, chatPrompt, chatReply, launchInput, mcpAppServers, mcpAppServersChat, payload, pricerTitle, record, reservationId, rows, toolNames } from "../worlds/mcp-app-servers.ts";
 
 const test = spec.world(mcpAppServers, {
   resources: { surfaces: ["web"], services: ["den", "mock"] },
@@ -263,7 +263,7 @@ test("an owner composes an App that is its own MCP server, and a teammate uses i
   });
 });
 
-chatTest("an owner prompts OpenWork's chat to build an App and to open one, and both work inside the conversation", async ({ world, agent, user, step, evidence }) => {
+chatTest("an owner prompts OpenWork's chat to build an App and to open one, and both work inside the conversation", async ({ world, agent, user, probe, step, evidence }) => {
   const modelTool = async (marker: string) => (await world.den.mocks.inventory.agentRequests({ promptMarker: marker })).find(request => request.kind === "tool");
   const lookups = async (sinceIso: string) => (await world.inventoryCalls({ sinceIso, atLeast: 1 })).map(call => call.args);
   const reservations = async (sinceIso: string) => (await world.reservations({ sinceIso, atLeast: 1 })).map(call => call.args);
@@ -332,6 +332,17 @@ chatTest("an owner prompts OpenWork's chat to build an App and to open one, and 
     await agent.send(chatPrompt);
     await user.see({ text: chatReply }, { timeoutMs: 120_000 });
     expect((await modelTool(chatPrompt))?.toolName).toMatch(/execute_capability$/);
+    // The App's result tells the model the person already sees the App, so its reply stays short.
+    const final = (await world.den.mocks.inventory.agentRequests({ promptMarker: chatPrompt })).find(request => request.kind === "final");
+    expect(final?.toolResultCodes).toEqual([expect.objectContaining({ hasAppShownNote: true })]);
+    // The model wrote a sentence before opening the App, so the App shows after that sentence and before the reply.
+    const transcript = (await probe.dom(`[data-message-role="assistant"], [data-mcp-app-resource="${world.created.resourceUri}"] iframe`)).elements;
+    const said = (text: string) => transcript.findIndex(element => element.tag !== "iframe" && element.text.includes(text));
+    const frames = transcript.flatMap((element, index) => element.tag === "iframe" ? [index] : []);
+    expect(frames).toHaveLength(1);
+    expect(said(chatLeadIn)).toBeGreaterThanOrEqual(0);
+    expect(said(chatLeadIn)).toBeLessThan(frames[0]);
+    expect(said(chatReply)).toBeGreaterThan(frames[0]);
     calculator = await focus(appTitle);
     await calculator.see({ role: "heading", label: appTitle });
     await calculator.see({ testId: "pricing-date" }, { text: /^Prices as of \d{4}-\d{2}-\d{2}$/, timeoutMs: 90_000 });
@@ -342,6 +353,7 @@ chatTest("an owner prompts OpenWork's chat to build an App and to open one, and 
     expect(await world.reservations({ sinceIso: openedAt })).toEqual([]);
     await user.screenshot();
     evidence.recordAssertionEvidence("The chat opens an existing App with the order it was given", `"${chatPrompt}" carries no App, Plugin, or connection id. The model opened ${appTitle} with execute_capability and the launch input { sku: "${launchInput.sku}", quantity: ${launchInput.quantity} }. The App has no sample order of its own, yet with no click it shows "${pricedLine}": its live Workflow loaded today's date and its read-only Inventory lookup loaded the price. Nothing was reserved.`, true);
+    evidence.recordAssertionEvidence("The App shows where it was opened, and the model is told to keep its reply short", `The model wrote "${chatLeadIn}" and then opened ${appTitle} in the same response. The conversation shows that sentence first, then the App, then the reply "${chatReply}". The result the model read after opening the App carried the note that the person already sees the App right above its reply, so the reply should stay to a sentence or two.`, true);
   });
 
   await step("one click on Reserve stock in the Order calculator reserves the stock once", async () => {

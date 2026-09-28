@@ -13,6 +13,8 @@ import { afterAll, beforeAll, beforeEach, expect, mock, spyOn, test } from "bun:
 import { Hono } from "hono"
 import * as Effect from "effect/Effect"
 import type { PluginArchActorContext } from "../src/routes/org/plugin-system/access.js"
+import { MCP_APP_SHOWN_NOTE } from "../src/mcp/mcp-app-reply.js"
+import { connectionActionAppMeta } from "../src/mcp/connection-action.js"
 
 const origin = "http://127.0.0.1:8790"
 const organizationId = createDenTypeId("organization")
@@ -161,6 +163,18 @@ beforeAll(async () => {
   }))
   spyOn(registry, "executeCapability").mockImplementation(async (ctx, request) => {
     normalExecutions.push({ scopes: [...ctx.principal.scopes], member: ctx.member, request })
+    // A connection tool that opens an App, and one whose call failed.
+    if (request.name === "mcp:emc_widgets:open_board" || request.name === "mcp:emc_widgets:broken_board") {
+      return {
+        ...(request.name === "mcp:emc_widgets:broken_board" ? { isError: true } : {}),
+        content: [{ type: "text", text: "Board ready" }],
+        _meta: { "openwork/mcpApp": { connectionId: "emc_widgets", toolName: "open_board", resourceUri: "ui://widgets/board.html", arguments: {} } },
+      }
+    }
+    // OpenWork's own connection card, which is not an App.
+    if (request.name === "mcp:emc_widgets:connection_status") {
+      return { content: [{ type: "text", text: "Connection ready" }], _meta: connectionActionAppMeta("emc_widgets") }
+    }
     return { content: [{ type: "text", text: "ordinary result" }], structuredContent: { ordinary: true }, _meta: { "provider/unchanged": true } }
   })
   const appTools = await import("../src/mcp/app-tools.js")
@@ -251,14 +265,24 @@ async function withClient(path: string, run: (client: Client) => Promise<void>, 
 
 test("create_app builds an App that opens in OpenWork and names its own MCP server", async () => {
   await withClient("/mcp/agent", async (client) => {
-    const names = (await client.listTools()).tools.map((tool) => tool.name)
+    const tools = (await client.listTools()).tools
+    const names = tools.map((tool) => tool.name)
     expect(names).toEqual(expect.arrayContaining(["create_app", "update_app", "read_app", "search_capabilities", "execute_capability"]))
     expect(names.some((name) => name.startsWith(MCP_APP_LAUNCH_TOOL_NAME))).toBe(false)
+    // The authoring rules reach the model once, in create_app, not again in update_app or the instructions.
+    const description = (name: string) => tools.find((tool) => tool.name === name)?.description ?? ""
+    expect(description("create_app")).toContain("app.callServerTool")
+    expect(description("update_app")).toContain("following create_app's rules")
+    for (const text of [description("update_app"), client.getInstructions() ?? ""]) expect(text).not.toContain("app.callServerTool")
 
     const createdResult = await client.callTool({ name: "create_app", arguments: source })
     expect(createdResult.structuredContent).toEqual({ app: appSummary, input: {}, mcpUrl: appUrl })
     expect(createdResult._meta).toEqual(launchMeta(appSummary))
     expect(JSON.stringify(createdResult.content)).toContain(appUrl)
+    // The model learns the person already sees the App above its reply; other clients still get its text.
+    const createdText = JSON.stringify(createdResult.content)
+    expect(createdText).toContain(MCP_APP_SHOWN_NOTE)
+    expect(createdText).toContain(source.textFallback)
     expect(created).toEqual([{ ...source, context: context, resolved: bindings }])
     expect(resolverCalls).toEqual([{ scopes: ["mcp:read", "mcp:write"], member, tools: declarations }])
     expect(workflowCreations).toBe(0)
@@ -307,6 +331,8 @@ test("an App past the index limit is not offered to open inside OpenWork, but ke
     expect(opened._meta).toBeUndefined()
     expect(opened.structuredContent).toEqual({ app: appSummary, input: {}, mcpUrl: appUrl })
     expect(JSON.stringify(opened.content)).toContain("past that limit")
+    // Nothing opens inside OpenWork, so nothing tells the model it is shown.
+    expect(JSON.stringify(opened.content)).not.toContain(MCP_APP_SHOWN_NOTE)
     const updated = await client.callTool({ name: "update_app", arguments: { ...source, appId, expectedRevisionId: revisionId } })
     expect(updated._meta).toBeUndefined()
     expect(JSON.stringify(updated.content)).toContain(appUrl)
@@ -512,6 +538,9 @@ test("with App servers off, Connect keeps its previous surface and App URLs refu
       for (const builder of ["create_app", "update_app", "read_app"]) expect(names).not.toContain(builder)
       expect(client.getInstructions()).toContain("save_artifact_view and follow its prerequisites")
       expect(client.getInstructions()).not.toContain("create_app")
+      expect(client.getInstructions()).not.toContain(MCP_APP_SHOWN_NOTE)
+      const board = await client.callTool({ name: "execute_capability", arguments: { name: "mcp:emc_widgets:open_board" } })
+      expect(JSON.stringify(board.content)).not.toContain(MCP_APP_SHOWN_NOTE)
       const index = await client.readResource({ uri: "openwork://connect/mcp-servers/index.json" })
       const text = index.contents[0] && "text" in index.contents[0] ? index.contents[0].text : "{}"
       expect(JSON.parse(text).servers).toEqual([])
@@ -528,4 +557,20 @@ test("with App servers off, Connect keeps its previous surface and App URLs refu
   } finally {
     Object.assign(env, { appMcpServersEnabled: true })
   }
+})
+
+test("a result that opens an App tells the model the person already sees it above the reply", async () => {
+  await withClient("/mcp/agent", async (client) => {
+    // Only results that open an App carry the note, not the instructions every session reads.
+    expect(client.getInstructions()).not.toContain(MCP_APP_SHOWN_NOTE)
+    const board = await client.callTool({ name: "execute_capability", arguments: { name: "mcp:emc_widgets:open_board" } })
+    // The provider's own text stays first and unchanged; the note is a separate block after it.
+    expect(board.content).toEqual([{ type: "text", text: "Board ready" }, { type: "text", text: MCP_APP_SHOWN_NOTE }])
+    const broken = await client.callTool({ name: "execute_capability", arguments: { name: "mcp:emc_widgets:broken_board" } })
+    expect(broken.content).toEqual([{ type: "text", text: "Board ready" }])
+    const card = await client.callTool({ name: "execute_capability", arguments: { name: "mcp:emc_widgets:connection_status" } })
+    expect(card.content).toEqual([{ type: "text", text: "Connection ready" }])
+    const ordinary = await client.callTool({ name: "execute_capability", arguments: { name: `plugin:${pluginId}:${otherAppId}` } })
+    expect(JSON.stringify(ordinary.content)).not.toContain(MCP_APP_SHOWN_NOTE)
+  })
 })

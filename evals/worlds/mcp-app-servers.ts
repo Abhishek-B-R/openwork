@@ -493,6 +493,8 @@ export async function mcpAppServers(seed: Seed, context: { place: Place }) {
 }
 
 export const chatPrompt = "Open the Order calculator for 6 of WIDGET-7.";
+/** What the model writes before it opens the App, in the same response. */
+export const chatLeadIn = "Looking for the Order calculator among your Apps.";
 export const chatReply = "The Order calculator is open in this conversation.";
 export const pricerTitle = "Quick order pricer";
 export const buildPrompt = "Build me an App that looks up a product's unit price in Inventory and multiplies it by the quantity.";
@@ -541,7 +543,7 @@ export async function mcpAppServersChat(seed: Seed) {
         { tool: "create_app", arguments: { ...appSource("revision one", { title: pricerTitle, sampleOrder: true }), tools } },
       ] },
       { promptMarker: chatPrompt, finalReply: chatReply, latestUserTurn: true, steps: [
-        { tool: "execute_capability", arguments: { name: `plugin:${created.pluginId}:${created.appId}`, body: launchInput } },
+        { tool: "execute_capability", text: chatLeadIn, arguments: { name: `plugin:${created.pluginId}:${created.appId}`, body: launchInput } },
       ] },
     ] }),
     signal: AbortSignal.timeout(15_000),

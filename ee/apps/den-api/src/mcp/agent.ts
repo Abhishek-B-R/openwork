@@ -98,7 +98,8 @@ import {
   connectionActionPayloadSchema,
 } from "./connection-action.js"
 import { needsGeneratedArtifactCatalog } from "./generated-artifact-catalog-request.js"
-import { APP_AUTHORING_GUIDANCE, AppBuilderError, mcpAppLaunchResult, registerAppBuilderTools, searchMcpApps } from "./app-builder-tools.js"
+import { AppBuilderError, mcpAppLaunchResult, registerAppBuilderTools, searchMcpApps } from "./app-builder-tools.js"
+import { withMcpAppShownNote } from "./mcp-app-reply.js"
 import { resolveMcpAppTools } from "./app-tools.js"
 import { createMcpApp, isActiveMcpApp, listAccessibleMcpApps, loadMcpAppServerDefinition, McpAppError, readMcpApp, updateMcpApp, type McpAppEntry } from "../mcp-apps.js"
 import {
@@ -196,7 +197,7 @@ function agentMcpInstructions(appServers: boolean): string {
     "Use create_skill to create one private Cloud skill in a new Plugin, and update_skill to publish a new immutable version of an existing skill. Both return text and structured skill details; do not route these flows through execute_capability, postPlugins, or postConfigObjectsVersions.",
     "Skills have direct tools: list_skills returns every built-in and marketplace skill this member may use, and get_skill returns one skill's SKILL.md by its name or exact capability. Prefer them over keyword search for skills; search_capabilities with type skills and execute_capability still return the same skills, and the skill:// resources are unchanged.",
     "Built-in remote skills create-skill, share-plugin, add-to-marketplace, and add-user-to-marketplace are always listed by list_skills and in the skill index. Retrieve and follow the matching one with get_skill (or by executing its exact capability); do not invent a local copy.",
-    appServers ? APP_AUTHORING_GUIDANCE : "For an app, dashboard, or artifact view of Workflow results, call the direct MCP tool save_artifact_view and follow its prerequisites. It is a Cloud MCP tool, not a desktop-only RPC or a search_capabilities match. Its presence in the available tools confirms availability; an empty capability search does not establish a disabled feature flag. Do not substitute a local HTML file for an in-app artifact. Build the complete app in one shot without asking about Workflow internals, names, or runtime code. Live workflows use server-supplied input.runtime for current dates and caller timezone. Use one friendly name for the workflow and app; the user previews the draft and chooses Save to keep both on their dashboard. Only create an Automation when the user asks for a schedule.",
+    appServers ? "Use create_app to build a new app, dashboard, or interactive view, and read_app then update_app to change one. Workflow-bound views from save_artifact_view are read-only." : "For an app, dashboard, or artifact view of Workflow results, call the direct MCP tool save_artifact_view and follow its prerequisites. It is a Cloud MCP tool, not a desktop-only RPC or a search_capabilities match. Its presence in the available tools confirms availability; an empty capability search does not establish a disabled feature flag. Do not substitute a local HTML file for an in-app artifact. Build the complete app in one shot without asking about Workflow internals, names, or runtime code. Live workflows use server-supplied input.runtime for current dates and caller timezone. Use one friendly name for the workflow and app; the user previews the draft and chooses Save to keep both on their dashboard. Only create an Automation when the user asks for a schedule.",
     "Skills teach how to perform work. Workflows are saved procedures discovered through search_capabilities and run through execute_capability. Author an ad hoc procedure with execute_capability_script; Workflow runs produce artifacts rendered by render_workflow_artifact, and Automations trigger Workflows. To keep a successful Code Mode result, save it as a Workflow inside the existing Plugin the member names (pass that pluginId); omit pluginId only for a private Workflow in their My Workflows Plugin. A Workflow inherits discovery and sharing from its Plugin and Marketplaces; never create a separate Workflow package or marketplace entry.",
     appServers
       ? "A match with kind mcp_app is a standard MCP App: an App built in OpenWork, which is also its own MCP server, or an App from a connected MCP server. Execute that exact match through execute_capability and let compatible hosts render its ui:// resource. Never import, convert, or browse for a standalone HTML URL instead; standalone URL-imported Apps are not part of this release."
@@ -741,7 +742,8 @@ export function registerAgentMcpRoutes<T extends { Variables: RequestIdVariables
             }
           }
         }
-        return result
+        // A connection App opens in OpenWork above the reply; keep the reply short.
+        return appServersEnabled ? withMcpAppShownNote(result) : result
       },
     )
 

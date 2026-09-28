@@ -15,18 +15,9 @@ import {
 import { z } from "zod"
 import type { McpAppEntry } from "../mcp-apps.js"
 import { buildMarketplaceCapabilityName } from "./marketplace-capabilities.js"
+import { MCP_APP_SHOWN_NOTE } from "./mcp-app-reply.js"
 import { DEN_MCP_READ_SCOPE, DEN_MCP_WRITE_SCOPE } from "./scopes.js"
 import { scoreText, tokenize, type CapabilityMatch } from "./search.js"
-
-export const APP_AUTHORING_GUIDANCE = [
-  "For a new app, dashboard, or interactive view, call create_app directly with complete React/CSS source, a readable textFallback, and the tools the App needs. No Workflow, receipt, output schema, or Automation is required. Older Workflow-bound views from save_artifact_view are read-only: they still open and refresh, but are not created or edited.",
-  "Each App becomes its own standard MCP server with exactly: open_app (bound to the App's immutable ui:// revision), the tools you declare, and the App's resources. Declare each tool with a clear snake_case name, a description, and one exact capability name from search_capabilities: a saved Workflow, a connection tool, or an OpenWork action that reads (GET). OpenWork actions that change data are refused; to change something from an App, bind a saved Workflow that makes the change. Use mode live for a saved Workflow that reads input.runtime; it runs read-only. Tools run as whoever uses the App, with their own access and connections.",
-  "Provide a default-exported React component receiving { app, input, result, hostContext }. input is the launch input object; result is the launch CallToolResult (read result?.structuredContent) and is undefined until the host delivers it. React is injected: use React.useState and other React APIs without imports. Do not use fetch, browser/host globals, dynamic code, external resources, URL-bearing elements, or native forms (<form> is blocked). Use labeled inputs and explicit type=button controls.",
-  "Call only the App's declared tools, by their declared names: app.callServerTool({ name, arguments }). Workflow and connection tools take the capability's own arguments; OpenWork action tools take { path, query, body } as their schema shows; live Workflow tools take only an optional { timeZone }. Check app.getHostCapabilities()?.serverTools first and show a blocked state when it is absent. Read-only tools are OpenWork action reads, live Workflows, and connection tools their provider marks read-only (readOnly: true in their search_capabilities match); OpenWork checks a connection tool's label again on every call. Other connection tools and ordinary Workflow runs are not read-only. Hosts may require a user click before calling a tool that is not read-only. OpenWork does, and one click authorizes exactly one tool call, even a read-only one. Call read-only tools when the App opens or its inputs change; if the host refuses one (OpenWork's refusal names tool_requires_approval or asks for approval), show a button that makes that one call instead. Give every other connection tool and Workflow run its own button that makes only that call, and show other errors as a readable blocked state.",
-  "The standard bridge uses autoResize:true. app.sendSizeChanged({ height }) requests a height; the host may clamp it and automatic content-size updates still apply. Follow DESIGN.md: compact neutral layout, one focal action, explicit loading/empty/error/blocked states, no internal scrolling or automatic navigation.",
-  "Creation uses a new private Plugin named after the App unless the user names an existing authorized pluginId. The Workflows an App's tools run are added to that Plugin, so you must manage each one. Share the App and its Workflows by sharing that Plugin; each person signs in with their own OpenWork account and sharing never shares credentials. The result includes the App's MCP URL for Cursor, Claude, or any MCP client. Read with read_app before update_app, supplying expectedRevisionId and complete replacement React source; omit cssSource, description, or tools to keep the current ones.",
-  "In OpenWork, create_app and update_app open the new revision in the conversation. To open an existing App, find it with search_capabilities (kind mcp_app) and execute that exact match. Only create an Automation when the user asks for a schedule.",
-].join(" ")
 
 const appResultSchema = z.object({
   app: mcpAppSummarySchema,
@@ -72,7 +63,7 @@ export function mcpAppLaunchResult(input: { app: McpAppSummary; publicOrigin: st
     }
   }
   return {
-    content: [{ type: "text" as const, text: `${input.message}\n\n${input.app.textFallback}` }],
+    content: [{ type: "text" as const, text: `${input.message} ${MCP_APP_SHOWN_NOTE}\n\n${input.app.textFallback}` }],
     structuredContent,
     _meta: {
       "openwork/mcpApp": {
@@ -128,7 +119,15 @@ export function registerAppBuilderTools(input: {
   }
   input.server.registerTool("create_app", {
     title: "Create an App",
-    description: APP_AUTHORING_GUIDANCE,
+    description: [
+      "Create an App, which is its own MCP server, from complete React/CSS source, a readable textFallback, and the tools it needs. It needs no Workflow, output schema, or Automation.",
+      "Each tool has a snake_case name, a description, and one exact capability from search_capabilities: a saved Workflow, a connection tool, or an OpenWork action that reads (GET). To change data, bind a saved Workflow that makes the change. Use mode live for a Workflow that reads input.runtime. Tools run as the person using the App.",
+      "reactSource default-exports a component receiving { app, input, result, hostContext }: input is the launch input, and result is the launch CallToolResult (read result?.structuredContent), undefined until delivered. React is injected; use its APIs without imports. Do not use fetch, browser or host globals, timers, dynamic code, external resources, URL-bearing elements, or <form>; use labeled inputs and type=button controls.",
+      "Call only declared tools, with app.callServerTool({ name, arguments }): a Workflow or connection tool takes the capability's arguments, an OpenWork action { path, query, body }, and a live Workflow only an optional { timeZone }. Show a blocked state if app.getHostCapabilities()?.serverTools is absent.",
+      "Call read-only tools (OpenWork action reads, live Workflows, and connection tools whose match says readOnly: true) when the App opens or its inputs change; if the host refuses one because it needs approval, offer a button that makes that call. Give every other tool its own button that makes only that call: OpenWork allows one call per click. Show other errors as a readable blocked state.",
+      "Keep it compact: one focal action, explicit loading, empty, error, and blocked states, and no internal scrolling or automatic navigation.",
+      "It goes in a new private Plugin named after it unless the user names an existing pluginId; the Workflows its tools run join that Plugin, and sharing the Plugin shares the App.",
+    ].join(" "),
     inputSchema: createMcpAppInputSchema,
     outputSchema: appResultSchema,
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
@@ -149,7 +148,11 @@ export function registerAppBuilderTools(input: {
   })
   input.server.registerTool("update_app", {
     title: "Update an App",
-    description: "Update an existing App with complete replacement React source, title, and textFallback. First read_app; copy its revisionId to expectedRevisionId. Omit cssSource, description, or tools to keep the current ones, or pass complete replacements. Publishes an immutable revision in the same Plugin and MCP server; newly bound Workflows are added to that Plugin, so everyone it is shared with can run them. Requires editor access and the mcp:write scope. " + APP_AUTHORING_GUIDANCE,
+    description: [
+      "Update an existing App with complete replacement React source, title, and textFallback, following create_app's rules.",
+      "First read_app, and copy its revisionId to expectedRevisionId. Omit cssSource, description, or tools to keep the current ones, or pass complete replacements.",
+      "Publishes an immutable revision in the same Plugin and MCP server; newly bound Workflows join that Plugin, so everyone it is shared with can run them. Requires editor access and the mcp:write scope.",
+    ].join(" "),
     inputSchema: updateMcpAppInputSchema,
     outputSchema: appResultSchema,
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
