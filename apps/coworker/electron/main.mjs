@@ -1243,6 +1243,15 @@ async function collaborationClient(slug, { threadId, kind = "reply", sessionKind
   const options = { baseUrl: handle.url, workspaceId: coworker.workspaceId, nativeWorkspaceId: binding?.nativeWorkspaceId ?? teamWorkspace().workspaceId, token: ownerToken, defaultModel: resolvedModel, defaultAgent: agent ?? (slug === ".coordinator" ? NATIVE_COORDINATOR_AGENT : binding && binding.nativeWorkspaceId !== teamWorkspace().workspaceId ? "build" : coworkerAgent(slug)), captureSkillOrigin: slug !== ".coordinator" };
   const client = ownedSessionClient(coworker, options, slug === ".coordinator" ? "coordinator" : sessionKind);
   client.resolvedModel = resolvedModel;
+  // A native session is opened on a model. A preparing client resolves none, so
+  // a thread it opens (a teammate's question, a first group reply) fell back to
+  // the engine's default, which an organization may forbid: HTTP 403
+  // organization_policy_denied, and the question failed before it was asked.
+  // Open it on the model this coworker's replies are chosen from instead.
+  if (!resolvedModel && !observationOnly && slug !== ".coordinator") {
+    const openThread = client.createThread;
+    client.createThread = async (input) => openThread.call(client, input.model ? input : { ...input, model: await localRunModel(coworker, "reply", typeof requestText === "string" ? requestText : "") });
+  }
   if (slug !== ".coordinator") client.coworkerIdentity = coworkerIdentity(coworker);
   const interactions = createCoworkerThreads({ serverUrl: handle.url, workspaceId: coworker.workspaceId, token: ownerToken,
     ...(slug === ".coordinator" ? {} : { owner: { slug, createdAt: coworker.createdAt } }) });
