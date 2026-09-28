@@ -45,10 +45,13 @@ reviewer would open, not every step. Run it locally with
 
 ### Journey tags
 
-A journey describes itself; there is no catalog to edit. Put a JSDoc block at
-the very top of the spec: its first line is the readable name, and
-`@module-tag` lines tag the whole file. Engine tags go on each case's `test(...)`.
-The tag descriptions in `evals/vitest.config.ts` are the source of truth
+A journey describes itself; there is no catalog to edit. Vitest discovers it
+(`evals/scripts/journeys.mjs` statically collects the specs and reads their tags).
+Put a JSDoc block at the very top of the spec: its first line is the readable
+name, and `@module-tag` lines tag the whole file. Engine tags go on each case's
+`test(...)`. Tests must be called `test`, `it`, `test…` or `…Test` (e.g.
+`const launchTest = spec.world(…)`) so Vitest's static parser finds them. The tag
+descriptions in `evals/vitest.config.ts` are the source of truth
 (`pnpm --dir evals exec vitest --list-tags`); unknown tags fail the run.
 
 | Tag | Use when the journey… | Example |
@@ -59,6 +62,7 @@ The tag descriptions in `evals/vitest.config.ts` are the source of truth
 | `live-openai` | streams from real OpenAI (needs `OPENAI_API_KEY` + opt-in) | `live-stream-continuity` |
 | `packaged` | boots a packaged desktop build (`OPENWORK_EVAL_ELECTRON_BINARY`) | `desktop-quit-path` |
 | `macos` | needs a macOS host | `computer-use-window-scope` |
+| `raw-desktop` | imports `desktop` from `@openwork/hosts`; manual only, never scheduled | `engine-v2-preview-flag` |
 | `engine-v1` / `engine-v2` | is a `--case`: title starts with its ID, e.g. `test("HOME-01 …", { tags: ["engine-v2"] }, …)` | `opencode-v2-session-home` |
 
 ```ts

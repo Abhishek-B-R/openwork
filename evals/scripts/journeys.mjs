@@ -1,15 +1,22 @@
-import { readdir, readFile } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
+import { basename } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-// Every journey describes itself in its own spec file; there is no list to keep in step.
-//   - Readable name: the one-line summary of a JSDoc block at the very top of the file
-//     (falls back to the filename).
-//   - Journey tags: Vitest `@module-tag` lines in that block. The tag descriptions in
-//     evals/vitest.config.ts are the documentation (`pnpm --dir evals exec vitest --list-tags`).
+// Every journey is a spec file in evals/specs, and Vitest discovers it: `collect` with
+// `staticParse` reads each spec's `@module-tag` lines and each test's `{ tags }` from the source
+// without importing it, so no spec, world or fixture code runs. The tag descriptions in
+// evals/vitest.config.ts are the documentation (`pnpm --dir evals exec vitest --list-tags`).
+//   - Journey tags (critical, local-only, live-model, live-openai, packaged, macos, raw-desktop)
+//     are file-level `@module-tag`s; journey-ci.test.mjs keeps them off individual tests.
 //   - Registered cases: tests whose title starts with a case ID (`HOME-01 …`) and that carry an
-//     `engine-v1`/`engine-v2` tag (per test via `{ tags: [...] }`, or for the whole file).
-//   - Raw-desktop specs (they import `desktop` from @openwork/hosts) are manual, as before.
-// Specs are parsed as text, never imported: the required-verification controller reads PR
-// source as data only, and the CI planners run without evals dependencies installed.
+//     `engine-v1`/`engine-v2` tag.
+//   - Readable name: the first line of the JSDoc block at the top of the file (else the filename).
+
+const evalsDir = fileURLToPath(new URL('..', import.meta.url));
+// Always the config next to this script. The required-verification controller runs this script
+// from the trusted default-branch checkout and points `root` at a directory holding a PR's spec
+// files, so the PR's own vitest.config.ts is never loaded.
+const trustedConfig = fileURLToPath(new URL('../vitest.config.ts', import.meta.url));
 
 // `needs` is what a journey requires beyond its placement (an env var the lane must provide, an
 // opt-in, or a platform), in the TestNeeds vocabulary the specs use. It is a WHOLE-FILE blocker:
@@ -24,61 +31,13 @@ const TAG_NEEDS = Object.freeze({
 });
 const ENGINES = ['v1', 'v2'];
 const CASE_ID = /^[A-Z][A-Z0-9]*(?:-[A-Za-z0-9]+)+(?=[\s:]|$)/;
+const SPEC = /^specs\/[^/]+\.e2e\.test\.ts$/;
 
-// Same grammar Vitest uses for `@module-tag` (any `//` or `*` comment line in the file).
-export function moduleTags(source) {
-  return [...source.matchAll(/(?:\/\/|\*)\s*@module-tag\s+([\w\-/]+)\b/g)].map(match => match[1]);
-}
-
+// The one-line summary of a JSDoc block at the very top of the file; Vitest does not read docs.
 export function journeyName(source) {
   const block = source.match(/^\s*\/\*\*([\s\S]*?)\*\//)?.[1];
   const summary = block?.split('\n').map(line => line.replace(/^\s*\*?\s?/, '').trim()).find(line => line !== '');
   return summary && !summary.startsWith('@') ? summary : undefined;
-}
-
-// Index just past the string literal that opens at `start`, following `${…}` in template literals.
-function literalEnd(source, start) {
-  const quote = source[start];
-  let depth = 0;
-  for (let index = start + 1; index < source.length; index++) {
-    const char = source[index];
-    if (char === '\\') { index++; continue; }
-    if (quote === '`' && depth === 0 && char === '$' && source[index + 1] === '{') { depth = 1; index++; continue; }
-    if (depth > 0) { if (char === '{') depth++; else if (char === '}') depth--; continue; }
-    if (char === quote) return index + 1;
-  }
-  return source.length;
-}
-
-// The `{ … }` options object right after a test title, if any.
-function optionsAfter(source, index) {
-  const open = source.slice(index).match(/^\s*,\s*\{/);
-  if (!open) return '';
-  const start = index + open[0].length - 1;
-  let depth = 0;
-  for (let cursor = start; cursor < source.length; cursor++) {
-    if (source[cursor] === '{') depth++;
-    else if (source[cursor] === '}' && --depth === 0) return source.slice(start, cursor + 1);
-  }
-  return '';
-}
-
-// Tests (`test(`, `it(`, and fixtures such as `latencyTest(`) with their title and own tags.
-export function specTests(source) {
-  return [...source.matchAll(/(?<![\w.])(?:it|test|\w+Test)\s*\(\s*(?=["'`])/g)].map(match => {
-    const start = match.index + match[0].length;
-    const end = literalEnd(source, start);
-    const options = optionsAfter(source, end);
-    const list = options.match(/\btags:\s*(\[[^\]]*\]|["'][^"']*["'])/)?.[1] ?? '';
-    return { title: source.slice(start + 1, end - 1), tags: [...list.matchAll(/["']([^"']+)["']/g)].map(tag => tag[1]) };
-  });
-}
-
-// `optIn` literals the spec declares; a registered case consents to these plus the e2e opt-in.
-function declaredOptIns(source) {
-  const names = [...source.matchAll(/optIn\s*:\s*\[([^\]]*)\]/g)]
-    .flatMap(match => [...match[1].matchAll(/["'](OPENWORK_EVAL_[A-Z0-9_]+)["']/g)].map(name => name[1]));
-  return [...new Set(names)].sort();
 }
 
 function needsFor(tags) {
@@ -92,10 +51,10 @@ function needsFor(tags) {
   return Object.keys(ordered).length ? ordered : undefined;
 }
 
-export function journeyEntry(spec, source) {
-  const tags = new Set(moduleTags(source));
-  const rawDesktop = /import\s*\{[^}]*\bdesktop\b[^}]*\}\s*from\s*["']@openwork\/hosts["']/s.test(source);
-  const placement = tags.has('local-only') ? 'local' : rawDesktop ? 'manual' : 'daytona';
+// `tests` are Vitest test cases ({ name, tags }); a test's tags include its file's `@module-tag`s.
+export function journeyEntry(spec, source, tests) {
+  const tags = new Set(tests.flatMap(test => test.tags));
+  const placement = tags.has('raw-desktop') ? 'manual' : tags.has('local-only') ? 'local' : 'daytona';
   const entry = {
     spec,
     name: journeyName(source) ?? spec.replace('.e2e.test.ts', '').replaceAll('-', ' '),
@@ -105,10 +64,11 @@ export function journeyEntry(spec, source) {
   };
   const needs = needsFor(tags);
   if (needs) entry.needs = needs;
-  const optIns = ['OPENWORK_EVAL_E2E_TESTS', ...declaredOptIns(source).filter(name => name !== 'OPENWORK_EVAL_E2E_TESTS')];
-  const cases = specTests(source).flatMap(({ title, tags: own }) => {
-    const id = title.match(CASE_ID)?.[0];
-    const engines = ENGINES.filter(engine => tags.has(`engine-${engine}`) || own.includes(`engine-${engine}`));
+  // Running a registered case is consent to the e2e opt-in and to the opt-ins its journey tags need.
+  const optIns = ['OPENWORK_EVAL_E2E_TESTS', ...(needs?.optIn ?? [])];
+  const cases = tests.flatMap(test => {
+    const id = test.name.match(CASE_ID)?.[0];
+    const engines = ENGINES.filter(engine => test.tags.includes(`engine-${engine}`));
     // Examples run locally (every placement can) on the newest engine the case supports.
     return id && engines.length ? [{ id, engines, optIns, example: { placement: '--local', engine: engines.at(-1) } }] : [];
   });
@@ -116,13 +76,40 @@ export function journeyEntry(spec, source) {
   return entry;
 }
 
-export async function catalog(root = new URL('../specs/', import.meta.url)) {
-  const files = (await readdir(root)).filter(file => file.endsWith('.e2e.test.ts')).sort();
-  return Promise.all(files.map(async spec => journeyEntry(spec, await readFile(new URL(spec, root), 'utf8'))));
+// Vitest's view of `<root>/specs/*.e2e.test.ts`: per spec, its source and its tests with their tags.
+// `root` defaults to evals/; any other root is read as data with this checkout's config.
+export async function collectSpecs(root = evalsDir) {
+  const { createVitest } = await import('vitest/node');
+  // Vite copies its env (MODE, DEV, PROD, …) onto process.env; keep callers' environment untouched.
+  const environment = { ...process.env };
+  const vitest = await createVitest('test', { config: trustedConfig, root, project: 'e2e', watch: false, reporters: [] });
+  try {
+    const { testModules, unhandledErrors } = await vitest.collect(['specs/'], { staticParse: true });
+    const problems = [
+      ...unhandledErrors.map(String),
+      ...testModules.flatMap(module => module.errors().map(error => `${module.relativeModuleId}: ${error.message}`)),
+    ];
+    if (problems.length) throw new Error(`Vitest could not read the journey specs:\n${problems.join('\n')}`);
+    const specs = testModules.filter(module => SPEC.test(module.relativeModuleId));
+    return (await Promise.all(specs.map(async module => ({
+      spec: basename(module.moduleId),
+      source: await readFile(module.moduleId, 'utf8'),
+      tests: [...module.children.allTests()].map(test => ({ name: test.name, tags: [...test.tags] })),
+    })))).sort((a, b) => a.spec.localeCompare(b.spec));
+  } finally {
+    await vitest.close();
+    for (const key of Object.keys(process.env)) if (!(key in environment)) delete process.env[key];
+    Object.assign(process.env, environment);
+  }
 }
 
-export const registeredCases = Object.freeze((await catalog())
-  .flatMap(entry => (entry.cases ?? []).map(value => Object.freeze({ spec: entry.spec, ...value }))));
+export async function discoverJourneys(root = evalsDir) {
+  return (await collectSpecs(root)).map(({ spec, source, tests }) => journeyEntry(spec, source, tests));
+}
+
+export function registeredCases(journeys) {
+  return journeys.flatMap(entry => (entry.cases ?? []).map(value => ({ spec: entry.spec, ...value })));
+}
 
 // For callers that read untrusted spec sources (the required-verification controller): a spec that
 // already exists on the trusted ref keeps the trusted ref's disposition, so a PR cannot drop its own

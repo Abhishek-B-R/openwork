@@ -11,8 +11,8 @@ const common = {
   environment: "node",
   testTimeout: 120_000,
   // Tags are explicit opt-ins that CI reads; strictTags rejects unknown ones. These descriptions are the
-  // documentation (`pnpm --dir evals exec vitest --list-tags`); scripts/journey-catalog.mjs reads the
-  // journey tags statically to plan CI, so adding a journey means editing only its spec.
+  // documentation (`pnpm --dir evals exec vitest --list-tags`); scripts/journeys.mjs asks Vitest to
+  // statically collect the journey tags to plan CI, so adding a journey means editing only its spec.
   tags: defineTags([
     { name: "checkpoints", description: "Save the world's end state (and marked steps) as reopenable checkpoints when run with --checkpoints on a world that can capture." },
     { name: "user-flow", description: "A person goes through the real UI; every step is a click or typed input that ends with a screenshot of what they see." },
@@ -22,6 +22,7 @@ const common = {
     { name: "live-model", description: "Journey (@module-tag): calls real paid models instead of the mock provider." },
     { name: "live-openai", description: "Journey (@module-tag): streams from the real OpenAI API; needs OPENAI_API_KEY and OPENWORK_EVAL_LIVE_OPENAI=1, so lanes without them skip it." },
     { name: "packaged", description: "Journey (@module-tag): boots a packaged desktop build; needs OPENWORK_EVAL_ELECTRON_BINARY, so lanes without one skip it." },
+    { name: "raw-desktop", description: "Journey (@module-tag): drives a raw desktop host (`desktop` from @openwork/hosts) that no CI lane provides; run it by hand, it is never scheduled." },
     { name: "macos", description: "Journey (@module-tag): needs a macOS host (native AppKit or Computer Use); other lanes skip it." },
     { name: "engine-v1", description: "Registered case: a test titled with its case ID (e.g. HOME-01) that runs on engine v1; run it with `pnpm evals:e2e <spec> --case <ID> --engine v1`." },
     { name: "engine-v2", description: "Registered case: a test titled with its case ID (e.g. HOME-01) that runs on engine v2; run it with `pnpm evals:e2e <spec> --case <ID> --engine v2`." },
