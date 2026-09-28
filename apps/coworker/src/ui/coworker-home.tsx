@@ -407,9 +407,7 @@ export function CoworkerHome({
     documentsSeenAt: lastDocumentsOpened(coworker.slug),
   });
   const documentsChanged = summary.rows.find((row) => row.kind === "documents")?.changed ?? 0;
-  // "Nothing in progress" is worth a line once the coworker has finished something; a new coworker's first message gets none.
-  const hasWorked = Boolean(activity?.last) || (activity?.recent?.length ?? 0) > 0;
-  const summaryLine: CoworkerSummaryLine | null = showSummaryLine(summary, hasWorked) ? summary : null;
+  const summaryLine: CoworkerSummaryLine | null = showSummaryLine(summary) ? summary : null;
   const askToUpdate = (text: string) => setDiscussionDraft({ id: Date.now(), text });
   const openThread = (threadId: string) => setOpenThreadRequest({ id: Date.now(), threadId });
   const explain = (text: string) => setDiscussionDraft({ id: Date.now(), text });

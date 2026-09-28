@@ -125,12 +125,12 @@ export function summaryRowTitle(part: Pick<SummaryPart, "kind" | "count" | "labe
 }
 
 /**
- * Whether the composer shows the line at all: a coworker that has never held
- * anything and never worked gets no "Nothing in progress" under its first
- * message.
+ * Whether the composer shows the line at all: only when there is something to
+ * count. "Nothing in progress" is not worth a line, so an idle coworker's
+ * conversation keeps that space.
  */
-export function showSummaryLine(summary: Pick<CoworkerSummaryLine, "parts">, hasWorked: boolean): boolean {
-  return summary.parts.length > 0 || hasWorked;
+export function showSummaryLine(summary: Pick<CoworkerSummaryLine, "parts">): boolean {
+  return summary.parts.length > 0;
 }
 
 /**

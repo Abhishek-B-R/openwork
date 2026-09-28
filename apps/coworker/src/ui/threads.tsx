@@ -2714,6 +2714,7 @@ function ThreadView({
           coworkerName={coworker.name}
           summary={summary}
           onOpenSummary={onOpenSummary}
+          atBottom={!away}
           effortStop={coworker.effortPreference}
           fixedVariant={coworker.modelVariant}
           onEffortChange={(stop) => void coworkerBridge.coworkers.update(coworker.slug, { effortPreference: stop }).then(onCoworkerChanged).catch(() => undefined)}
@@ -2734,6 +2735,7 @@ function ThreadView({
           placeholder={`Follow up with ${coworker.name}…`}
           summary={summary}
           onOpenSummary={onOpenSummary}
+          atBottom={!away}
         />
       )}
       </div>
@@ -3520,6 +3522,7 @@ function DiscussionComposer({
   fixedVariant = "",
   onEffortChange,
   offerStartingPoints = false,
+  atBottom = true,
 }: {
   skills?: SelectedSkill[];
   onRemoveSkill?: (index: number) => void;
@@ -3550,6 +3553,8 @@ function DiscussionComposer({
   effortStop?: EffortStop;
   fixedVariant?: string;
   onEffortChange?: (stop: EffortStop) => void;
+  /** The conversation is scrolled to its end, where the quiet line under it may show. */
+  atBottom?: boolean;
 }) {
   // Recurring work needs Calendar; without it the starting points stay with one-off work.
   const { calendar: calendarEnabled } = useFeatures();
@@ -3563,7 +3568,7 @@ function DiscussionComposer({
   const stopping = working && !assignmentMode && !value.trim() && Boolean(onStop);
   const submitLabel = busy ? "Working…" : assignmentMode ? "Create assignment" : working ? "Next" : "Send";
   return (
-    <div className="shrink-0 px-3 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 sm:px-5" data-testid="coworker-composer" data-working={working ? "true" : "false"}>
+    <div className="shrink-0 px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2 sm:px-5" data-testid="coworker-composer" data-working={working ? "true" : "false"}>
       <div className="mx-auto max-w-3xl">
         {error ? <div className="mb-2"><ErrorNote>{error}</ErrorNote></div> : null}
         {assignmentMode ? (
@@ -3627,8 +3632,8 @@ function DiscussionComposer({
             )}
           </div>
         </div>
-        <div className="mt-2 flex flex-wrap items-center justify-between gap-x-3 gap-y-1 px-2 text-[10px] text-mist/65">
-          <span className="hidden sm:inline" data-testid="coworker-composer-hint">
+        <ComposerFootnote visible={atBottom}>
+          <span className="hidden min-w-0 truncate sm:inline" data-testid="coworker-composer-hint">
             {waiting && !busy
               ? `${waiting}…`
               : working && !assignmentMode
@@ -3636,7 +3641,30 @@ function DiscussionComposer({
                 : `Enter to ${assignmentMode ? "create" : "send"} · Shift Enter for a new line`}
           </span>
           <SummaryLine summary={summary} onOpen={onOpenSummary} />
-        </div>
+        </ComposerFootnote>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The composer's quiet line: how to send, and what the coworker holds. Like a
+ * footnote at the end of the conversation, it floats just above the composer
+ * dock in the gap the conversation leaves there anyway, so it adds no height,
+ * and shows only while the conversation is scrolled to its end. It positions
+ * against the dock (the nearest positioned ancestor), above anything stacked
+ * on the composer.
+ */
+export function ComposerFootnote({ visible, children }: { visible: boolean; children: ReactNode }) {
+  return (
+    <div
+      inert={!visible}
+      className={`pointer-events-none absolute inset-x-0 bottom-full px-3 transition-opacity duration-200 motion-reduce:transition-none sm:px-5 ${visible ? "opacity-100" : "opacity-0"}`}
+      data-testid="coworker-composer-footnote"
+      data-visible={visible ? "true" : "false"}
+    >
+      <div className="mx-auto flex max-w-3xl items-center justify-between gap-x-3 px-2 pb-1 text-[10px] text-mist/65 [&_button]:pointer-events-auto">
+        {children}
       </div>
     </div>
   );
@@ -3648,10 +3676,8 @@ function DiscussionComposer({
  * Activity; a dot after "documents" marks ones changed since the person looked.
  */
 export function SummaryLine({ summary, onOpen }: { summary: CoworkerSummaryLine | null; onOpen?: (kind: SummaryKind) => void }) {
-  if (!summary) return null;
-  if (summary.parts.length === 0) {
-    return <span className="shrink-0 truncate" data-testid="coworker-summary-line">{summary.text}</span>;
-  }
+  // Nothing to count is nothing to say: no "Nothing in progress" line.
+  if (!summary || summary.parts.length === 0) return null;
   return (
     <span className="flex min-w-0 shrink-0 items-center gap-1" data-testid="coworker-summary-line">
       {summary.parts.map((part, index) => (
@@ -3720,6 +3746,7 @@ function MessageComposer({
   placeholder,
   summary = null,
   onOpenSummary,
+  atBottom = true,
 }: {
   value: string;
   onChange: (value: string) => void;
@@ -3732,13 +3759,15 @@ function MessageComposer({
   placeholder: string;
   summary?: CoworkerSummaryLine | null;
   onOpenSummary?: (kind: SummaryKind) => void;
+  /** The conversation is scrolled to its end, where the quiet line under it may show. */
+  atBottom?: boolean;
 }) {
   const canSubmit = Boolean(value.trim());
   const stopping = working && !value.trim() && Boolean(onStop);
   const fieldRef = useRef<HTMLTextAreaElement>(null);
   useAutoGrow(fieldRef, value);
   return (
-    <div className="px-3 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 sm:px-5" data-testid="coworker-composer" data-working={working ? "true" : "false"}>
+    <div className="px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2 sm:px-5" data-testid="coworker-composer" data-working={working ? "true" : "false"}>
       <div className="mx-auto max-w-3xl">
         <div className="glass-sheen relative rounded-[24px] border border-line bg-panel/55 p-3 shadow-[0_8px_32px_rgb(0_0_0/0.35)] backdrop-blur-xl backdrop-saturate-150 transition-colors focus-within:border-spark/50" data-glint="surface">
           <textarea
@@ -3764,9 +3793,9 @@ function MessageComposer({
           </div>
         </div>
         {summary ? (
-          <div className="mt-1.5 flex items-center justify-end px-1 text-[9px] text-mist/65">
+          <ComposerFootnote visible={atBottom}>
             <SummaryLine summary={summary} onOpen={onOpenSummary} />
-          </div>
+          </ComposerFootnote>
         ) : null}
       </div>
     </div>

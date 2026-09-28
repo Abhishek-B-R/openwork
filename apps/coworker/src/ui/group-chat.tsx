@@ -38,7 +38,7 @@ import { acknowledgeCoworker, CoworkerAvatar, GroupAvatars } from "@/ui/coworker
 import { InteractionCard, InteractionCards, LETTERS, OptionRow, typingInField } from "@/ui/interactions";
 import { ActionMenu, Button, CONVERSATION_TOP, ChevronIcon, ErrorNote, IconButton, PlusIcon, StopIcon, Tooltip } from "@/ui/kit";
 import { CalendarIcon } from "@/ui/main-content-switch";
-import { CollaborationReceipts, SendButton, SummaryLine } from "@/ui/threads";
+import { CollaborationReceipts, ComposerFootnote, SendButton, SummaryLine } from "@/ui/threads";
 import { useAutoGrow } from "@/ui/use-auto-grow";
 import { JumpToLatest, useConversationScroll } from "@/ui/use-conversation-scroll";
 import { ConversationWindow, useConversationWindow } from "@/ui/conversation-window";
@@ -1064,13 +1064,13 @@ function GroupChatView({
             </div>
           </div>
           {eventId ? <p className="mt-2 px-2 text-[11px] text-mist" data-testid="event-assignment-unavailable">Create assignments in a coworker's own chat for now. Event-chat assignment receipts are not yet supported; ordinary follow-up messages still work here.</p> : null}
-          <div className="mt-2 flex flex-wrap items-center justify-between gap-x-3 gap-y-1 px-2 text-[10px] text-mist/65">
+          <ComposerFootnote visible={!away}>
             <p className="min-w-0 truncate">
               {assignmentMode ? "Enter to choose who owns it · Shift Enter for a new line" : "Enter to send · Shift Enter for a new line · @name chooses who answers, @everyone asks all"}
             </p>
             {/* What the members hold between them; the line stays away while nobody holds anything. */}
             <SummaryLine summary={holdings} />
-          </div>
+          </ComposerFootnote>
         </div>
       </div>
       </div>
