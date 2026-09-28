@@ -35,6 +35,11 @@ test("a flagged owner records and filters audit history by default while an unfl
   let originalEventIds: string[] = [];
 
   async function selectEventType(text: string) {
+    // Navigation mounts the filter before its independently fetched catalog is
+    // ready. Observe readiness; never dispatch a click to a disabled control.
+    await audit.eventually(() => audit.dom('button[aria-label="Event type"]:not(:disabled)'), {
+      within: 30_000, label: "Event catalog is ready for selection", until: (value) => value.elements.length === 1,
+    });
     await owner.click({ role: "button", label: "Event type" });
     // Target the displayed option text: the menu's enclosing label names the
     // whole field, and its text span receives the user's click on the option.
