@@ -37,6 +37,7 @@ import { CoworkerRail, type CoworkerMainContent } from "@/ui/coworker-rail";
 import { FocusHome } from "@/ui/focus-home";
 import { useResizablePanel, type ResizablePanel } from "@/ui/use-resizable-panel";
 import { LayoutContext, useLayoutState } from "@/ui/use-layout";
+import { SuperKeyProvider, sendSuperAction, useSuperKeyState } from "@/ui/use-super-key";
 import type { PanelBounds } from "@/lib/panel-layout";
 
 /** The team rail: drag it narrower than a row can show and it folds to avatars. */
@@ -898,6 +899,19 @@ export default function App() {
   const openGroupChat = (id: string) => { navigationGeneration.current += 1; if (!allowSourceNavigation()) return; setActivityGroupRequest(null); setGroupDocumentRequest(null); setHomeRequest(null); setGroupEventSource(null); calendarConversationOrigin.current = null; setSelectedActivityId(null); setSelectedGroupId(id); navigate("chat"); setGroupDetailsOpen(false); };
   /** In Focus mode the team is a list of conversations covering the window; otherwise, in a narrow window, a drawer. */
   const drawerOpen = layout.teamOpen && !layout.focus;
+  /**
+   * The super key (⌘⇧): quick actions over the team and its conversations. It
+   * rests in settings, Customize and while a coworker or group is being made,
+   * and steps aside for any open dialog. Focus mode is the shell's own; the
+   * team list and the pace dial take their actions themselves.
+   */
+  const superKey = useSuperKeyState({
+    enabled: !globalSettings && !factoryResetOpen && !replayOnboarding && !customizing && !creating && !creatingGroup,
+    onAction: (action) => {
+      if (action.kind === "focus") layoutState.toggleFocus();
+      else sendSuperAction(action);
+    },
+  });
 
   // The catalog the onboarding steps propose from, read once when they are first needed.
   useEffect(() => {
@@ -1335,6 +1349,7 @@ export default function App() {
   return (
     <VoiceContext.Provider value={{ accountKey: session ? `${sessionKey(session)}\u0000${session.userEmail}` : "signed-out", openModels: () => openGlobalSettings("models"), signIn: () => setConnecting(true) }}>
     <LayoutContext.Provider value={layout}>
+    <SuperKeyProvider value={superKey}>
     <div key={accountKey} className="window-shell relative flex h-full overflow-hidden" data-testid="coworker-shell" data-layout={chatOnly ? (layoutState.compact ? "compact" : "focus") : "full"}>
       <div
         className={workspaceActive || customizeOpen ? "flex min-w-0 flex-1" : "hidden"}
@@ -1635,6 +1650,7 @@ export default function App() {
       </Suspense>
       </DeferredView> : null}
     </div>
+    </SuperKeyProvider>
     </LayoutContext.Provider>
     </VoiceContext.Provider>
   );

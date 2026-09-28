@@ -1,8 +1,9 @@
 import { ChevronIcon, FocusIcon, IconButton, SidebarIcon } from "@/ui/kit";
 import { useLayout } from "@/ui/use-layout";
+import { SuperKeyCap, useSuperKey } from "@/ui/use-super-key";
 
 function shortcut(): string {
-  return typeof document !== "undefined" && document.documentElement.dataset.windowPlatform === "darwin" ? "⌘\\" : "Ctrl+\\";
+  return typeof document !== "undefined" && document.documentElement.dataset.windowPlatform === "darwin" ? "⌘⇧F" : "Ctrl+Shift+F";
 }
 
 /**
@@ -40,10 +41,15 @@ export function TeamButton() {
 /** Focus mode on or off: the conversation alone in a small window docked at the right of the screen. In Focus mode it is the only control at the top. */
 export function FocusToggle() {
   const layout = useLayout();
+  const superKey = useSuperKey();
   const label = layout.focus ? "Leave Focus mode" : "Focus mode";
   return (
-    <IconButton label={label} tooltip={`${label} · ${shortcut()}`} tooltipSide="bottom" className="window-no-drag" aria-pressed={layout.focus} onClick={layout.toggleFocus} data-testid="focus-mode-toggle">
-      <FocusIcon active={layout.focus} />
-    </IconButton>
+    <span className="relative inline-flex">
+      <IconButton label={label} tooltip={`${label} · ${shortcut()}`} tooltipSide="bottom" className="window-no-drag" aria-pressed={layout.focus} aria-keyshortcuts={shortcut() === "⌘⇧F" ? "Meta+Shift+F" : "Control+Shift+F"} onClick={layout.toggleFocus} data-testid="focus-mode-toggle">
+        <FocusIcon active={layout.focus} />
+      </IconButton>
+      {/* While the super key is down, the key that toggles it sits on the button itself. */}
+      {superKey.active ? <SuperKeyCap className="super-keycap--badge pointer-events-none absolute -bottom-1.5 -right-1.5" pressed={superKey.pressed === "F"}>F</SuperKeyCap> : null}
+    </span>
   );
 }

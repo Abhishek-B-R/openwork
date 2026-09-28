@@ -114,6 +114,7 @@ import { applyStreamEvent, type LivePart, type LiveStream } from "@/lib/live-str
 import { waitForGroup as waitForObservation } from "@/lib/group-continuity";
 import { useAutoGrow } from "@/ui/use-auto-grow";
 import { JumpToLatest, useConversationScroll } from "@/ui/use-conversation-scroll";
+import { SuperKeyStrip, useSuperKey } from "@/ui/use-super-key";
 import { ConversationWindow, useConversationWindow } from "@/ui/conversation-window";
 import { InteractionCard, InteractionCards, LETTERS, OptionRow, typingInField } from "@/ui/interactions";
 import { acknowledgeCoworker, CoworkerAvatar, expressCoworker } from "@/ui/coworker-avatar";
@@ -3567,6 +3568,7 @@ function DiscussionComposer({
 }) {
   // Recurring work needs Calendar; without it the starting points stay with one-off work.
   const { calendar: calendarEnabled } = useFeatures();
+  const superKey = useSuperKey();
   const value = assignmentMode ? assignment : message;
   const submit = assignmentMode ? onCreateAssignment : onSend;
   const held = busy || Boolean(waiting);
@@ -3585,7 +3587,8 @@ function DiscussionComposer({
             Something {coworkerName} should own, separate from this chat
           </p>
         ) : null}
-        <div className={`glass-sheen relative rounded-[24px] border bg-panel/55 p-3 shadow-[0_8px_32px_rgb(0_0_0/0.35)] backdrop-blur-xl backdrop-saturate-150 transition-colors focus-within:border-spark/50 ${assignmentMode ? "border-spark/35" : "border-line"}`} data-testid="coworker-input-surface" data-glint="surface">
+        <div className={`glass-sheen relative rounded-[24px] border bg-panel/55 p-3 shadow-[0_8px_32px_rgb(0_0_0/0.35)] backdrop-blur-xl backdrop-saturate-150 transition-colors focus-within:border-spark/50 ${assignmentMode ? "border-spark/35" : "border-line"}`} data-testid="coworker-input-surface" data-glint="surface" data-super={superKey.active ? "true" : "false"}>
+          <SuperKeyStrip pace={Boolean(effortStop && onEffortChange)} />
           {!assignmentMode ? <VoicePanel voice={voice} /> : null}
           {!assignmentMode && skills.length ? <div className="flex flex-wrap gap-2 px-1 pb-2" aria-label="Selected skills">
             {skills.map((skill, index) => <span key={`${skill.id}:${index}`} className="inline-flex max-w-full items-center gap-2 rounded-full border border-line px-2 py-1 text-xs text-snow" data-testid="coworker-selected-skill">

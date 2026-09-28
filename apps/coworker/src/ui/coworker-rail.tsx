@@ -6,6 +6,7 @@ import type { DenSession } from "@/lib/den";
 import type { CoworkerActivity } from "@/lib/threads";
 import { CoworkerMark } from "@/ui/brand";
 import { CoworkerAvatar, GroupAvatars, expressCoworker, faceFor } from "@/ui/coworker-avatar";
+import { SuperKeyCap, onSuperAction, useSuperKey } from "@/ui/use-super-key";
 import { Button, IconButton, PlusIcon, SearchIcon, StatusDot, Tooltip } from "@/ui/kit";
 import type { ResizablePanel } from "@/ui/use-resizable-panel";
 import { CalendarIcon, MainContentSwitch, type MainContent } from "@/ui/main-content-switch";
@@ -179,6 +180,23 @@ export function CoworkerRail({
   const visibleCoworkers = coworkers.filter((coworker) =>
     `${coworker.name} ${coworker.role}`.toLowerCase().includes(query.trim().toLowerCase()),
   );
+  // The super key numbers coworkers as the list shows them (folded: all of them), and ↑ ↓ step through that order.
+  const superKey = useSuperKey();
+  const superTargets = useRef({ list: panel.collapsed ? coworkers : visibleCoworkers, selectedSlug, onSelect });
+  superTargets.current = { list: panel.collapsed ? coworkers : visibleCoworkers, selectedSlug, onSelect };
+  useEffect(() => onSuperAction((action) => {
+    const { list, selectedSlug: current, onSelect: open } = superTargets.current;
+    if (list.length === 0) return;
+    if (action.kind === "coworker") {
+      const target = list[action.index];
+      if (target) open(target.slug);
+    } else if (action.kind === "cycle") {
+      const at = list.findIndex((coworker) => coworker.slug === current);
+      const next = at < 0 ? (action.by > 0 ? 0 : list.length - 1) : (at + action.by + list.length) % list.length;
+      const target = list[next];
+      if (target) open(target.slug);
+    }
+  }), []);
   const activityMode = mainContent === "activity";
   const collapsed = panel.collapsed && !activityMode;
   const width = activityMode ? Math.max(panel.bounds.min, panel.width) : panel.width;
@@ -300,7 +318,7 @@ export function CoworkerRail({
       {panel.collapsed ? (
         <>
           <nav aria-label="Coworkers" className="flex flex-1 flex-col items-center gap-1 overflow-y-auto overflow-x-hidden px-1 pb-4 pt-3">
-            {coworkers.map((coworker) => {
+            {coworkers.map((coworker, index) => {
               const activity = activityBySlug[coworker.slug];
               const active = coworker.slug === selectedSlug;
               const tone = activityTone(activity);
@@ -344,6 +362,7 @@ export function CoworkerRail({
                 {calendarEnabled ? <Tooltip content={`Open ${coworker.name}'s calendar`} side="right">
                   <button type="button" aria-label={`Open ${coworker.name}'s calendar`} className="window-no-drag absolute bottom-1 left-0 inline-flex size-4 items-center justify-center rounded bg-ink/80 text-mist hover:text-snow focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-spark/60 [&>svg]:size-[14px]" onClick={(event) => { event.stopPropagation(); onOpenCalendar(coworker.slug); }} data-testid="coworker-calendar-shortcut"><CalendarIcon /></button>
                 </Tooltip> : null}
+                {superKey.active && index < 9 ? <SuperKeyCap className="super-keycap--badge pointer-events-none absolute -right-0.5 top-0.5 z-10" pressed={superKey.pressed === String(index + 1)} delay={index * 22}>{index + 1}</SuperKeyCap> : null}
                 </div>
               );
             })}
@@ -404,7 +423,7 @@ export function CoworkerRail({
           </p>
           <nav ref={listRef} onScroll={followList} aria-label="Coworkers" className="rail-list min-h-0 flex-1 overflow-y-auto pb-5" style={{ paddingTop: RAIL_TITLE_HEIGHT }} data-scrolled={listScrolled ? "true" : "false"} data-testid="coworker-rail-list">
             <div className="space-y-0.5 px-2">
-            {visibleCoworkers.map((coworker) => {
+            {visibleCoworkers.map((coworker, index) => {
               const activity = activityBySlug[coworker.slug];
               const active = coworker.slug === selectedSlug;
               return (
@@ -443,7 +462,7 @@ export function CoworkerRail({
                   <span className="min-w-0 flex-1">
                     <span className="flex h-5 items-baseline justify-between gap-2">
                       <span className="min-w-0 truncate text-sm font-semibold leading-5 text-snow">{coworker.name}</span>
-                      <span className="min-w-[3ch] shrink-0 text-right text-[10px] leading-5 tabular-nums text-mist">{relativeTime(activity?.updatedAt ?? 0)}</span>
+                      <span className={`min-w-[3ch] shrink-0 text-right text-[10px] leading-5 tabular-nums text-mist transition-opacity duration-150 ${superKey.active && index < 9 ? "opacity-0" : ""}`}>{relativeTime(activity?.updatedAt ?? 0)}</span>
                     </span>
                     <span data-testid="coworker-rail-status" className={`mt-0.5 flex h-4 min-w-0 items-center gap-1.5 text-[11px] font-medium leading-4 ${activityTextTone(activity)}`}>
                       {calendarEnabled ? <Tooltip content={`Open ${coworker.name}'s calendar`} side="right">
@@ -460,6 +479,7 @@ export function CoworkerRail({
                     </span>
                   </span>
                 </div>
+                {superKey.active && index < 9 ? <SuperKeyCap className="super-keycap--badge pointer-events-none absolute right-2.5 top-1/2 z-10 -translate-y-1/2" pressed={superKey.pressed === String(index + 1)} delay={index * 22}>{index + 1}</SuperKeyCap> : null}
                 </div>
               );
             })}

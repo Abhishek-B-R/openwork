@@ -2,44 +2,19 @@ import { CoworkerEffortSlider } from "@openwork/ui/coworker-effort";
 import { useEffect, useEffectEvent, useId, useRef, useState } from "react";
 import { DEFAULT_EFFORT_STOP, EFFORT_STOPS, describeEffortStop, effortLevelFor, effortStopLabel, laneWithPreference, replyKindForLane, type EffortKind, type EffortStop } from "@/lib/effort";
 import { HelpTip } from "@/ui/kit";
+import { onMac, onSuperAction, superKeyLabel, useSuperKey } from "@/ui/use-super-key";
 
-/** Holding ⌘⇧ (Ctrl+Shift elsewhere) this long with no other key peeks at the pace; a quick ⌘⇧← still selects text. */
-const PEEK_DELAY_MS = 300;
-const MODIFIER_KEYS = new Set(["Meta", "Shift", "Control"]);
 /** How long a chosen stop waits for the save to come back before the saved one shows again. */
 const CHOSEN_SETTLE_MS = 3000;
 
-function onMac(): boolean {
-  return document.documentElement.dataset.windowPlatform === "darwin" || /Mac/i.test(navigator.platform);
-}
-
-/** ⌘⇧ on a Mac, Ctrl+Shift elsewhere, and nothing else held. */
-function isPaceChord(event: KeyboardEvent): boolean {
-  return onMac()
-    ? event.metaKey && event.shiftKey && !event.ctrlKey && !event.altKey
-    : event.ctrlKey && event.shiftKey && !event.metaKey && !event.altKey;
-}
-
-/** Text fields select with ⌘⇧← →, and sliders and resizers step with arrows; those keep them until the pace is showing. */
-function keepsArrows(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) return false;
-  if (target.isContentEditable || target instanceof HTMLTextAreaElement || target.matches('[role="slider"], [role="separator"]')) return true;
-  return target instanceof HTMLInputElement && !["checkbox", "radio", "button", "submit"].includes(target.type);
-}
-
-/** The chord as this platform spells it. */
-function paceShortcutLabel(): string {
-  return onMac() ? "⌘⇧" : "Ctrl+Shift";
-}
-
 /**
  * Dynamic effort sets the coworker's pace. The composer pill opens the
- * five-stop selector with the slider at the foot; what each stop means opens
- * above it, so the slider never moves under the pointer. Holding ⌘⇧
- * (Ctrl+Shift elsewhere) peeks at it from the conversation, ← → move it, and
- * letting go puts it away. Each turn derives its effort from this preference
- * and the kind of work; a supported fixed effort in Customize › AI model
- * still takes priority.
+ * five-stop selector on top of itself, with the slider at the foot; what each
+ * stop means opens above it, so the slider never moves under the pointer.
+ * While the super key (⌘⇧, Ctrl+Shift elsewhere) is down, the pill becomes the
+ * slider in place and ← → move it. Each turn derives its effort from this
+ * preference and the kind of work; a supported fixed effort in Customize › AI
+ * model still takes priority.
  */
 export function EffortDial({
   stop: savedStop,
@@ -55,8 +30,9 @@ export function EffortDial({
   compact?: boolean;
   fixedVariant?: string;
 }) {
-  // "click" opens it until dismissed; "peek" lasts while ⌘⇧ is held.
-  const [open, setOpen] = useState<false | "click" | "peek">(false);
+  // A click opens the selector until it is dismissed.
+  const [open, setOpen] = useState<false | "click">(false);
+  const superKey = useSuperKey();
   const [explained, setExplained] = useState(false);
   // A stop just chosen shows at once, so quick presses add up; the saved one catches up (or wins back if the save failed).
   const [chosen, setChosen] = useState<EffortStop | null>(null);
@@ -102,63 +78,23 @@ export function EffortDial({
   }, [open]);
 
   const step = useEffectEvent((by: number) => choose(EFFORT_STOPS[Math.min(EFFORT_STOPS.length - 1, Math.max(0, EFFORT_STOPS.indexOf(stop) + by))]));
-  const current = useEffectEvent(() => open);
 
-  // The shortcut belongs to the composer on screen: not a hidden one, and not one under a dialog.
+  // The super key's ← → belong to the composer on screen: not a hidden one, and not one under a dialog.
   useEffect(() => {
     if (!compact) return;
-    let timer: number | undefined;
-    const cancel = () => {
-      if (timer === undefined) return;
-      window.clearTimeout(timer);
-      timer = undefined;
-    };
-    const reachable = () => {
+    return onSuperAction((action) => {
+      if (action.kind !== "pace") return;
       const root = rootRef.current;
-      return Boolean(root && root.getClientRects().length > 0 && !root.closest("[inert]") && !document.querySelector('[aria-modal="true"]'));
-    };
-    const endPeek = () => {
-      cancel();
-      if (current() === "peek") setOpen(false);
-    };
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.defaultPrevented || event.isComposing || !reachable()) return;
-      const chord = isPaceChord(event);
-      if (MODIFIER_KEYS.has(event.key)) {
-        if (event.repeat) return;
-        cancel();
-        if (chord && !current()) timer = window.setTimeout(() => { timer = undefined; setOpen("peek"); }, PEEK_DELAY_MS);
-        return;
-      }
-      cancel();
-      const by = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
-      // While peeking the arrows are the pace's; before that, a field that uses them keeps them.
-      if (chord && by && (current() === "peek" || !keepsArrows(event.target))) {
-        event.preventDefault();
-        event.stopPropagation();
-        if (!current()) setOpen("peek");
-        step(by);
-        return;
-      }
-      if (current() === "peek") setOpen(false);
-    };
-    const onKeyUp = (event: KeyboardEvent) => {
-      if (MODIFIER_KEYS.has(event.key)) endPeek();
-    };
-    window.addEventListener("keydown", onKeyDown, true);
-    window.addEventListener("keyup", onKeyUp, true);
-    window.addEventListener("blur", endPeek);
-    return () => {
-      cancel();
-      window.removeEventListener("keydown", onKeyDown, true);
-      window.removeEventListener("keyup", onKeyUp, true);
-      window.removeEventListener("blur", endPeek);
-    };
+      if (!root || root.getClientRects().length === 0 || root.closest("[inert]") || document.querySelector('[aria-modal="true"]')) return;
+      step(action.by);
+    });
   }, [compact]);
+  /** While the super key is down, the pill becomes the slider where it stands. */
+  const inPlace = compact && superKey.active && !open;
 
   const index = EFFORT_STOPS.indexOf(stop);
   const label = effortStopLabel(stop);
-  const shortcut = paceShortcutLabel();
+  const shortcut = superKeyLabel();
   const examples: { label: string; kind: EffortKind }[] = [
     { label: "Quick questions", kind: replyKindForLane(laneWithPreference("quick", stop)) },
     { label: "Planning & research", kind: replyKindForLane(laneWithPreference("deep", stop)) },
@@ -216,7 +152,7 @@ export function EffortDial({
         </div>
       </div>
       <div className="mt-3 flex items-center justify-between gap-3">
-        <p id={labelId} aria-live={open === "peek" ? "polite" : undefined} className="effort-dial-name text-lg font-semibold tracking-tight text-snow" data-testid="effort-dial-stop">{label}</p>
+        <p id={inPlace ? undefined : labelId} className="effort-dial-name text-lg font-semibold tracking-tight text-snow" data-testid="effort-dial-stop">{label}</p>
         {compact ? <span className="flex items-center gap-1.5 text-[10px] text-mist/70" data-testid="effort-shortcut-hint">Hold{keys}</span> : stop !== DEFAULT_EFFORT_STOP ? (
           <button
             type="button"
@@ -249,7 +185,7 @@ export function EffortDial({
       <button
         ref={pillRef}
         type="button"
-        className="inline-flex min-h-8 items-center gap-2 rounded-xl px-2.5 py-1.5 text-[11px] text-mist transition-colors hover:bg-spark/10 hover:text-snow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-spark/50"
+        className={`inline-flex min-h-8 items-center gap-2 rounded-xl px-2.5 py-1.5 text-[11px] text-mist transition-colors hover:bg-spark/10 hover:text-snow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-spark/50 ${inPlace ? "invisible" : ""}`}
         aria-haspopup="dialog"
         aria-expanded={Boolean(open)}
         aria-keyshortcuts={onMac() ? "Meta+Shift+ArrowLeft Meta+Shift+ArrowRight" : "Control+Shift+ArrowLeft Control+Shift+ArrowRight"}
@@ -261,8 +197,19 @@ export function EffortDial({
         <span className="text-mist">{label}</span>{" "}
         <span aria-hidden="true">⌄</span>
       </button>
+      {inPlace ? (
+        // The pill's own spot, a little wider: the pace and its slider, moved by ← → while the super key is down.
+        <div className="effort-inplace absolute right-0 top-1/2 z-30 flex h-11 w-[min(300px,calc(100vw-96px))] -translate-y-1/2 items-center gap-2 rounded-2xl border border-spark/30 bg-panel/95 pl-2.5 pr-1.5 shadow-[0_10px_30px_rgb(0_0_0/0.45)] backdrop-blur-md" data-testid="effort-dial-inplace">
+          <DynamicEffortIcon />
+          <span id={labelId} aria-live="polite" className="w-[4.75rem] shrink-0 truncate text-[12px] font-semibold text-snow" data-testid="effort-dial-stop">{label}</span>
+          <div className="min-w-0 flex-1">
+            <CoworkerEffortSlider index={index} stop={stop} label={label} labelId={labelId} onChange={(nextIndex) => choose(EFFORT_STOPS[nextIndex])} />
+          </div>
+        </div>
+      ) : null}
       {open ? (
-        <div role="dialog" aria-label={`Thinking pace for ${coworkerName}`} className="effort-popover absolute bottom-full right-0 z-30 mb-3 max-w-[calc(100vw-24px)] rounded-[20px] border border-line bg-panel p-4 shadow-[0_16px_48px_rgba(0,0,0,0.4)]">
+        // On top of the pill, anchored at its foot: what each stop means grows upward and the slider stays put.
+        <div role="dialog" aria-label={`Thinking pace for ${coworkerName}`} className="effort-popover absolute bottom-0 right-0 z-30 max-w-[calc(100vw-24px)] rounded-[20px] border border-line bg-panel p-4 shadow-[0_16px_48px_rgba(0,0,0,0.4)]">
           {dial}
         </div>
       ) : null}
