@@ -337,19 +337,29 @@ The coworker directory is registered as an ordinary OpenWork workspace, so:
   the app reads back into `workers/<id>/findings.jsonl`; every turn takes a
   slot on this Mac like a responsibility run and releases it when it settles,
   so Workers and scheduled runs wait in one line (`electron/workers.mjs`,
-  `electron/main.mjs`). Each finding wakes the coworker: findings queue per
-  coworker and, at most once a minute, become one ordinary turn in its open
-  discussion listing the Workers and their updates; the transcript folds that
-  turn into the action line ("Reviewed an update from Market scan") beside
-  whatever the coworker did about it. The coworker starts, steers, and stops
-  Workers through its own tools (`worker_spawn`, `worker_steer`, `worker_pause`,
-  `worker_resume`, `worker_cancel`, `workers_list`, `worker_findings`, served by the same
-  loopback MCP server as its document tools); the person does the same from
+  `electron/main.mjs`). Bigger work fans out: the contract's "Bigger work"
+  section has the coworker split a goal into up to three parts, create the
+  working document with a `##` section per part, start one Worker per part in
+  the same turn (each told its sibling Workers and the section it patches), say
+  the plan and end the turn. Findings update the Workers view and working
+  memory without waking the coworker; when every Worker and consultation the
+  turn requested has ended, one automatic follow-up in the originating
+  conversation receives all results together (`electron/collaboration.mjs`).
+  That follow-up may start one build round of up to three more on the results
+  (only after at least one succeeded, never after a thinking brief); the build
+  round's own follow-up cannot delegate. The coworker starts and steers
+  Workers through native tools (`coworker_worker_spawn`, `_steer`, `_pause`,
+  `_resume`, `_cancel`) and reads them through `workers_list` and
+  `worker_findings` on the loopback MCP server; the person does the same from
   the Activity panel's Workers level — flat rows opening into the findings timeline,
   Steer, Pause/Resume, Stop, and Open its work (the Worker's thread, read-only)
   — and starts one with New Worker. At most three Workers are live per
   coworker. Worker turns disable direct Worker, assignment, memory, and team
-  management tools and native task delegation. This is a native tool boundary,
+  management tools and native task delegation. The engine's own `subagent`
+  tool is off for every coworker (`ALWAYS_OFF_TOOLS` in the team features
+  list), so Workers are the one way to delegate. Scheduled assignment runs use
+  their own role without delegation, questions, reactions or schedule changes,
+  and their prompt says nobody is watching live. This is a native tool boundary,
   not filesystem isolation: Workers still share the coworker's workspace.
   `workers.json` keeps Worker threads out of discussions and assignments.
   Steering and the admitted turn are durable; recovery reuses the turn's
@@ -492,6 +502,11 @@ document, not an implied historical revision.
   tool-only result. Saved receipts across that native parent are coalesced once
   per document, retaining the latest revision; separate turns keep their own
   attachments. Native structured receipts—not guessed titles—choose the ID.
+  A document the coworker writes while the conversation is open also opens
+  beside it by itself, once, when there is room and the reading pane is empty
+  or showing an earlier followed document; it never replaces a document the
+  person opened, one they closed, or unsaved edits, and never opens in Focus
+  mode or a narrow window (`onFollowDocument`).
   Shared group documents use their own group-scoped receipt and reader. No
   Markdown from the model is needed to manufacture the card.
 - **Soft enforcement.** A finished reply longer than about 1,200 characters
@@ -685,12 +700,12 @@ provider retention policy; the existing Models service terms still apply.
 
 | Choice | Where | Inputs | Rule | Fallback | Override | Explained to the person? | Coverage / verification |
 |---|---|---|---|---|---|---|---|
-| Starting a Worker | Contract `### Which shape an answer takes` and `## Workers`; `worker_spawn`, `workerTurnTools` | The request | One bounded goal, not a schedule or quick question. Worker turns disable direct management tools and task delegation through native session permissions; the shared workspace is not a sandbox. | — | New Worker; Steer, Pause, Stop | "Started a Worker · Name" and one sentence from the coworker | `workers.test.mjs` (creation and tool handling), `open-coworker-team` (native Worker delegation), `open-coworker-turn-recovery` (native tool boundary) |
+| Starting a Worker | Contract `### Which shape an answer takes` and `## Bigger work`; `worker_spawn`, `workerTurnTools` | The request | One bounded goal, not a schedule or quick question. Worker turns disable direct management tools and task delegation through native session permissions; the shared workspace is not a sandbox. | — | New Worker; Steer, Pause, Stop | "Started a Worker · Name" and one sentence from the coworker | `workers.test.mjs` (creation and tool handling), `open-coworker-team` (native Worker delegation), `open-coworker-turn-recovery` (native tool boundary) |
 | Its lifespan | `normalizeLifespan`; `spawnWorker` with purpose and effort | The tool's `lifespan`, purpose, and dial stop | Thinking defaults to two turns; delivery to 6 · 8 · 10 · 14 · 20 turns from Light to All in. Delegated work needs finite turns (1–100) or a deadline; only the person can choose until stopped. | Finite purpose default | New Worker; explicit finite tool limit; steer or stop | Purpose, model and remaining turns in the Worker view | `workers.test.mjs`; native purpose-control proof pending |
 | Its model and handoff | `resolveWorkerModel`; existing `coworker_worker_spawn` purpose | Coworker role override, app role default, owner anchor/native default or recommendation, connected catalog | Explicit coworker role first, app role second, otherwise deep selection for thinking and standard for delivery with same-provider known-cost guards. Save model/effort snapshots at creation. Existing snapshots, unpinned legacy Workers and recovery stay unchanged. One brief can lead to at most two delivery Workers; no recursion or separate model-selection tool | Unavailable explicit choices fail; recommend only when no anchor was set | Coworker Worker-model overrides; app role defaults | Saved model and effort remain visible; later settings affect new Workers only | `workers.test.mjs`, `groups.test.mjs`; native multi-provider proof pending |
 | At most three live per coworker | `createWorker` | The live Workers | The fourth is refused with a sentence | — | Stop one | The tool's sentence, `workers_list` | `workers.test.mjs` |
 | When a turn runs | `admitWorkerTurn` in `electron/main.mjs` | This Mac's run limit (`maxParallelLocalRuns`, default 2) | Turns follow one another as soon as a slot is free; runs already in line go first | Queued | AI & local setup › the limit | "Waiting its turn" | `open-coworker-workers` (limit 1 → queued) |
-| Waking the coworker | `createReviewScheduler` | Findings | Per coworker, at most once a minute, as one turn in the open discussion once it is idle (up to five minutes); held without a discussion; retried once after a failure, then dropped and recorded on the Worker | Held / dropped, recorded | — | "Reviewed an update from Market scan"; "Not reviewed …" on the Worker | `workers.test.mjs`, `open-coworker-workers` |
+| Waking the coworker | `queueContinuation` in `electron/collaboration.mjs` | Every requested dependency ending | One automatic follow-up in the originating conversation with all results; it may start one build round (up to three) when at least one result succeeded and no thinking brief was used; the build round's follow-up cannot delegate | Failed results are reported, not retried | Continue with available results | Receipts: "Waiting for requested work", then the coworker's reply | `groups.test.mjs` (parallel research, build round) |
 | Needs a decision | `nextWorkerState`; the review prompt | The Worker's report | New model-pinned Workers stop and return the blocker to the supervisor, unless steering is already pending. Legacy Workers retain the decision-wait/steer behavior. | No recursive Worker or paid upgrade | Supervisor reviews and asks the person when needed | Failure explicitly says Needs a decision; legacy wait card remains | `workers.test.mjs`; new native blocker handback proof pending |
 | Done on the first turn | `nextWorkerState` | The report | Finishes; the slot is released; one turn spent | — | — | "Done" | `workers.test.mjs` |
 | After a quit | `prepareWorkerTurn`, `recoverInterruptedWorkers` | Durable steering and pending turn | Reuse the admitted message id; do not re-execute accepted work. Decisions keep waiting; paused stays paused with its steering. | Interrupted replies may fail | Resume a paused Worker | "Checking the interrupted step before continuing after the app closed." | `workers.test.mjs`, `open-coworker-turn-recovery` |
@@ -1444,6 +1459,50 @@ connection index and rendered with the standard MCP App host). Signing out
 removes the gateway again. The packaged app ships the engine's OpenWork plugins
 under `Resources/opencode-plugins`, as the desktop does.
 
+## Connect cards in the conversation
+
+When a coworker's work needs an app the person hasn't connected (Gmail, Slack,
+Notion, any OpenWork Connect app), a card appears in the conversation instead
+of instructions. It speaks as the coworker, with its small face and name: "I
+need you to connect Gmail first. So I can read your inbox and draft the
+replies." Below that is the app with its logo and one button. The card is a
+size container: from 24rem wide the app row puts the button beside it, and
+narrower it stacks with a full-width button, so nothing wraps mid-row in Focus
+mode or a narrow window. It is a labelled group with a polite live region for
+"Finish signing in…" and "Gmail is connected". Its sheet takes focus when it
+opens and returns it to the button on Escape. A card comes from two places:
+- The coworker calling `coworker_app_connect` with the app and why
+  (`electron/connect-tools.mjs`). Its contract says to do this when an app is
+  not connected, say one line, and end the turn.
+- OpenWork Connect's own status in a Connect result: a failed call for want of
+  a connection, a status probe, or a search made to connect. Ordinary searches
+  only list blocked apps for information and never raise a card.
+
+`src/lib/connect-cards.ts` derives the cards and reads each one's live state
+from the person's connections (`useConnectorCatalog`, re-read on focus):
+- **Connect / Reconnect:** a white button opens a small sheet with the app's
+  description, what the coworker will do, and who the person signs in with.
+  Continue starts the connection (`startConnection`) and opens the provider's
+  sign-in in the browser. The card watches for the connection every two seconds
+  for up to three minutes. When it lands, the card turns green and, for the
+  latest turn, sends "<App> is connected. Go ahead." so the work carries on.
+- **Sign in to OpenWork** when signed out, **Set up** when the app is not in the
+  organization yet (Den's connector page), and plain words naming who must act
+  when an admin or provider owns the fix.
+
+Every turn's home context also carries the coworker's picture of its apps
+(`electron/apps-context.mjs`, from Den's usable connections, read at most every
+15 seconds): which apps are connected for the person, which are set up but
+waiting on their sign-in, or that they are not signed in, plus the one way to
+use them (`search_capabilities`, then `execute_capability`) or ask for one
+(`coworker_app_connect`). A coworker knows before it searches, and never asks
+for keys or sends the person to settings.
+
+Workers and scheduled runs are not offered the tool: a Worker hands the blocker
+back and its coworker asks. In a group chat, where tool calls are not shown,
+the main process publishes the request as a `status: "connect"` timeline event,
+rendered as the same card.
+
 ## Apps & tools
 
 Embedded Apps carry a server-issued launch lease bound to their originating
@@ -1967,7 +2026,10 @@ participant. They enter a durable, quiet waiting state with a one-hour deadline,
 release global execution capacity, and retain their native-session lock. Answers
 are bound to the exact group, workspace, session, execution and request; stale or
 cross-scope replies are refused. Answering resumes that same native execution,
-not a resubmitted prompt. The existing permission rules still apply. Coworker
+not a resubmitted prompt. Private and assignment turns enter the same waiting
+state while their question or permission card is open (answered in the
+conversation itself), so a person who takes a while to decide does not hit the
+15-minute step limit. The existing permission rules still apply. Coworker
 enables native questions only where no explicit question/catch-all rule already
 exists; Workers and the progress summarizer do not receive that tool.
 

@@ -131,7 +131,7 @@ export function isNothingToAdd(text: string): boolean {
  * payloads never appear here.
  */
 export function groupSpeakerPrompt(input: {
-  group: Pick<CoworkerGroupSummary, "name">;
+  group: Pick<CoworkerGroupSummary, "name"> & Partial<Pick<CoworkerGroupSummary, "id">>;
   speaker: GroupParticipant;
   participants: readonly GroupParticipant[];
   message: string;
@@ -166,6 +166,9 @@ export function groupSpeakerPrompt(input: {
     lines.push(`Your part in this reply: ${input.brief?.trim() || "answer the person for your part, from your role."}`);
     lines.push("Reply as yourself, in a few sentences, addressing the person. Do not speak for anyone else and do not repeat what the others already said — add something new.");
   }
+  // Shared work lands in one group document, and the speaker needs this chat's id to write it.
+  if (input.group.id) lines.push(`This chat's group id, for shared documents: ${input.group.id}.`);
+  lines.push(`When the person asks the group to produce something (a plan, research, a draft), build it in one shared group document instead of long replies: ${input.plan.mode === "parallel" ? "only the first listed speaker creates it, with a ## section per part; the others read it first and save their section if it exists, otherwise keep their part in the reply" : "the first speaker creates it with a ## section per part and says who takes which; each later speaker reads it and fills their own section"}. Say in your reply what you added. Heavy parts can go to your own Workers; add what they return to your section when they report back. The last speaker says what is still open.`);
   lines.push("A collective invitation asks for your own response, even if another coworker already answered. For a personal check-in, answer briefly as yourself rather than passing because someone else replied. Never impersonate or answer on behalf of peers.");
   lines.push("If the person asks this group to schedule an Event or meeting, give useful planning input. Only the last first-round speaker may create or update the Event after reading earlier replies; if you are the only speaker, you own that step. Supply a meaningful Title, Goal (objective), and Working prompt (description) when creating it. Ask the person for a missing time or cadence instead of inventing one. A scheduled Event's automatic session cannot create another Event.");
   lines.push("For a requested roster change or parallel group chat, only the last first-round speaker calls coworker_group_manage. Earlier speakers may suggest participants without changing the group. An Event's participant roster is changed with coworker_event_update for future sessions.");

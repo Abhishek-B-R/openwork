@@ -2155,6 +2155,48 @@ test("one thinking brief permits a bounded delivery handoff, and unavailable Wor
   });
 });
 
+test("parallel research returns once, its follow-up may start one build round, and that round's follow-up cannot delegate", async () => {
+  await withHome(async (home) => {
+    let service;
+    const spawned = [];
+    const fixture = nativeFixture(async ({ slug, threadId, input, reply }) => {
+      const trusted = await service.context(slug, { sessionID: threadId, messageID: reply.id, callID: reply.parts[0].callId });
+      const ask = (callId, name) => service.request({ ...trusted, callId }, "worker", { name, purpose: "delivery", goal: `${name}: write your section of doc:launch-plan.`, continuation: { objective: "A launch plan", refs: ["doc:launch-plan"], resumeInstructions: "Combine the sections." } });
+      if (input.prompt === "Research the launch in parallel") {
+        for (const name of ["Market", "Pricing", "Channels"]) await ask(name.toLowerCase(), name);
+        await assert.rejects(ask("fourth", "Fourth"), /collaboration limit/);
+      } else if (input.prompt.includes("RESEARCH EVIDENCE") && !input.prompt.includes("DRAFT EVIDENCE")) {
+        await ask("draft", "Draft");
+        await ask("review", "Review");
+      } else {
+        await assert.rejects(ask("third-round", "Third round"), /collaboration limit/);
+      }
+    });
+    service = createCollaboration({ directory: home, clientFor: async (slug) => fixture.clientFor(slug), pollMs: 5, cancelWorker: async () => {},
+      spawn: async (slug, input) => {
+        spawned.push(input);
+        let worker = await createWorker(home, slug, { ...input, spawnedBy: "coworker" });
+        const evidence = ["Draft", "Review"].includes(input.name) ? "DRAFT EVIDENCE" : "RESEARCH EVIDENCE";
+        const step = nextWorkerState(worker, { kind: "settled", report: parseWorkerReport(`## Done\n${evidence}: doc:launch-plan, ${input.name} section`) });
+        worker = await updateWorker(home, slug, worker.id, step.patch);
+        await service.completeWorker(worker, step.events);
+        return worker;
+      },
+    });
+    try {
+      const owner = { slug: "scout", threadId: "ses_build_round", conversationId: "ses_build_round", kind: "private" };
+      const first = await service.submit({ owner, messageId: "msg_parallel", prompt: "Research the launch in parallel", track: true });
+      await eventually(async () => (await service.read((state) => state.tasks[first.taskId])).state === "succeeded");
+      assert.deepEqual(spawned.map((input) => input.name), ["Market", "Pricing", "Channels", "Draft", "Review"]);
+      assert.equal(fixture.requests.length, 3, "the request, one follow-up with all three results, and the build round's follow-up");
+      assert.match(fixture.requests[1].prompt, /Market section[\s\S]*Pricing section[\s\S]*Channels section/, "the three parallel results come back together");
+      assert.match(fixture.requests[2].prompt, /DRAFT EVIDENCE/);
+      assert.ok(fixture.requests.every((request) => request.threadId === owner.threadId));
+      await service.stop({ requireConfirmed: true });
+    } finally { await service.stop(); }
+  });
+});
+
 test("completion before yield, restart delivery, and cancellation do not duplicate or resurrect a continuation", async () => {
   await withHome(async (home) => {
     const fixture = nativeFixture();

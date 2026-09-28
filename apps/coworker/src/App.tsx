@@ -1504,6 +1504,8 @@ export default function App() {
               <GroupChat
                 key={`${selectedGroup.id}:${selectedGroup.createdAt}`}
                 group={selectedGroup}
+                session={session}
+                onOpenAccount={() => openGlobalSettings("account")}
                 navigationGuard={readerNavigation}
                 active={chatActive && !groupDetailsOpen && !creatingGroup}
                 onExitActivity={activityVisible ? exitActivity : undefined}

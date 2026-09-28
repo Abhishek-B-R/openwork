@@ -175,6 +175,10 @@ function describeCoworkerTool(name: CoworkerToolName, call: WorkStepInput, state
     const described = describeTeamStep(name, { input, output: call.output, metadata: call.metadata ?? {} }, state);
     return { label: described.label, doing: described.doing, service: "your team", state, tool: call.tool };
   }
+  if (name === "app_connect") {
+    const app = clipLabel(text(input.app)) || "an app";
+    return { label: state === "failed" ? `Couldn't ask you to connect ${app}` : `Asked you to connect ${app}`, doing: `asking you to connect ${app}`, service: "your apps", state, tool: call.tool };
+  }
   const service = isAssignmentTool(name) ? "your assignments" : "your memory";
   const step = (label: string, doing: string): WorkStep => ({ label, doing, service, state, tool: call.tool });
   const failed = state === "failed";

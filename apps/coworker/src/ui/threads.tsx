@@ -126,6 +126,9 @@ import { ReplyReferences } from "@/ui/reply-references";
 import { linkDocumentMentions, type DocumentReference } from "@/lib/message-references";
 import { DocumentCard } from "@/ui/documents";
 import { documentCardsFromCalls, isDocumentTool, shouldFoldReply, splitReplyLead, type DocumentCardData } from "@/lib/documents";
+import { connectCardsFromCalls, type ConnectCardData } from "@/lib/connect-cards";
+import { ConnectCard } from "@/ui/connect-card";
+import { useConnectorCatalog } from "@/ui/use-connector-catalog";
 import { newcomerLine, teamCardsFromCalls } from "@/lib/team";
 import { TeamCardsForTurn, type TeamHooks } from "@/ui/team-cards";
 import { WorkPopover, workPopoverPlacement, type WorkPopoverPlacement } from "@/ui/work-popover";
@@ -204,6 +207,8 @@ export type DocumentHooks = {
   list: readonly DocumentReference[];
   onOpenDocument: (documentId: string) => void;
   onOpenDocumentBeside: (documentId: string) => void;
+  /** A document the coworker just wrote in this conversation: shown beside it when there is room and nothing else is there. */
+  onFollowDocument?: (documentId: string) => void;
   canOpenBeside: boolean;
 };
 
@@ -2415,7 +2420,28 @@ function ThreadView({
   const currentWords = useMemo(() => writingText(correlatedStream, activeReply), [correlatedStream, activeReply]);
   const streamingMessageIds = useMemo(() => new Set(correlatedStream?.parts.filter((part) => part.type === "text").map((part) => part.messageId)), [correlatedStream]);
   const blocks = useMemo(() => conversationBlocks(visibleMessages, (message, index) => working && message.role === "assistant" && (index === lastAssistantIndex || streamingMessageIds.has(message.id))), [visibleMessages, working, lastAssistantIndex, streamingMessageIds]);
-  const conversationWindow = useConversationWindow(scrollRef, blocks, (block) => block.kind === "actions" || block.kind === "documents" ? block.id : block.message.id);
+  const conversationWindow = useConversationWindow(scrollRef, blocks, (block) => block.kind === "actions" || block.kind === "documents" || block.kind === "connect" ? block.id : block.message.id);
+  // Connect cards read the person's live OpenWork connections, once for the whole conversation.
+  const connectCatalog = useConnectorCatalog(session, blocks.some((block) => block.kind === "connect"));
+  const latestRequestId = lastPersonIndex >= 0 ? visibleMessages[lastPersonIndex]?.id ?? "" : "";
+  // The document the coworker is writing opens beside the conversation as it lands. Only the newest
+  // documents block counts, and what was already there when the conversation opened stays put.
+  const followedCards = useRef<{ threadId: string; seen: Set<string> } | null>(null);
+  const followDocument = documents?.onFollowDocument;
+  useEffect(() => {
+    if (!transcriptLoaded) return;
+    const latest = blocks.findLast((block) => block.kind === "documents");
+    const cards = latest?.kind === "documents" ? latest.cards.map((card) => ({ id: card.id, key: `${card.id}:${card.revision ?? ""}` })) : [];
+    if (followedCards.current?.threadId !== threadId) {
+      followedCards.current = { threadId, seen: new Set(cards.map((card) => card.key)) };
+      return;
+    }
+    const seen = followedCards.current.seen;
+    const fresh = cards.filter((card) => !seen.has(card.key));
+    for (const card of fresh) seen.add(card.key);
+    const next = fresh.at(-1);
+    if (next && active) followDocument?.(next.id);
+  }, [active, blocks, followDocument, threadId, transcriptLoaded]);
   // What the coworker is doing this moment comes from what is streaming, not from a label:
   // a reasoning part is thinking, a text part is writing, an unsettled tool call is a tool.
   const phase: LivePhase = livePhase({
@@ -2574,6 +2600,26 @@ function ThreadView({
             const retriedWith = block.kind === "message" ? executionsByMessage.get(block.message.id)?.retryLabel : undefined;
             if (block.kind === "actions") {
                return <ActionLine key={block.id} review={block.review} calls={block.calls} client={mcpClient} />;
+            }
+            if (block.kind === "connect") {
+              return (
+                <div key={block.id} className="flex min-w-0 max-w-[min(76%,38rem)] flex-col gap-2" data-testid="coworker-connect-cards" data-parent-id={block.parentId}>
+                  {block.cards.map((card) => (
+                    <ConnectCard
+                      key={card.key}
+                      card={card}
+                      catalog={connectCatalog.catalog}
+                      checking={connectCatalog.loading}
+                      refresh={connectCatalog.refresh}
+                      session={session}
+                      coworker={coworker}
+                      latest={active && kind === "discussion" && block.parentId === latestRequestId}
+                      onSignIn={onOpenAccount}
+                      onContinue={sendText}
+                    />
+                  ))}
+                </div>
+              );
             }
             if (block.kind === "documents") {
               return (
@@ -2760,6 +2806,7 @@ function ThreadView({
 type ConversationBlock =
   | { kind: "actions"; id: string; review: WorkerReview | null; calls: TranscriptToolCall[] }
   | { kind: "documents"; id: string; parentId: string; cards: DocumentCardData[] }
+  | { kind: "connect"; id: string; parentId: string; cards: ConnectCardData[] }
   | { kind: "message"; message: TranscriptMessage; previous: TranscriptMessage | undefined; active: boolean; continued: boolean; tail: boolean; calls: TranscriptToolCall[]; documentCalls: TranscriptToolCall[] }
   /** A reply that ended without words — stopped or failed — kept as one quiet line where it happened. */
   | { kind: "ended"; message: TranscriptMessage; ended: "stopped" | "failed" };
@@ -2773,7 +2820,7 @@ export function CollaborationReceipts({ receipts, canRetry, retryUnavailable }: 
   };
   return <div className="space-y-2" data-testid="collaboration-receipts" aria-live="polite">
     {receipts.slice(-12).map((receipt) => <div key={receipt.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-2 text-[11px] text-mist [overflow-wrap:anywhere]" data-testid="collaboration-receipt" data-work-id={receipt.id} data-state={receipt.state}>
-      <span>{receipt.state === "waiting" || receipt.state === "waiting-person" ? "Waiting for requested work" : receipt.state === "resumption-queued" ? "Results ready; follow-up queued" : receipt.state === "resuming" ? "Following up on the results" : receipt.state === "succeeded" ? "Follow-up completed" : receipt.state === "cancelled" ? "Collaboration stopped" : receipt.state === "running" ? "Requested work is running" : "Collaboration needs attention"}</span>
+      <span>{receipt.state === "waiting" ? "Waiting for requested work" : receipt.state === "waiting-person" ? "Waiting for your answer" : receipt.state === "resumption-queued" ? "Results ready; follow-up queued" : receipt.state === "resuming" ? "Following up on the results" : receipt.state === "succeeded" ? "Follow-up completed" : receipt.state === "cancelled" ? "Collaboration stopped" : receipt.state === "running" ? "Requested work is running" : "Collaboration needs attention"}</span>
       {receipt.dependencies.slice(0, 3).map((dependency) => {
         const name = safeWorkLabel(dependency.label, dependency.kind === "worker" ? "Worker" : "Coworker");
         const label = `${name}: ${dependency.state === "succeeded" ? "received" : dependency.state === "failed" ? "failed" : dependency.state === "cancelled" ? "cancelled" : dependency.state === "waiting-person" ? "needs your input" : "pending"}`;
@@ -2828,11 +2875,15 @@ export function conversationBlocks(
   });
   const appendDocuments = (message: TranscriptMessage, index: number) => {
     if (message.role !== "assistant" || !message.parentId || lastReplies.get(message.parentId) !== index) return;
-    const cards = documentCardsFromCalls(documentCallsByParent.get(message.parentId) ?? []);
-    if (cards.length === 0) return;
+    const calls = documentCallsByParent.get(message.parentId) ?? [];
+    const cards = documentCardsFromCalls(calls);
+    // An app the turn needs connected lands after its documents, as the thing to do next.
+    const connects = connectCardsFromCalls(calls);
+    if (cards.length === 0 && connects.length === 0) return;
     flush();
     pendingId = "";
-    blocks.push({ kind: "documents", id: `documents-${message.parentId}`, parentId: message.parentId, cards });
+    if (cards.length > 0) blocks.push({ kind: "documents", id: `documents-${message.parentId}`, parentId: message.parentId, cards });
+    if (connects.length > 0) blocks.push({ kind: "connect", id: `connect-${message.parentId}`, parentId: message.parentId, cards: connects });
   };
   messages.forEach((message, index) => {
     if (continuation(message)) return;

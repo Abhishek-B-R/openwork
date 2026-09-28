@@ -141,6 +141,8 @@ const usableConnectionsSchema = z.object({
     /** Always true for a connected shared connection; per member otherwise. */
     connectedForMe: z.boolean().catch(false),
     nativeProviderKey: z.string().nullish(),
+    /** When this person last connected it: a reconnect shows as a newer time. */
+    connectedAt: z.string().nullish().catch(null),
   })),
 });
 const connectionPresetsSchema = z.object({

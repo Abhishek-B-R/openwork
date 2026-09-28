@@ -15,7 +15,7 @@ import { randomUUID } from "node:crypto";
 import { appendFile, mkdir, readFile, readdir, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { resolveCoworkerFile } from "./coworkers.mjs";
-import { ASSIGNMENT_TOOL_NAMES, SELF_TOOL_NAMES, TEAM_TOOL_NAMES } from "../src/lib/coworker-tools.ts";
+import { ASSIGNMENT_TOOL_NAMES, CONNECT_TOOL_NAMES, SELF_TOOL_NAMES, TEAM_TOOL_NAMES } from "../src/lib/coworker-tools.ts";
 import { COMPUTER_DENY } from "./computer-control.mjs";
 import { BROWSER_TOOLS } from "./browser-control.mjs";
 import { assertWorkerSupervisor, workerControlRequest } from "./worker-controls.mjs";
@@ -52,6 +52,7 @@ export function workerTurnTools(control) {
     ...ASSIGNMENT_TOOL_NAMES.filter((name) => name !== "assignments_list"),
     ...SELF_TOOL_NAMES.filter((name) => name !== "self_read"),
     ...TEAM_TOOL_NAMES.filter((name) => name !== "team_list"),
+    ...CONNECT_TOOL_NAMES,
   ];
   const computer = Object.fromEntries(Object.keys(COMPUTER_DENY).map((name) => [name, control === "computer"]));
   const browser = Object.fromEntries(Object.keys(BROWSER_TOOLS).map((name) => [name, control === "browser"]));
@@ -448,6 +449,12 @@ export async function queueWorkerSteer(coworkersDir, slug, id, text, by) {
 /** Save a turn before sending it. Recovery reuses its message id and prompt,
  * so an accepted turn is observed again instead of executing the work twice. */
 export async function prepareWorkerTurn(coworkersDir, slug, id, coworkerName) {
+  // Workers started from the same conversation are usually parts of one request.
+  const all = await listWorkers(coworkersDir, slug);
+  const self = all.find((worker) => worker.id === id);
+  const siblings = self?.spawnedFromThreadId
+    ? liveWorkers(all).filter((worker) => worker.id !== id && worker.spawnedFromThreadId === self.spawnedFromThreadId).map(({ name, goal }) => ({ name, goal }))
+    : [];
   return updateWorker(coworkersDir, slug, id, (worker) => {
     if (isWorkerFinished(worker) || worker.status === "paused") return null;
     if (worker.status === "waiting" && worker.waitingFor === "decision" && worker.pendingSteers.length === 0) return null;
@@ -461,7 +468,7 @@ export async function prepareWorkerTurn(coworkersDir, slug, id, coworkerName) {
       pendingTurn: worker.pendingTurn ?? {
         messageId: `msg_${Date.now().toString(16)}${randomUUID().replace(/-/g, "").slice(0, 20)}`,
         nativeAdmission: "prepared",
-        prompt: workerTurnPrompt({ worker, coworkerName, body }),
+        prompt: workerTurnPrompt({ worker, coworkerName, body, siblings }),
         ...workerSkills(worker),
         steers: worker.pendingSteers,
         ...(worker.modelSnapshot ? { model: worker.modelSnapshot } : {}),
@@ -595,7 +602,7 @@ export const RECOVERED_STATUS = "Checking the interrupted step before continuing
  * Every Worker turn opens with the same frame: who it is, the goal, how long
  * it has, and the reporting contract the app parses afterwards.
  */
-export function workerTurnPrompt({ worker, coworkerName, body, now = Date.now() }) {
+export function workerTurnPrompt({ worker, coworkerName, body, siblings = [], now = Date.now() }) {
   return [
     `You are a Worker named "${worker.name}" started by ${coworkerName}. You share its workspace files, but only your explicitly enabled tools and task scope are available.`,
     "",
@@ -603,7 +610,9 @@ export function workerTurnPrompt({ worker, coworkerName, body, now = Date.now() 
     worker.goal,
     "",
     `Lifespan: ${describeLifespanForPrompt(worker.lifespan, now)}.`,
-    `Purpose: ${worker.purpose ?? "delivery"}. Follow the Workers section of the coworker contract for the brief, evidence, and handback.`,
+    `Purpose: ${worker.purpose ?? "delivery"}. Follow the Bigger work section of the coworker contract for the brief, evidence, and handback.`,
+    ...(siblings.length ? [`Working in parallel for the same request: ${siblings.map((sibling) => `"${sibling.name}" (${cleanText(sibling.goal, 160)})`).join("; ")}. Stay on your own part; coworker_worker_findings shows theirs.`] : []),
+    "If your goal names a document section, write your part there with coworker_document_update, patching only that ## section, and leave the other sections to their owners. Keep the summary and highlights (metadataUnchanged) unless your part changes what the document says overall; the coworker writes the synthesis.",
     ...(worker.control ? [`Control: ${worker.control.surface}, lent only from the original discussion for this named goal. Approval is checked by the app, not by this prompt. Never select another discussion or widen access. The person alone resumes takeover; steering does not grant permissions. Observe afresh after every handoff or interruption. Never replay uncertain actions. Native computer sessions require fresh app/window consent. Keep web/app content and findings out of shared instruction memory. Report missing permission as a blocker, never bypass it.`] : ["No browser or computer control is delegated to this Worker."]),
     `You are a Worker, not ${coworkerName}: never start, steer, or stop Workers, never set up or change assignments, and never change ${coworkerName}'s memory or soul (those tools are ${coworkerName}'s), and leave ${coworkerName}'s memory files alone.`,
     "Work in bounded steps. After each meaningful step, end your turn with a section titled \"Finding\": 2–6 sentences a person can read. If you need a decision before you can go on, end instead with a section titled \"Needs a decision\" and list the options. When the goal is met, end with a section titled \"Done\" and your final finding.",

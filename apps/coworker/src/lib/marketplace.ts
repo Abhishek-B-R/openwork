@@ -62,6 +62,7 @@ export type UsableConnection = {
   connected: boolean;
   connectedForMe: boolean;
   nativeProviderKey?: string | null;
+  connectedAt?: string | null;
 };
 
 /** One of Den's curated MCP presets (`GET /v1/mcp-connections/presets`). */

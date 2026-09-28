@@ -21,12 +21,16 @@ export const SELF_TOOL_NAMES = ["memory_remember", "memory_forget", "memory_note
 /** The team tools: who else is on the team, hand work to a teammate, propose a new one. Only the person ever adds a coworker. */
 export const TEAM_TOOL_NAMES = ["team_list", "team_refer", "team_suggest"] as const;
 
+/** Asking the person to connect an app the work needs: a Connect card in the conversation. */
+export const CONNECT_TOOL_NAMES = ["app_connect"] as const;
+
 export type AssignmentToolName = (typeof ASSIGNMENT_TOOL_NAMES)[number];
 export type SelfToolName = (typeof SELF_TOOL_NAMES)[number];
 export type TeamToolName = (typeof TEAM_TOOL_NAMES)[number];
-export type CoworkerToolName = AssignmentToolName | SelfToolName | TeamToolName;
+export type ConnectToolName = (typeof CONNECT_TOOL_NAMES)[number];
+export type CoworkerToolName = AssignmentToolName | SelfToolName | TeamToolName | ConnectToolName;
 
-const ALL_TOOL_NAMES: ReadonlySet<string> = new Set<string>([...ASSIGNMENT_TOOL_NAMES, ...SELF_TOOL_NAMES, ...TEAM_TOOL_NAMES]);
+const ALL_TOOL_NAMES: ReadonlySet<string> = new Set<string>([...ASSIGNMENT_TOOL_NAMES, ...SELF_TOOL_NAMES, ...TEAM_TOOL_NAMES, ...CONNECT_TOOL_NAMES]);
 
 function isCoworkerToolName(value: string): value is CoworkerToolName {
   return ALL_TOOL_NAMES.has(value);

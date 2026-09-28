@@ -17,49 +17,18 @@ import {
 } from "@/lib/marketplace";
 import { acknowledgeCoworker, avatarFill, CoworkerAvatar } from "@/ui/coworker-avatar";
 import { ChevronIcon, IconButton, SearchIcon } from "@/ui/kit";
+import { useConnectorCatalog } from "@/ui/use-connector-catalog";
 import { useFeatures } from "@/ui/use-features";
 
 type View = { kind: "home" } | { kind: "setup" } | { kind: "connector"; id: string } | { kind: "coworker"; id: string };
 type Tab = "coworkers" | "apps";
 
-const SIGNED_OUT: ConnectorCatalog = { signedIn: false, connections: [], presets: [] };
 
 // Quiet controls: one white primary per page, small outlined buttons everywhere else.
 const PRIMARY = "inline-flex h-9 shrink-0 items-center justify-center rounded-lg bg-snow px-4 text-sm font-medium text-ink transition-opacity hover:opacity-90 disabled:opacity-60";
 const SECONDARY = "inline-flex h-8 shrink-0 items-center justify-center rounded-lg border border-white/15 px-3 text-[13px] text-snow transition-colors hover:bg-white/[0.06] disabled:opacity-60";
 const LABEL = "text-[11px] font-semibold uppercase tracking-[0.14em] text-mist";
 
-/** The member's connectors as OpenWork's Library lists them, re-read whenever the window comes back (after a browser sign-in). */
-function useConnectorCatalog(session: DenSession | null, enabled: boolean) {
-  const [catalog, setCatalog] = useState<ConnectorCatalog>(SIGNED_OUT);
-  const [loading, setLoading] = useState(Boolean(session) && enabled);
-  const [error, setError] = useState("");
-  const refresh = useCallback(async () => {
-    if (!session || !enabled) {
-      setCatalog(session ? { signedIn: true, connections: [], presets: [] } : SIGNED_OUT);
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
-    try {
-      const [connections, presets] = await Promise.all([listUsableConnections(session), listConnectionPresets(session)]);
-      setCatalog({ signedIn: true, connections, presets });
-      setError("");
-    } catch (cause) {
-      setCatalog({ signedIn: true, connections: [], presets: [] });
-      setError(`Apps could not be read from OpenWork. ${cause instanceof Error ? cause.message : String(cause)}`);
-    } finally {
-      setLoading(false);
-    }
-  }, [enabled, session]);
-  useEffect(() => { void refresh(); }, [refresh]);
-  useEffect(() => {
-    const again = () => void refresh();
-    window.addEventListener("focus", again);
-    return () => window.removeEventListener("focus", again);
-  }, [refresh]);
-  return { catalog, loading, error, refresh };
-}
 
 /**
  * The Marketplace: coworkers ready to join the team and, while Apps & tools is

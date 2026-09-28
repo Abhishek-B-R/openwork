@@ -17,6 +17,7 @@ import { DEFAULT_FEATURES, FEATURES } from "../src/lib/features.ts";
 import { createDocument } from "./documents.mjs";
 import { eventToolCatalog } from "./events.mjs";
 import { teamToolCatalog } from "./team-tools.mjs";
+import { connectToolCatalog } from "./connect-tools.mjs";
 import { workerToolCatalog } from "./workers.mjs";
 import { WORKER_MANAGEMENT } from "./worker-controls.mjs";
 
@@ -41,7 +42,7 @@ after(async () => {
 function registeredMcpCatalog() {
   // Match main's MCP registration: spawning/management are native plugin tools.
   const workers = workerToolCatalog().filter((tool) => tool.name !== "worker_spawn" && !WORKER_MANAGEMENT.includes(tool.name));
-  return [...toolCatalog(), ...workers, ...assignmentToolCatalog(), ...selfToolCatalog(), ...teamToolCatalog()];
+  return [...toolCatalog(), ...workers, ...assignmentToolCatalog(), ...selfToolCatalog(), ...teamToolCatalog(), ...connectToolCatalog()];
 }
 
 async function layers(coworker) {
@@ -71,7 +72,7 @@ test("files and registered MCP stay bounded, with a separate native Event catalo
   assert.ok(freshTotal <= FIXED_STACK_BUDGET_CHARS, `fixed files + registered MCP are ${freshTotal} chars; the budget is ${FIXED_STACK_BUDGET_CHARS}`);
   // The contract and registered MCP catalog also have individual caps.
   const catalog = fresh.find(([name]) => name === "registered MCP catalog")[1];
-  assert.equal(registeredMcpCatalog().length, 21);
+  assert.equal(registeredMcpCatalog().length, 22);
   assert.ok(catalog.length < 18_000, `the registered MCP catalog is ${catalog.length} chars`);
   const agentsChars = fresh.find(([name]) => name === "AGENTS.md")[1].length;
   assert.ok(agentsChars < 15_000, `AGENTS.md is ${agentsChars} chars; the cap is 15,000`);

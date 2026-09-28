@@ -526,7 +526,9 @@ export function createCollaboration({ directory, clientFor, cleanupClientFor = c
       snapshot = await observe(() => client.getThreadSnapshot(entry.owner.threadId, { signal: controller.signal }));
       for (;;) {
           if (running.replying) { observed = false; await withAbort(new Promise((resolve) => setTimeout(resolve, pollMs)), controller.signal); continue; }
-          if (["group", "consultation"].includes(entry.owner.kind) && client.pendingInteractions && !running.replying) {
+          // While a question or permission waits for the person, the step clock pauses; any
+          // conversation can ask (a private chat answers it natively, a group through the app).
+          if (["group", "consultation", "private", "assignment"].includes(entry.owner.kind) && client.pendingInteractions && !running.replying) {
             const version = running.interactionVersion;
             const pending = await observe(() => pendingFor(entry, client, AbortSignal.any([controller.signal, AbortSignal.timeout(setupTimeoutMs)]), snapshot));
             entry = await change((state) => {
@@ -550,8 +552,10 @@ export function createCollaboration({ directory, clientFor, cleanupClientFor = c
               return current;
             });
             if (version !== running.interactionVersion || running.replying) { observed = false; continue; }
+            const wasWaiting = running.waiting;
             running.waiting = entry.state === "waiting-person";
-            armDeadline();
+            // Private and assignment turns keep their step clock until they actually wait for the person.
+            if (["group", "consultation"].includes(entry.owner.kind) || running.waiting !== wasWaiting) armDeadline();
           }
           if (!runnable(data, data.executions[id])) { running.mustAbort = true; return; }
           native ||= snapshot.native?.engine === "v2";
@@ -1099,14 +1103,22 @@ export function createCollaboration({ directory, clientFor, cleanupClientFor = c
         if (purpose === "thinking" && (parent.depth !== 0 || dependencies.length > 0)) throw new Error("Use at most one thinking brief, before delivery, for this original task.");
         if (purpose === "delivery" && thinker && (thinker.state !== "succeeded" || thinker.briefReady !== true)) throw new Error("Delivery requires a completed thinking brief. An exhausted or empty result does not authorize delivery; review it in this conversation.");
         if (kind === "worker" && input.lifespan?.kind === "open") throw new Error("A delegated Worker needs a finite turn limit or deadline.");
-        // The only second delegation phase is delivery from one successful
-        // thinking brief. The original coworker owns it; Workers never delegate.
+        // A follow-up delegates again in two bounded ways, both owned by the original
+        // coworker (Workers never delegate): delivery from one successful thinking
+        // brief, or one build round that builds on results that came back (say,
+        // parallel research, then a draft from it). The build round's own follow-up
+        // cannot delegate, so a task has at most two rounds of up to three each.
         const current = state.executions[entry.id];
         const deliveryHandoff = entry.continuation && purpose === "delivery" && parent.depth === 0
           && (current.deliveryHandoff || (dependencies.length === 1 && thinker?.state === "succeeded" && thinker.briefReady === true));
-        if ((entry.continuation && !deliveryHandoff) || parent.depth >= 2 || dependencies.length >= 3) throw new Error("This task reached its collaboration limit. Finish with the available results or ask the person for a new task.");
-        if (deliveryHandoff && !current.deliveryHandoff) {
-          current.deliveryHandoff = true;
+        const buildRound = entry.continuation && !deliveryHandoff && purpose !== "thinking" && parent.depth === 0 && !thinker
+          && (current.buildRound || (!parent.buildRoundUsed && dependencies.some((task) => task.state === "succeeded")));
+        const round = buildRound ? 1 : 0;
+        const inRound = dependencies.filter((task) => (task.round ?? 0) === round).length;
+        if ((entry.continuation && !deliveryHandoff && !buildRound) || parent.depth >= 2 || inRound >= 3) throw new Error("This task reached its collaboration limit. Finish with the available results or ask the person for a new task.");
+        if ((deliveryHandoff && !current.deliveryHandoff) || (buildRound && !current.buildRound)) {
+          if (deliveryHandoff) current.deliveryHandoff = true;
+          else { current.buildRound = true; parent.buildRoundUsed = true; }
           parent.generation += 1;
           parent.continuationId = null;
           parent.followUpRequested = true;
@@ -1119,7 +1131,7 @@ export function createCollaboration({ directory, clientFor, cleanupClientFor = c
         parent.refs = (input.continuation?.refs ?? []).filter((value) => typeof value === "string").slice(0, 8).map((value) => text(value, 300));
         parent.completedActions = (input.continuation?.completedActions ?? []).filter((value) => typeof value === "string").slice(0, 8).map((value) => text(value, 300));
         parent.resumeInstructions = text(input.continuation?.resumeInstructions) || parent.resumeInstructions;
-        const task = { id, kind, parentId: parent.id, origin: entry.owner, owner: entry.owner, state: "requested", dependencies: [], executionId: null, depth: parent.depth + 1, lineage: [...parent.lineage, to], to, objective, refs: [], completedActions: [], resumeInstructions: "Answer the focused question using the requested results.", label: text(kind === "worker" ? input.name : `Question for ${to}`, 100), input: { ...input, ...(purpose ? { purpose } : {}), question: text(input.question), context: text(input.context, 2000) }, workerId: kind === "worker" ? `wrk_${keyFor(id)}` : null, createdAt: now(), deadline: now() + dependencyTimeoutMs, result: "", error: "", continuationId: null, generation: 0 };
+        const task = { id, kind, parentId: parent.id, origin: entry.owner, owner: entry.owner, state: "requested", dependencies: [], executionId: null, depth: parent.depth + 1, round, lineage: [...parent.lineage, to], to, objective, refs: [], completedActions: [], resumeInstructions: "Answer the focused question using the requested results.", label: text(kind === "worker" ? input.name : `Question for ${to}`, 100), input: { ...input, ...(purpose ? { purpose } : {}), question: text(input.question), context: text(input.context, 2000) }, workerId: kind === "worker" ? `wrk_${keyFor(id)}` : null, createdAt: now(), deadline: now() + dependencyTimeoutMs, result: "", error: "", continuationId: null, generation: 0 };
         if (event) task.deadline = Math.min(task.deadline, event.deadlineAt);
         state.tasks[id] = task;
         task.coworkerCreatedAt = kind === "consultation" ? event ? event.identities[to].createdAt : identity.coworkerCreatedAt ?? null : entry.coworkerCreatedAt ?? null;
@@ -1132,7 +1144,7 @@ export function createCollaboration({ directory, clientFor, cleanupClientFor = c
         return task;
       });
       wake();
-      return { text: `Requested ${result.label}. Acknowledge this in one sentence and end this turn now. Do not poll or wait inside this turn. The result will resume you in this original conversation automatically.`, structured: { collaboration: { id, state: result.state, label: result.label }, ...(result.workerId ? { worker: { id: result.workerId, name: result.label, action: "requested", status: "starting" } } : {}) } };
+      return { text: `Requested ${result.label}. Start any other parts this request needs now, then tell the person the plan in a sentence or two and end this turn. Do not poll or wait inside this turn: every result resumes you here together, automatically.`, structured: { collaboration: { id, state: result.state, label: result.label }, ...(result.workerId ? { worker: { id: result.workerId, name: result.label, action: "requested", status: "starting" } } : {}) } };
     },
     async complete(id, outcome) {
       await change((state) => {
@@ -1271,7 +1283,7 @@ export function createCollaboration({ directory, clientFor, cleanupClientFor = c
       return entries.length > 0;
     },
     async receipts({ slug, threadId, groupId }) {
-      return read((state) => Object.values(state.tasks).filter((task) => task.dependencies.length > 0 && (groupId ? task.owner.groupId === groupId : task.owner.slug === slug && task.owner.threadId === threadId)).map((task) => ({ id: task.id, ...(task.owner.eventRunId ? { eventRunId: task.owner.eventRunId } : {}), conversationId: task.owner.conversationId, threadId: task.owner.threadId, messageId: state.executions[task.executionId]?.messageId ?? "", state: task.state, label: task.state === "waiting" ? "Waiting for requested work" : task.state === "resumption-queued" ? "Results ready; follow-up queued" : task.state === "resuming" ? "Following up on the results" : task.state === "succeeded" ? "Follow-up completed" : task.state === "cancelled" ? "Collaboration stopped" : "Collaboration needs attention", error: task.error, dependencies: task.dependencies.map((id) => ({ id, kind: state.tasks[id].kind, label: state.tasks[id].label, state: state.tasks[id].state, groupId: state.tasks[id].groupId ?? "", error: state.tasks[id].error })) })));
+      return read((state) => Object.values(state.tasks).filter((task) => task.dependencies.length > 0 && (groupId ? task.owner.groupId === groupId : task.owner.slug === slug && task.owner.threadId === threadId)).map((task) => ({ id: task.id, ...(task.owner.eventRunId ? { eventRunId: task.owner.eventRunId } : {}), conversationId: task.owner.conversationId, threadId: task.owner.threadId, messageId: state.executions[task.executionId]?.messageId ?? "", state: task.state, label: task.state === "waiting" ? "Waiting for requested work" : task.state === "waiting-person" ? "Waiting for your answer" : task.state === "resumption-queued" ? "Results ready; follow-up queued" : task.state === "resuming" ? "Following up on the results" : task.state === "succeeded" ? "Follow-up completed" : task.state === "cancelled" ? "Collaboration stopped" : "Collaboration needs attention", error: task.error, dependencies: task.dependencies.map((id) => ({ id, kind: state.tasks[id].kind, label: state.tasks[id].label, state: state.tasks[id].state, groupId: state.tasks[id].groupId ?? "", error: state.tasks[id].error })) })));
     },
     async retry(id) {
       if (closed || serviceError) throw new Error(serviceError || "The collaboration service is closing.");

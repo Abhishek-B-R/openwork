@@ -49,6 +49,13 @@ export function featureOffTools(features = DEFAULT_FEATURES) {
   ];
 }
 
+/**
+ * Engine tools no coworker is offered, whatever the features: the native
+ * `subagent` tool starts child sessions the app does not track, so Workers
+ * stay the one way a coworker delegates (with their view, limits and handback).
+ */
+export const ALWAYS_OFF_TOOLS = Object.freeze(["subagent"]);
+
 /** The native agent entry for one coworker: contract as system prompt, home-scoped file access, no model (per turn). */
 
 export function coworkerAgentDefinition(teamRoot, coworker, coworkers = [], features = DEFAULT_FEATURES) {
@@ -128,7 +135,7 @@ async function writeIfChanged(target, content) {
 
 /** Which tools are off because their feature is turned off in the app. */
 export async function writeTeamFeatures(teamRoot, features = DEFAULT_FEATURES) {
-  return writeIfChanged(path.join(teamWorkspaceDirectory(teamRoot), TEAM_FEATURES_FILE), JSON.stringify({ off: featureOffTools(features) }));
+  return writeIfChanged(path.join(teamWorkspaceDirectory(teamRoot), TEAM_FEATURES_FILE), JSON.stringify({ off: [...featureOffTools(features), ...ALWAYS_OFF_TOOLS] }));
 }
 
 /** The one loopback connection every installed plugin uses to reach the app's broker. */

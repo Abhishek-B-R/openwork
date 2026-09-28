@@ -227,6 +227,9 @@ export function CoworkerHome({
   const [documentsReset, setDocumentsReset] = useState(0);
   /** The document open in the reading pane beside the conversation, when the window has room. */
   const [besideDocumentId, setBesideDocumentId] = useState("");
+  // Which beside document the app opened by following the coworker's work, and which ones the person closed.
+  const followedDocument = useRef("");
+  const declinedFollow = useRef(new Set<string>());
   const documentNavigation: DocumentNavigationGuard = useRef(null);
   const besideNavigation: DocumentNavigationGuard = useRef(null);
   const [documentNotice, setDocumentNotice] = useState("");
@@ -392,10 +395,18 @@ export function CoworkerHome({
     onOpenDocumentBeside: (documentId) => {
       if (!allowDocumentNavigation()) return;
       if (canOpenBeside) {
+        followedDocument.current = "";
         setBesidePath(null);
         setBesideDocumentId(documentId);
       }
       else documentHooks.onOpenDocument(documentId);
+    },
+    // Never over something the person opened there, a document they closed, or unsaved edits.
+    onFollowDocument: (documentId) => {
+      if (!canOpenBeside || besidePath || declinedFollow.current.has(documentId) || besideNavigation.current?.()) return;
+      if (besideDocumentId && besideDocumentId !== followedDocument.current) return;
+      followedDocument.current = documentId;
+      setBesideDocumentId(documentId);
     },
     canOpenBeside,
   };
@@ -635,7 +646,11 @@ export function CoworkerHome({
           <DocumentBesidePane
             coworker={coworker}
             documentId={besideDocumentId}
-            onClose={() => { if (allowDocumentNavigation()) setBesideDocumentId(""); }}
+            onClose={() => {
+              if (!allowDocumentNavigation()) return;
+              if (besideDocumentId === followedDocument.current) declinedFollow.current.add(besideDocumentId);
+              setBesideDocumentId("");
+            }}
             onChanged={refreshDocuments}
             onAskToUpdate={askToUpdate}
             onOpenDocument={setBesideDocumentId}

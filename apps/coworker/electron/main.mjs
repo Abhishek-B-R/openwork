@@ -23,7 +23,7 @@ import { createFocusWindow } from "./focus-window.mjs";
 import { globalOpencodeConfigDir, openworkConfigDir } from "@openwork/paths";
 import { createHeadlessThreadClientV2 as createHeadlessThreadClient, createNativeV2Client, createNativeV2Id, nativeCatalogProviders, toTranscript } from "@openwork/headless-threads/v2";
 import { configureNativePluginBundles, verifyNativePluginBundles } from "./native-plugin.mjs";
-import { nativeTurnAgent, coworkerAgent, NATIVE_COORDINATOR_AGENT } from "./native-turns.mjs";
+import { nativeTurnAgent, coworkerAgent, NATIVE_COORDINATOR_AGENT, SCHEDULED_RUN_TOOLS } from "./native-turns.mjs";
 import { assertTeamCompatibleHomes, teamWorkspaceDirectory, teamWorkspaceId, updateTeamWorkspaceConfig, writeTeamFeatures } from "./team-workspace.mjs";
 import { createLinkPreviews } from "./link-preview.mjs";
 import { DEFAULT_FEATURES, INTERFACE_FEATURES } from "../src/lib/features.ts";
@@ -92,6 +92,8 @@ import {
 import { TEAM_SCOPE, COWORKER_TOOLS_MCP_NAME, DEFAULT_INSTRUCTIONS, createCoworkerToolsServer, createToolHandlers, toolCatalog } from "./coworker-tools.mjs";
 import { readSuggestions, recommendTeam, refreshTeamRosters, setReferralState, setSuggestionState, teamCatalog, teamStates } from "./team.mjs";
 import { createTeamToolHandlers, teamToolCatalog } from "./team-tools.mjs";
+import { connectToolCatalog, createConnectToolHandlers } from "./connect-tools.mjs";
+import { createAppsContext } from "./apps-context.mjs";
 import {
   archiveDocument,
   listDocuments,
@@ -348,6 +350,8 @@ let deepLinkListenerReady = false;
  * @type {{ baseUrl: string, token: string, orgId: string } | null}
  */
 let denSession = null;
+/** The coworker's per-turn picture of the person's OpenWork Connect apps, read from Den and kept briefly. */
+const readAppsContext = createAppsContext({ currentSession: () => denSession });
 // In-memory receipts only: a renderer account is not proof the embedded server applied it.
 let denSessionHandoff = Promise.resolve();
 let denAccountHandoff = Promise.resolve();
@@ -796,6 +800,10 @@ async function readRunSummary(client, threadId) {
   }
 }
 
+// A scheduled run has no one watching it live; say so, so the coworker works alone and leaves a usable record.
+const SCHEDULED_RUN_PROMPT = (name, instructions) =>
+  `Scheduled run of your assignment "${name}". Nobody is watching live, so work on your own: no questions, Workers or teammates here. Keep substantial results in a document, and end with a short summary of what you did, what you found and anything the person should decide.\n\n${instructions}`;
+
 const RESUME_PROMPT = (name, reason) =>
   [
     `Continue the previous run of the responsibility "${name}". It stopped before finishing${reason ? ` (${reason})` : ""}.`,
@@ -841,7 +849,7 @@ async function executeLocalResponsibility(
       if (shared) await warmCoworkerWorkspace(coworker);
       else await prepareLegacySession(coworker, binding);
       const model = await localRunModel(coworker, "assignment-run");
-      const agent = nativeTurnAgent({ tools: COMPUTER_DENY, ...(shared ? { slug } : {}) });
+      const agent = nativeTurnAgent({ tools: SCHEDULED_RUN_TOOLS, ...(shared ? { slug } : {}) });
       client = ownedSessionClient(coworker, {
         baseUrl: handle.url,
         workspaceId: coworker.workspaceId,
@@ -854,14 +862,14 @@ async function executeLocalResponsibility(
       signal.throwIfAborted();
       const messageId = `msg_${activeRunId.replaceAll("-", "")}`;
       const execution = { id: activeRunId, owner: { slug, threadId, kind: "assignment" }, coworkerCreatedAt: coworker.createdAt,
-        messageId, workspaceId: coworker.workspaceId, model, agent, tools: COMPUTER_DENY, state: "running", sentAt: Date.now() };
+        messageId, workspaceId: coworker.workspaceId, model, agent, tools: SCHEDULED_RUN_TOOLS, state: "running", sentAt: Date.now() };
       standaloneExecutions.set(threadId, execution);
       if (resumeThreadId) {
         acceptance = await client.sendTurn(threadId, { prompt: RESUME_PROMPT(started.name, resumeReason), messageId, agent, model, signal });
       } else {
         await client.createThread({ threadId, title: started.name, agent, model, signal });
         signal.throwIfAborted();
-        acceptance = await client.sendTurn(threadId, { prompt: started.instructions, messageId, agent, model, signal });
+        acceptance = await client.sendTurn(threadId, { prompt: SCHEDULED_RUN_PROMPT(started.name, started.instructions), messageId, agent, model, signal });
       }
       const result = await client.waitForThread(threadId, {
         signal,
@@ -1149,6 +1157,22 @@ const groupExecution = createGroupExecution({
 });
 
 const groupDocumentTools = new Set(groupDocumentToolCatalog().map((tool) => tool.name));
+/**
+ * A group chat shows no tool calls, so a coworker's request to connect an app
+ * reaches it as a timeline card instead; a private chat reads the call itself.
+ */
+async function announceConnect(entry, slug, pending) {
+  const result = await pending;
+  const connect = result?.structured?.connect;
+  const groupId = ["group", "consultation"].includes(entry?.owner?.kind) ? entry.owner.groupId || entry.owner.conversationId : "";
+  if (!connect || !groupId) return result;
+  await appendGroupEvent(coworkersDir, groupId, {
+    id: `evt_connect_${entry.id}_${String(connect.app).toLowerCase().replace(/[^a-z0-9]+/g, "-")}`, kind: "status", status: "connect",
+    title: connect.app, text: connect.reason, slug, executionId: entry.id, turnId: entry.owner.turnId, threadId: entry.owner.threadId,
+  }).catch(() => undefined);
+  return result;
+}
+
 const groupDocuments = createGroupDocumentService({
   coworkersDir,
   coworkerFor: (slug) => getCoworker(coworkersDir, slug),
@@ -2467,7 +2491,7 @@ async function ensureToolsServer() {
     ...createToolHandlers({ coworkersDir }), ...workerHandlers,
     ...createAssignmentToolHandlers({ coworkersDir, settings: () => readSettings(settingsPath), timezone: coworkerTimezone,
       runNow: (slug, id) => startLocalResponsibilityRun(slug, id, "manual"), cloud: () => cloudAssignments() }),
-    ...createSelfToolHandlers({ coworkersDir }), ...createTeamToolHandlers({ coworkersDir }),
+    ...createSelfToolHandlers({ coworkersDir }), ...createTeamToolHandlers({ coworkersDir }), ...createConnectToolHandlers(),
   };
   // Documents and Workers share one server: starting, steering, and stopping a Worker go
   // through the same functions the Workers view uses, so the run limit and records agree.
@@ -2500,7 +2524,7 @@ async function ensureToolsServer() {
           return { filesystemScope: await resolveNativeFilesystemScope(current.coworker, context) };
         }
         if (name === "session_context") return { slug, createdAt: admitted.binding.createdAt, abilities: admitted.coworker.abilities, homeDirectory: admitted.coworker.path,
-          homeContext: await readHomeContext(coworkersDir, slug) };
+          homeContext: [await readHomeContext(coworkersDir, slug), await readAppsContext()].filter(Boolean).join("\n\n") };
       }
       const abilityContext = admitted ? { ...context, createdAt: admitted.binding.createdAt, workspaceId: admitted.binding.workspaceId, directory: admitted.coworker.path } : context;
       if (name === "react") return messageReactions.execute(slug, args, context, transportSignal);
@@ -2521,7 +2545,7 @@ async function ensureToolsServer() {
         const key = JSON.stringify([admitted.entry.id, context.messageID, context.callID]);
         if (managementCalls.has(key)) return managementCalls.get(key);
         if (managementCalls.size >= 4096) throw new Error("This app launch reached its native action receipt limit.");
-        const result = ordinaryHandlers[name](slug, args);
+        const result = name === "app_connect" ? announceConnect(current.entry, slug, ordinaryHandlers[name](slug, args)) : ordinaryHandlers[name](slug, args);
         managementCalls.set(key, result);
         return result;
       }
@@ -2575,8 +2599,9 @@ async function ensureToolsServer() {
       }),
       ...createSelfToolHandlers({ coworkersDir }),
       ...createTeamToolHandlers({ coworkersDir }),
+      ...createConnectToolHandlers(),
     }).map(([name, handler]) => [name, (...args) => maintenanceAdmission.run(() => handler(...args))])),
-    tools: [...toolCatalog(), ...workerToolCatalog().filter((tool) => tool.name !== "worker_spawn" && !WORKER_MANAGEMENT.includes(tool.name)), ...assignmentToolCatalog(), ...selfToolCatalog(), ...teamToolCatalog()],
+    tools: [...toolCatalog(), ...workerToolCatalog().filter((tool) => tool.name !== "worker_spawn" && !WORKER_MANAGEMENT.includes(tool.name)), ...assignmentToolCatalog(), ...selfToolCatalog(), ...teamToolCatalog(), ...connectToolCatalog()],
     // One line naming the server; the rules for each tool family are in the coworker's contract, said once.
     instructions: DEFAULT_INSTRUCTIONS,
     version: app.getVersion(),

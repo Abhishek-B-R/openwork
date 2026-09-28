@@ -7,6 +7,9 @@ import { classifyThreads, discussionIds, loadDiscussionRegistry } from "@/lib/di
 import { humanizeDocumentId } from "@/lib/documents";
 import { DocumentCard, DocumentsIcon, lastDocumentsOpened, useDocumentNavigationGuard, type DocumentNavigationGuard } from "@/ui/documents";
 import { GroupDocuments, type GroupDocumentsApi } from "@/ui/group-documents";
+import type { DenSession } from "@/lib/den";
+import { ConnectCard } from "@/ui/connect-card";
+import { useConnectorCatalog } from "@/ui/use-connector-catalog";
 import {
   publishGroupRun,
   stopGroupRun,
@@ -203,7 +206,12 @@ function GroupChatView({
   activityRequest,
   onExitActivity,
   navigationGuard,
+  session = null,
+  onOpenAccount,
 }: {
+  /** The person's OpenWork account, for Connect cards: which apps are connected and signing in to one. */
+  session?: DenSession | null;
+  onOpenAccount?: () => void;
   navigationGuard?: DocumentNavigationGuard;
   onExitActivity?: () => void;
   activityRequest?: { id: number; eventId: string; onOpened?: () => Promise<void> } | null;
@@ -686,6 +694,13 @@ function GroupChatView({
   const statusLine = activityError ? "Reconnecting to activity" : localSends.some((item) => item.state === "uncertain") ? "Checking message confirmation" : sending ? "Sending…" : interactions.length || executions.length || live ? presentation.line : waiting ? "Waiting for requested work" : !loaded || !receiptsLoaded || observed.groupId !== group.id ? "Checking activity" : localSends.some((item) => item.state === "accepted") ? "Message accepted" : "Ready";
   const activeSlugs = presentation.activeSlugs;
   const rows = useMemo(() => groupConversationRows(events, executions, localSends), [events, executions, localSends]);
+  // A coworker's request to connect an app lands as a card; only the newest one carries the work on once connected.
+  const lastConnectEventId = events.findLast((event) => event.kind === "status" && event.status === "connect")?.id ?? "";
+  const connectCatalog = useConnectorCatalog(session, Boolean(lastConnectEventId));
+  const continueAfterConnect = (words: string) => {
+    if (!active || !runtime.engineManaged || group.archivedAt) return;
+    sendVoicedMessage(words, newId("m"));
+  };
   const persistedEventIds = useMemo(() => new Set(events.map((event) => event.id)), [events]);
   const viewEvent = eventId && onOpenEvent ? <button type="button" className="font-medium text-snow/80 underline-offset-2 hover:underline" onClick={() => onOpenEvent(eventId)} data-testid="group-event-phase-link">View event</button> : null;
 
@@ -712,6 +727,23 @@ function GroupChatView({
             const tail = !sameSpeaker(next);
             const label = timeLabelBetween(previous?.at, event.at);
             if (event.kind === "status") {
+              if (event.status === "connect" && event.title) {
+                return (
+                  <div key={key} className="min-w-0 max-w-[min(100%,26rem)]" data-testid="group-status" data-status={event.status} data-speaker={event.slug} data-event-id={event.id}>
+                    <ConnectCard
+                      card={{ key: event.id, app: event.title, reason: event.text, connectionId: null, status: null }}
+                      catalog={connectCatalog.catalog}
+                      checking={connectCatalog.loading}
+                      refresh={connectCatalog.refresh}
+                      session={session}
+                      coworker={coworkers.find((member) => member.slug === event.slug) ?? { slug: event.slug ?? "coworker", name: nameFor(event.slug ?? "") }}
+                      latest={active && event.id === lastConnectEventId}
+                      onSignIn={() => onOpenAccount?.()}
+                      onContinue={continueAfterConnect}
+                    />
+                  </div>
+                );
+              }
               if (event.status === "document" && event.documentId && documentsApi) {
                 const documentId = event.documentId;
                 return (

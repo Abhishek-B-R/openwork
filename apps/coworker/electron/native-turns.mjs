@@ -3,6 +3,17 @@ import { workerTurnTools } from "./workers.mjs";
 import { nativePermissions } from "./native-config.mjs";
 import { COORDINATOR_AGENT as NATIVE_COORDINATOR_AGENT } from "./coordinator.mjs";
 import { EVENT_WRITE_DENY, EVENT_SCHEDULE_DENY } from "./event-execution.mjs";
+
+/**
+ * A scheduled assignment run works alone: nobody answers a question, no
+ * conversation receives a Worker's or teammate's handback, and it never changes
+ * schedules. It is offered only what works there.
+ */
+export const SCHEDULED_RUN_TOOLS = Object.freeze({
+  ...COMPUTER_DENY, ...EVENT_SCHEDULE_DENY, question: false, coworker_react: false, coworker_group_manage: false,
+  coworker_team_consult: false, coworker_team_refer: false, coworker_app_connect: false,
+  ...Object.fromEntries(["spawn", "steer", "pause", "resume", "cancel"].map((action) => [`coworker_worker_${action}`, false])),
+});
 import { COWORKER_ROLE_SEPARATOR, coworkerAgent, coworkerAgentOwner as sharedAgentOwner, coworkerRoleAgentId } from "../src/lib/coworker-agents.ts";
 
 export { NATIVE_COORDINATOR_AGENT };
@@ -18,6 +29,7 @@ const bases = [
   { id: "coworker-worker", tools: workerTurnTools() },
   { id: "coworker-worker-browser", tools: workerTurnTools("browser") },
   { id: "coworker-worker-computer", tools: workerTurnTools("computer") },
+  { id: "coworker-scheduled", tools: SCHEDULED_RUN_TOOLS, policies: [{ suffix: "", tools: {} }] },
 ];
 const eventPolicies = [
   { suffix: "", tools: {} },
@@ -29,7 +41,7 @@ for (const base of bases) {
   const conclusions = base.id === "coworker-no-referral" || base.id === "coworker-group"
     ? [{ suffix: "", tools: {} }, { suffix: "-no-conclusion", tools: { coworker_event_conclude: false } }, { suffix: "-conclusion", tools: { coworker_event_conclude: true } }]
     : [{ suffix: "", tools: {} }];
-  for (const policy of eventPolicies) for (const conclusion of conclusions) {
+  for (const policy of base.policies ?? eventPolicies) for (const conclusion of conclusions) {
     const tools = { ...base.tools, ...policy.tools, ...conclusion.tools };
     const key = maskKey(tools);
     if (key !== "[]" && !masks.has(key)) masks.set(key, { id: base.id + policy.suffix + conclusion.suffix, tools });
