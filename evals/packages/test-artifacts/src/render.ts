@@ -137,7 +137,7 @@ function traceHtml(testRun: TestRunRecord): string {
 const FLOW_GROUPS: { flow: ProofFlow | undefined; className: string; blurb: string }[] = [
   { flow: "user", className: "user", blurb: "A person goes through the real UI; each step ends with a screenshot of what they see." },
   { flow: "agent", className: "agent", blurb: "An agent, MCP client or server acts; the proof is the requests and responses." },
-  { flow: undefined, className: "unlabelled", blurb: "Not tagged user-flow or agent-flow." },
+  { flow: undefined, className: "unlabelled", blurb: "Not tagged user-flow or agent-flow: add { tags: [\"user-flow\"] } or { tags: [\"agent-flow\"] } to each test (docs/testing.md#user-flow-vs-agent-flow)." },
 ];
 
 function entryFlow(entry: TestArtifactIndexEntry): ProofFlow | undefined {

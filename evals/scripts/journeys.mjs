@@ -32,6 +32,9 @@ const TAG_NEEDS = Object.freeze({
 const ENGINES = ['v1', 'v2'];
 const CASE_ID = /^[A-Z][A-Z0-9]*(?:-[A-Za-z0-9]+)+(?=[\s:]|$)/;
 const SPEC = /^specs\/[^/]+\.e2e\.test\.ts$/;
+export const JOURNEY_DOCS = 'docs/testing.md#journey-tags';
+const DISCOVERY_HINT = 'A tag must be declared in evals/vitest.config.ts: list the declared tags with '
+  + '`pnpm --dir evals exec vitest --list-tags`, or add the new tag there with a description. See ' + JOURNEY_DOCS + '.';
 
 // The one-line summary of a JSDoc block at the very top of the file; Vitest does not read docs.
 export function journeyName(source) {
@@ -89,7 +92,7 @@ export async function collectSpecs(root = evalsDir) {
       ...unhandledErrors.map(String),
       ...testModules.flatMap(module => module.errors().map(error => `${module.relativeModuleId}: ${error.message}`)),
     ];
-    if (problems.length) throw new Error(`Vitest could not read the journey specs:\n${problems.join('\n')}`);
+    if (problems.length) throw new Error(`Vitest could not read the journey specs:\n${problems.join('\n')}\n${DISCOVERY_HINT}`);
     const specs = testModules.filter(module => SPEC.test(module.relativeModuleId));
     return (await Promise.all(specs.map(async module => ({
       spec: basename(module.moduleId),

@@ -12,6 +12,8 @@ import { StatusIcon } from "./status-icon";
 type Verdict = ReturnType<typeof summarizeReview>["verdict"];
 type Source = ReviewReport["sources"][number];
 
+const FLOW_GUIDE_URL = "https://github.com/different-ai/openwork/blob/dev/docs/testing.md#user-flow-vs-agent-flow";
+
 /** Who did the thing: user-flow proof leads so a reviewer sees first whether a person could do it. */
 function flowGroup(source: Source): { order: number; label: string } {
   if (source.kind === "docshot") return { order: 3, label: "Documentation reference" };
@@ -109,7 +111,12 @@ export function Report({ report, id, connected }: { report: ReviewReport; id: st
               {report.gaps.map((gap, index) => (
                 <li key={index}>{gap}</li>
               ))}
-              {missingUserFlow && <li>No user-flow proof: nothing here shows a person doing this in the UI.</li>}
+              {missingUserFlow && (
+                <li>
+                  No user-flow proof: nothing here shows a person doing this in the UI.{" "}
+                  <a href={FLOW_GUIDE_URL}>Add <code>{'{ tags: ["user-flow"] }'}</code> to a UI journey</a>.
+                </li>
+              )}
               {summary.pendingVisual > 0 && (
                 <li>{`${summary.pendingVisual} visual ${summary.pendingVisual === 1 ? "judgment" : "judgments"} pending.`}</li>
               )}

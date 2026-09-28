@@ -171,6 +171,9 @@ function specList(sources: TestRunSource[]): string {
   return specs.map((spec) => `\`${spec}\``).join(", ");
 }
 
+/** Rendered on GitHub, so the guide link must be absolute. */
+export const FLOW_GUIDE_URL = "https://github.com/different-ai/openwork/blob/dev/docs/testing.md#user-flow-vs-agent-flow";
+
 /** Who did the thing in each proof: user-flow proof first, so a reviewer sees whether a person could do it. */
 export function flowLines(report: Pick<ReviewReport, "sources">): string[] {
   const runs = report.sources.filter((source): source is TestRunSource => source.kind === "test-run");
@@ -180,9 +183,9 @@ export function flowLines(report: Pick<ReviewReport, "sources">): string[] {
   const unlabelled = runs.filter((source) => source.flow === undefined);
   const lines = [""];
   if (user.length > 0) lines.push(`- User flow: ${specList(user)}`);
-  else lines.push("- No user-flow proof: nothing here shows a person doing this in the UI.");
+  else lines.push(`- No user-flow proof: nothing here shows a person doing this in the UI. [Add \`{ tags: ["user-flow"] }\` to a UI journey](${FLOW_GUIDE_URL}).`);
   if (agent.length > 0) lines.push(`- Agent flow: ${specList(agent)}`);
-  if (unlabelled.length > 0) lines.push(`- Unlabelled: ${specList(unlabelled)}`);
+  if (unlabelled.length > 0) lines.push(`- Unlabelled (no flow tag): ${specList(unlabelled)}`);
   return lines;
 }
 

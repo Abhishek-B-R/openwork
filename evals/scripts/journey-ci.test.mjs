@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { judgeJourneys } from './judge-journeys.mjs';
 import assert from 'node:assert/strict';
-import { ciLane, collectSpecs, discoverJourneys, journeyName, registeredCases, selectJourneys, unmetLaneNeeds, withTrustedMetadata } from './journeys.mjs';
+import { JOURNEY_DOCS, ciLane, collectSpecs, discoverJourneys, journeyName, registeredCases, selectJourneys, unmetLaneNeeds, withTrustedMetadata } from './journeys.mjs';
 import { EXCLUDED_LABEL, aggregate, classify, markdown } from './journey-report.mjs';
 import { notification, deliver, validateReport, findStateRun } from './notify-journeys.mjs';
 
@@ -17,6 +17,8 @@ const report = status => validateReport({ entries: [{ ...entry, status }] });
 const specs = await collectSpecs();
 const journeys = await discoverJourneys();
 const cases = registeredCases(journeys);
+// Failure messages name the fix and the doc section (docs/testing.md), so a red run teaches the convention.
+const see = `See ${JOURNEY_DOCS}.`;
 
 test('incident state survives more than 100 newer unrelated alert runs', async () => {
   const pages = [];
@@ -36,7 +38,7 @@ test('incident state survives more than 100 newer unrelated alert runs', async (
 test('critical PR selection includes existing critical journeys even when only product source changes', async () => {
   const entries = journeys;
   const selected = selectJourneys(entries, { critical: true, changed: ['apps/app/src/view.tsx'] });
-  assert.equal(selected.length, 3);
+  assert.equal(selected.length, 3, `expected 3 critical journeys, found ${selected.map(value => value.spec).join(', ')}; when you add or drop @module-tag critical, update this count and docs/testing.md#how-ci-picks-journeys.`);
   assert(selected.some(value => value.placement === 'local'));
   assert(selected.some(value => value.model === 'live'));
   assert(selected.every(value => value.critical));
@@ -75,7 +77,7 @@ test('journeys needing a packaged binary, macOS, or paid live consent are skippe
     ['packaged-preactivation-egress.e2e.test.ts', 'set OPENWORK_EVAL_ELECTRON_BINARY'],
     ['packaged-preactivation-updater.e2e.test.ts', 'set OPENWORK_EVAL_ELECTRON_BINARY'],
     ['released-enterprise-activated.e2e.test.ts', 'set OPENWORK_EVAL_ELECTRON_BINARY'],
-  ]);
+  ], `the journeys CI skips for unmet prerequisites changed; if you added or removed a packaged/macos/live-openai @module-tag on purpose, update this list. ${see}`);
   assert(excluded.every(entry => entry.placement === 'local'));
   assert(excluded.every(entry => !entry.critical));
   // A lane that packages the enterprise desktop would schedule the packaged journeys again; released-enterprise-activated's
@@ -121,9 +123,9 @@ async function guardedPrerequisites(spec, root = new URL('../specs/', import.met
 test('needs from journey tags match the whole-file prerequisites each spec and its worlds guard, in both directions', async () => {
   const entries = journeys;
   const declared = entries.filter(entry => entry.needs);
-  assert.equal(declared.length, 8);
+  assert.equal(declared.length, 8, `expected 8 journeys with packaged/macos/live-openai needs, found ${declared.map(entry => entry.spec).join(', ')}; update this count when you add or remove one of those tags. ${see}`);
   for (const entry of declared) {
-    assert.deepEqual({ env: [...(entry.needs.env ?? [])].sort(), platform: entry.needs.platform }, await guardedPrerequisites(entry.spec), `${entry.spec}: packaged/macos/live-openai tags drifted from the spec/world guards`);
+    assert.deepEqual({ env: [...(entry.needs.env ?? [])].sort(), platform: entry.needs.platform }, await guardedPrerequisites(entry.spec), `${entry.spec}: its packaged/macos/live-openai @module-tags drifted from what the spec's needs and its worlds' skip guards check; add or remove the tag so both agree. ${see}`);
   }
   // The released spec's update case alone needs the baseline binary; that is not a whole-file blocker.
   assert.deepEqual(await guardedPrerequisites('released-enterprise-activated.e2e.test.ts'), { env: ['OPENWORK_EVAL_ELECTRON_BINARY'], platform: undefined });
@@ -151,14 +153,14 @@ const ENGINE_TAGS = ['engine-v1', 'engine-v2'];
 test('journey tags are declared in vitest.config.ts and file-level, and engine tags mark ID-titled cases', async () => {
   const config = await readFile(new URL('../vitest.config.ts', import.meta.url), 'utf8');
   const declared = new Set([...config.matchAll(/\{\s*name:\s*"([^"]+)",\s*description:\s*"[^"]+"/g)].map(match => match[1]));
-  for (const tag of [...JOURNEY_TAGS, ...ENGINE_TAGS]) assert(declared.has(tag), `${tag} must be declared (with a description) in vitest.config.ts`);
+  for (const tag of [...JOURNEY_TAGS, ...ENGINE_TAGS]) assert(declared.has(tag), `${tag} must be declared (with a description) in evals/vitest.config.ts, then run \`pnpm --dir evals docs:tags\`. ${see}`);
   assert.equal(specs.length, journeys.length);
   for (const { spec, tests } of specs) {
     // A test's tags include its file's @module-tags, so a journey tag on only some tests was set per test.
     for (const tag of JOURNEY_TAGS.filter(value => tests.some(test => test.tags.includes(value))))
-      assert(tests.every(test => test.tags.includes(tag)), `${spec}: ${tag} describes the whole journey; declare it with @module-tag`);
+      assert(tests.every(test => test.tags.includes(tag)), `${spec}: ${tag} describes the whole journey; move it from the test's { tags } to a \` * @module-tag ${tag}\` line in the JSDoc block at the top of the file. ${see}`);
     for (const { name, tags } of tests) {
-      if (tags.some(tag => ENGINE_TAGS.includes(tag))) assert.match(name, /^[A-Z][A-Z0-9]*(?:-[A-Za-z0-9]+)+[\s:]/, `${spec}: an engine-tagged test must start with its case ID`);
+      if (tags.some(tag => ENGINE_TAGS.includes(tag))) assert.match(name, /^[A-Z][A-Z0-9]*(?:-[A-Za-z0-9]+)+[\s:]/, `${spec}: "${name}" carries an engine tag, so its title must start with a unique case ID, e.g. test("HOME-01 …", { tags: ["engine-v2"] }, …). ${see}`);
     }
   }
 });
@@ -167,13 +169,14 @@ test('raw-desktop marks exactly the specs that drive a raw desktop host, which n
   for (const entry of journeys) {
     const source = await readFile(new URL(entry.spec, specsRoot), 'utf8');
     const rawDesktop = /import\s*\{[^}]*\bdesktop\b[^}]*\}\s*from\s*["']@openwork\/hosts["']/s.test(source);
-    assert.equal(entry.placement === 'manual', rawDesktop, `${entry.spec}: tag it @module-tag raw-desktop exactly when it imports desktop from @openwork/hosts`);
+    assert.equal(entry.placement === 'manual', rawDesktop, `${entry.spec}: tag it @module-tag raw-desktop exactly when it imports desktop from @openwork/hosts (prefer seed.appWeb, which CI can run). ${see}`);
   }
 });
 
 test('registered cases come from the specs: unique IDs, at least one engine, and the e2e opt-in', async () => {
   assert(cases.length >= 20);
-  assert.equal(new Set(cases.map(value => value.id)).size, cases.length, 'case IDs are unique across specs');
+  const duplicates = cases.filter((value, index) => cases.findIndex(other => other.id === value.id) !== index).map(value => `${value.id} (${value.spec})`);
+  assert.deepEqual(duplicates, [], `case IDs must be unique across specs; rename the later one (pnpm evals:new --engine picks a free ID). ${see}`);
   for (const registered of cases) {
     const entry = journeys.find(value => value.spec === registered.spec);
     assert(entry.cases.some(value => value.id === registered.id));
@@ -216,7 +219,7 @@ test('Vitest discovers journeys from spec files as data: names, module tags, tem
     // Neither the spec nor a config next to it was executed: only this checkout's config is loaded.
     await assert.rejects(readFile(marker, 'utf8'), { code: 'ENOENT' });
     await writeFile(join(root, 'specs', 'unknown-tag.e2e.test.ts'), 'test("SMUGGLE-01 x", { tags: ["not-declared"] }, async () => {});\n');
-    await assert.rejects(discoverJourneys(root), /Vitest could not read the journey specs/);
+    await assert.rejects(discoverJourneys(root), /Vitest could not read the journey specs[\s\S]*vitest --list-tags[\s\S]*docs\/testing\.md#journey-tags/);
   } finally { await rm(root, { recursive: true, force: true }); }
   assert.equal(journeyName('/**\n * @module-tag critical\n */\n'), undefined);
   assert.equal(journeyName('import x from "y";\n/** Not at the top */'), undefined);
