@@ -76,25 +76,29 @@ function launchTool(definition: McpAppServerDefinition): Tool {
   }
 }
 
-/** Only reads Den verified itself run without asking; a connection tool always asks. */
-function verifiedReadOnly(binding: McpAppToolBinding): boolean {
-  return binding.readOnly && binding.kind !== "mcp"
-}
-
+/**
+ * Read-only tools, including connection tools their provider marks read-only,
+ * advertise it so hosts can run them without a click. Den checks a connection
+ * tool's label again on every call.
+ */
 function boundTool(binding: McpAppToolBinding): Tool {
-  const readOnly = verifiedReadOnly(binding)
   return {
     name: binding.name,
     description: binding.description,
     inputSchema: { ...binding.inputSchema, type: "object" },
     annotations: {
-      readOnlyHint: readOnly,
-      destructiveHint: !readOnly,
-      idempotentHint: readOnly,
+      readOnlyHint: binding.readOnly,
+      destructiveHint: !binding.readOnly,
+      idempotentHint: binding.readOnly,
       openWorldHint: binding.kind !== "api",
     },
     _meta: { ui: { visibility: ["model", "app"] } },
   }
+}
+
+/** A connection tool always needs mcp:write, whatever its label, because external dispatch requires it. */
+function requiredScope(binding: McpAppToolBinding): string {
+  return binding.readOnly && binding.kind !== "mcp" ? DEN_MCP_READ_SCOPE : DEN_MCP_WRITE_SCOPE
 }
 
 /**
@@ -155,8 +159,8 @@ export function createMcpAppServer(input: {
     }
     const binding = tools.find((tool) => tool.name === request.params.name)
     if (!binding) throw new McpError(ErrorCode.InvalidParams, `Tool ${request.params.name} is not available on ${app.title}.`)
-    const requiredScope = verifiedReadOnly(binding) ? DEN_MCP_READ_SCOPE : DEN_MCP_WRITE_SCOPE
-    if (!input.scopes.has(requiredScope)) return scopeError(binding.name, requiredScope)
+    const scope = requiredScope(binding)
+    if (!input.scopes.has(scope)) return scopeError(binding.name, scope)
     return input.callTool(binding, args)
   })
 

@@ -69,8 +69,9 @@ function unavailable(tool: McpAppToolDeclaration, reason: string): McpAppError {
 /**
  * Resolves declared App tools as their author, looking up only the
  * capabilities they name. Each binding records how its arguments reach the
- * capability, the schema the App's server advertises, and whether Den itself
- * verified it as read-only: OpenWork reads and live Workflows are; connection
+ * capability, the schema the App's server advertises, and whether it is
+ * read-only: OpenWork reads and live Workflows are, and so is a connection tool
+ * its provider marks read-only, which every call checks again. Other connection
  * tools and ordinary Workflow runs are not, so a host asks before each call.
  */
 export async function resolveMcpAppTools(ctx: CapabilityRegistryContext, declarations: McpAppToolDeclaration[]): Promise<McpAppToolBinding[]> {
@@ -145,8 +146,9 @@ export async function resolveMcpAppTools(ctx: CapabilityRegistryContext, declara
         kind: "mcp",
         mode,
         inputSchema: objectJsonSchema(described.inputSchema) ?? { type: "object" },
-        // A provider's own read-only hints are descriptive, so every call asks first.
-        readOnly: false,
+        // The provider's label as the author sees it now; callMcpAppTool requires
+        // it again, in the caller's own tool list, on every call.
+        readOnly: described.readOnly,
         schemaDigest: externalMcpToolSchemaDigest(described.inputSchema),
       }
     } else {
@@ -167,6 +169,19 @@ export async function resolveMcpAppTools(ctx: CapabilityRegistryContext, declara
 
 function errorResult(error: string, message: string): ExecuteCapabilityToolResult {
   return { isError: true, content: [{ type: "text", text: JSON.stringify({ error, message }) }] }
+}
+
+/** Why OpenWork refused a call, read from its own JSON error text. */
+function refusalReason(result: ExecuteCapabilityToolResult): string | undefined {
+  if (!result.isError) return undefined
+  const text = result.content.find((item) => item.type === "text")
+  if (!text || text.type !== "text") return undefined
+  try {
+    const payload: unknown = JSON.parse(text.text)
+    return isRecord(payload) && typeof payload.reason === "string" ? payload.reason : undefined
+  } catch {
+    return undefined
+  }
 }
 
 // Launch hints name tools and resources on /mcp/agent, which an App's own server does not serve.
@@ -216,10 +231,16 @@ export async function callMcpAppTool(
     return withoutAgentServerMeta(await executeCapability(ctx, { name: binding.capability, path: args.path, query: args.query, body: args.body }))
   }
   if (parsed?.kind !== "externalMcp") return errorResult("unknown_capability", "This App tool is no longer available.")
-  // The provider must still advertise the schema the App was published against.
-  return withoutAgentServerMeta(await executeCapability(ctx, {
+  // The provider must still advertise the schema the App was published against
+  // and, for a read-only tool, still mark it read-only for this caller.
+  const result = await executeCapability(ctx, {
     name: binding.capability,
     body: args,
     ...(binding.schemaDigest ? { schemaDigest: binding.schemaDigest, requireSchemaMatch: true } : {}),
-  }))
+    ...(binding.readOnly ? { requireReadOnly: true } : {}),
+  })
+  if (binding.readOnly && refusalReason(result) === "provider_not_read_only") {
+    return errorResult("policy_blocked", `${binding.name} is no longer marked read-only by its provider, so OpenWork blocked it. An editor of this App needs to update its tools.`)
+  }
+  return withoutAgentServerMeta(result)
 }

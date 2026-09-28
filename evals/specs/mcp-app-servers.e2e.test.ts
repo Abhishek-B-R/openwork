@@ -1,6 +1,6 @@
 import { expect } from "vitest";
 import { spec } from "@openwork/testkit";
-import { appSource, appTitle, buildPrompt, buildReply, chatPrompt, chatReply, launchInput, mcpAppServers, mcpAppServersChat, payload, pricerTitle, record, rows, toolNames } from "../worlds/mcp-app-servers.ts";
+import { appSource, appTitle, buildPrompt, buildReply, chatPrompt, chatReply, launchInput, mcpAppServers, mcpAppServersChat, payload, pricerTitle, record, reservationId, rows, toolNames } from "../worlds/mcp-app-servers.ts";
 
 const test = spec.world(mcpAppServers, {
   resources: { surfaces: ["web"], services: ["den", "mock"] },
@@ -12,13 +12,24 @@ const chatTest = spec.world(mcpAppServersChat, {
   needs: { commands: ["bun", "pnpm", "opencode"] }, timeout: 600_000,
 });
 
-const composedTools = ["open_app", toolNames.live, toolNames.connection, toolNames.workflow];
+const composedTools = ["open_app", toolNames.live, toolNames.connection, toolNames.workflow, toolNames.reserve];
 const orderLine = `${launchInput.quantity} × ${launchInput.sku}`;
+const pricedLine = `${orderLine} at 7`;
+const reservedLine = `Reserved ${reservationId}`;
+const reservation = { sku: launchInput.sku, quantity: launchInput.quantity };
 
 test("an owner composes an App that is its own MCP server, and a teammate uses it from a standard host once its Plugin is shared", async ({ world, user, probe, step, evidence }) => {
   const appName = `plugin:${world.created.pluginId}:${world.created.appId}`;
   const clientCalls = (persona: "owner" | "member") => world.requests.filter(request => request.via === "client" && request.persona === persona && request.method === "tools/call");
   const clientToolNames = (persona: "owner" | "member") => clientCalls(persona).map(request => request.params.name);
+  // open_app first, then the two reads the App makes on open in either order, then one call per click.
+  const expectCalls = (persona: "owner" | "member", clicked: string[]) => {
+    const names = clientToolNames(persona);
+    expect(names[0]).toBe("open_app");
+    expect(names.slice(1, 3).sort()).toEqual([toolNames.connection, toolNames.live].sort());
+    expect(names.slice(3)).toEqual(clicked);
+  };
+  const clientCall = (persona: "owner" | "member", name: string) => clientCalls(persona).find(request => request.params.name === name);
   // One App frame is open at a time; it stays open across the steps that click in it.
   let frame: Awaited<ReturnType<typeof world.frame>> | undefined;
   await using _openFrame = { [Symbol.asyncDispose]: async () => { await frame?.[Symbol.asyncDispose](); } };
@@ -33,19 +44,20 @@ test("an owner composes an App that is its own MCP server, and a teammate uses i
     frame = await world.frame();
     return user.on(frame);
   };
-  // Opening runs only the live Workflow: the pricing date shows, and the price waits for a click.
+  // Opening runs only the reads: the pricing date and the Inventory price load, and the reservation waits for a click.
   const opened = async (persona: "owner" | "member", revision: string, sinceIso: string) => {
     const appUser = await open(persona);
     await appUser.see({ role: "heading", label: appTitle });
     await appUser.see({ text: `Ready — ${revision}` });
     await appUser.see({ testId: "pricing-date" }, { text: /^Prices as of \d{4}-\d{2}-\d{2}$/, timeoutMs: 90_000 });
-    await appUser.see({ testId: "order-line" }, { text: orderLine });
-    expect(await world.inventoryCalls({ sinceIso })).toEqual([]);
+    await appUser.see({ testId: "order-line" }, { text: pricedLine, timeoutMs: 90_000 });
+    expect((await world.inventoryCalls({ sinceIso, atLeast: 1 })).map(call => call.args)).toEqual([{ sku: launchInput.sku }]);
+    expect(await world.reservations({ sinceIso })).toEqual([]);
     return appUser;
   };
-  const lookUp = async (appUser: Awaited<ReturnType<typeof opened>>) => {
-    await appUser.click({ role: "button", label: "Look up price" });
-    await appUser.see({ testId: "order-line" }, { text: `${orderLine} at 7`, timeoutMs: 90_000 });
+  const reserve = async (appUser: Awaited<ReturnType<typeof opened>>) => {
+    await appUser.click({ role: "button", label: "Reserve stock" });
+    await appUser.see({ testId: "reservation" }, { text: reservedLine, timeoutMs: 90_000 });
   };
   const calculate = async (appUser: Awaited<ReturnType<typeof opened>>) => {
     await appUser.click({ role: "button", label: "Calculate total" });
@@ -71,41 +83,45 @@ test("an owner composes an App that is its own MCP server, and a teammate uses i
     evidence.recordAssertionEvidence("The App is private to its creator", "The teammate's standard host gets a JSON-RPC mcp_app_not_found error for tools/list, tools/call, and resources/read on the App's MCP URL, and their Connect server index does not list it.", true);
   });
 
-  await step("the owner opens the App from its own MCP URL, and only its live Workflow runs: the pricing date shows and the price waits for a click", async () => {
+  await step("the owner opens the App from its own MCP URL, and only its reads run: the pricing date and the Inventory price load, and the reservation waits for a click", async () => {
     expect(world.created.mcpUrl.endsWith(`/mcp/agent/connections/${world.created.appId}`)).toBe(true);
     const listed = rows((await world.rpc("owner", "app", "tools/list", {})).tools);
     expect(listed.map(tool => tool.name)).toEqual(composedTools);
     const byName = Object.fromEntries(listed.map(tool => [tool.name, tool]));
     expect(byName.open_app).toMatchObject({ annotations: { readOnlyHint: true }, _meta: { ui: { resourceUri: world.created.resourceUri, visibility: ["model", "app"] } } });
     expect(byName[toolNames.live]).toMatchObject({ annotations: { readOnlyHint: true, destructiveHint: false }, inputSchema: { type: "object", properties: { timeZone: { type: "string" } } } });
-    // The provider calls its lookup read-only, but OpenWork cannot verify that, so it asks first.
-    expect(byName[toolNames.connection]).toMatchObject({ annotations: { readOnlyHint: false, destructiveHint: true }, inputSchema: { type: "object", required: ["sku"] } });
+    // The provider marks its lookup read-only and not destructive, so the App server says so too.
+    expect(byName[toolNames.connection]).toMatchObject({ annotations: { readOnlyHint: true, destructiveHint: false }, inputSchema: { type: "object", required: ["sku"] } });
     expect(byName[toolNames.workflow]).toMatchObject({ annotations: { readOnlyHint: false }, inputSchema: { type: "object", required: ["quantity", "unitPrice"] } });
+    // The reservation is not marked read-only, so it is not read-only here.
+    expect(byName[toolNames.reserve]).toMatchObject({ annotations: { readOnlyHint: false, destructiveHint: true }, inputSchema: { type: "object", required: ["sku", "quantity"] } });
     ownerSince = new Date().toISOString();
     ownerApp = await opened("owner", "revision one", ownerSince);
     await user.see({ testId: "viewer" }, { text: "Signed in as the owner" });
-    expect(clientToolNames("owner")).toEqual(["open_app", toolNames.live]);
-    expect(clientCalls("owner")[1]?.params.arguments).toEqual({ timeZone: "UTC" });
-    expect(payload(clientCalls("owner")[1]?.result ?? {})).toMatchObject({ status: "executed" });
+    expectCalls("owner", []);
+    expect(clientCall("owner", toolNames.live)?.params.arguments).toEqual({ timeZone: "UTC" });
+    expect(payload(clientCall("owner", toolNames.live)?.result ?? {})).toMatchObject({ status: "executed" });
+    expect(clientCall("owner", toolNames.connection)?.params.arguments).toEqual({ sku: launchInput.sku });
     await user.screenshot();
-    evidence.recordAssertionEvidence("Opening an App runs only reads OpenWork verifies", `The App's own MCP server at ${world.created.serverPath} lists exactly open_app, ${toolNames.live} (live Workflow, read-only), ${toolNames.connection} (Inventory connection tool, not read-only: its provider's hint is not trusted), and ${toolNames.workflow} (Workflow with input, not read-only). On open the reference host called only open_app and ${toolNames.live}; the Inventory MCP recorded no lookup.`, true);
+    evidence.recordAssertionEvidence("Opening an App runs only its read-only tools", `The App's own MCP server at ${world.created.serverPath} lists exactly open_app, ${toolNames.live} (live Workflow, read-only), ${toolNames.connection} (Inventory lookup its provider marks read-only, so read-only), ${toolNames.workflow} (Workflow with input, not read-only), and ${toolNames.reserve} (Inventory reservation, not marked read-only). On open the reference host called open_app, ${toolNames.live}, and ${toolNames.connection}: the Inventory MCP recorded one lookup and no reservation, and the order line reads "${pricedLine}".`, true);
   });
 
-  await step("one click on Look up price makes exactly one Inventory lookup", async () => {
+  await step("one click on Reserve stock makes exactly one reservation", async () => {
     if (!ownerApp) throw new Error("The owner's App is not open");
-    await lookUp(ownerApp);
-    expect(clientToolNames("owner")).toEqual(composedTools.slice(0, 3));
-    expect(clientCalls("owner")[2]?.params.arguments).toEqual({ sku: launchInput.sku });
-    expect((await world.inventoryCalls({ sinceIso: ownerSince, atLeast: 1 })).map(call => call.args)).toEqual([{ sku: launchInput.sku }]);
+    await reserve(ownerApp);
+    expectCalls("owner", [toolNames.reserve]);
+    expect(clientCall("owner", toolNames.reserve)?.params.arguments).toEqual(reservation);
+    expect((await world.reservations({ sinceIso: ownerSince, atLeast: 1 })).map(call => call.args)).toEqual([reservation]);
+    expect(await world.inventoryCalls({ sinceIso: ownerSince })).toHaveLength(1);
     await user.screenshot();
-    evidence.recordAssertionEvidence("A connection tool runs on a click, once", `Clicking Look up price made one ${toolNames.connection} call, and the Inventory MCP recorded exactly one lookup for ${launchInput.sku}. The order line now reads "${orderLine} at 7".`, true);
+    evidence.recordAssertionEvidence("A connection tool that is not read-only runs on a click, once", `Clicking Reserve stock made one ${toolNames.reserve} call, and the Inventory MCP recorded exactly one reservation of ${launchInput.quantity} × ${launchInput.sku}. The App shows "${reservedLine}".`, true);
   });
 
   await step("after: one click on Calculate total runs the pricing Workflow, and the owner sees 42", async () => {
     if (!ownerApp) throw new Error("The owner's App is not open");
     await calculate(ownerApp);
-    expect(clientToolNames("owner")).toEqual(composedTools);
-    const total = clientCalls("owner")[3];
+    expectCalls("owner", [toolNames.reserve, toolNames.workflow]);
+    const total = clientCall("owner", toolNames.workflow);
     expect(total?.params.arguments).toEqual({ quantity: launchInput.quantity, unitPrice: 7 });
     expect(payload(total?.result ?? {})).toMatchObject({ status: "executed", value: { total: 42 } });
     expect(world.requests.filter(request => request.via === "client").every(request => request.endpoint === "app")).toBe(true);
@@ -174,13 +190,14 @@ test("an owner composes an App that is its own MCP server, and a teammate uses i
     const sinceIso = new Date().toISOString();
     const memberApp = await opened("member", "revision one", sinceIso);
     await user.see({ testId: "viewer" }, { text: "Signed in as a teammate" });
-    await lookUp(memberApp);
+    await reserve(memberApp);
     await calculate(memberApp);
-    expect(clientToolNames("member")).toEqual(composedTools);
-    expect(payload(clientCalls("member")[3]?.result ?? {})).toMatchObject({ status: "executed", value: { total: 42 } });
+    expectCalls("member", [toolNames.reserve, toolNames.workflow]);
+    expect(payload(clientCall("member", toolNames.workflow)?.result ?? {})).toMatchObject({ status: "executed", value: { total: 42 } });
     expect((await world.inventoryCalls({ sinceIso, atLeast: 1 })).map(call => call.args)).toEqual([{ sku: launchInput.sku }]);
+    expect((await world.reservations({ sinceIso, atLeast: 1 })).map(call => call.args)).toEqual([reservation]);
     await user.screenshot();
-    evidence.recordAssertionEvidence("A teammate uses the shared App as themselves", `With no grant on either Workflow, the teammate's calls ran the same three tools at the same MCP URL: the live Workflow on open, then one Inventory lookup and one Workflow run on two clicks, which returned 42. Sharing never shared credentials.`, true);
+    evidence.recordAssertionEvidence("A teammate uses the shared App as themselves", `With no grant on either Workflow, the teammate's calls ran the same four tools at the same MCP URL: the live Workflow and the Inventory lookup on open, then one reservation and one Workflow run on two clicks, which returned 42. Sharing never shared credentials.`, true);
   });
 
   await step("an update keeps the same MCP URL and tools, and the owner's App opens on the new revision", async () => {
@@ -196,7 +213,7 @@ test("an owner composes an App that is its own MCP server, and a teammate uses i
     await opened("owner", "revision two", new Date().toISOString());
     expect((await world.hostState()).uri).toBe(updated.resourceUri);
     await user.screenshot();
-    evidence.recordAssertionEvidence("Revisions stay behind the same MCP URL and tools", "update_app without tools published a new revision on the same App server with the same four tools. Opening the App again shows revision two, and the original revision stays readable to the owner.", true);
+    evidence.recordAssertionEvidence("Revisions stay behind the same MCP URL and tools", "update_app without tools published a new revision on the same App server with the same five tools. Opening the App again shows revision two with its reads loaded, and the original revision stays readable to the owner.", true);
   });
 
   await step("a teammate without access still cannot use either revision", async () => {
@@ -215,6 +232,7 @@ test("an owner composes an App that is its own MCP server, and a teammate uses i
 chatTest("an owner prompts OpenWork's chat to build an App and to open one, and both work inside the conversation", async ({ world, agent, user, step, evidence }) => {
   const modelTool = async (marker: string) => (await world.den.mocks.inventory.agentRequests({ promptMarker: marker })).find(request => request.kind === "tool");
   const lookups = async (sinceIso: string) => (await world.inventoryCalls({ sinceIso, atLeast: 1 })).map(call => call.args);
+  const reservations = async (sinceIso: string) => (await world.reservations({ sinceIso, atLeast: 1 })).map(call => call.args);
   // One App frame is open at a time; it stays open across the steps that click in it.
   let frame: Awaited<ReturnType<typeof world.appFrame>> | undefined;
   await using _openFrame = { [Symbol.asyncDispose]: async () => { await frame?.[Symbol.asyncDispose](); } };
@@ -228,7 +246,7 @@ chatTest("an owner prompts OpenWork's chat to build an App and to open one, and 
   let pricer: Awaited<ReturnType<typeof focus>> | undefined;
   let calculator: Awaited<ReturnType<typeof focus>> | undefined;
 
-  await step("the owner asks the chat to build an App in plain words, and it opens in the conversation with only its pricing date", async () => {
+  await step("the owner asks the chat to build an App in plain words, and it opens in the conversation with its pricing date and price, no click needed", async () => {
     builtAt = new Date().toISOString();
     await agent.send(buildPrompt);
     await user.see({ text: buildReply }, { timeoutMs: 120_000 });
@@ -236,20 +254,34 @@ chatTest("an owner prompts OpenWork's chat to build an App and to open one, and 
     pricer = await focus(pricerTitle);
     await pricer.see({ role: "heading", label: pricerTitle });
     await pricer.see({ testId: "pricing-date" }, { text: /^Prices as of \d{4}-\d{2}-\d{2}$/, timeoutMs: 90_000 });
-    await pricer.see({ testId: "order-line" }, { text: orderLine });
+    // The provider marks the Inventory lookup read-only, so OpenWork runs it on open without a click.
+    await pricer.see({ testId: "order-line" }, { text: pricedLine, timeoutMs: 90_000 });
+    await pricer.notSee({ role: "button", label: "Look up price" });
     await pricer.notSee({ testId: "total" });
-    expect(await world.inventoryCalls({ sinceIso: builtAt })).toEqual([]);
+    expect(await lookups(builtAt)).toEqual([{ sku: launchInput.sku }]);
+    expect(await world.reservations({ sinceIso: builtAt })).toEqual([]);
     await user.screenshot();
-    evidence.recordAssertionEvidence("The chat builds the App, and opening it runs only reads OpenWork verifies", `For "${buildPrompt}", the model called create_app with ${pricerTitle}'s source and three declared tools. The App opened in the conversation and loaded today's date from its live Workflow without a click; its Inventory tool waited, and the Inventory MCP recorded no lookup.`, true);
+    evidence.recordAssertionEvidence("The chat builds the App, and opening it runs its read-only tools without a click", `For "${buildPrompt}", the model called create_app with ${pricerTitle}'s source and four declared tools. The App opened in the conversation and, with no click, loaded today's date from its live Workflow and the unit price from its Inventory lookup, which the provider marks read-only: the order line reads "${pricedLine}". The Inventory MCP recorded one lookup and no reservation.`, true);
   });
 
-  await step("one click on Look up price in the new App makes one Inventory lookup", async () => {
+  await step("a click on Reserve stock from the App's own script is refused, because it is not a person's click", async () => {
+    if (!pricer || !frame) throw new Error(`${pricerTitle} is not open`);
+    await world.scriptedClick(frame, "Reserve stock");
+    await pricer.see({ role: "alert" }, { text: /approval/i, timeoutMs: 60_000 });
+    expect(await world.reservations({ sinceIso: builtAt })).toEqual([]);
+    await user.screenshot();
+    evidence.recordAssertionEvidence("A connection tool that is not read-only still needs a person's click", `The provider does not mark ${toolNames.reserve} read-only. A click from the App's own script called it, and OpenWork refused the call for want of a user click: the App shows the approval error, and the Inventory MCP recorded no reservation.`, true);
+  });
+
+  await step("one trusted click on Reserve stock reserves the stock once", async () => {
     if (!pricer) throw new Error(`${pricerTitle} is not open`);
-    await pricer.click({ role: "button", label: "Look up price" });
-    await pricer.see({ testId: "order-line" }, { text: `${orderLine} at 7`, timeoutMs: 90_000 });
+    await pricer.click({ role: "button", label: "Reserve stock" });
+    await pricer.see({ testId: "reservation" }, { text: reservedLine, timeoutMs: 90_000 });
+    await pricer.notSee({ role: "alert" });
+    expect(await reservations(builtAt)).toEqual([reservation]);
     expect(await lookups(builtAt)).toEqual([{ sku: launchInput.sku }]);
     await user.screenshot();
-    evidence.recordAssertionEvidence("A connection tool runs on a click inside the conversation", `Clicking Look up price in ${pricerTitle} made exactly one Inventory lookup for ${launchInput.sku}; the order line now reads "${orderLine} at 7".`, true);
+    evidence.recordAssertionEvidence("One real click runs the reservation once", `One trusted click on Reserve stock made exactly one ${toolNames.reserve} call, reserving ${launchInput.quantity} × ${launchInput.sku}; the App shows "${reservedLine}". The Inventory lookup still ran only once, on open.`, true);
   });
 
   await step("after: one click on Calculate total in the new App prices the order at 42", async () => {
@@ -269,20 +301,22 @@ chatTest("an owner prompts OpenWork's chat to build an App and to open one, and 
     calculator = await focus(appTitle);
     await calculator.see({ role: "heading", label: appTitle });
     await calculator.see({ testId: "pricing-date" }, { text: /^Prices as of \d{4}-\d{2}-\d{2}$/, timeoutMs: 90_000 });
-    await calculator.see({ testId: "order-line" }, { text: orderLine });
+    await calculator.see({ testId: "order-line" }, { text: pricedLine, timeoutMs: 90_000 });
+    await calculator.notSee({ role: "button", label: "Look up price" });
     await calculator.notSee({ testId: "total" });
-    expect(await world.inventoryCalls({ sinceIso: openedAt })).toEqual([]);
+    expect(await lookups(openedAt)).toEqual([{ sku: launchInput.sku }]);
+    expect(await world.reservations({ sinceIso: openedAt })).toEqual([]);
     await user.screenshot();
-    evidence.recordAssertionEvidence("The chat opens an existing App with the order it was given", `"${chatPrompt}" carries no App, Plugin, or connection id. The model opened ${appTitle} with execute_capability and the launch input { sku: "${launchInput.sku}", quantity: ${launchInput.quantity} }. The App has no sample order of its own, yet it shows "${orderLine}"; its live Workflow loaded today's date, and its Inventory lookup waited for a click.`, true);
+    evidence.recordAssertionEvidence("The chat opens an existing App with the order it was given", `"${chatPrompt}" carries no App, Plugin, or connection id. The model opened ${appTitle} with execute_capability and the launch input { sku: "${launchInput.sku}", quantity: ${launchInput.quantity} }. The App has no sample order of its own, yet with no click it shows "${pricedLine}": its live Workflow loaded today's date and its read-only Inventory lookup loaded the price. Nothing was reserved.`, true);
   });
 
-  await step("one click on Look up price in the Order calculator makes one Inventory lookup", async () => {
+  await step("one click on Reserve stock in the Order calculator reserves the stock once", async () => {
     if (!calculator) throw new Error(`${appTitle} is not open`);
-    await calculator.click({ role: "button", label: "Look up price" });
-    await calculator.see({ testId: "order-line" }, { text: `${orderLine} at 7`, timeoutMs: 90_000 });
-    expect(await lookups(openedAt)).toEqual([{ sku: launchInput.sku }]);
+    await calculator.click({ role: "button", label: "Reserve stock" });
+    await calculator.see({ testId: "reservation" }, { text: reservedLine, timeoutMs: 90_000 });
+    expect(await reservations(openedAt)).toEqual([reservation]);
     await user.screenshot();
-    evidence.recordAssertionEvidence("The lookup runs once, from its own click", `Clicking Look up price in ${appTitle} made exactly one Inventory lookup for ${launchInput.sku}.`, true);
+    evidence.recordAssertionEvidence("The reservation runs once, from its own click", `Clicking Reserve stock in ${appTitle} made exactly one reservation of ${launchInput.quantity} × ${launchInput.sku}.`, true);
   });
 
   await step("after: one click on Calculate total prices the order, with no approval prompt", async () => {

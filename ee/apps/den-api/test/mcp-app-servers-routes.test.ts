@@ -397,14 +397,31 @@ test("each App's own MCP server exposes only its launch tool, declared tools, an
     expect(normalExecutions).toHaveLength(1)
   })
 
-  // A connection tool never runs without asking, whatever its stored binding says.
+  // A connection tool its provider marks read-only advertises that label, so
+  // hosts can run it without a click. Every connection-tool call still needs
+  // mcp:write, and without it the provider is never reached.
+  const searchNotes: McpAppToolBinding = { ...bindings[1]!, name: "search_notes", description: "Search notes.", capability: "mcp:emc_notes:search_notes", readOnly: true }
   scopes = new Set(["mcp:read"])
   normalExecutions = []
-  servedBindings = [{ ...bindings[1]!, readOnly: true }]
+  servedBindings = [bindings[1]!, searchNotes]
   await withClient(appSummary.serverPath, async (client) => {
-    expect((await client.listTools()).tools[1]).toMatchObject({ name: "create_note", annotations: { readOnlyHint: false, destructiveHint: true } })
-    expect(JSON.stringify((await client.callTool({ name: "create_note", arguments: { text: "Ship it" } })).content)).toContain("insufficient_mcp_scope")
+    const listed = (await client.listTools()).tools
+    expect(listed[1]).toMatchObject({ name: "create_note", annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false } })
+    expect(listed[2]).toMatchObject({ name: "search_notes", annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true } })
+    for (const name of ["create_note", "search_notes"]) {
+      const refused = await client.callTool({ name, arguments: { text: "roadmap" } })
+      expect(refused.isError).toBe(true)
+      expect(JSON.parse(JSON.stringify(refused.content))[0].text).toContain('"requiredScope":"mcp:write"')
+    }
     expect(normalExecutions).toEqual([])
+  })
+  scopes = new Set(["mcp:read", "mcp:write"])
+  await withClient(appSummary.serverPath, async (client) => {
+    await client.callTool({ name: "search_notes", arguments: { text: "roadmap" } })
+    expect(normalExecutions).toEqual([{
+      scopes: ["mcp:read", "mcp:write"], member,
+      request: { name: "mcp:emc_notes:search_notes", body: { text: "roadmap" }, schemaDigest: searchNotes.schemaDigest, requireSchemaMatch: true, requireReadOnly: true },
+    }])
   })
   servedBindings = bindings
 

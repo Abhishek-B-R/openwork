@@ -105,6 +105,8 @@ export type CapabilityExecuteInput = {
   schemaDigest?: string
   /** Refuse an external tool whose input schema no longer matches schemaDigest. */
   requireSchemaMatch?: boolean
+  /** Refuse an external tool that its provider no longer marks read-only for this caller. */
+  requireReadOnly?: boolean
   path?: unknown
   query?: unknown
   body?: unknown
@@ -233,6 +235,7 @@ const externalMcpProviderErrorOutputSchema = z.object({
 
 const externalCapabilityErrorPayloadSchema = z.object({
   error: z.string(),
+  reason: z.string().optional(),
   message: z.string(),
   requiredScope: z.enum(["mcp:read", "mcp:write"]).optional(),
   referenceId: z.string().optional(),
@@ -263,6 +266,7 @@ export function externalCapabilityErrorToolResult(
     : undefined
   const payload = externalCapabilityErrorPayloadSchema.parse({
     error: result.error,
+    ...(result.reason ? { reason: result.reason } : {}),
     message: result.message,
     ...(result.requiredScope ? { requiredScope: result.requiredScope } : {}),
     ...(result.referenceId === undefined ? {} : { referenceId: result.referenceId }),
@@ -578,6 +582,7 @@ const externalMcpSource: CapabilitySource = {
       args: normalizeToolBody(input.body),
       schemaDigest: input.schemaDigest,
       ...(input.requireSchemaMatch ? { requireSchemaMatch: true } : {}),
+      ...(input.requireReadOnly ? { requireReadOnly: true } : {}),
       redirectUriBase: ctx.redirectUriBase,
     })
     return result.ok

@@ -19,7 +19,13 @@ const skillId = createDenTypeId("configObject")
 const workflow = `plugin:${pluginId}:${workflowId}`
 const projectsSchema = { type: "object", properties: { query: { type: "object", properties: { q: { type: "string" } } } } }
 const noteSchema = { type: "object", properties: { text: { type: "string" } }, required: ["text"] }
-const providerSchemas: Record<string, Record<string, unknown>> = { create_note: noteSchema, search_notes: { type: "object" } }
+const providerSchemas: Record<string, Record<string, unknown>> = {
+  create_note: noteSchema, search_notes: { type: "object" }, delete_notes: { type: "object" }, tag_note: { type: "object" },
+}
+// Each provider tool's annotations as the author's live tool list shows them.
+const providerLabels: Record<string, { readOnlyHint?: boolean; destructiveHint?: boolean }> = {
+  create_note: {}, search_notes: { readOnlyHint: true }, delete_notes: { readOnlyHint: true, destructiveHint: true }, tag_note: { readOnlyHint: false },
+}
 const catalog = [
   { name: "getProjects", method: "GET", path: "/v1/projects", operation: {}, inputSchema: { type: "object" } },
   { name: "postProjects", method: "POST", path: "/v1/projects", operation: {}, inputSchema: { type: "object" } },
@@ -81,7 +87,7 @@ beforeAll(async () => {
     describes.push(request.toolName)
     const inputSchema = providerSchemas[request.toolName]
     return inputSchema
-      ? { ok: true, inputSchema }
+      ? { ok: true, inputSchema, readOnly: external.providerMarksReadOnly(providerLabels[request.toolName]) }
       : { ok: false, error: "unknown_capability", message: `No current tool named "${request.toolName}" exists on "Notes".` }
   })
   spyOn(marketplace, "listAccessibleWorkflows").mockImplementation(async (request) => {
@@ -113,27 +119,33 @@ beforeEach(() => {
 })
 afterAll(() => mock.restore())
 
-test("declared tools resolve one capability at a time, and only reads Den verifies are read-only", async () => {
+test("declared tools resolve one capability at a time, and a connection tool is read-only only when its provider marks it so", async () => {
   const declarations: McpAppToolDeclaration[] = [
     { name: "list_projects", description: "List projects.", capability: "getProjects" },
     { name: "create_note", description: "Create a note.", capability: "mcp:emc_notes:create_note" },
     { name: "search_notes", description: "Search notes.", capability: "mcp:emc_notes:search_notes" },
     { name: "weekly_summary", description: "This week's summary.", capability: workflow, mode: "live" },
     { name: "summary_for_week", description: "A chosen week's summary.", capability: workflow },
+    { name: "delete_notes", description: "Delete notes.", capability: "mcp:emc_notes:delete_notes" },
+    { name: "tag_note", description: "Tag a note.", capability: "mcp:emc_notes:tag_note" },
   ]
   const bindings = await appTools.resolveMcpAppTools(context(), declarations)
   // No whole capability tree: only the named connection tools are described.
   expect(treeBuilds).toBe(0)
   expect(catalogEnumerations).toBe(1)
-  expect(describes).toEqual(["create_note", "search_notes"])
+  expect(describes).toEqual(["create_note", "search_notes", "delete_notes", "tag_note"])
   expect(workflowLookups).toEqual([[workflowId]])
   expect(bindings.map(({ name, kind, mode, readOnly }) => ({ name, kind, mode, readOnly }))).toEqual([
     { name: "list_projects", kind: "api", mode: "input", readOnly: true },
+    // No annotations: not read-only.
     { name: "create_note", kind: "mcp", mode: "input", readOnly: false },
-    // A provider's own read-only hint never makes a tool run without a click.
-    { name: "search_notes", kind: "mcp", mode: "input", readOnly: false },
+    // readOnlyHint true and not destructive: read-only, so it can load on open.
+    { name: "search_notes", kind: "mcp", mode: "input", readOnly: true },
     { name: "weekly_summary", kind: "workflow", mode: "live", readOnly: true },
     { name: "summary_for_week", kind: "workflow", mode: "input", readOnly: false },
+    // Destructive wins over readOnlyHint, and readOnlyHint false is not read-only.
+    { name: "delete_notes", kind: "mcp", mode: "input", readOnly: false },
+    { name: "tag_note", kind: "mcp", mode: "input", readOnly: false },
   ])
   expect(bindings[0]?.inputSchema).toEqual(projectsSchema)
   expect(bindings[1]?.inputSchema).toEqual(noteSchema)
@@ -172,22 +184,26 @@ test("declarations that cannot become App tools are rejected before anything is 
 })
 
 test("each binding reaches its capability as the caller with the capability's own argument shape", async () => {
-  const [api, mcp, live, input] = await appTools.resolveMcpAppTools(context(), [
+  const [api, mcp, live, input, readOnlyMcp] = await appTools.resolveMcpAppTools(context(), [
     { name: "list_projects", description: "List projects.", capability: "getProjects" },
     { name: "create_note", description: "Create a note.", capability: "mcp:emc_notes:create_note" },
     { name: "weekly_summary", description: "This week's summary.", capability: workflow, mode: "live" },
     { name: "summary_for_week", description: "A chosen week's summary.", capability: workflow },
+    { name: "search_notes", description: "Search notes.", capability: "mcp:emc_notes:search_notes" },
   ])
-  if (!api || !mcp || !live || !input) throw new Error("Expected four bindings")
+  if (!api || !mcp || !live || !input || !readOnlyMcp) throw new Error("Expected five bindings")
   const ctx = context()
   await appTools.callMcpAppTool(ctx, api, { query: { q: "roadmap" }, ignored: true })
   await appTools.callMcpAppTool(ctx, mcp, { text: "Ship it" })
   await appTools.callMcpAppTool(ctx, input, { week: "2026-W39" })
+  await appTools.callMcpAppTool(ctx, readOnlyMcp, { query: "roadmap" })
   expect(executions).toEqual([
     { name: "getProjects", path: undefined, query: { q: "roadmap" }, body: undefined },
     // The provider must still advertise the schema the App was published against.
     { name: "mcp:emc_notes:create_note", body: { text: "Ship it" }, schemaDigest: mcp.schemaDigest, requireSchemaMatch: true },
     { name: workflow, body: { week: "2026-W39" } },
+    // Only a read-only connection binding requires the provider's label again, in the caller's own tool list.
+    { name: "mcp:emc_notes:search_notes", body: { query: "roadmap" }, schemaDigest: readOnlyMcp.schemaDigest, requireSchemaMatch: true, requireReadOnly: true },
   ])
   const result = await appTools.callMcpAppTool(ctx, live, { timeZone: "Europe/Paris", week: "ignored" })
   expect(result.structuredContent).toEqual({ status: "executed", value: { total: 3 } })
@@ -220,4 +236,30 @@ test("every call rechecks that an OpenWork action only reads, and drops launch h
   expect((await appTools.callMcpAppTool(ctx, api, {}))._meta).toEqual({ "openwork/schemaGuidance": { warnings: [] } })
   nextResult = { content: [{ type: "text", text: "ok" }], _meta: { "openwork/mcpApp": { toolName: "connection_action" } } }
   expect("_meta" in await appTools.callMcpAppTool(ctx, api, {})).toBe(false)
+})
+
+test("a read-only connection tool its provider stops marking read-only is refused with the App's own tool name", async () => {
+  const ctx = context()
+  const [readOnlyMcp, mcp] = await appTools.resolveMcpAppTools(ctx, [
+    { name: "find_notes", description: "Find notes.", capability: "mcp:emc_notes:search_notes" },
+    { name: "create_note", description: "Create a note.", capability: "mcp:emc_notes:create_note" },
+  ])
+  if (!readOnlyMcp || !mcp) throw new Error("Expected two bindings")
+  const refusal = (reason?: string) => ({
+    isError: true,
+    content: [{ type: "text" as const, text: JSON.stringify({ error: "policy_blocked", ...(reason ? { reason } : {}), message: "search_notes is no longer marked read-only by its provider, so OpenWork blocked the call." }) }],
+  })
+  nextResult = refusal("provider_not_read_only")
+  const blocked = await appTools.callMcpAppTool(ctx, readOnlyMcp, { query: "roadmap" })
+  expect(blocked.isError).toBe(true)
+  const payload = JSON.parse(blocked.content[0]?.type === "text" ? blocked.content[0].text : "{}")
+  expect(payload).toEqual({
+    error: "policy_blocked",
+    message: "find_notes is no longer marked read-only by its provider, so OpenWork blocked it. An editor of this App needs to update its tools.",
+  })
+  // Other refusals, and refusals for tools that were never read-only, reach the App as the provider layer wrote them.
+  nextResult = refusal()
+  expect(await appTools.callMcpAppTool(ctx, readOnlyMcp, {})).toEqual(refusal())
+  nextResult = refusal("provider_not_read_only")
+  expect(await appTools.callMcpAppTool(ctx, mcp, { text: "Ship it" })).toEqual(refusal("provider_not_read_only"))
 })

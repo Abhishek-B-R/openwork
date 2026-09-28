@@ -7,8 +7,9 @@
 // Workflows, and builds the "Order calculator" App through OpenWork Connect's
 // create_app. The App is its own MCP server with three composed tools:
 // todays_date (live Workflow, read-only, runs on open), lookup_unit_price
-// (Inventory connection tool, runs on a click), and price_total (Workflow with
-// input, runs on a click).
+// (Inventory connection tool its provider marks read-only, run here from its
+// button for the SKU you type), and price_total (Workflow with input, runs on a
+// click).
 // Output includes disposable tokens: keep it out of logs, PRs, and notes.
 import { spawn } from "node:child_process";
 import { openSync, readFileSync } from "node:fs";
@@ -178,8 +179,7 @@ export default function OrderCalculator({ app, input }) {
       .then(reply => setToday(reply.isError ? null : payload(reply).value?.today))
       .catch(() => setToday(null));
   }, [app, toolsAvailable]);
-  // A connection tool asks before each call, and OpenWork lets one click
-  // authorize one tool call, so each button makes exactly one.
+  // OpenWork lets one click authorize one tool call, so each button makes exactly one.
   async function lookUp() {
     setStatus("Looking up price"); setPrice(null); setTotal(null);
     try {

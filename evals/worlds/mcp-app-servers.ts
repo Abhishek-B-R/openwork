@@ -5,7 +5,7 @@ import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
 import { chrome, defaultDaytonaExec, execInSandbox } from "@openwork/hosts";
-import { connect, debuggerUrlFor, evaluate, listTargets, type Surface } from "@openwork/cdp";
+import { browserScript, connect, debuggerUrlFor, evaluate, listTargets, type Surface } from "@openwork/cdp";
 import type { Place, Seed } from "@openwork/env";
 import type { MockMcpTool } from "@openwork/labs";
 import { reconcileDraftHost } from "../fixtures/cloud-draft-host.ts";
@@ -17,7 +17,8 @@ export const liveTitle = "Today's pricing date";
 export const launchInput = { sku: "WIDGET-7", quantity: 6 };
 export const indexUri = "openwork://connect/mcp-servers/index.json";
 /** The App composes three kinds of capability, each under its own clear tool name. */
-export const toolNames = { live: "todays_date", connection: "lookup_unit_price", workflow: "price_total" } as const;
+export const toolNames = { live: "todays_date", connection: "lookup_unit_price", workflow: "price_total", reserve: "reserve_stock" } as const;
+export const reservationId = "RES-7001";
 const unitPrice = 7;
 const fixturePaths = ["/owner/", "/member/", "/outsider/", "/host.js", "/owner/rpc", "/member/rpc", "/outsider/rpc"];
 
@@ -79,28 +80,39 @@ export function appSource(revision: string, options: { title?: string; sampleOrd
       const input = ${order};
       const [today, setToday] = React.useState(null);
       const [price, setPrice] = React.useState(null);
+      const [priceNeedsClick, setPriceNeedsClick] = React.useState(false);
+      const [reservation, setReservation] = React.useState(null);
       const [total, setTotal] = React.useState(null);
       const [failure, setFailure] = React.useState("");
       const [busy, setBusy] = React.useState("");
       const toolsAvailable = Boolean(app.getHostCapabilities()?.serverTools);
+      async function lookUpPrice() {
+        const lookup = await app.callServerTool({ name: ${JSON.stringify(toolNames.connection)}, arguments: { sku: input.sku } });
+        if (lookup.isError) throw new Error("Price lookup failed");
+        setPrice(payload(lookup).unitPrice);
+      }
       React.useEffect(() => {
         if (!toolsAvailable) return;
-        // Only reads OpenWork verifies run when the App opens: here, the live Workflow.
+        // Read-only tools load when the App opens: the live Workflow's date, and
+        // the Inventory price, whose provider marks its lookup read-only.
         app.callServerTool({ name: ${JSON.stringify(toolNames.live)}, arguments: { timeZone: "UTC" } })
           .then(date => { if (date.isError) throw new Error("Pricing date unavailable"); setToday(payload(date).value?.today); })
           .catch(error => setFailure(error.message));
+        // A host that asks before this call refuses it; a button then makes it instead.
+        lookUpPrice().catch(() => setPriceNeedsClick(true));
       }, [app, toolsAvailable]);
-      // A connection tool or Workflow run asks first, and OpenWork lets one
+      // Other connection tools and Workflow runs ask first, and OpenWork lets one
       // click authorize one tool call, so each button makes exactly one.
       async function run(label, call) {
         setBusy(label); setFailure("");
         try { await call(); } catch (error) { setFailure(error.message); }
         finally { setBusy(""); }
       }
-      const lookUp = () => run("Looking up price", async () => {
-        const lookup = await app.callServerTool({ name: ${JSON.stringify(toolNames.connection)}, arguments: { sku: input.sku } });
-        if (lookup.isError) throw new Error("Price lookup failed");
-        setPrice(payload(lookup).unitPrice);
+      const lookUp = () => run("Looking up price", lookUpPrice);
+      const reserve = () => run("Reserving stock", async () => {
+        const reply = await app.callServerTool({ name: ${JSON.stringify(toolNames.reserve)}, arguments: { sku: input.sku, quantity: input.quantity } });
+        if (reply.isError) throw new Error("The reservation failed");
+        setReservation(payload(reply).reservationId);
       });
       const calculate = () => run("Calculating", async () => {
         const reply = await app.callServerTool({ name: ${JSON.stringify(toolNames.workflow)}, arguments: { quantity: input.quantity, unitPrice: price } });
@@ -113,8 +125,10 @@ export function appSource(revision: string, options: { title?: string; sampleOrd
         {!toolsAvailable && <p role="status">Server tools unavailable. Reopen in a host that enables server tools.</p>}
         <p data-testid="pricing-date">{today ? "Prices as of " + today : "Loading pricing date"}</p>
         <p data-testid="order-line">{input.quantity ?? 0} × {input.sku ?? "no product"}{price !== null ? " at " + price : ""}</p>
-        <button type="button" disabled={!toolsAvailable || busy !== ""} onClick={lookUp}>Look up price</button>
+        {priceNeedsClick && price === null && <button type="button" disabled={!toolsAvailable || busy !== ""} onClick={lookUp}>Look up price</button>}
+        <button type="button" disabled={!toolsAvailable || busy !== ""} onClick={reserve}>Reserve stock</button>
         <button type="button" disabled={!toolsAvailable || busy !== "" || price === null} onClick={calculate}>Calculate total</button>
+        {reservation && <p data-testid="reservation">Reserved {reservation}</p>}
         {busy && <p role="status">{busy}</p>}
         {failure && <p role="alert">{failure}</p>}
         {total !== null && <output data-testid="total" aria-label="Total">{String(total)}</output>}
@@ -214,8 +228,8 @@ type RequestWitness = { persona: Persona; endpoint: Endpoint; via: "setup" | "cl
 
 /**
  * An owner builds an App through OpenWork Connect whose own MCP server composes
- * a live Workflow, an Inventory connection tool, and a Workflow. A standard MCP
- * Apps reference host talks only to that App's MCP URL, as the owner, a
+ * a live Workflow, two Inventory connection tools, and a Workflow. A standard
+ * MCP Apps reference host talks only to that App's MCP URL, as the owner, a
  * teammate, and an outsider.
  */
 const inventoryTool: MockMcpTool = {
@@ -224,6 +238,18 @@ const inventoryTool: MockMcpTool = {
   inputSchema: { type: "object", properties: { sku: { type: "string" } }, required: ["sku"], additionalProperties: false },
   annotations: { readOnlyHint: true, destructiveHint: false },
   result: { content: [{ type: "text", text: `Unit price ${unitPrice}` }], structuredContent: { sku: launchInput.sku, unitPrice }, isError: false },
+};
+
+/** A connection tool that changes something, so its provider does not mark it read-only. */
+const reserveTool: MockMcpTool = {
+  name: toolNames.reserve,
+  description: "Reserve stock for an order.",
+  inputSchema: { type: "object", properties: { sku: { type: "string" }, quantity: { type: "number" } }, required: ["sku", "quantity"], additionalProperties: false },
+  annotations: { readOnlyHint: false, destructiveHint: false },
+  result: {
+    content: [{ type: "text", text: `Reserved ${launchInput.quantity} of ${launchInput.sku}` }],
+    structuredContent: { reservationId, sku: launchInput.sku, quantity: launchInput.quantity }, isError: false,
+  },
 };
 
 /** Save the two Workflows and build the App over them and the Inventory connection, all through Connect. */
@@ -264,11 +290,13 @@ async function composeOrderCalculator(
     live: `plugin:${live.pluginId}:${live.configObjectId}`,
     connection: `mcp:${connectionId}:${toolNames.connection}`,
     workflow: `plugin:${procedure.pluginId}:${procedure.configObjectId}`,
+    reserve: `mcp:${connectionId}:${toolNames.reserve}`,
   };
   const tools = [
     { name: toolNames.live, description: "Today's pricing date for the viewer.", capability: capabilities.live, mode: "live" },
     { name: toolNames.connection, description: "Look up a product's unit price in Inventory.", capability: capabilities.connection },
     { name: toolNames.workflow, description: "Multiply a quantity by a unit price.", capability: capabilities.workflow },
+    { name: toolNames.reserve, description: "Reserve the order's stock in Inventory.", capability: capabilities.reserve },
   ];
   const created = appSummary(await call("create_app", { ...appSource("revision one"), tools }));
   return { procedure, live, capabilities, tools, created };
@@ -281,7 +309,7 @@ export async function mcpAppServers(seed: Seed, context: { place: Place }) {
     // Legacy Workflow-bound views are on so the journey can prove they are read-only beside App servers.
     env: { DEN_GENERATED_ARTIFACT_VIEWS_ENABLED: "true", DEN_APP_MCP_SERVERS_ENABLED: "true" },
     org: { name: `App servers ${Date.now()}`, members: { member: { name: "App teammate" }, outsider: { name: "Ungranted teammate" } } },
-    mocks: { inventory: seed.mock({ allowUnauthenticatedMcp: true, tools: [inventoryTool] }) },
+    mocks: { inventory: seed.mock({ allowUnauthenticatedMcp: true, tools: [inventoryTool, reserveTool] }) },
   });
   const connection = await seed.orgConnection(den.admin, {
     name: `Inventory ${Date.now()}`, url: den.mocks.inventory.mcpUrl,
@@ -393,6 +421,7 @@ export async function mcpAppServers(seed: Seed, context: { place: Place }) {
   return {
     app, pluginWeb, den, created, capabilities, tools, url, requests, rpc, call,
     inventoryCalls: (options: { sinceIso?: string; atLeast?: number } = {}) => den.mocks.inventory.toolCalls({ name: toolNames.connection, atLeast: 0, ...options }),
+    reservations: (options: { sinceIso?: string; atLeast?: number } = {}) => den.mocks.inventory.toolCalls({ name: toolNames.reserve, atLeast: 0, ...options }),
     /** Shares only the App's own Plugin, which carries the Workflows its tools run. */
     async share() {
       await grant(`/v1/plugins/${created.pluginId}/access`);
@@ -459,7 +488,7 @@ export async function mcpAppServersChat(seed: Seed) {
   const den = await seed.den({
     env: { DEN_GENERATED_ARTIFACT_VIEWS_ENABLED: "true", DEN_APP_MCP_SERVERS_ENABLED: "true" },
     org: { name: `App servers chat ${Date.now()}` },
-    mocks: { inventory: seed.mock({ allowUnauthenticatedMcp: true, tools: [inventoryTool] }) },
+    mocks: { inventory: seed.mock({ allowUnauthenticatedMcp: true, tools: [inventoryTool, reserveTool] }) },
   });
   const connection = await seed.orgConnection(den.admin, {
     name: `Inventory ${Date.now()}`, url: den.mocks.inventory.mcpUrl,
@@ -527,6 +556,16 @@ export async function mcpAppServersChat(seed: Seed) {
   return {
     app, session, den, created,
     inventoryCalls: (options: { sinceIso?: string; atLeast?: number } = {}) => den.mocks.inventory.toolCalls({ name: toolNames.connection, atLeast: 0, ...options }),
+    reservations: (options: { sinceIso?: string; atLeast?: number } = {}) => den.mocks.inventory.toolCalls({ name: toolNames.reserve, atLeast: 0, ...options }),
+    /** Clicks a button from the App's own script: a click the host does not trust as user input. */
+    async scriptedClick(frame: Surface, label: string) {
+      const clicked = await evaluate(frame.client, browserScript((text: string) => {
+        const button = Array.from(document.querySelectorAll("button")).find(candidate => candidate.textContent?.trim() === text);
+        button?.click();
+        return Boolean(button);
+      }, [label]));
+      if (!clicked) throw new Error(`The App has no ${label} button`);
+    },
     /** An App's isolated frame in the conversation, by its title, for trusted input. */
     async appFrame(title: string): Promise<Surface & AsyncDisposable> {
       const deadline = Date.now() + 60_000;

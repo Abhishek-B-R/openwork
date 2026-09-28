@@ -90,15 +90,21 @@ the App's declared tools, and its revision resources.
 A declared tool binds one exact capability. Publishing resolves it as the
 author, looking up only that capability (the Workflow, one connection's tool
 list, or the Den operation), and stores its argument shape, input schema, and
-read-only flag in the revision. Read-only means Den verified it: Den and native
-GET operations, and `live` Workflows. Den and native writes are refused as App
-tools; connection tools and Workflow runs with input are never read-only,
-whatever their provider's annotations say, so hosts ask before each call.
+read-only flag in the revision. Den and native GET operations and `live`
+Workflows are read-only. A connection tool is read-only when its provider marks
+it `readOnlyHint: true` and not destructive, as the author's tool list shows at
+publish; search results carry the same `readOnly` label. Den and native writes
+are refused as App tools; other connection tools and Workflow runs with input
+are not read-only, so hosts ask before each call. The App server advertises the
+flag, but every connection-tool call still needs `mcp:write`, as all external
+dispatch does.
 
 Calls run through the ordinary executor as the caller. `api` tools take
 `{ path, query, body }` and are rechecked as GETs on every call; `mcp` tools
 take the tool's own arguments and fail closed once the provider's input schema
-no longer matches the published digest; Workflow tools take the Workflow's
+no longer matches the published digest, or, for a read-only binding, once the
+caller's live tool list no longer marks the tool read-only; the App then gets a
+`policy_blocked` error naming its tool. Workflow tools take the Workflow's
 input, and `live` ones run read-only with only an optional `timeZone`. Results
 drop the `openwork/mcpApp` and `openwork/serverTools` hints, which name tools on
 `/mcp/agent`. Plugin access is rechecked on every request; unavailable Apps

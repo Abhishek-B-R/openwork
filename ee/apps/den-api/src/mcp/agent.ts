@@ -162,6 +162,7 @@ const capabilityMatchOutputSchema = z.object({
   argumentsSchema: z.unknown().optional(),
   schemaDigest: z.string().optional(),
   invocation: z.object({ argumentsField: z.literal("body") }).optional(),
+  readOnly: z.boolean().optional(),
   kind: z.string().optional(),
   mcpApp: z.object({ resourceUri: z.string() }).optional(),
   status: z.string().optional(),
