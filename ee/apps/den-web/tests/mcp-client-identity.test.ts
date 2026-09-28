@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { McpUnverifiedAppWarning } from "../app/mcp/client-identity";
+import { McpReturnLine, McpUnverifiedAppWarning } from "../app/mcp/client-identity";
+import { knownMcpCimdDomain } from "../app/mcp/client-trust-constants";
 import { describeMcpRedirect, fallbackClientName, isLoopbackHost } from "../app/mcp/client-identity-model";
 
 describe("MCP consent client identity", () => {
@@ -30,6 +31,26 @@ describe("MCP consent client identity", () => {
 });
 
 describe("unverified application warning", () => {
+  test("recognizes only the exact HTTPS CIMD domain", () => {
+    expect(knownMcpCimdDomain("https://claude.ai/oauth/claude-code-client-metadata")).toBe("claude.ai");
+    for (const id of [null, "dcr-client", "http://claude.ai/oauth/client", "https://claude.ai/", "https://claude.ai.evil.example/client", "https://sub.claude.ai/client", "https://claude.ai@evil.example/client", "https://evil.example@claude.ai/client", "https://claude.ai:8443/client", "https://claude.ai/client#fragment"]) {
+      expect(knownMcpCimdDomain(id)).toBeNull();
+    }
+  });
+
+  test("recognized CIMD suppresses only the generic warning, not loopback guidance", () => {
+    const client = { name: "Client", logoUri: null, clientId: "https://claude.ai/oauth/claude-code-client-metadata", loaded: true, metadataResolved: true };
+    const redirect = describeMcpRedirect("http://127.0.0.1:3000/callback");
+    const markup = renderToStaticMarkup(createElement(McpUnverifiedAppWarning, { redirect, client }));
+    expect(markup).toContain('data-testid="mcp-known-app-identity"');
+    expect(markup).toContain("claude.ai");
+    expect(markup).not.toContain("Unverified application");
+    expect(renderToStaticMarkup(createElement(McpReturnLine, { redirect, client }))).toContain('data-testid="mcp-loopback-warning"');
+    for (const changed of [{ ...client, metadataResolved: false }, { ...client, loaded: false }, { ...client, clientId: "dcr-client" }, { ...client, clientId: "https://unknown.example/client" }]) {
+      expect(renderToStaticMarkup(createElement(McpUnverifiedAppWarning, { redirect: describeMcpRedirect("https://claude.ai/api/mcp/auth_callback"), client: changed }))).toContain("Unverified application");
+    }
+  });
+
   test.each([
     "https://assistant.example.com/oauth/callback",
     "http://127.0.0.1:39421/callback",

@@ -136,7 +136,7 @@ export default function McpConsentPage() {
       </div>
       <McpConsentPermissions scope={scope} actor={actor} />
       <div className="flex flex-col gap-3.5">
-        <McpUnverifiedAppWarning redirect={redirect} />
+        <McpUnverifiedAppWarning redirect={redirect} client={client} />
         <McpReturnLine client={client} redirect={redirect} />
         {error ? <SetupErrorLine>{error}</SetupErrorLine> : null}
         <button type="button" className="den-button-primary w-full" disabled={busy !== null} onClick={() => void decide(true)}>

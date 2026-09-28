@@ -371,7 +371,7 @@ export default function McpSelectOrganizationPage() {
       <McpConsentPermissions scope={requestedScope} actor={actor} />
 
       <div className="flex flex-col gap-3.5">
-        <McpUnverifiedAppWarning redirect={redirect} />
+        <McpUnverifiedAppWarning redirect={redirect} client={client} />
         <McpReturnLine client={client} redirect={redirect} short />
         {errorMessage ? <SetupErrorLine>{errorMessage}</SetupErrorLine> : null}
         {creating ? (

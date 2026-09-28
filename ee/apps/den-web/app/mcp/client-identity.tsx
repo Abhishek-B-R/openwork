@@ -4,6 +4,7 @@ import { SetupLine, type SetupFact } from "../(den)/_components/setup-frame-part
 import { describeMcpRedirect, type McpRedirectDescription } from "./client-identity-model";
 import { McpAppFact } from "./mcp-story";
 import type { McpClient } from "./use-mcp-client";
+import { knownMcpCimdDomain } from "./client-trust-constants";
 
 /** Where the approval is sent, from the signed authorize query. */
 export function useMcpRedirect(oauthQuery: string): McpRedirectDescription | null {
@@ -19,7 +20,18 @@ export function mcpIdentityFacts(client: McpClient, redirect: McpRedirectDescrip
 }
 
 /** Registration and a signed OAuth request do not verify the app's publisher. */
-export function McpUnverifiedAppWarning({ redirect }: { redirect: McpRedirectDescription | null }) {
+export function McpUnverifiedAppWarning({ redirect, client }: { redirect: McpRedirectDescription | null; client?: McpClient }) {
+  // Wait for the signed-query public-client lookup to succeed before recognizing
+  // a domain. Never infer trust from a DCR callback, name, or logo.
+  const knownDomain = client?.loaded && client.metadataResolved ? knownMcpCimdDomain(client.clientId) : null;
+  if (knownDomain) {
+    return (
+      <section aria-label="Application identity" className="flex min-w-0 flex-col gap-2" data-testid="mcp-known-app-identity">
+        <SetupLine>Application information provided by <span className="font-medium" data-testid="mcp-identity-domain">{knownDomain}</span>.</SetupLine>
+        <SetupLine>Only authorize if you started this connection and trust the app with the permissions shown.</SetupLine>
+      </section>
+    );
+  }
   return (
     <section aria-label="Unverified application" className="flex min-w-0 flex-col gap-2 border-l-2 border-[var(--dls-text-secondary)] pl-3" data-testid="mcp-unverified-app-warning">
       <SetupLine><strong className="font-semibold">Unverified application</strong></SetupLine>
