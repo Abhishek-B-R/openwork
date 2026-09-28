@@ -29,6 +29,13 @@ test("an owner filters grouped audit history by child event, exact IDs and local
   const idSearches: Array<{ label: string; value: string }> = [];
   let operationId = "";
 
+  async function selectEventType(text: string) {
+    await owner.click({ role: "button", label: "Event type" });
+    // Target the displayed option text: the menu's enclosing label names the
+    // whole field, and its text span receives the user's click on the option.
+    await owner.click({ text });
+  }
+
   async function seeGroupedOperation() {
     await owner.see(groupedRow, { timeoutMs: 30_000 });
     await owner.notSee({ testId: "audit-empty" });
@@ -84,10 +91,10 @@ test("an owner filters grouped audit history by child event, exact IDs and local
     expect(labels).toContain("Provider credential updated");
     expect(labels).toContain("Provider created");
     expect(labels).toContain("Audit policy enabled");
-    await owner.see({ role: "option", label: "Provider credential updated" });
+    await owner.see({ text: "Provider credential updated" });
     evidence.recordAssertionEvidence("The catalog is not derived from loaded operation summaries", `${catalog.eventTypes.length} server event types and ${options.elements.length - 1} dropdown event types are available with zero retained operations, including credential changes and policy events.`, options.elements.length === catalog.eventTypes.length + 1);
     await owner.screenshot();
-    await owner.click({ role: "option", label: "All event types" });
+    await owner.press("Escape");
   });
 
   await step("the owner opens More filters for Result, Origin and Actor", async () => {
@@ -151,13 +158,11 @@ test("an owner filters grouped audit history by child event, exact IDs and local
   });
 
   await step("after: selecting a child event type returns its whole grouped operation", async () => {
-    await owner.click({ role: "button", label: "Event type" });
-    await owner.click({ role: "option", label: "Provider created" });
+    await selectEventType("Provider created");
     await owner.click({ role: "button", label: "Apply filters" });
     await owner.see({ testId: "audit-empty" }, { text: /No operations match these filters/ });
     await owner.notSee(groupedRow);
-    await owner.click({ role: "button", label: "Event type" });
-    await owner.click({ role: "option", label: "Provider credential updated" });
+    await selectEventType("Provider credential updated");
     await owner.click({ role: "button", label: "Apply filters" });
     await owner.see({ role: "button", label: "Event type" }, { text: "Provider credential updated" });
     await seeGroupedOperation();
@@ -274,6 +279,7 @@ test("an owner filters grouped audit history by child event, exact IDs and local
     evidence.recordAssertionEvidence("Off is separate from entitlement and retained history", `Entitlement remains ${off.entitlement.enabled}; the organization setting is ${off.captureOn}; ${history.events.length} saved events remain readable.`, off.entitlement.enabled && !off.captureOn && !off.captureEnabled && history.events.length > 0);
     await owner.screenshot();
     await owner.click({ role: "switch", label: "Capture audit logs" });
+    await owner.see({ text: "Recording" });
     await owner.notSee({ text: "New activity is not recorded. Retained history remains available." });
     const onResponse = await probe.api(world.den.admin, "/v1/audit/usage");
     const on = auditUsageResponseSchema.parse(onResponse.body);
