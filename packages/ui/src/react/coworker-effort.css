@@ -1,26 +1,39 @@
-/* Fill and native thumb share a 32px diameter; higher effort adds light, not layout movement. */
+/*
+ * Fill and native thumb share a 32px diameter; higher effort adds light, not
+ * layout movement. One energy level per stop drives everything: stars that
+ * light up one by one, light that drifts and twinkles faster, sparks off the
+ * thumb from Thorough, and a burst, flowing colour and starry lenses at All in.
+ */
 .effort-slider {
   position: relative;
   height: 40px;
+  --effort-energy: 0;
   --effort-light: 0;
   --effort-particles: 0;
   --effort-glow: transparent;
 }
-.effort-slider[data-stop="steady"] { --effort-light: 0.18; }
+.effort-slider[data-stop="steady"] {
+  --effort-energy: 0.2;
+  --effort-light: 0.18;
+  --effort-particles: 0.2;
+}
 .effort-slider[data-stop="balanced"] {
+  --effort-energy: 0.4;
   --effort-light: 0.4;
   --effort-particles: 0.4;
   --effort-glow: rgb(91 141 255 / 12%);
 }
 .effort-slider[data-stop="thorough"] {
+  --effort-energy: 0.7;
   --effort-light: 0.7;
   --effort-particles: 0.7;
-  --effort-glow: rgb(91 141 255 / 23%);
+  --effort-glow: rgb(91 141 255 / 26%);
 }
 .effort-slider[data-stop="all-in"] {
+  --effort-energy: 1;
   --effort-light: 1;
   --effort-particles: 1;
-  --effort-glow: rgb(62 213 166 / 25%);
+  --effort-glow: rgb(62 213 166 / 32%);
 }
 .effort-slider-track {
   position: absolute;
@@ -39,6 +52,7 @@
   overflow: hidden;
   border-radius: 999px;
   background: linear-gradient(100deg, #365cae, var(--color-spark, #5b8dff));
+  background-size: 100% 100%;
 }
 .effort-slider-aurora {
   position: absolute;
@@ -58,39 +72,163 @@
   opacity: var(--effort-particles);
   transition: opacity 240ms ease;
 }
-.effort-slider-full-effects {
-  position: absolute;
-  inset: 0;
-  opacity: 0;
-  transition: opacity 320ms ease;
-}
-.effort-slider[data-stop="all-in"] .effort-slider-full-effects { opacity: 1; }
+
+/* Stars pop in as they light up, then twinkle; the higher the pace, the quicker. */
 .effort-slider-star {
   position: absolute;
   aspect-ratio: 1;
+  overflow: visible;
   fill: var(--color-snow, #f5f7fb);
-  opacity: 0.6;
-  transform: scale(0.8) rotate(-8deg);
+  filter: drop-shadow(0 0 3px rgb(245 247 251 / 70%));
+  animation: effort-star-pop 460ms cubic-bezier(0.3, 1.7, 0.5, 1) both;
 }
+.effort-slider-star path {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: effort-star-twinkle calc(3s - 1.7s * var(--effort-energy)) ease-in-out infinite alternate;
+}
+.effort-slider-star:nth-of-type(3n) { fill: #d8fff1; }
+.effort-slider-star:nth-of-type(4n) { fill: #e4dcff; }
+
+/* A band of light crossing the fill: slow at Thorough, quick at All in. */
 .effort-slider-sweep {
   position: absolute;
   inset: 0 auto 0 -55%;
   width: 55%;
-  background: linear-gradient(110deg, transparent 15%, rgb(245 247 251 / 18%) 50%, transparent 85%);
+  background: linear-gradient(110deg, transparent 15%, rgb(245 247 251 / 22%) 50%, transparent 85%);
+  opacity: 0;
+  transition: opacity 320ms ease;
 }
-.effort-slider[data-stop="all-in"] .effort-slider-star {
-  animation: effort-star-glint 4.8s ease-in-out infinite alternate;
-}
+.effort-slider[data-stop="thorough"] .effort-slider-sweep,
 .effort-slider[data-stop="all-in"] .effort-slider-sweep {
-  animation: effort-light-sweep 8s ease-in-out infinite;
+  opacity: 1;
+  animation: effort-light-sweep calc(9s - 6.4s * var(--effort-energy)) ease-in-out infinite;
 }
+.effort-slider[data-stop="balanced"] .effort-slider-aurora,
 .effort-slider[data-stop="thorough"] .effort-slider-aurora,
 .effort-slider[data-stop="all-in"] .effort-slider-aurora {
-  animation: effort-aurora 7s ease-in-out infinite alternate;
+  animation: effort-aurora calc(9s - 6s * var(--effort-energy)) ease-in-out infinite alternate;
 }
+.effort-slider[data-stop="balanced"] .effort-slider-particle,
 .effort-slider[data-stop="thorough"] .effort-slider-particle,
 .effort-slider[data-stop="all-in"] .effort-slider-particle {
-  animation: effort-light-drift 3.8s ease-in-out infinite alternate;
+  animation: effort-light-drift calc(4.6s - 3s * var(--effort-energy)) ease-in-out infinite alternate;
+}
+
+/* All in: the colours flow along the fill and the whole track breathes. */
+.effort-slider[data-stop="all-in"] .effort-slider-fill {
+  background: linear-gradient(100deg, #365cae, var(--color-spark, #5b8dff), #9c8cf0, var(--color-mint, #3ed5a6), var(--color-spark, #5b8dff), #365cae);
+  background-size: 300% 100%;
+  animation: effort-fill-flow 3.2s linear infinite;
+}
+.effort-slider[data-stop="all-in"] .effort-slider-track {
+  animation: effort-track-breathe 1.6s ease-in-out infinite alternate;
+}
+
+/* Centred on the thumb, behind it, and outside the track so sparks can fly. */
+.effort-slider-thumb-effects {
+  position: absolute;
+  top: 20px;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+.effort-slider-halo {
+  position: absolute;
+  left: -26px;
+  top: -26px;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgb(62 213 166 / 55%) 0%, rgb(91 141 255 / 30%) 45%, transparent 70%);
+  opacity: calc((var(--effort-energy) - 0.5) * 2);
+  transition: opacity 320ms ease;
+  animation: effort-halo-pulse calc(2.4s - 1.4s * var(--effort-energy)) ease-in-out infinite alternate;
+}
+.effort-slider-spark {
+  position: absolute;
+  left: -2.5px;
+  top: -2.5px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--color-snow, #f5f7fb);
+  box-shadow: 0 0 8px 2px rgb(62 213 166 / 85%);
+  opacity: 0;
+  animation: effort-spark-rise calc(1.9s - 0.7s * var(--effort-energy)) ease-out infinite;
+}
+.effort-slider-spark:nth-child(even) { box-shadow: 0 0 8px 2px rgb(183 168 237 / 90%); }
+.effort-slider-spark:nth-child(3n) {
+  width: 7px;
+  height: 7px;
+  border-radius: 0;
+  clip-path: polygon(50% 0, 62% 38%, 100% 50%, 62% 62%, 50% 100%, 38% 62%, 0 50%, 38% 38%);
+}
+
+/* Arriving at All in: two rings and a spray of stars burst off the thumb, once. */
+.effort-slider-burst {
+  position: absolute;
+  inset: 0;
+  filter: drop-shadow(0 0 4px rgb(62 213 166 / 90%));
+}
+.effort-slider-burst::before,
+.effort-slider-burst::after {
+  content: "";
+  position: absolute;
+  left: -20px;
+  top: -20px;
+  width: 40px;
+  height: 40px;
+  border: 3px solid var(--color-mint, #3ed5a6);
+  border-radius: 50%;
+  opacity: 0;
+  animation: effort-burst-ring 760ms cubic-bezier(0.2, 0.8, 0.2, 1) 1;
+}
+.effort-slider-burst::after {
+  border-width: 2px;
+  border-color: #b7a8ed;
+  animation-delay: 140ms;
+}
+.effort-slider-burst span {
+  position: absolute;
+  left: -5px;
+  top: -5px;
+  width: 10px;
+  height: 10px;
+  background: var(--color-snow, #f5f7fb);
+  clip-path: polygon(50% 0, 62% 38%, 100% 50%, 62% 62%, 50% 100%, 38% 62%, 0 50%, 38% 38%);
+  opacity: 0;
+  animation: effort-burst-ray 820ms cubic-bezier(0.15, 0.7, 0.3, 1) 1;
+}
+.effort-slider-burst span:nth-child(odd) { background: var(--color-mint, #3ed5a6); }
+.effort-slider-burst span:nth-child(3n) { background: #cfc4ff; }
+.effort-slider-burst[data-size="small"] { --effort-reach: 32px; filter: drop-shadow(0 0 3px rgb(91 141 255 / 80%)); }
+.effort-slider-burst[data-size="small"]::before { border-width: 2px; border-color: var(--color-spark, #5b8dff); animation-duration: 560ms; }
+.effort-slider-burst[data-size="small"]::after { display: none; }
+.effort-slider-burst[data-size="small"] span { width: 7px; height: 7px; left: -3.5px; top: -3.5px; animation-duration: 620ms; }
+
+/* ...and a flash of light runs the length of the track. */
+.effort-slider-fill::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(100deg, transparent 0%, rgb(255 255 255 / 75%) 45%, transparent 60%);
+  background-size: 250% 100%;
+  background-position: 120% 0;
+  opacity: 0;
+  pointer-events: none;
+}
+.effort-slider[data-stop="all-in"] .effort-slider-fill::after {
+  animation: effort-arrival-flash 700ms ease-out 1;
+}
+
+@keyframes effort-star-pop {
+  from { opacity: 0; transform: scale(0) rotate(-45deg); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes effort-star-twinkle {
+  from { opacity: 0.45; transform: scale(0.7) rotate(-10deg); }
+  to { opacity: 1; transform: scale(1.2) rotate(12deg); }
 }
 @keyframes effort-aurora {
   to { transform: translateX(8%); }
@@ -98,15 +236,65 @@
 @keyframes effort-light-drift {
   to { transform: translate(3px, -3px); }
 }
-@keyframes effort-star-glint {
-  to { opacity: 0.95; transform: translate(2px, -1px) scale(1.15) rotate(8deg); }
-}
 @keyframes effort-light-sweep {
   to { transform: translateX(300%); }
 }
+@keyframes effort-fill-flow {
+  to { background-position: 150% 0; }
+}
+@keyframes effort-track-breathe {
+  to { box-shadow: 0 0 26px rgb(62 213 166 / 45%), inset 0 0 0 1px rgb(255 255 255 / 10%); }
+}
+@keyframes effort-halo-pulse {
+  from { transform: scale(0.85); }
+  to { transform: scale(1.25); }
+}
+@keyframes effort-spark-rise {
+  0% { opacity: 0; transform: translate(0, -8px) scale(0.4) rotate(0deg); }
+  15% { opacity: 1; }
+  100% { opacity: 0; transform: translate(var(--effort-drift, 0px), -50px) scale(1.1) rotate(90deg); }
+}
+@keyframes effort-burst-ring {
+  from { opacity: 1; transform: scale(0.5); }
+  to { opacity: 0; transform: scale(2.6); }
+}
+@keyframes effort-burst-ray {
+  0% { opacity: 1; transform: rotate(var(--effort-turn)) translateX(12px) scale(1.5) rotate(0deg); }
+  70% { opacity: 1; }
+  100% { opacity: 0; transform: rotate(var(--effort-turn)) translateX(var(--effort-reach, 60px)) scale(0.5) rotate(180deg); }
+}
+@keyframes effort-arrival-flash {
+  0% { opacity: 1; background-position: 120% 0; }
+  100% { opacity: 1; background-position: -60% 0; }
+}
+@keyframes effort-thumb-pop {
+  0% { transform: scale(1); }
+  40% { transform: scale(1.28) rotate(-10deg); }
+  70% { transform: scale(0.94) rotate(6deg); }
+  100% { transform: scale(1); }
+}
+@keyframes effort-thumb-wiggle {
+  0%, 100% { transform: rotate(0deg); }
+  25% { transform: rotate(-7deg) translateY(-1px); }
+  75% { transform: rotate(7deg) translateY(-1px); }
+}
+
+/* The stop's name warms up with the track and shimmers at All in. */
 .effort-dial-name { transition: color 240ms ease; }
 [data-testid="effort-dial-panel"][data-stop="thorough"] .effort-dial-name { color: #bbcaff; }
-[data-testid="effort-dial-panel"][data-stop="all-in"] .effort-dial-name { color: var(--color-mint, #3ed5a6); }
+[data-testid="effort-dial-panel"][data-stop="all-in"] .effort-dial-name {
+  color: var(--color-mint, #3ed5a6);
+  background: linear-gradient(90deg, var(--color-mint, #3ed5a6) 0%, #f5f7fb 30%, #b7a8ed 50%, var(--color-mint, #3ed5a6) 70%, var(--color-mint, #3ed5a6) 100%);
+  background-size: 250% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: effort-name-shimmer 2.6s linear infinite;
+}
+@keyframes effort-name-shimmer {
+  from { background-position: 100% 0; }
+  to { background-position: -150% 0; }
+}
 .effort-dial-range {
   position: relative;
   z-index: 1;
@@ -143,7 +331,7 @@
   margin: 0;
   border: 1px solid rgb(255 255 255 / 65%);
   border-radius: 50%;
-  background: var(--color-snow, #f5f7fb) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='10 32 100 50' fill='none' stroke='%2311151d' stroke-width='6' stroke-linecap='round'%3E%3Ccircle cx='37.5' cy='57' r='17.5'/%3E%3Ccircle cx='82.5' cy='57' r='17.5'/%3E%3Cpath d='M57.5 57c1.25-4 3.75-4 5 0M15 57h4.5M100.5 57h4.5'/%3E%3C/svg%3E") center / 20px 10px no-repeat;
+  background: var(--color-snow, #f5f7fb);
   box-shadow: 0 1px 4px rgb(0 0 0 / 18%);
 }
 .effort-dial-range::-moz-range-thumb {
@@ -152,20 +340,124 @@
   height: 32px;
   border: 1px solid rgb(255 255 255 / 65%);
   border-radius: 50%;
-  background: var(--color-snow, #f5f7fb) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='10 32 100 50' fill='none' stroke='%2311151d' stroke-width='6' stroke-linecap='round'%3E%3Ccircle cx='37.5' cy='57' r='17.5'/%3E%3Ccircle cx='82.5' cy='57' r='17.5'/%3E%3Cpath d='M57.5 57c1.25-4 3.75-4 5 0M15 57h4.5M100.5 57h4.5'/%3E%3C/svg%3E") center / 20px 10px no-repeat;
+  background: var(--color-snow, #f5f7fb);
   box-shadow: 0 1px 4px rgb(0 0 0 / 18%);
 }
+
+/* Higher pace, brighter thumb: a soft ring from Thorough, a glowing one at All in. */
+.effort-dial-range::-webkit-slider-thumb { transition: box-shadow 240ms ease; }
+.effort-slider[data-stop="thorough"] .effort-dial-range::-webkit-slider-thumb {
+  box-shadow: 0 1px 4px rgb(0 0 0 / 18%), 0 0 0 3px rgb(91 141 255 / 28%);
+  animation: effort-thumb-pop-small 420ms cubic-bezier(0.3, 1.5, 0.5, 1) 1;
+}
+.effort-slider[data-stop="all-in"] .effort-dial-range::-webkit-slider-thumb {
+  box-shadow: 0 1px 4px rgb(0 0 0 / 18%), 0 0 0 3px rgb(62 213 166 / 40%), 0 0 18px rgb(62 213 166 / 60%);
+  animation: effort-thumb-pop 520ms cubic-bezier(0.3, 1.5, 0.5, 1) 1;
+}
+.effort-slider[data-stop="all-in"] .effort-dial-range::-moz-range-thumb {
+  box-shadow: 0 0 0 3px rgb(62 213 166 / 40%), 0 0 18px rgb(62 213 166 / 60%);
+}
+
+/*
+ * The coworker's glasses, on top of the thumb and never in the pointer's way.
+ * The lenses morph from round to a star (their paths share one shape, so they
+ * ease between stops) and tint from clear to sunglasses to bright star shades.
+ */
+.effort-slider-face {
+  position: absolute;
+  top: 20px;
+  z-index: 2;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+.effort-slider-face svg {
+  position: absolute;
+  left: -10px;
+  top: -5px;
+  width: 20px;
+  height: 10px;
+  overflow: visible;
+  transition: transform 420ms cubic-bezier(0.3, 1.4, 0.5, 1);
+}
+.effort-slider[data-stop="thorough"] .effort-slider-face svg { transform: scale(1.06); }
+.effort-slider[data-stop="all-in"] .effort-slider-face svg { transform: scale(1.18); }
+.effort-glasses-lens,
+.effort-glasses-frame {
+  stroke: #11151d;
+  stroke-width: 6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: d 460ms cubic-bezier(0.4, 0, 0.2, 1), fill-opacity 420ms ease;
+}
+.effort-glasses-frame { fill: none; }
+.effort-glasses-lens { fill-opacity: 0; }
+.effort-slider[data-stop="balanced"] .effort-glasses-lens { fill-opacity: 0.16; }
+.effort-slider[data-stop="thorough"] .effort-glasses-lens { fill-opacity: 0.92; }
+.effort-slider[data-stop="all-in"] .effort-glasses-lens { fill-opacity: 1; }
+.effort-glasses-tint-from,
+.effort-glasses-tint-to { stop-color: var(--color-spark, #5b8dff); transition: stop-color 420ms ease; }
+.effort-slider[data-stop="thorough"] .effort-glasses-tint-from { stop-color: #2a3a66; }
+.effort-slider[data-stop="thorough"] .effort-glasses-tint-to { stop-color: #16203a; }
+.effort-slider[data-stop="all-in"] .effort-glasses-tint-from { stop-color: var(--color-spark, #5b8dff); }
+.effort-slider[data-stop="all-in"] .effort-glasses-tint-to { stop-color: var(--color-mint, #3ed5a6); }
+.effort-glasses-glint {
+  fill: none;
+  stroke: #f5f7fb;
+  stroke-width: 4;
+  stroke-linecap: round;
+  opacity: 0;
+  transition: d 460ms cubic-bezier(0.4, 0, 0.2, 1), opacity 320ms ease;
+}
+.effort-slider[data-stop="thorough"] .effort-glasses-glint,
+.effort-slider[data-stop="all-in"] .effort-glasses-glint { opacity: 0.9; }
+/* A little life on the face: a tilt now and then at Thorough, a pop and a happy wiggle at All in. */
+.effort-slider[data-stop="thorough"] .effort-slider-face {
+  animation: effort-face-pop-small 420ms cubic-bezier(0.3, 1.5, 0.5, 1) 1, effort-face-tilt 3.2s ease-in-out 600ms infinite;
+}
+.effort-slider[data-stop="all-in"] .effort-slider-face {
+  animation: effort-thumb-pop 520ms cubic-bezier(0.3, 1.5, 0.5, 1) 1, effort-thumb-wiggle 1.4s ease-in-out 700ms infinite;
+}
+@keyframes effort-thumb-pop-small {
+  0% { transform: scale(1); }
+  45% { transform: scale(1.12); }
+  100% { transform: scale(1); }
+}
+@keyframes effort-face-pop-small {
+  0% { transform: scale(1); }
+  45% { transform: scale(1.12) rotate(-5deg); }
+  100% { transform: scale(1); }
+}
+@keyframes effort-face-tilt {
+  0%, 70%, 100% { transform: rotate(0deg); }
+  80% { transform: rotate(-5deg); }
+  90% { transform: rotate(4deg); }
+}
+
+/* Reduced motion: every stop keeps its stars and colours, standing still; nothing flies. */
 @media (prefers-reduced-motion: reduce) {
   .effort-slider-track,
+  .effort-slider-fill,
   .effort-slider-aurora,
   .effort-slider-particle,
-  .effort-slider-full-effects,
   .effort-slider-star,
+  .effort-slider-star path,
   .effort-slider-sweep,
+  .effort-slider-halo,
+  .effort-slider-fill::after,
   .effort-dial-name {
     animation: none !important;
     transition: none;
   }
+  .effort-slider .effort-dial-range::-webkit-slider-thumb,
+  .effort-slider-face,
+  .effort-slider-face svg,
+  .effort-glasses-lens,
+  .effort-glasses-frame,
+  .effort-glasses-glint { animation: none !important; transition: none !important; }
+  .effort-slider-spark,
+  .effort-slider-burst,
+  .effort-slider-sweep { display: none; }
 }
 
 .effort-slider-stops { position: absolute; inset: 0 16px; display: flex; align-items: center; justify-content: space-between; pointer-events: none; }

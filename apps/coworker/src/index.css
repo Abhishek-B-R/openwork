@@ -989,6 +989,20 @@ body.is-resizing-panel * {
     animation: none;
   }
 }
+/* The thinking-pace popover grows out of its pill, which sits under its bottom-right corner. */
+@keyframes effort-popover-in {
+  from { opacity: 0; transform: translateY(6px) scale(0.96); }
+  to { opacity: 1; transform: none; }
+}
+.effort-popover {
+  transform-origin: bottom right;
+  animation: effort-popover-in 180ms cubic-bezier(0.2, 0.8, 0.2, 1) 1;
+}
+@media (prefers-reduced-motion: reduce) {
+  .effort-popover {
+    animation: none;
+  }
+}
 
 /*
  * Memory pages read like a tidy outline, not a document: the tab already names
