@@ -3,12 +3,13 @@ import { after, before, test } from "node:test"
 import { randomUUID } from "node:crypto"
 import { createDenDb } from "@openwork-ee/den-db"
 import { and, eq, inArray } from "@openwork-ee/den-db/drizzle"
-import { AuditEventTable, AuditOperationTable, AuditPolicyTable, AuditUsageFactTable, GatewayCredentialSetTable, GatewayModelGroupModelTable, GatewayModelGroupTable, GatewayProviderAccessTable, GatewayProviderCredentialTable, GatewayProviderModelTable, GatewayProviderOauthStateTable, GatewayProviderTable, MemberTable, OrganizationTable } from "@openwork-ee/den-db/schema"
+import { AuditEventTable, AuditOperationTable, AuditPolicyTable, AuditStateTable, AuditUsageFactTable, GatewayCredentialSetTable, GatewayModelGroupModelTable, GatewayModelGroupTable, GatewayProviderAccessTable, GatewayProviderCredentialTable, GatewayProviderModelTable, GatewayProviderOauthStateTable, GatewayProviderTable, MemberTable, OrganizationTable } from "@openwork-ee/den-db/schema"
 import { createDenTypeId } from "@openwork-ee/utils/typeid"
 import { AUDIT_CORRELATION_HEADER } from "@openwork/types/den/audit"
 import { bindProviderGrantAuditTarget, loadProviderAudit, providerAuditMutation, providerRequestAuditContext, providerSystemAuditContext, recordProviderAttempt } from "../src/audit/provider.js"
-import { setAuditCaptureState, type AuditCategory, type AuditContext, type AuditTx } from "@openwork-ee/den-db/audit-log"
-import { readAuditEntitlement } from "../src/audit/capture.js"
+import { readAuditPolicy, setAuditCaptureState, type AuditCategory, type AuditContext, type AuditTx } from "@openwork-ee/den-db/audit-log"
+import { readAuditEntitlement, readEffectiveAuditPolicy } from "../src/audit/capture.js"
+import { readAuditUsage } from "../src/audit/queries.js"
 import type { GatewayAccessGrantWrite } from "@openwork/types/den/gateway"
 
 const url = process.env.DEN_AUDIT_TEST_DATABASE_URL
@@ -61,7 +62,7 @@ async function fixture(categories: AuditCategory[] = ["change", "request", "secu
   const providerId = createDenTypeId("inferenceProvider")
   const setId = createDenTypeId("gatewayCredentialSet")
   const credentialId = createDenTypeId("inferenceProviderCredential")
-  await db.insert(OrganizationTable).values({ id: org, name: "Synthetic capture", slug: `synthetic-${org}`, metadata: { plan: { tier: "enterprise", source: "manual" } } })
+  await db.insert(OrganizationTable).values({ id: org, name: "Synthetic capture", slug: `synthetic-${org}`, metadata: { capabilities: { auditLogs: true }, plan: { tier: "enterprise", source: "manual" } } })
   await db.insert(AuditPolicyTable).values({ organization_id: org, source: "operator", enabled: true, categories, allowance: 100, excess_mode: "keep_all", revision: 1, effective_at: new Date("2026-01-01T00:00:00Z"), attachment_window_seconds: 300 })
   await db.insert(GatewayProviderTable).values({ id: providerId, organization_id: org, created_by_org_membership_id: member, provider_id: "synthetic", name: "Before", provider_config: { id: "synthetic", npm: "@ai-sdk/openai", env: ["SYNTHETIC_API_KEY"] }, settings: {} })
   await db.insert(GatewayCredentialSetTable).values({ id: setId, gateway_provider_id: providerId, name: "Shared", credential_mode: "org" })
@@ -82,14 +83,14 @@ async function fixture(categories: AuditCategory[] = ["change", "request", "secu
   return { db, org, member, user, providerId, setId, credentialId, context, current, mutate, events }
 }
 
-dbTest("flag off, absent policy and excluded categories do not query matrix snapshots", async () => {
+dbTest("flag off, absent unentitled policy and excluded categories do not query matrix snapshots", async () => {
   const f = await fixture()
   queries.length = 0
   assert.equal(await loadProviderAudit(f.db, false, f.context(), "update"), null)
   await f.db.transaction((tx) => providerAuditMutation(tx, null, async () => 1))
   assert.equal(queries.some((sql) => /select|insert|update/i.test(sql)), false)
   const absentOrg = createDenTypeId("organization")
-  await f.db.insert(OrganizationTable).values({ id: absentOrg, name: "Synthetic absent", slug: `synthetic-${absentOrg}`, metadata: { plan: { tier: "enterprise" } } })
+  await f.db.insert(OrganizationTable).values({ id: absentOrg, name: "Synthetic absent", slug: `synthetic-${absentOrg}`, metadata: { capabilities: { auditLogs: true }, plan: { tier: "free" } } })
   const absent = { ...f.context(), organizationId: absentOrg }
   assert.equal(await loadProviderAudit(f.db, true, absent, "update"), null)
   await f.db.update(AuditPolicyTable).set({ categories: ["request"] }).where(eq(AuditPolicyTable.organization_id, f.org))
@@ -98,6 +99,186 @@ dbTest("flag off, absent policy and excluded categories do not query matrix snap
   await f.db.transaction((tx) => providerAuditMutation(tx, capture, async () => 1))
   assert.equal(queries.some((sql) => /gateway_/.test(sql)), false)
   assert.equal((await f.events()).length, 1)
+})
+
+dbTest("first captured mutation lazily provisions exact temporary defaults with system evidence and operation accounting", async () => {
+  const f = await fixture()
+  await f.db.delete(AuditPolicyTable).where(eq(AuditPolicyTable.organization_id, f.org))
+  queries.length = 0
+  await f.mutate("update", (tx) => tx.update(GatewayProviderTable).set({ name: "First captured change" }).where(eq(GatewayProviderTable.id, f.providerId)))
+  const initializationInsert = queries.findIndex((query) => /^insert into `audit_policy`/i.test(query))
+  const snapshot = queries.findIndex((query) => /^select.*from `gateway_providers`/i.test(query))
+  assert.ok(initializationInsert >= 0 && snapshot > initializationInsert)
+  const policy = await readAuditPolicy(f.db, f.org)
+  assert.ok(policy)
+  assert.deepEqual({ ...policy, effectiveAt: null, captureStartedAt: null }, {
+    organizationId: f.org, revision: 1, source: "cloud", enabled: true,
+    allowance: 6_000_000, excessMode: "delete_oldest", attachmentWindowSeconds: 300,
+    categories: ["change", "security", "execution", "access", "request", "lifecycle"], effectiveAt: null, captureStartedAt: null,
+  })
+  const events = await f.events()
+  const initialized = events[0]
+  assert.equal(initialized.action, "audit.policy.initialized")
+  assert.equal(initialized.category, "lifecycle")
+  assert.equal(initialized.outcome, "succeeded")
+  assert.deepEqual(initialized.actor, { type: "system", id: "den-api.audit-defaults" })
+  assert.deepEqual(initialized.operation.initiatingActor, initialized.actor)
+  assert.equal(initialized.requestId, null)
+  assert.equal(initialized.changes?.before, null)
+  const { captureStartedAt, ...after } = policy
+  assert.deepEqual(initialized.changes?.after, after)
+  assert.deepEqual(initialized.changes?.changedFields, Object.keys(after).sort())
+  assert.equal(captureStartedAt, initialized.recordedAt)
+  assert.deepEqual(events.slice(1).map((event) => event.action), ["provider.updated", "provider.configuration.update.committed"])
+  const usage = await readAuditUsage({ database: f.db, organizationId: f.org }, true)
+  assert.equal(usage.retainedOperations, 2)
+  assert.equal(usage.eventCount, 3)
+  assert.equal(usage.logicalBytes, events.reduce((sum, event) => sum + event.logicalBytes, 0))
+  assert.equal(usage.oldestAvailableAt, initialized.recordedAt)
+  assert.equal(usage.captureOn, true)
+  assert.equal(usage.captureEnabled, true)
+  assert.equal(usage.billing, "disabled")
+  assert.equal(usage.cleanup, "dry_run")
+  const facts = await f.db.select().from(AuditUsageFactTable).where(eq(AuditUsageFactTable.organization_id, f.org))
+  assert.equal(facts.length, 2)
+  assert.ok(facts.every((fact) => fact.allowance === 6_000_000 && fact.delta === 1))
+})
+
+dbTest("concurrent first mutations and usage reads converge to one default policy and initialization operation", async () => {
+  const f = await fixture()
+  await f.db.delete(AuditPolicyTable).where(eq(AuditPolicyTable.organization_id, f.org))
+  await Promise.all([
+    ...Array.from({ length: 12 }, (_, index) => f.mutate("update", (tx) => tx.update(GatewayProviderTable).set({ name: `Default race ${index}` }).where(eq(GatewayProviderTable.id, f.providerId)))),
+    ...Array.from({ length: 8 }, () => readAuditUsage({ database: f.db, organizationId: f.org }, true).then((usage) => {
+      assert.equal(usage.captureEnabled, true)
+      assert.equal(usage.policy?.revision, 1)
+      assert.ok(usage.oldestAvailableAt)
+      assert.ok(usage.retainedOperations >= 1)
+    })),
+  ])
+  const events = await f.events()
+  assert.equal(events.filter((event) => event.action === "audit.policy.initialized").length, 1)
+  assert.equal(events.filter((event) => event.action === "provider.updated").length, 12)
+  assert.equal(events.length, 25)
+  assert.equal(new Set(events.map((event) => event.operationId)).size, 13)
+  assert.equal((await f.db.select().from(AuditPolicyTable).where(eq(AuditPolicyTable.organization_id, f.org))).length, 1)
+  assert.equal((await f.db.select().from(AuditUsageFactTable).where(eq(AuditUsageFactTable.organization_id, f.org))).length, 13)
+})
+
+dbTest("transaction callers with old missing-policy snapshots converge without nested transactions or lock upgrades", async () => {
+  const f = await fixture()
+  await f.db.delete(AuditPolicyTable).where(eq(AuditPolicyTable.organization_id, f.org))
+  const ready = barrier()
+  let arrived = 0
+  const policies = await Promise.all(Array.from({ length: 4 }, () => f.db.transaction(async (tx) => {
+    await readAuditEntitlement(tx, f.org, true)
+    assert.equal(await readAuditPolicy(tx, f.org), null)
+    if (++arrived === 4) ready.resolve()
+    await within(ready.promise, "all transactions observing absent policy")
+    return readEffectiveAuditPolicy(tx, f.org, true)
+  })))
+  assert.ok(policies[0])
+  for (const policy of policies) assert.deepEqual(policy, policies[0])
+  assert.equal((await f.events()).length, 1)
+})
+
+dbTest("missing policy never provisions when global off, unflagged or unentitled; forged capacity grants nothing", async () => {
+  const f = await fixture()
+  await f.db.delete(AuditPolicyTable).where(eq(AuditPolicyTable.organization_id, f.org))
+  for (const scenario of [
+    { capture: false, tier: "enterprise", flag: true },
+    ...[undefined, false, null, "true", 1].map((flag) => ({ capture: true, tier: "enterprise", flag })),
+    ...["free", "team"].map((tier) => ({ capture: true, tier, flag: true })),
+  ]) {
+    await f.db.update(OrganizationTable).set({ metadata: { capabilities: { auditLogs: scenario.flag }, plan: { tier: scenario.tier }, audit: { enabled: true, allowance: 999999999, source: "operator", excessMode: "keep_all" }, entitlements: { auditLogs: true } } }).where(eq(OrganizationTable.id, f.org))
+    queries.length = 0
+    assert.equal(await loadProviderAudit(f.db, scenario.capture, f.context(), "update"), null)
+    assert.equal(queries.some((query) => /audit_|gateway_|^\s*(?:insert|update|delete)/i.test(query)), false)
+  }
+  assert.equal(await readAuditPolicy(f.db, f.org), null)
+  assert.deepEqual(await f.db.select().from(AuditStateTable).where(eq(AuditStateTable.organization_id, f.org)), [])
+  assert.deepEqual(await f.events(), [])
+})
+
+dbTest("lazy initialization failure rolls policy and state back before business snapshots", async () => {
+  const f = await fixture()
+  await f.db.delete(AuditPolicyTable).where(eq(AuditPolicyTable.organization_id, f.org))
+  await f.db.insert(AuditEventTable).values({ id: createDenTypeId("auditEvent"), org_id: f.org, action: "synthetic.sequence_conflict", sequence: 1 })
+  queries.length = 0
+  await assert.rejects(loadProviderAudit(f.db, true, f.context(), "update"))
+  assert.equal(queries.some((query) => /gateway_/.test(query)), false)
+  assert.equal(await readAuditPolicy(f.db, f.org), null)
+  assert.deepEqual(await f.db.select().from(AuditStateTable).where(eq(AuditStateTable.organization_id, f.org)), [])
+  assert.deepEqual(await f.db.select().from(AuditOperationTable).where(eq(AuditOperationTable.organization_id, f.org)), [])
+  assert.deepEqual(await f.db.select().from(AuditUsageFactTable).where(eq(AuditUsageFactTable.organization_id, f.org)), [])
+})
+
+dbTest("missing-policy initializer waits for organization revocation and uses the freshly locked flag and entitlement", async () => {
+  for (const metadata of [
+    { capabilities: { auditLogs: false }, plan: { tier: "enterprise" } },
+    { capabilities: { auditLogs: true }, plan: { tier: "free" } },
+  ]) {
+    const f = await fixture()
+    await f.db.delete(AuditPolicyTable).where(eq(AuditPolicyTable.organization_id, f.org))
+    const holding = barrier()
+    const resume = barrier()
+    const revoke = f.db.transaction(async (tx) => {
+      await tx.update(OrganizationTable).set({ metadata }).where(eq(OrganizationTable.id, f.org))
+      holding.resolve()
+      await resume.promise
+    })
+    await holding.promise
+    const waiting = barrier()
+    onQuery = (query) => { if (/organization.*for share/i.test(query)) waiting.resolve() }
+    const capture = loadProviderAudit(f.db, true, f.context(), "update")
+    try { await within(waiting.promise, "initializer reaching the fresh organization fence") }
+    finally { onQuery = undefined; resume.resolve(); await revoke }
+    assert.equal(await capture, null)
+    assert.equal(await readAuditPolicy(f.db, f.org), null)
+    assert.deepEqual(await f.db.select().from(AuditStateTable).where(eq(AuditStateTable.organization_id, f.org)), [])
+    assert.deepEqual(await f.events(), [])
+  }
+})
+
+dbTest("org flag defaults off even with Enterprise/self-hosted entitlement and initialized ON policy", async () => {
+  const f = await fixture()
+  const { env } = await import("../src/env.js")
+  for (const selfHosted of [false, true]) for (const auditLogs of [undefined, false, null, "true", 1]) {
+    env.auditSelfHostedEnabled = selfHosted
+    try {
+      await f.db.update(OrganizationTable).set({ metadata: { plan: { tier: selfHosted ? "free" : "enterprise" }, capabilities: { auditLogs } } }).where(eq(OrganizationTable.id, f.org))
+      assert.equal((await readAuditEntitlement(f.db, f.org)).enabled, true)
+      queries.length = 0
+      for (const context of [f.context(), providerSystemAuditContext(f.org, f.providerId)]) assert.equal(await loadProviderAudit(f.db, true, context, "catalog.refresh"), null)
+      assert.equal(queries.some((query) => /audit_|gateway_|^\s*(?:insert|update|delete)/i.test(query)), false)
+    } finally { env.auditSelfHostedEnabled = false }
+  }
+  assert.deepEqual(await f.events(), [])
+})
+
+dbTest("in-flight flag revocation rejects stale capture and failed attempts before snapshots and writes", async () => {
+  const f = await fixture()
+  const capture = await loadProviderAudit(f.db, true, f.context(), "update")
+  assert.ok(capture)
+  const holding = barrier()
+  const resume = barrier()
+  const revoke = f.db.transaction(async (tx) => {
+    await tx.update(OrganizationTable).set({ metadata: { plan: { tier: "enterprise" }, capabilities: { auditLogs: false } } }).where(eq(OrganizationTable.id, f.org))
+    holding.resolve()
+    await resume.promise
+  })
+  await holding.promise
+  queries.length = 0
+  let mutated = false
+  const pending = assert.rejects(f.db.transaction((tx) => providerAuditMutation(tx, capture, async () => { mutated = true })), /audit_policy_changed/)
+  resume.resolve()
+  await revoke
+  await pending
+  await assert.rejects(recordProviderAttempt(f.db, capture, 500), /audit_policy_changed/)
+  assert.equal(mutated, false)
+  assert.equal(queries.some((query) => /gateway_|audit_state|audit_policy|^\s*(?:insert|update|delete)/i.test(query)), false)
+  assert.equal((await readAuditEntitlement(f.db, f.org)).enabled, true)
+  assert.deepEqual(await f.events(), [])
 })
 
 dbTest("separate actors create concurrently without a before-provider SELECT or missing-PK gap probe", async () => {
@@ -379,7 +560,7 @@ dbTest("fresh plan reads gate provider and system capture without policy or snap
   const environment = await import("../src/env.js")
   Object.assign(environment.env, { planGatingEnabled: false, auditSelfHostedEnabled: false })
   for (const tier of ["free", "team"]) {
-    await f.db.update(OrganizationTable).set({ metadata: { plan: { tier }, auditLogs: true, source: "operator" } }).where(eq(OrganizationTable.id, f.org))
+    await f.db.update(OrganizationTable).set({ metadata: { capabilities: { auditLogs: true }, plan: { tier }, auditLogs: true, source: "operator" } }).where(eq(OrganizationTable.id, f.org))
     queries.length = 0
     for (const context of [f.context(), providerSystemAuditContext(f.org, f.providerId)]) assert.equal(await loadProviderAudit(f.db, true, context, "catalog.refresh"), null)
     assert.equal(queries.some((query) => /audit_policy|gateway_/.test(query)), false)
@@ -387,7 +568,7 @@ dbTest("fresh plan reads gate provider and system capture without policy or snap
   }
   Object.assign(environment.env, { auditSelfHostedEnabled: true })
   try { assert.ok(await loadProviderAudit(f.db, true, f.context(), "update")) } finally { Object.assign(environment.env, { auditSelfHostedEnabled: false }) }
-  await f.db.update(OrganizationTable).set({ metadata: { plan: { tier: "enterprise" } } }).where(eq(OrganizationTable.id, f.org))
+  await f.db.update(OrganizationTable).set({ metadata: { capabilities: { auditLogs: true }, plan: { tier: "enterprise" } } }).where(eq(OrganizationTable.id, f.org))
   assert.ok(await loadProviderAudit(f.db, true, f.context(), "update"))
   await f.db.update(AuditPolicyTable).set({ categories: ["lifecycle"], revision: 2 }).where(eq(AuditPolicyTable.organization_id, f.org))
   assert.equal(await loadProviderAudit(f.db, true, f.context(), "update"), null)
@@ -411,7 +592,7 @@ dbTest("a committed plan downgrade rejects stale capture before snapshot reads o
   const holding = barrier()
   const resume = barrier()
   const downgrade = f.db.transaction(async (tx) => {
-    await tx.update(OrganizationTable).set({ metadata: { plan: { tier: "free" } } }).where(eq(OrganizationTable.id, f.org))
+    await tx.update(OrganizationTable).set({ metadata: { capabilities: { auditLogs: true }, plan: { tier: "free" } } }).where(eq(OrganizationTable.id, f.org))
     holding.resolve()
     await resume.promise
   })
@@ -474,7 +655,7 @@ dbTest("entitlement fence precedes snapshots and holds plan downgrade until capt
   const snapshot = queries.findIndex((query) => /select.*gateway_providers/i.test(query))
   assert.ok(fence >= 0 && snapshot > fence)
   let downgraded = false
-  const downgrade = f.db.update(OrganizationTable).set({ metadata: { plan: { tier: "free" } } }).where(eq(OrganizationTable.id, f.org)).then(() => { downgraded = true })
+  const downgrade = f.db.update(OrganizationTable).set({ metadata: { capabilities: { auditLogs: true }, plan: { tier: "free" } } }).where(eq(OrganizationTable.id, f.org)).then(() => { downgraded = true })
   try { await new Promise((resolve) => setTimeout(resolve, 100)); assert.equal(downgraded, false) } finally { resume.resolve() }
   await pending
   await downgrade

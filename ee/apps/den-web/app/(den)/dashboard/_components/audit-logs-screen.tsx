@@ -19,10 +19,11 @@ import {
 
 export function getAuditAccess(input: {
   orgId: string | null; orgContext: DenOrgContext | null; orgBusy: boolean; orgError: string | null; mutationBusy: string | null;
-}): "checking" | "error" | "locked" | "allowed" {
+}): "checking" | "error" | "unavailable" | "locked" | "allowed" {
   if (input.orgBusy || input.mutationBusy === "switch-organization") return "checking";
   if (input.orgError) return "error";
   if (!input.orgId || !input.orgContext || input.orgId !== input.orgContext.organization.id) return "checking";
+  if (!input.orgContext.capabilities.auditLogs) return "unavailable";
   return getOrgAccessFlags(input.orgContext.currentMember.role, input.orgContext.currentMember.isOwner, input.orgContext.roles).isAdmin ? "allowed" : "locked";
 }
 
@@ -37,6 +38,7 @@ export function AuditLogsScreen() {
   const access = getAuditAccess(dashboard);
   if (access === "error") return <AuditPage><DenNotice tone="error" message="Could not verify workspace access. Try again." /><DenButton variant="secondary" onClick={() => void dashboard.refreshOrgData()}>Retry access check</DenButton></AuditPage>;
   if (access === "checking") return <AuditPage><AuditSkeleton /></AuditPage>;
+  if (access === "unavailable") return <AuditPage><AuditLocked unavailable /></AuditPage>;
   if (access === "locked" || !dashboard.orgContext || !dashboard.orgId) return <AuditPage><AuditLocked /></AuditPage>;
   const member = dashboard.orgContext.currentMember;
   return <AuditLogsContent key={JSON.stringify([dashboard.orgId, member.id, member.userId, member.role, member.isOwner])} scope={{ orgId: dashboard.orgId, memberId: member.id }} members={dashboard.orgContext.members} />;

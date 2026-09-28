@@ -166,9 +166,9 @@ export async function updateAuditCapture(scope: AuditScope, input: AuditCaptureU
 }
 
 export function auditCaptureLockReason(usage: AuditUsageResponse): string | null {
-  if (!usage.policy) return "Ask an instance admin to configure audit storage.";
   if (!usage.entitlement.enabled) return "Capture requires Enterprise or instance entitlement. Ask an organization owner or instance operator to review availability.";
   if (!usage.captureAvailable) return "Capture is unavailable in this deployment. Ask an instance operator to enable capture rollout.";
+  if (!usage.policy) return "Audit defaults could not be verified. Refresh status or ask an instance admin to check the service.";
   return null;
 }
 
@@ -180,7 +180,9 @@ export function useAuditCapture(scope: AuditScope, onAccessError: (error: AuditR
   const client = useQueryClient();
   const dashboard = useOrgDashboard();
   const member = dashboard.orgContext?.currentMember;
+  const auditLogs = dashboard.orgContext?.capabilities.auditLogs === true;
   const allowed = dashboard.orgId === scope.orgId && dashboard.orgContext?.organization.id === scope.orgId
+    && auditLogs
     && member?.id === scope.memberId && getOrgAccessFlags(member.role, member.isOwner).isAdmin
     && !dashboard.orgBusy && !dashboard.orgError && dashboard.mutationBusy !== "switch-organization";
   const sessionRef = useRef<CaptureSession | null>(null);
@@ -191,7 +193,7 @@ export function useAuditCapture(scope: AuditScope, onAccessError: (error: AuditR
     const session: CaptureSession = { active: allowed, busy: false, controller: new AbortController() };
     sessionRef.current = session;
     return () => { session.active = false; session.controller.abort(); };
-  }, [allowed, scope.orgId, scope.memberId, member?.userId, member?.role, member?.isOwner]);
+  }, [allowed, auditLogs, scope.orgId, scope.memberId, member?.userId, member?.role, member?.isOwner]);
 
   const isCurrent = (session: CaptureSession) => session.active && sessionRef.current === session;
   async function refreshStatus(session = sessionRef.current, keepFeedback = false) {

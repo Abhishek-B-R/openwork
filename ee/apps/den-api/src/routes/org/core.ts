@@ -21,6 +21,7 @@ import { jsonValidator, orgMemberRoute, orgRoleRoute, publicRoute, queryValidato
 import { denTypeIdSchema, enterprisePlanRequiredSchema, forbiddenSchema, invalidRequestSchema, jsonResponse, notFoundSchema, unauthorizedSchema } from "../../openapi.js"
 import { validateInvitationAcceptVerification } from "../../organization-join-verification.js"
 import { normalizeOrganizationMetadata } from "../../organization-limits.js"
+import { organizationHasCapability } from "../../organization-capabilities.js"
 import { isOpenWorkWebAvailableForOrganization } from "../../openwork-web-availability.js"
 import { getOpenWorkWebAccess } from "../../stripe-billing.js"
 import {
@@ -172,6 +173,7 @@ const organizationContextResponseSchema = z.object({
   currentMember: z.object({}).passthrough(),
   currentMemberTeams: z.array(z.object({}).passthrough()),
   capabilities: z.object({
+    auditLogs: z.boolean(),
     gatewayDashboard: z.literal(true).meta({
       deprecated: true,
       description: "Compatibility field, always true. AI Gateway is available to every organization; deployment configuration and authorization still apply.",
@@ -717,6 +719,7 @@ export function registerOrgCoreRoutes<T extends { Variables: OrgRouteVariables }
         plan: parseOrganizationPlan(currentOrganization.metadata),
         entitlements: getOrganizationEntitlements(currentOrganization.metadata),
         capabilities: {
+          auditLogs: organizationHasCapability(currentOrganization.metadata, "auditLogs") && env.auditVisibilityEnabled,
           gatewayDashboard: true,
           // Protocol capability: clients must see this explicit signal before
           // calling the dashboard routes. Older Den versions omit the field,

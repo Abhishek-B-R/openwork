@@ -83,6 +83,24 @@ test("GET /v1/org exposes fresh audit entitlement, not cached metadata or single
   databaseMetadata = undefined
 })
 
+test("GET /v1/org uses fresh literal audit flag AND visibility, separately from entitlement", async () => {
+  for (const visibility of [false, true]) for (const auditLogs of [undefined, false, null, "true", true]) {
+    env.auditVisibilityEnabled = visibility
+    metadata = { capabilities: { auditLogs: auditLogs !== true } }
+    databaseMetadata = { plan: { tier: "enterprise" }, capabilities: { auditLogs } }
+    const response = await app.request("/v1/org")
+    expect(response.status).toBe(200)
+    const payload = await response.json()
+    expect(payload.capabilities.auditLogs).toBe(visibility && auditLogs === true)
+    expect(payload.entitlements.auditLogs).toBe(true)
+  }
+  databaseMetadata = { plan: { tier: "free" }, capabilities: { auditLogs: true } }
+  const payload = await (await app.request("/v1/org")).json()
+  expect(payload.capabilities.auditLogs).toBe(true)
+  expect(payload.entitlements.auditLogs).toBe(false)
+  databaseMetadata = undefined
+})
+
 test("unauthenticated callers do not receive deployment capabilities", async () => {
   authenticated = false
   const response = await app.request("/v1/org")

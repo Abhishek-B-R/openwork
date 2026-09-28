@@ -15,6 +15,7 @@ import { auditReadCoveredRoutes, supportedAuditEventTypes } from "../src/audit/c
 import { auditCsv } from "../src/audit/exports.js"
 import { AuditReadError, AUDIT_CURSOR_TTL_MS, auditFilterHash, readAuditCursor, signAuditCursor } from "../src/audit/cursors.js"
 import { auditExportQuerySchema, auditOperationsQuerySchema, listAuditEvents, listAuditExportEvents, listAuditOperations, readAuditUsage } from "../src/audit/queries.js"
+import { initializeAuditPilot, validatePilotConfig } from "../src/audit/pilot-policy.js"
 import type { OrgRouteVariables } from "../src/routes/org/shared.js"
 import type { DenApiKeySession } from "../src/api-keys.js"
 
@@ -52,7 +53,7 @@ async function fixture(role = "owner") {
   const memberId = createDenTypeId("member")
   const sessionId = createDenTypeId("session")
   await db.insert(AuthUserTable).values({ id: userId, name: "Synthetic operator", email: `${userId}@example.test`, emailVerified: true })
-  await db.insert(OrganizationTable).values({ id: org, name: "Synthetic audit test", slug: `synthetic-${org}`, metadata: { plan: { tier: "enterprise", source: "manual" } } })
+  await db.insert(OrganizationTable).values({ id: org, name: "Synthetic audit test", slug: `synthetic-${org}`, metadata: { capabilities: { auditLogs: true }, plan: { tier: "enterprise", source: "manual" } } })
   await db.insert(MemberTable).values({ id: memberId, organizationId: org, userId, role })
   await db.insert(AuthSessionTable).values({ id: sessionId, userId, token: `synthetic-session-${sessionId}`, activeOrganizationId: org, expiresAt: new Date(Date.now() + 600000) })
   await db.insert(AuditPolicyTable).values({ organization_id: org, revision: 1, source: "operator", enabled: true, categories: ["change"], allowance: 100, excess_mode: "keep_all", effective_at: new Date("2026-01-01T00:00:00Z"), attachment_window_seconds: 300 })
@@ -81,6 +82,83 @@ async function fixture(role = "owner") {
   const toggle = (captureOn: boolean, expectedRevision: number, extra: Record<string, unknown> = {}) => app().request("/v1/audit/settings", { method: "PATCH", headers: { "content-type": "application/json", "x-openwork-org-id": org }, body: JSON.stringify({ captureOn, expectedRevision, ...extra }) })
   return { db, org, userId, memberId, session, context, event, policy, append, app, request, toggle, events, query: { database: db, organizationId: org, secret } }
 }
+
+dbTest("unflagged Enterprise and self-hosted orgs deny every read/export/catalog/settings before snapshots or writes", async () => {
+  const f = await fixture()
+  const operation = await f.append()
+  const original = await f.events()
+  const originalPolicy = await readAuditPolicy(f.db, f.org)
+  for (const selfHosted of [false, true]) for (const auditLogs of [undefined, false, null, "true", 1]) {
+    environment.env.auditSelfHostedEnabled = selfHosted
+    await f.db.update(OrganizationTable).set({ metadata: { plan: { tier: selfHosted ? "free" : "enterprise" }, capabilities: { auditLogs } } }).where(eq(OrganizationTable.id, f.org))
+    try {
+      for (const path of ["/v1/audit/operations", `/v1/audit/operations/${operation.operationId}/events`, "/v1/audit/export", "/v1/audit/export?format=csv", "/v1/audit/usage", "/v1/audit/event-types"]) {
+        const response = await f.request(path)
+        assert.equal(response.status, 403, path)
+        assert.deepEqual(await response.json(), { error: "audit_feature_disabled" })
+      }
+      for (const captureOn of [false, true]) {
+        const response = await f.toggle(captureOn, 1)
+        assert.equal(response.status, 403)
+        assert.deepEqual(await response.json(), { error: "audit_feature_disabled" })
+      }
+      queries.length = 0
+      for (const read of [
+        () => listAuditOperations(f.query, { limit: 1 }),
+        () => listAuditEvents(f.query, { limit: 1 }, operation.operationId),
+        () => listAuditExportEvents(f.query, { limit: 1, format: "ndjson" }),
+        () => readAuditUsage(f.query, true),
+      ]) await assert.rejects(read(), code("audit_feature_disabled"))
+      assert.equal(queries.some((query) => /audit_(?:state|policy|operation|event)|^\s*(?:insert|update|delete)/i.test(query)), false)
+    } finally { environment.env.auditSelfHostedEnabled = false }
+  }
+  assert.deepEqual(await f.events(), original)
+  assert.deepEqual(await readAuditPolicy(f.db, f.org), originalPolicy)
+})
+
+dbTest("flag disable hides retained history and re-enable preserves both ON and explicit OFF preferences", async () => {
+  const f = await fixture()
+  await f.append()
+  for (const captureOn of [true, false]) {
+    if (!captureOn) assert.equal((await f.toggle(false, 1)).status, 200)
+    const policy = await readAuditPolicy(f.db, f.org)
+    const events = await f.events()
+    await f.db.update(OrganizationTable).set({ metadata: { plan: { tier: "enterprise" }, capabilities: { auditLogs: false } } }).where(eq(OrganizationTable.id, f.org))
+    assert.equal((await f.request("/v1/audit/operations")).status, 403)
+    await f.db.update(OrganizationTable).set({ metadata: { plan: { tier: "enterprise" }, capabilities: { auditLogs: true } } }).where(eq(OrganizationTable.id, f.org))
+    const response = await f.request("/v1/audit/usage")
+    const usage = auditUsageResponseSchema.parse(await response.json())
+    assert.equal(usage.captureOn, captureOn)
+    assert.equal(usage.captureEnabled, captureOn)
+    assert.equal(usage.captureAvailable, true)
+    assert.deepEqual(await readAuditPolicy(f.db, f.org), policy)
+    assert.deepEqual(await f.events(), events)
+    assert.equal((await f.request("/v1/audit/operations")).status, 200)
+  }
+})
+
+dbTest("query waits for in-flight flag revocation and rejects before acquiring an audit snapshot", async () => {
+  const f = await fixture()
+  await f.append()
+  let release = () => {}
+  let holding = () => {}
+  const held = new Promise<void>((resolve) => { holding = resolve })
+  const resume = new Promise<void>((resolve) => { release = resolve })
+  const revoke = f.db.transaction(async (tx) => {
+    await tx.update(OrganizationTable).set({ metadata: { plan: { tier: "enterprise" }, capabilities: { auditLogs: false } } }).where(eq(OrganizationTable.id, f.org))
+    holding()
+    await resume
+  })
+  await held
+  queries.length = 0
+  let finished = false
+  const denied = assert.rejects(listAuditOperations(f.query, { limit: 1 }).finally(() => { finished = true }), code("audit_feature_disabled"))
+  try { await delay(100); assert.equal(finished, false) } finally { release() }
+  await revoke
+  await denied
+  assert.ok(queries.some((query) => /organization.*for share/i.test(query)))
+  assert.equal(queries.some((query) => /audit_(?:state|policy|operation|event)/i.test(query)), false)
+})
 
 dbTest("operation pages are tenant scoped, bounded projections with stable ties and first-event summaries", async () => {
   const f = await fixture()
@@ -419,7 +497,7 @@ dbTest("usage reads stored counters and oldest operation; disabling capture does
   assert.ok(!queries.some((query) => /count\(|sum\(/i.test(query)))
   assert.equal((await listAuditEvents(f.query, { limit: 50 }, first.operationId)).events.length, 2)
   const emptyOrg = createDenTypeId("organization")
-  await f.db.insert(OrganizationTable).values({ id: emptyOrg, name: "Synthetic empty", slug: `synthetic-${emptyOrg}` })
+  await f.db.insert(OrganizationTable).values({ id: emptyOrg, name: "Synthetic empty", slug: `synthetic-${emptyOrg}`, metadata: { capabilities: { auditLogs: true } } })
   const empty = await readAuditUsage({ database: f.db, organizationId: emptyOrg }, true)
   assert.equal(empty.retainedOperations, 0)
   assert.equal(empty.policy, null)
@@ -453,6 +531,9 @@ dbTest("event catalog includes hidden actions with empty history and is independ
   await f.db.update(AuditPolicyTable).set({ enabled: false }).where(eq(AuditPolicyTable.organization_id, f.org))
   await check()
   await f.db.delete(AuditPolicyTable).where(eq(AuditPolicyTable.organization_id, f.org))
+  // Missing policy is passive only when not ready for initialization. A missing
+  // policy alongside canonical retained state is intentionally inconsistent.
+  await f.db.update(OrganizationTable).set({ metadata: { capabilities: { auditLogs: true }, plan: { tier: "free" } } }).where(eq(OrganizationTable.id, f.org))
   await check()
   for (const query of ["limit=1", "cursor=bad", "from=2026-01-01", "action=provider.updated", "searchId=missing", "resourceId=missing", "searchId=a&searchId=b"]) assert.equal((await f.request(`/v1/audit/event-types?${query}`)).status, 400, query)
 })
@@ -624,7 +705,7 @@ dbTest("failed intent or served persistence releases no content and preserves on
   assert.equal((await blocked.events()).length, 0)
 })
 
-dbTest("visibility alone gates reads; capture flag, absent/disabled policy and excluded categories preserve access", async () => {
+dbTest("visibility gates flagged reads; capture flag, unentitled absent/disabled policy and excluded categories preserve access", async () => {
   const f = await fixture()
   const event = await f.append()
   Object.assign(environment.env, { auditVisibilityEnabled: false })
@@ -646,6 +727,7 @@ dbTest("visibility alone gates reads; capture flag, absent/disabled policy and e
   await f.db.update(AuditPolicyTable).set({ enabled: false }).where(eq(AuditPolicyTable.organization_id, f.org))
   assert.equal((await f.request("/v1/audit/operations")).status, 200)
   await f.db.delete(AuditPolicyTable).where(eq(AuditPolicyTable.organization_id, f.org))
+  await f.db.update(OrganizationTable).set({ metadata: { capabilities: { auditLogs: true }, plan: { tier: "free" } } }).where(eq(OrganizationTable.id, f.org))
   assert.equal((await f.request("/v1/audit/operations")).status, 200)
   assert.equal((await f.events()).length, 1)
 })
@@ -656,7 +738,7 @@ dbTest("capture entitlement matrix ignores legacy gating and tenant-writable cla
   try {
     for (const tier of ["enterprise", "team", "free"]) for (const selfHosted of [false, true]) for (const gating of [false, true]) {
       const f = await fixture()
-      const metadata = { plan: { tier, source: "manual" }, auditLogs: true, audit: { enabled: true }, entitlements: { auditLogs: true } }
+      const metadata = { capabilities: { auditLogs: true }, plan: { tier, source: "manual" }, auditLogs: true, audit: { enabled: true }, entitlements: { auditLogs: true } }
       Object.assign(environment.env, { auditSelfHostedEnabled: selfHosted, planGatingEnabled: gating })
       await f.db.update(OrganizationTable).set({ metadata }).where(eq(OrganizationTable.id, f.org))
       await f.db.update(AuditPolicyTable).set({ enabled: false }).where(eq(AuditPolicyTable.organization_id, f.org))
@@ -724,28 +806,144 @@ dbTest("on-off-on keeps retained history, first capture time and operator settin
   assert.equal(state.retained_operations, new Set(events.map((event) => event.operationId)).size)
 })
 
-dbTest("missing operator policy never fabricates allowance and OFF revision zero is a no-op", async () => {
+dbTest("direct revision-zero settings initialize ON or atomically apply explicit OFF, then retain optimistic concurrency", async () => {
+  for (const captureOn of [true, false]) {
+    const f = await fixture()
+    await f.db.delete(AuditPolicyTable).where(eq(AuditPolicyTable.organization_id, f.org))
+    assert.equal((await f.toggle(captureOn, 1)).status, 409)
+    assert.equal(await readAuditPolicy(f.db, f.org), null)
+    assert.deepEqual(await f.db.select().from(AuditStateTable).where(eq(AuditStateTable.organization_id, f.org)), [])
+    const response = await f.toggle(captureOn, 0)
+    assert.equal(response.status, 200)
+    const usage = auditUsageResponseSchema.parse(await response.json())
+    assert.equal(usage.captureOn, captureOn)
+    assert.equal(usage.captureEnabled, captureOn)
+    assert.equal(usage.policy?.allowance, 6_000_000)
+    assert.equal(usage.policy.revision, captureOn ? 1 : 2)
+    const events = await f.events()
+    assert.deepEqual(events.map((event) => event.action), captureOn ? ["audit.policy.initialized"] : ["audit.policy.initialized", "audit.capture.disabled"])
+    assert.deepEqual(events[0].actor, { type: "system", id: "den-api.audit-defaults" })
+    if (!captureOn) assert.deepEqual(events[1].actor, { type: "user", id: f.userId, memberId: f.memberId })
+    assert.equal((await f.toggle(captureOn, 0)).status, 409)
+    assert.equal((await f.toggle(captureOn, usage.policy.revision)).status, 200)
+    assert.deepEqual(await f.events(), events)
+    if (!captureOn) {
+      const refreshed = auditUsageResponseSchema.parse(await (await f.request("/v1/audit/usage")).json())
+      assert.equal(refreshed.captureOn, false)
+      assert.deepEqual(await f.events(), events)
+    }
+  }
+})
+
+dbTest("GET usage lazily provisions only ready orgs, with exact server defaults despite forged metadata", async () => {
+  for (const selfHosted of [false, true]) {
+    const f = await fixture()
+    await f.db.delete(AuditPolicyTable).where(eq(AuditPolicyTable.organization_id, f.org))
+    await f.db.update(OrganizationTable).set({ metadata: {
+      capabilities: { auditLogs: true }, plan: { tier: selfHosted ? "free" : "enterprise" },
+      allowance: 1, source: "operator", excessMode: "paid_overage", audit: { allowance: 999999999, attachmentWindowSeconds: 86400, categories: ["read"] },
+    } }).where(eq(OrganizationTable.id, f.org))
+    environment.env.auditSelfHostedEnabled = selfHosted
+    try {
+      const response = await f.request("/v1/audit/usage")
+      assert.equal(response.status, 200)
+      const usage = auditUsageResponseSchema.parse(await response.json())
+      assert.equal(usage.captureOn, true)
+      assert.equal(usage.captureEnabled, true)
+      assert.equal(usage.captureAvailable, true)
+      assert.equal(usage.policy?.source, selfHosted ? "operator" : "cloud")
+      assert.equal(usage.policy?.excessMode, selfHosted ? "keep_all" : "delete_oldest")
+      assert.equal(usage.policy?.allowance, 6_000_000)
+      assert.equal(usage.policy?.attachmentWindowSeconds, 300)
+      assert.deepEqual(usage.policy?.categories, ["change", "security", "execution", "access", "request", "lifecycle"])
+      assert.equal(usage.policy?.revision, 1)
+      assert.equal(usage.retainedOperations, 2)
+      assert.equal(usage.eventCount, 2) // served event commits after this response snapshot
+      const events = await f.events()
+      assert.deepEqual(events.map((event) => event.action), ["audit.policy.initialized", "audit.usage.requested", "audit.usage.served"])
+      assert.equal(usage.policy?.captureStartedAt, events[0].recordedAt)
+      assert.equal(usage.oldestAvailableAt, events[0].recordedAt)
+      const refreshed = await readAuditUsage(f.query, true)
+      assert.equal(refreshed.retainedOperations, 2)
+      assert.equal(refreshed.eventCount, 3)
+      assert.deepEqual(refreshed.policy, usage.policy)
+      assert.deepEqual(await f.events(), events)
+      await assert.rejects(initializeAuditPilot(f.db, validatePilotConfig({ organizationId: f.org, source: "cloud", allowance: 1, excessMode: "delete_oldest", attachmentWindowSeconds: 1 }), true), /audit_pilot_policy_exists/)
+      assert.deepEqual(await f.events(), events)
+    } finally { environment.env.auditSelfHostedEnabled = false }
+  }
+})
+
+dbTest("direct usage first-read races return coherent initialized policy, counters and oldest timestamp", async () => {
   const f = await fixture()
   await f.db.delete(AuditPolicyTable).where(eq(AuditPolicyTable.organization_id, f.org))
-  const response = await f.toggle(true, 0)
-  assert.equal(response.status, 409)
-  assert.deepEqual(await response.json(), { error: "audit_policy_not_configured" })
-  assert.equal((await f.toggle(false, 1)).status, 409)
-  const off = await f.toggle(false, 0)
-  assert.equal(off.status, 200)
-  const usage = auditUsageResponseSchema.parse(await off.json())
-  assert.equal(usage.policy, null)
-  assert.equal(usage.captureOn, false)
-  assert.equal(usage.entitlement.enabled, true)
-  assert.equal((await f.events()).length, 0)
-  assert.deepEqual(await f.db.select().from(AuditStateTable).where(eq(AuditStateTable.organization_id, f.org)), [])
+  const responses = await Promise.all(Array.from({ length: 12 }, () => readAuditUsage(f.query, true)))
+  for (const usage of responses) {
+    assert.equal(usage.captureEnabled, true)
+    assert.equal(usage.retainedOperations, 1)
+    assert.equal(usage.eventCount, 1)
+    assert.ok(usage.oldestAvailableAt)
+    assert.deepEqual(usage, responses[0])
+  }
+  assert.equal((await f.events()).length, 1)
+})
+
+dbTest("concurrent revision-zero ON and OFF have one winner and the loser refreshes without duplicate initialization", async () => {
+  const f = await fixture()
+  await f.db.delete(AuditPolicyTable).where(eq(AuditPolicyTable.organization_id, f.org))
+  const responses = await Promise.all([f.toggle(true, 0), f.toggle(false, 0)])
+  assert.deepEqual(responses.map((response) => response.status).sort(), [200, 409])
+  const policy = await readAuditPolicy(f.db, f.org)
+  assert.equal(policy?.enabled, responses[0].status === 200)
+  assert.equal((await f.events()).filter((event) => event.action === "audit.policy.initialized").length, 1)
+  assert.deepEqual((await f.events()).map((event) => event.action), policy?.enabled ? ["audit.policy.initialized"] : ["audit.policy.initialized", "audit.capture.disabled"])
+})
+
+dbTest("free/team or capture-unavailable usage creates neither policy nor state; OFF zero stays a no-op", async () => {
+  for (const scenario of [{ tier: "free", capture: true }, { tier: "team", capture: true }, { tier: "enterprise", capture: false }]) {
+    const f = await fixture()
+    await f.db.delete(AuditPolicyTable).where(eq(AuditPolicyTable.organization_id, f.org))
+    await f.db.update(OrganizationTable).set({ metadata: { capabilities: { auditLogs: true }, plan: { tier: scenario.tier } } }).where(eq(OrganizationTable.id, f.org))
+    environment.env.auditCaptureEnabled = scenario.capture
+    try {
+      for (const response of [await f.request("/v1/audit/usage"), await f.toggle(false, 0)]) {
+        assert.equal(response.status, 200)
+        const usage = auditUsageResponseSchema.parse(await response.json())
+        assert.equal(usage.policy, null)
+        assert.equal(usage.captureOn, false)
+        assert.equal(usage.captureEnabled, false)
+      }
+      assert.equal((await f.toggle(true, 0)).status, scenario.capture ? 402 : 409)
+      assert.equal(await readAuditPolicy(f.db, f.org), null)
+      assert.deepEqual(await f.db.select().from(AuditStateTable).where(eq(AuditStateTable.organization_id, f.org)), [])
+      assert.deepEqual(await f.events(), [])
+    } finally { environment.env.auditCaptureEnabled = true }
+  }
+})
+
+dbTest("custom policy and captureStartedAt survive lazy reads, plan upgrades and flag cycles without forced restoration", async () => {
+  const f = await fixture()
+  await f.append()
+  await f.db.update(AuditPolicyTable).set({ allowance: 42, attachment_window_seconds: 17, categories: ["change"], excess_mode: "delete_oldest" }).where(eq(AuditPolicyTable.organization_id, f.org))
+  assert.equal((await f.toggle(false, 1)).status, 200)
+  const original = await readAuditPolicy(f.db, f.org)
+  const events = await f.events()
+  for (const tier of ["free", "enterprise"]) {
+    await f.db.update(OrganizationTable).set({ metadata: { capabilities: { auditLogs: false }, plan: { tier } } }).where(eq(OrganizationTable.id, f.org))
+    assert.equal((await f.request("/v1/audit/usage")).status, 403)
+    await f.db.update(OrganizationTable).set({ metadata: { capabilities: { auditLogs: true }, plan: { tier } } }).where(eq(OrganizationTable.id, f.org))
+    const usage = auditUsageResponseSchema.parse(await (await f.request("/v1/audit/usage")).json())
+    assert.equal(usage.captureOn, false)
+    assert.deepEqual(usage.policy, original)
+    assert.deepEqual(await f.events(), events)
+  }
 })
 
 dbTest("revoked plans and unavailable rollout cannot enable but can disable without hiding history", async () => {
   const f = await fixture()
   const retained = await f.append()
   await f.db.update(AuditPolicyTable).set({ categories: ["access"] }).where(eq(AuditPolicyTable.organization_id, f.org))
-  await f.db.update(OrganizationTable).set({ metadata: { plan: { tier: "team" } } }).where(eq(OrganizationTable.id, f.org))
+  await f.db.update(OrganizationTable).set({ metadata: { capabilities: { auditLogs: true }, plan: { tier: "team" } } }).where(eq(OrganizationTable.id, f.org))
   const revoked = auditUsageResponseSchema.parse(await (await f.request("/v1/audit/usage")).json())
   assert.deepEqual(revoked.entitlement, { enabled: false, source: "none" })
   assert.equal(revoked.captureOn, true)
@@ -757,7 +955,7 @@ dbTest("revoked plans and unavailable rollout cannot enable but can disable with
   Object.assign(environment.env, { auditCaptureEnabled: false })
   try {
     assert.equal((await f.toggle(false, 1)).status, 200)
-    await f.db.update(OrganizationTable).set({ metadata: { plan: { tier: "enterprise" } } }).where(eq(OrganizationTable.id, f.org))
+    await f.db.update(OrganizationTable).set({ metadata: { capabilities: { auditLogs: true }, plan: { tier: "enterprise" } } }).where(eq(OrganizationTable.id, f.org))
     const unavailable = await f.toggle(true, 2)
     assert.equal(unavailable.status, 409)
     assert.deepEqual(await unavailable.json(), { error: "audit_capture_unavailable" })
@@ -828,6 +1026,19 @@ dbTest("required control event insert failure rolls back policy, counters and op
     assert.deepEqual(await f.db.select().from(AuditStateTable).where(eq(AuditStateTable.organization_id, f.org)), [])
     assert.deepEqual(await f.db.select().from(AuditOperationTable).where(eq(AuditOperationTable.organization_id, f.org)), [])
   } finally { await f.db.execute(sql.raw("DROP TRIGGER audit_api_test_fail_capture")) }
+})
+
+dbTest("first explicit OFF cannot leave a committed ON default when its control evidence fails", async () => {
+  const f = await fixture()
+  await f.db.delete(AuditPolicyTable).where(eq(AuditPolicyTable.organization_id, f.org))
+  await f.db.execute(sql.raw("CREATE TRIGGER audit_api_test_fail_initial_off BEFORE INSERT ON audit_event FOR EACH ROW BEGIN IF NEW.action = 'audit.capture.disabled' THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'synthetic-insert-failure'; END IF; END"))
+  try {
+    assert.equal((await f.toggle(false, 0)).status, 503)
+    assert.equal(await readAuditPolicy(f.db, f.org), null)
+    assert.deepEqual(await f.events(), [])
+    assert.deepEqual(await f.db.select().from(AuditStateTable).where(eq(AuditStateTable.organization_id, f.org)), [])
+    assert.deepEqual(await f.db.select().from(AuditOperationTable).where(eq(AuditOperationTable.organization_id, f.org)), [])
+  } finally { await f.db.execute(sql.raw("DROP TRIGGER audit_api_test_fail_initial_off")) }
 })
 
 dbTest("concurrent desired-state toggles reject a stale revision rather than silently losing updates", async () => {

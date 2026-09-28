@@ -70,7 +70,7 @@ async function fixture(role = "owner", policy = true, sharedOrganizationId?: typ
   const memberId = createDenTypeId("member")
   const sessionId = createDenTypeId("session")
   await db.insert(AuthUserTable).values({ id: userId, name: "Synthetic operator", email: `${userId}@example.test`, emailVerified: true })
-  if (!sharedOrganizationId) await db.insert(OrganizationTable).values({ id: orgId, name: "Synthetic audit organization", slug: `synthetic-${orgId}`, metadata: { plan: { tier: "enterprise", source: "manual" } } })
+  if (!sharedOrganizationId) await db.insert(OrganizationTable).values({ id: orgId, name: "Synthetic audit organization", slug: `synthetic-${orgId}`, metadata: { capabilities: { auditLogs: true }, plan: { tier: "enterprise", source: "manual" } } })
   await db.insert(MemberTable).values({ id: memberId, organizationId: orgId, userId, role })
   await db.insert(AuthSessionTable).values({ id: sessionId, userId, token: `synthetic-session-${sessionId}`, activeOrganizationId: orgId, expiresAt: new Date(Date.now() + 600000) })
   if (policy && !sharedOrganizationId) await db.insert(AuditPolicyTable).values({ organization_id: orgId, revision: 1, source: "operator", enabled: true, categories: ["change", "request", "execution", "security"], allowance: 100, excess_mode: "keep_all", attachment_window_seconds: 300, effective_at: new Date("2026-01-01T00:00:00Z") })
@@ -391,7 +391,7 @@ dbTest("actual management denial and validation failure emit safe attempts outsi
   assert.equal(JSON.stringify(failures).includes("do-not-log-invalid-request"), false)
 })
 
-dbTest("flag false and absent policy preserve real provider create/patch/delete APIs", async () => {
+dbTest("capture flag false preserves provider APIs; ready absent policy starts capture on the first real mutation", async () => {
   Object.assign(environment.env, { auditCaptureEnabled: false })
   try {
     const f = await fixture()
@@ -402,8 +402,27 @@ dbTest("flag false and absent policy preserve real provider create/patch/delete 
   } finally { Object.assign(environment.env, { auditCaptureEnabled: true }) }
   const f = await fixture("owner", false)
   const { id } = await f.create()
+  assert.equal((await f.request("PATCH", `/v1/inference-providers/${id}`, { name: "Automatically captured" })).status, 200)
   assert.equal((await f.request("DELETE", `/v1/inference-providers/${id}`)).status, 204)
-  assert.equal((await f.events()).length, 0)
+  const events = await f.events()
+  assert.equal(events[0].action, "audit.policy.initialized")
+  assert.equal(events.filter((event) => event.action === "audit.policy.initialized").length, 1)
+  assert.deepEqual(events[0].actor, { type: "system", id: "den-api.audit-defaults" })
+  for (const action of ["provider.created", "provider.updated", "provider.deleted"]) assert.ok(events.some((event) => event.action === action), action)
+  const [policy] = await f.db.select().from(AuditPolicyTable).where(eq(AuditPolicyTable.organization_id, f.orgId))
+  assert.equal(policy.allowance, 6_000_000)
+  assert.equal(policy.enabled, true)
+})
+
+dbTest("two authenticated first requests provision once and both real provider creations are captured", async () => {
+  const first = await fixture("owner", false)
+  const second = await fixture("admin", false, first.orgId)
+  await Promise.all([first.create(), second.create()])
+  const events = await first.events()
+  assert.equal(events.filter((event) => event.action === "audit.policy.initialized").length, 1)
+  assert.equal(events.filter((event) => event.action === "provider.created").length, 2)
+  assert.equal(new Set(events.map((event) => event.operationId)).size, 3)
+  assert.equal((await first.db.select().from(AuditUsageFactTable).where(eq(AuditUsageFactTable.organization_id, first.orgId))).length, 3)
 })
 
 dbTest("read-triggered refresh records SYSTEM independently and propagates audit failure, never a warning", async () => {

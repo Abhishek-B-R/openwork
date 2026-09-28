@@ -30,8 +30,9 @@ export function operationsPage(operations = [auditOperation], nextCursor: string
 export function eventsPage(events = [auditEvent], nextCursor: string | null = null) {
   return { events, nextCursor, snapshotSequence: 10 };
 }
-export function auditDashboard(orgId = "org-a", role = "owner"): ReturnType<typeof useOrgDashboard> {
+export function auditDashboard(orgId = "org-a", role = "owner", auditLogs = true): ReturnType<typeof useOrgDashboard> {
   const orgContext = parseOrgContextPayload({
+    capabilities: { auditLogs },
     organization: { id: orgId, name: "Test workspace", slug: orgId },
     currentMember: { id: `member-${orgId}`, userId: "user-a", role, isOwner: role === "owner" },
     members: [{ id: "member-a", userId: "user-a", role: "owner", user: { id: "user-a", name: "Test owner", email: "owner@example.test" } }],

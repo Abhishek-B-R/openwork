@@ -73,6 +73,7 @@ export type AdminOrganizationsPageResponse = {
       installLinks: boolean;
       mcpConnections: boolean;
       modelsAnalytics: boolean;
+      auditLogs: boolean;
       /**
        * Compatibility field, always true. AI Gateway is available to every organization; deployment configuration and authorization still apply.
        *
@@ -145,6 +146,7 @@ export type AdminOverviewResponse = {
       installLinks: boolean;
       mcpConnections: boolean;
       modelsAnalytics: boolean;
+      auditLogs: boolean;
       /**
        * Compatibility field, always true. AI Gateway is available to every organization; deployment configuration and authorization still apply.
        *
@@ -684,6 +686,7 @@ export type OrganizationContextResponse = {
     [key: string]: unknown;
   }>;
   capabilities: {
+    auditLogs: boolean;
     /**
      * Compatibility field, always true. AI Gateway is available to every organization; deployment configuration and authorization still apply.
      *
@@ -1257,7 +1260,7 @@ export type CreateInstallLinkResponse = {
 
 export type CapabilityDisabledError = {
   error: "capability_disabled";
-  capability: "installLinks" | "mcpConnections" | "modelsAnalytics";
+  capability: "installLinks" | "mcpConnections" | "modelsAnalytics" | "auditLogs";
 };
 
 export type CreateInstallLinkRequest = {
@@ -5122,6 +5125,7 @@ export type GetV1AdminOrganizationsByOrganizationIdCapabilitiesResponses = {
       installLinks: boolean;
       mcpConnections: boolean;
       modelsAnalytics: boolean;
+      auditLogs: boolean;
       /**
        * Compatibility field, always true. AI Gateway is available to every organization; deployment configuration and authorization still apply.
        *
@@ -5182,6 +5186,7 @@ export type PutV1AdminOrganizationsByOrganizationIdCapabilitiesResponses = {
       installLinks: boolean;
       mcpConnections: boolean;
       modelsAnalytics: boolean;
+      auditLogs: boolean;
       /**
        * Compatibility field, always true. AI Gateway is available to every organization; deployment configuration and authorization still apply.
        *
@@ -7614,12 +7619,12 @@ export type UpdateAuditCaptureErrors = {
    */
   402: EnterprisePlanRequiredError;
   /**
-   * Administrator permission, fresh authentication and visibility required.
+   * Administrator permission, fresh authentication, audit feature and visibility required.
    */
   403:
     | ForbiddenError
     | {
-        error: "audit_visibility_disabled";
+        error: "audit_feature_disabled" | "audit_visibility_disabled";
       };
   /**
    * Organization or retained operation not found, including foreign-tenant targets.
@@ -7628,7 +7633,7 @@ export type UpdateAuditCaptureErrors = {
     error: "organization_not_found" | "audit_operation_not_found";
   };
   /**
-   * Refresh a changed policy, request operator initialization or wait for capture rollout.
+   * Refresh a changed policy or wait for capture rollout.
    */
   409: {
     error: "audit_policy_changed" | "audit_policy_not_configured" | "audit_capture_unavailable";
@@ -7705,10 +7710,10 @@ export type GetAuditEventTypesErrors = {
    */
   401: UnauthorizedError;
   /**
-   * Organization administrator permission and audit visibility required.
+   * Organization administrator permission, audit feature and visibility required.
    */
   403: {
-    error: "forbidden" | "audit_visibility_disabled";
+    error: "forbidden" | "audit_feature_disabled" | "audit_visibility_disabled";
     message?: string;
   };
   /**
@@ -7808,10 +7813,10 @@ export type GetAuditOperationsErrors = {
    */
   401: UnauthorizedError;
   /**
-   * Organization administrator permission and audit visibility required.
+   * Organization administrator permission, audit feature and visibility required.
    */
   403: {
-    error: "forbidden" | "audit_visibility_disabled";
+    error: "forbidden" | "audit_feature_disabled" | "audit_visibility_disabled";
     message?: string;
   };
   /**
@@ -7902,10 +7907,10 @@ export type GetAuditOperationEventsErrors = {
    */
   401: UnauthorizedError;
   /**
-   * Organization administrator permission and audit visibility required.
+   * Organization administrator permission, audit feature and visibility required.
    */
   403: {
-    error: "forbidden" | "audit_visibility_disabled";
+    error: "forbidden" | "audit_feature_disabled" | "audit_visibility_disabled";
     message?: string;
   };
   /**
@@ -8012,10 +8017,10 @@ export type GetAuditUsageErrors = {
    */
   401: UnauthorizedError;
   /**
-   * Organization administrator permission and audit visibility required.
+   * Organization administrator permission, audit feature and visibility required.
    */
   403: {
-    error: "forbidden" | "audit_visibility_disabled";
+    error: "forbidden" | "audit_feature_disabled" | "audit_visibility_disabled";
     message?: string;
   };
   /**
@@ -8142,10 +8147,10 @@ export type GetAuditExportErrors = {
    */
   401: UnauthorizedError;
   /**
-   * Organization administrator permission and audit visibility required.
+   * Organization administrator permission, audit feature and visibility required.
    */
   403: {
-    error: "forbidden" | "audit_visibility_disabled";
+    error: "forbidden" | "audit_feature_disabled" | "audit_visibility_disabled";
     message?: string;
   };
   /**

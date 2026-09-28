@@ -5,7 +5,7 @@ import ts from "typescript"
 import { providerAuditRegistry, providerAuditStep } from "../src/audit/provider.js"
 import { diffProviderSnapshots, type ProviderAuditSnapshot } from "../src/audit/provider-serializers.js"
 import { auditEventTypesResponseSchema, type AuditEventTypesResponse } from "@openwork/types/den/audit"
-import { auditCaptureCoverage, auditExclusions, auditReadCoverage, supportedAuditEventTypes, auditReadCoveredRoutes, auditRolloutStatus, orgAuditCoverage, otherAuditSurfaces, pilotPolicyCoverage, providerBackgroundSteps, providerCoverage, providerCoveredResources, providerCoveredRoutes, providerUncoveredRoutes } from "../src/audit/coverage.js"
+import { auditCaptureCoverage, defaultPolicyCoverage, auditExclusions, auditReadCoverage, supportedAuditEventTypes, auditReadCoveredRoutes, auditRolloutStatus, orgAuditCoverage, otherAuditSurfaces, pilotPolicyCoverage, providerBackgroundSteps, providerCoverage, providerCoveredResources, providerCoveredRoutes, providerUncoveredRoutes } from "../src/audit/coverage.js"
 
 function source(relative: string) {
   return ts.createSourceFile(relative, readFileSync(new URL(relative, import.meta.url), "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
@@ -133,7 +133,7 @@ test("each audit-read route calls serveAudit with the inventoried action and app
   assert.ok(settings)
   assert.equal(calls(settings.call, "setAuditCaptureState").length, 1)
   assert.equal(calls(settings.call, "ensureOrganizationAdmin").length, 1)
-  assert.equal(calls(settings.call, "readAuditEntitlement").length, 1)
+  assert.equal(calls(settings.call, "requireAuditFeature").length, 1)
   const writer = source("../../../packages/den-db/src/audit-log.ts")
   for (const action of auditCaptureCoverage.actions) assert.ok(descendants(writer).some((node) => ts.isStringLiteral(node) && node.text === action))
   for (const expected of auditReadCoveredRoutes) {
@@ -159,7 +159,14 @@ test("each audit-read route calls serveAudit with the inventoried action and app
 })
 
 test("supported event catalog is the full bounded executable inventory, including hidden children and its own access events", () => {
-  const expected = [...new Set([...providerCoverage.actions, ...auditReadCoverage.actions, ...pilotPolicyCoverage.actions, ...auditCaptureCoverage.actions])].sort()
+  const defaults = calls(source("../src/audit/capture.ts"), "appendAuditEvent")
+  assert.equal(defaults.length, 1)
+  assert.ok(ts.isObjectLiteralExpression(defaults[0].arguments[1]))
+  const event = property(defaults[0].arguments[1], "event")
+  assert.ok(event && ts.isObjectLiteralExpression(event))
+  assert.deepEqual(defaultPolicyCoverage.actions, [stringProperty(event, "action")])
+  assert.deepEqual(defaultPolicyCoverage.categories, [stringProperty(event, "category")])
+  const expected = [...new Set([...providerCoverage.actions, ...auditReadCoverage.actions, ...pilotPolicyCoverage.actions, ...auditCaptureCoverage.actions, ...defaultPolicyCoverage.actions])].sort()
   const response: AuditEventTypesResponse = auditEventTypesResponseSchema.parse({ eventTypes: supportedAuditEventTypes() })
   assert.deepEqual(response, { eventTypes: expected })
   assert.equal(response.eventTypes.length, new Set(response.eventTypes).size)
@@ -239,8 +246,9 @@ test("self-hosted deployment configuration separates entitlement, capture rollou
   const values = readFileSync(new URL("../../../../packaging/helm/openwork-ee/values.yaml", import.meta.url), "utf8")
   const config = readFileSync(new URL("../../../../packaging/helm/openwork-ee/templates/configmap.yaml", import.meta.url), "utf8")
   for (const [envName, key] of [["DEN_AUDIT_SELF_HOSTED_ENABLED", "selfHostedEnabled"], ["DEN_AUDIT_CAPTURE_ENABLED", "captureEnabled"], ["DEN_AUDIT_VISIBILITY_ENABLED", "visibilityEnabled"]]) {
-    assert.ok(envExample.includes(`${envName}=false`))
-    assert.ok(values.includes(`${key}: "false"`))
+    const expected = key === "selfHostedEnabled" ? "false" : "true"
+    assert.ok(envExample.includes(`${envName}=${expected}`))
+    assert.ok(values.includes(`${key}: "${expected}"`))
     assert.ok(config.includes(`${envName}: {{ .Values.config.audit.${key} | quote }}`))
   }
 })

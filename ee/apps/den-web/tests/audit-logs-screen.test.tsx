@@ -102,6 +102,100 @@ test.each(["member", "custom-role"])("%s gets a locked state without fetching or
   }, { state: auditDashboard("org-a", role) });
 });
 
+test.each(["owner", "super-admin", "admin", "member", "custom-role"])("unflagged %s direct route is neutral and mounts no queries or self-enable controls", async (role) => {
+  const state = auditDashboard("org-a", role, false);
+  if (!state.orgContext) throw new Error("Missing context");
+  state.orgContext.entitlements.auditLogs = true;
+  await withScreen(async ({ container, calls, client }) => {
+    expect(container.textContent).toContain("Audit logs are not enabled for this organization.");
+    expect(container.textContent).not.toContain("restricted to organization admins");
+    expect(container.textContent).not.toContain("Enterprise");
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+    expect(container.querySelector("button, input, select")).toBeNull();
+    expect(calls).toHaveLength(0);
+    expect(client.getQueryCache().getAll()).toHaveLength(0);
+  }, { state });
+});
+
+test("flagged org plan loss keeps mounted history and changes while capture remains off", async () => {
+  const state = auditDashboard();
+  if (!state.orgContext) throw new Error("Missing context");
+  state.orgContext.entitlements.auditLogs = true;
+  await withScreen(async ({ container, calls, click, toggle, rerender }) => {
+    await click("View changes for Provider updated");
+    await toggle("Capture and storage");
+    expect(captureSwitch(container).getAttribute("aria-checked")).toBe("false");
+    const count = calls.length;
+    await rerender(auditDashboard());
+    expect(container.textContent).toContain("Team models");
+    expect(container.querySelector('[data-testid="audit-event"]')).not.toBeNull();
+    expect(captureSwitch(container).getAttribute("aria-checked")).toBe("false");
+    expect(calls).toHaveLength(count);
+  }, { state, reply: (path) => ({ payload: path.includes("/events") ? eventsPage() : path.includes("/usage")
+    ? captureUsage(false, { entitlement: { enabled: false, source: "none" } }) : operationsPage() }) });
+});
+
+test("rollout revocation removes loaded history, expanded events and usage without new requests", async () => {
+  await withScreen(async ({ container, calls, click, toggle, rerender, client }) => {
+    await click("View changes for Provider updated");
+    await toggle("Capture and storage");
+    expect(container.textContent).toContain("Team models");
+    expect(container.querySelector('[data-testid="audit-event"]')).not.toBeNull();
+    const count = calls.length;
+    await rerender(auditDashboard("org-a", "owner", false));
+    expect(container.textContent).toContain("not enabled for this organization");
+    expect(container.textContent).not.toContain("Team models");
+    expect(container.querySelector('[data-testid="audit-event"], [role="switch"]')).toBeNull();
+    expect(calls).toHaveLength(count);
+    expect(client.getQueryCache().findAll({ queryKey: ["audit"] })).toHaveLength(0);
+    await rerender(auditDashboard());
+    expect(calls).toHaveLength(count + 2);
+    expect(container.textContent).toContain("Team models");
+    expect(container.querySelector('[data-testid="audit-event"], [role="switch"]')).toBeNull();
+  });
+});
+
+test("revocation aborts pending history and catalog reads and discards late results", async () => {
+  const held = deferred<Reply>();
+  const catalog = deferred<Reply>();
+  await withScreen(async ({ container, calls, rerender, flush, client }) => {
+    expect(calls).toHaveLength(2);
+    await rerender(auditDashboard("org-a", "owner", false));
+    for (const { init } of calls) expect(init?.signal?.aborted).toBe(true);
+    await act(async () => { held.resolve({ payload: operationsPage() }); catalog.resolve({ payload: auditEventTypes }); });
+    await flush();
+    expect(container.textContent).not.toContain("Team models");
+    expect(container.textContent).toContain("not enabled for this organization");
+    expect(client.getQueryCache().findAll({ queryKey: ["audit"] })).toHaveLength(0);
+    expect(calls).toHaveLength(2);
+  }, { reply: () => held.promise, eventTypesReply: () => catalog.promise });
+});
+
+test.each(["operations", "catalog", "events", "usage", "capture"])("backend audit_feature_disabled from %s removes history with org-rollout copy", async (endpoint) => {
+  let disabled = false;
+  const denied = { status: 403, payload: { error: "audit_feature_disabled" } };
+  await withScreen(async ({ container, click, toggle }) => {
+    expect(container.textContent).toContain("Team models");
+    disabled = true;
+    if (endpoint === "events") await click("View changes for Provider updated");
+    else if (endpoint === "usage" || endpoint === "capture") {
+      await toggle("Capture and storage");
+      if (endpoint === "capture") await click("Capture audit logs");
+    } else await click("Refresh history");
+    expect(container.textContent).toContain("Audit logs are not enabled for this organization.");
+    expect(container.textContent).not.toContain("Team models");
+    expect(container.textContent).not.toContain("restricted to organization admins");
+    expect(container.textContent).not.toContain("visibility is disabled");
+    expect(container.querySelector('[role="alert"], [role="switch"]')).toBeNull();
+  }, {
+    eventTypesReply: () => disabled && endpoint === "catalog" ? denied : { payload: auditEventTypes },
+    reply: (path, init) => {
+      const target = init?.method === "PATCH" ? "capture" : path.includes("/events") ? "events" : path.includes("/usage") ? "usage" : "operations";
+      return disabled && target === endpoint ? denied : { payload: target === "usage" ? auditUsage : target === "events" ? eventsPage() : operationsPage() };
+    },
+  });
+});
+
 test("pending, mismatched and switching contexts do not mount audit queries", async () => {
   await withScreen(async ({ container, calls, rerender }) => {
     expect(container.querySelector('[data-testid="audit-skeleton"]')).not.toBeNull();
@@ -424,7 +518,7 @@ test("missing storage policy is an operator lock, not a plan denial", async () =
   await withScreen(async ({ container, toggle, click, calls }) => {
     await toggle("Capture and storage");
     expect(captureSwitch(container).disabled).toBe(true);
-    expect(container.textContent).toContain("Ask an instance admin to configure audit storage.");
+    expect(container.textContent).toContain("Audit defaults could not be verified.");
     expect(container.textContent).not.toContain("Requires Enterprise");
     await click("Capture audit logs");
     expect(calls.some(({ init }) => init?.method === "PATCH")).toBe(false);
@@ -612,14 +706,14 @@ test.each([401, 403, 404])("capture conflict refresh propagates %s to the locked
       : { payload: path.includes("usage") ? auditUsage : operationsPage() } });
 });
 
-test("conflict refresh cannot write back after switching organizations", async () => {
+test.each(["org", "rollout"])("conflict refresh cannot write back after %s changes", async (transition) => {
   const held = deferred<Reply>();
   let reads = 0;
   await withScreen(async ({ toggle, click, rerender, flush, client, calls }) => {
     await toggle("Capture and storage");
     await click("Capture audit logs");
     const request = calls.filter(({ path }) => path.includes("usage")).at(-1);
-    await rerender(auditDashboard("org-b"));
+    await rerender(transition === "org" ? auditDashboard("org-b") : auditDashboard("org-a", "owner", false));
     expect(request?.init?.signal?.aborted).toBe(true);
     const apply = spyOn(client, "setQueryData");
     try {
@@ -644,7 +738,7 @@ test("ordinary usage refresh failure disables capture despite retained verified 
   }, { reply: (path) => path.includes("usage") && ++reads > 1 ? { status: 503, payload: {} } : { payload: path.includes("usage") ? auditUsage : operationsPage() } });
 });
 
-test.each(["verify", "cancel", "org", "member", "role", "unmount"])("delayed reauth callback is pinned and invalidated on %s", async (transition) => {
+test.each(["verify", "cancel", "org", "member", "role", "rollout", "rollout-restored", "unmount"])("delayed reauth callback is pinned and invalidated on %s", async (transition) => {
   const resume = deferred<void>();
   let replay: () => Promise<void> = async () => { throw new Error("No reauth callback"); };
   let patches = 0;
@@ -664,6 +758,11 @@ test.each(["verify", "cancel", "org", "member", "role", "unmount"])("delayed rea
     expect(patches).toBe(1);
     expect(captureSwitch(container).disabled).toBe(true);
     if (transition === "org") await rerender(auditDashboard("org-b"));
+    if (transition === "rollout" || transition === "rollout-restored") {
+      await rerender(auditDashboard("org-a", "owner", false));
+      expect(container.textContent).not.toContain("Team models");
+      if (transition === "rollout-restored") await rerender(auditDashboard());
+    }
     if (transition === "role") await rerender(auditDashboard("org-a", "admin"));
     if (transition === "member") {
       const next = auditDashboard();
@@ -693,7 +792,7 @@ test.each(["verify", "cancel", "org", "member", "role", "unmount"])("delayed rea
   } });
 });
 
-test.each(["org", "member", "role", "unmount"])("late PATCH response after %s cannot update any usage cache", async (transition) => {
+test.each(["org", "member", "role", "rollout", "rollout-restored", "unmount"])("late PATCH response after %s cannot update any usage cache", async (transition) => {
   const held = deferred<Reply>();
   await withScreen(async ({ container, toggle, click, calls, rerender, unmount, client, flush }) => {
     await toggle("Capture and storage");
@@ -704,6 +803,11 @@ test.each(["org", "member", "role", "unmount"])("late PATCH response after %s ca
     client.setQueryDefaults(otherKey, { gcTime: Infinity });
     client.setQueryData(otherKey, otherUsage);
     if (transition === "org") await rerender(auditDashboard("org-b"));
+    if (transition === "rollout" || transition === "rollout-restored") {
+      await rerender(auditDashboard("org-a", "owner", false));
+      expect(container.textContent).not.toContain("Team models");
+      if (transition === "rollout-restored") await rerender(auditDashboard());
+    }
     if (transition === "role") await rerender(auditDashboard("org-a", "member"));
     if (transition === "member") {
       const next = auditDashboard();

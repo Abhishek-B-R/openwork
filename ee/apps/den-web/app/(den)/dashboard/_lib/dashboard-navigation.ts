@@ -115,7 +115,7 @@ export function buildDashboardNavSections({
   const observabilityItems: DashboardNavItem[] = orgSlug
     ? [
         ...(access.isAdmin ? [{ href: getAnalyticsRoute(orgSlug), label: "Analytics", icon: BarChart3 }] : []),
-        { href: getAuditLogsRoute(orgSlug), label: "Audit logs", icon: access.isAdmin ? ScrollText : LockKeyhole, ...(access.isAdmin ? {} : { badge: "Admin access" }) },
+        ...(capabilities.auditLogs ? [{ href: getAuditLogsRoute(orgSlug), label: "Audit logs", icon: access.isAdmin ? ScrollText : LockKeyhole, ...(access.isAdmin ? {} : { badge: "Admin access" }) }] : []),
       ]
     : [];
   const settingsChildren: DashboardNavChild[] = orgSlug

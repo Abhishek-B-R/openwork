@@ -114,14 +114,27 @@ Configurable categories: change,security,execution,access,read,request,lifecycle
 lifecycle is ALWAYS included, even when omitted from --categories.
 Coverage is limited to implemented provider configuration and audit-read emitters;
 category names do not promise all security, execution or read activity is captured.
-Global DEN_AUDIT_CAPTURE_ENABLED and DEN_AUDIT_VISIBILITY_ENABLED default false
-and are never changed. Capture controls traffic, not this direct policy event.
-Policy enabled is organization opt-in, NOT entitlement. Source cloud/operator
+Global DEN_AUDIT_CAPTURE_ENABLED and DEN_AUDIT_VISIBILITY_ENABLED default true;
+explicit false is a kill switch. This initializer never changes them.
+Traffic and API access require metadata.capabilities.auditLogs=true (literal true),
+managed only by platform admins; absent/false means hidden and no traffic capture.
+Disabling the feature hides history without deleting data or changing captureOn.
+Ready organizations now lazily initialize missing policies ON during capture or
+GET usage, with a system audit.policy.initialized event. Temporary server defaults:
+6,000,000 retained OPERATIONS (not child events), 300-second attachment window,
+the default categories above, cloud/delete_oldest for Enterprise or operator/keep_all
+for explicit self-hosted entitlement. No cap enforcement, billing or cleanup.
+Existing OFF preferences remain OFF on re-enable; custom configuration is preserved.
+The manual CLI still requires explicit settings and rejects every existing policy,
+including automatically provisioned ones. Neither source nor mode grants entitlement.
+Capture controls traffic, not this direct policy event.
+Policy enabled is the organization capture preference, NOT entitlement. Source cloud/operator
 only describes storage policy provenance; neither source grants availability.
 Traffic also requires an Enterprise plan or explicit installation entitlement
 DEN_AUDIT_SELF_HOSTED_ENABLED=true (default false). Single-org mode and disabled
 legacy plan gating do not grant audit availability. No billing request is made.
-Admins may toggle existing policies, but cannot initialize capacity or categories.
+Admins may toggle capture, but cannot supply capacity or categories. A first direct
+PATCH at expectedRevision=0 can initialize defaults and apply OFF in one transaction.
 The policy event starts captureStartedAt; it does not imply traffic flags are on.
 
 --preview-retention is a separate read-only mode using the stored policy, not

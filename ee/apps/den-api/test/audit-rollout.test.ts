@@ -90,6 +90,16 @@ test("installation entitlement env is a strict default-false boolean independent
   }
 })
 
+test("deployment capture and visibility default on and explicit false remains a kill switch", () => {
+  for (const value of [undefined, "false", "true"]) {
+    const childEnv = { ...process.env, DATABASE_URL: "mysql://root:synthetic@127.0.0.1:1/audit_logs_test", DEN_DB_ENCRYPTION_KEY: "synthetic-disposable-key-1234567890123456", BETTER_AUTH_SECRET: "synthetic-disposable-auth-1234567890123456", BETTER_AUTH_URL: "http://127.0.0.1:8790", DEN_AUDIT_CAPTURE_ENABLED: value, DEN_AUDIT_VISIBILITY_ENABLED: value }
+    const child = spawnSync(process.execPath, ["--conditions=development", "--import", "tsx", "--input-type=module", "--eval", "const {env}=await import('./src/env.ts'); process.stdout.write(JSON.stringify([env.auditCaptureEnabled,env.auditVisibilityEnabled]))"], { cwd: new URL("..", import.meta.url), env: childEnv, encoding: "utf8" })
+    assert.equal(child.status, 0)
+    assert.deepEqual(JSON.parse(child.stdout), [value !== "false", value !== "false"])
+  }
+  for (const text of ["default true", "metadata.capabilities.auditLogs=true", "6,000,000 retained OPERATIONS", "Existing OFF preferences remain OFF", "No cap enforcement, billing or cleanup"]) assert.ok(AUDIT_PILOT_HELP.includes(text), text)
+})
+
 test("configuration/database failures are withheld, not serialized or blindly retried", async () => {
   const output: string[] = []
   const errors: string[] = []

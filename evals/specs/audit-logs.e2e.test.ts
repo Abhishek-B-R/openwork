@@ -20,14 +20,19 @@ async function enterPastDate(owner: User, label: string, day: string) {
   await owner.see({ label }, { value: `2000-01-${day.padStart(2, "0")}T01:00` });
 }
 
-test("an owner filters grouped audit history by child event, exact IDs and local dates while a teammate cannot read it", async ({ world, user, probe, step, evidence }) => {
+test("a flagged owner records and filters audit history by default while an unflagged owner and a teammate cannot read it", async ({ world, user, probe, step, evidence }) => {
   const owner = user.on(world.web);
   const audit = probe.on(world.web);
   const teammate = user.on(world.memberWeb);
+  const unflaggedOwner = user.on(world.unflaggedWeb);
+  const hiddenAudit = probe.on(world.unflaggedWeb);
   const operationsPath = "/v1/audit/operations?limit=50";
+  const providerOperationsPath = `${operationsPath}&action=provider.credential.updated&resourceId=${encodeURIComponent(world.providerId)}`;
   const groupedRow = { role: "button", label: "View changes for Provider configuration update committed" } satisfies Parameters<User["see"]>[0];
   const idSearches: Array<{ label: string; value: string }> = [];
   let operationId = "";
+  let initializationOperationId = "";
+  let originalEventIds: string[] = [];
 
   async function selectEventType(text: string) {
     await owner.click({ role: "button", label: "Event type" });
@@ -37,22 +42,129 @@ test("an owner filters grouped audit history by child event, exact IDs and local
   }
 
   async function seeGroupedOperation() {
+    await historySettled();
     await owner.see(groupedRow, { timeoutMs: 30_000 });
     await owner.notSee({ testId: "audit-empty" });
-    const rows = await audit.dom('button[aria-controls^="audit-operation-"]');
-    expect(rows.elements).toHaveLength(1);
     expect((await audit.dom(`button[aria-controls="audit-operation-${operationId}"]`)).elements).toHaveLength(1);
   }
 
-  await step("before: audit capture is configured but no provider changes have been recorded", async () => {
+  async function historySettled() {
+    await audit.eventually(() => audit.dom('div[aria-busy="false"]:has(> [data-testid="audit-empty"]), div[aria-busy="false"]:has(button[aria-controls^="audit-operation-"])'), {
+      within: 30_000, label: "Applied audit history has finished loading", until: (value) => value.elements.length > 0,
+    });
+  }
+
+  async function filterProviderHistory() {
+    await selectEventType("Provider credential updated");
+    await owner.click({ role: "button", label: "Apply filters" });
+    await historySettled();
+  }
+
+  await step("before: an entitled owner without the release flag has no audit navigation", async () => {
+    await unflaggedOwner.see({ testId: "den-org-sidebar" }, { timeoutMs: 90_000 });
+    const response = await probe.api(world.unflaggedOwner, "/v1/org");
+    expect(response.response.status).toBe(200);
+    expect(response.body).toMatchObject({ organization: { id: world.unflaggedOrgId }, currentMember: { isOwner: true }, entitlements: { auditLogs: true }, capabilities: { auditLogs: false } });
+    await unflaggedOwner.notSee({ role: "link", label: "Audit logs" });
+    const links = await hiddenAudit.dom('[data-testid="den-org-sidebar"] a[href="/dashboard/audit-logs"]');
+    expect(links.elements).toHaveLength(0);
+    evidence.recordAssertionEvidence("Entitlement does not reveal the hidden feature", `The second organization owner is entitled, its auditLogs capability is false, and ${links.elements.length} audit sidebar links are present.`, links.elements.length === 0);
+    await unflaggedOwner.screenshot();
+  });
+
+  await step("before: the unflagged owner cannot find audit logs in the command palette", async () => {
+    await unflaggedOwner.click({ role: "button", label: "Search or jump to" });
+    await unflaggedOwner.see({ testId: "den-command-palette" });
+    await unflaggedOwner.type({ testId: "den-command-palette-input" }, "Audit logs", { verify: true });
+    await unflaggedOwner.see({ text: "No matches for “Audit logs”." });
+    await unflaggedOwner.notSee({ role: "option", label: "Audit logs" });
+    const options = await hiddenAudit.dom('[data-testid="den-command-palette"] [role="option"]');
+    expect(options.elements).toHaveLength(0);
+    evidence.recordAssertionEvidence("Hidden audit logs are absent from search", `Searching Audit logs returns ${options.elements.length} command-palette options and the no-matches state.`, options.elements.length === 0);
+    await unflaggedOwner.screenshot();
+    await unflaggedOwner.press("Escape");
+  });
+
+  await step("before: the unflagged owner's direct link is unavailable and the API denies audit access", async () => {
+    await unflaggedOwner.navigate(`${world.den.ref.webUrl}/dashboard/audit-logs`);
+    await unflaggedOwner.see({ testId: "audit-locked" }, { text: "Audit logs are not enabled for this organization.", timeoutMs: 60_000 });
+    await unflaggedOwner.notSee({ label: "Search IDs" });
+    await unflaggedOwner.notSee({ role: "button", label: "Refresh history" });
+    await unflaggedOwner.notSee({ role: "switch", label: "Capture audit logs" });
+    await unflaggedOwner.notSee({ text: "Capture and storage" });
+    const statuses: number[] = [];
+    for (const path of [operationsPath, "/v1/audit/event-types", "/v1/audit/usage", "/v1/audit/export"]) {
+      const response = await probe.api(world.unflaggedOwner, path);
+      statuses.push(response.response.status);
+      expect(response.response.status).toBe(403);
+      expect(response.body).toEqual({ error: "audit_feature_disabled" });
+    }
+    evidence.recordAssertionEvidence("The release flag is enforced despite owner permission and entitlement", `Operations, catalog, usage and export return ${statuses.join("/")} audit_feature_disabled; the direct route shows the neutral unavailable message.`, statuses.every((status) => status === 403));
+    await unflaggedOwner.screenshot();
+  });
+
+  await step("before: the flagged owner is already recording with no provider changes retained", async () => {
     await owner.see({ role: "heading", label: "Audit logs" }, { timeoutMs: 90_000 });
-    await owner.see({ testId: "audit-empty" });
-    const response = await probe.api(world.den.admin, operationsPath);
+    await filterProviderHistory();
+    await owner.see({ testId: "audit-empty" }, { text: /No operations match these filters/ });
+    const response = await probe.api(world.den.admin, providerOperationsPath);
     const history = auditOperationsResponseSchema.parse(response.body);
     expect(response.response.status).toBe(200);
     expect(history.operations).toHaveLength(0);
-    evidence.recordAssertionEvidence("No retained provider operations", `Audit operations returned ${response.response.status} with ${history.operations.length} operations. The world explicitly seeded an operator policy before this screen.`, response.response.status === 200 && history.operations.length === 0);
+    await owner.see({ role: "link", label: "Audit logs" });
+    await owner.click({ text: "Capture and storage" });
+    await owner.see({ text: "Recording" });
+    const usageResponse = await probe.api(world.den.admin, "/v1/audit/usage");
+    expect(usageResponse.response.status).toBe(200);
+    const usage = auditUsageResponseSchema.parse(usageResponse.body);
+    expect(usage.entitlement).toEqual({ enabled: true, source: "self_hosted" });
+    expect(usage.captureAvailable).toBe(true);
+    expect(usage.captureOn).toBe(true);
+    expect(usage.captureEnabled).toBe(true);
+    expect(usage.policy).toMatchObject({
+      revision: 1, enabled: true, source: "operator", allowance: 6_000_000, excessMode: "keep_all", attachmentWindowSeconds: 300,
+      categories: ["change", "security", "execution", "access", "request", "lifecycle"],
+    });
+    expect(usage.policy?.captureStartedAt).toEqual(expect.any(String));
+    expect(usage.retainedOperations).toBeGreaterThan(0);
+    await owner.see({ text: "6,000,000" });
+    await owner.see({ text: "Instance operator" });
+    await owner.see({ text: "Keep all" });
+    expect((await audit.dom('[role="switch"][aria-label="Capture audit logs"][aria-checked="true"]')).elements).toHaveLength(1);
+    // Bring the allowance into the viewport alongside the recording state.
+    await owner.click({ text: "Operation allowance" });
+    evidence.recordAssertionEvidence("Default rollout records before any manual toggle", `No policy was seeded. The lazily initialized revision ${usage.policy?.revision} operator/keep_all policy is ON with a displayed 6,000,000-operation allowance, 300-second window and access capture; ${usage.retainedOperations} total operations already exist, with ${history.operations.length} matching provider credential changes.`, usage.captureAvailable && usage.captureOn && usage.captureEnabled && usage.policy?.allowance === 6_000_000 && history.operations.length === 0);
     await owner.screenshot();
+    await owner.click({ text: "Capture and storage" });
+    await owner.click({ role: "heading", label: "Audit logs" });
+  });
+
+  await step("before: one system initialization and administrator reads are already in history", async () => {
+    const response = await probe.api(world.den.admin, `${operationsPath}&action=audit.policy.initialized`);
+    expect(response.response.status).toBe(200);
+    const history = auditOperationsResponseSchema.parse(response.body);
+    expect(history.operations).toHaveLength(1);
+    expect(history.nextCursor).toBeNull();
+    const initialization = history.operations[0];
+    if (!initialization) throw new Error("Missing automatic policy initialization");
+    initializationOperationId = initialization.id;
+    const eventsResponse = await probe.api(world.den.admin, `/v1/audit/operations/${encodeURIComponent(initialization.id)}/events?limit=50`);
+    expect(eventsResponse.response.status).toBe(200);
+    const timeline = auditEventsResponseSchema.parse(eventsResponse.body);
+    expect(timeline.events).toHaveLength(1);
+    expect(timeline.nextCursor).toBeNull();
+    expect(timeline.events[0]).toMatchObject({ action: "audit.policy.initialized", actor: { type: "system", id: "den-api.audit-defaults" }, changes: { before: null, after: { allowance: 6_000_000, enabled: true, source: "operator", excessMode: "keep_all" } } });
+    const readsResponse = await probe.api(world.den.admin, `${operationsPath}&action=audit.operations.served`);
+    expect(readsResponse.response.status).toBe(200);
+    const reads = auditOperationsResponseSchema.parse(readsResponse.body);
+    expect(reads.operations.length).toBeGreaterThan(0);
+    await selectEventType("Audit policy initialized");
+    await owner.click({ role: "button", label: "Apply filters" });
+    await historySettled();
+    await owner.see({ role: "button", label: "View changes for Audit policy initialized" });
+    evidence.recordAssertionEvidence("Real initialization and read capture are retained", `Exactly ${timeline.events.length} system initialization event in ${initialization.id}; the read-action query returns ${reads.operations.length} administrator read operations on this page. Default access capture is active.`, timeline.events.length === 1 && reads.operations.length > 0);
+    await owner.screenshot();
+    await filterProviderHistory();
   });
 
   await step("the owner sees dates, event type and Search IDs without opening More filters", async () => {
@@ -77,22 +189,23 @@ test("an owner filters grouped audit history by child event, exact IDs and local
     await owner.screenshot();
   });
 
-  await step("the empty history still offers the full server event-type catalog", async () => {
+  await step("history with no provider changes still offers the full server event-type catalog", async () => {
     const response = await probe.api(world.den.admin, "/v1/audit/event-types");
     expect(response.response.status).toBe(200);
     const catalog = auditEventTypesResponseSchema.parse(response.body);
     expect(catalog.eventTypes).toContain("provider.credential.updated");
     expect(catalog.eventTypes).toContain("provider.created");
     expect(catalog.eventTypes).toContain("audit.policy.enabled");
+    expect(catalog.eventTypes).toContain("audit.policy.initialized");
     await owner.click({ role: "button", label: "Event type" });
-    const options = await audit.eventually(() => audit.dom('[role="listbox"] [role="option"]'), { within: 30_000, label: "Full event catalog is available before any history", until: (value) => value.elements.length === catalog.eventTypes.length + 1 });
+    const options = await audit.eventually(() => audit.dom('[role="listbox"] [role="option"]'), { within: 30_000, label: "Full event catalog is available before provider changes", until: (value) => value.elements.length === catalog.eventTypes.length + 1 });
     const labels = options.elements.map((option) => option.text);
     expect(labels).toContain("All event types");
     expect(labels).toContain("Provider credential updated");
     expect(labels).toContain("Provider created");
     expect(labels).toContain("Audit policy enabled");
     await owner.see({ text: "Provider credential updated" });
-    evidence.recordAssertionEvidence("The catalog is not derived from loaded operation summaries", `${catalog.eventTypes.length} server event types and ${options.elements.length - 1} dropdown event types are available with zero retained operations, including credential changes and policy events.`, options.elements.length === catalog.eventTypes.length + 1);
+    evidence.recordAssertionEvidence("The catalog is not derived from loaded operation summaries", `${catalog.eventTypes.length} server event types and ${options.elements.length - 1} dropdown event types are available with no matching provider changes; system initialization and administrator reads already exist.`, options.elements.length === catalog.eventTypes.length + 1);
     await owner.screenshot();
     await owner.press("Escape");
   });
@@ -130,17 +243,22 @@ test("an owner filters grouped audit history by child event, exact IDs and local
   await step("after: several provider requests appear as one audit operation", async () => {
     await owner.click({ role: "link", label: "Audit logs" });
     await owner.see({ role: "heading", label: "Audit logs" }, { timeoutMs: 30_000 });
+    await filterProviderHistory();
     await owner.see({ text: "First recorded target" });
     await owner.see({ role: "button", label: "View changes for Provider configuration update committed" });
-    const response = await probe.api(world.den.admin, `${operationsPath}&action=provider.credential.updated`);
+    const response = await probe.api(world.den.admin, providerOperationsPath);
+    expect(response.response.status).toBe(200);
     const history = auditOperationsResponseSchema.parse(response.body);
     expect(history.operations).toHaveLength(1);
     const operation = history.operations[0];
     if (!operation) throw new Error("No grouped provider operation returned");
     operationId = operation.id;
-    expect(operation.action).not.toBe("provider.credential.updated");
+    expect(operation.action).toBe("provider.configuration.update.committed");
     const eventsResponse = await probe.api(world.den.admin, `/v1/audit/operations/${encodeURIComponent(operationId)}/events?limit=50`);
     const timeline = auditEventsResponseSchema.parse(eventsResponse.body);
+    expect(eventsResponse.response.status).toBe(200);
+    expect(timeline.nextCursor).toBeNull();
+    originalEventIds = timeline.events.map((event) => event.id);
     const requests = new Set(timeline.events.map((event) => event.requestId).filter(Boolean));
     expect(requests.size).toBeGreaterThanOrEqual(3);
     expect(new Set(timeline.events.map((event) => event.operationId)).size).toBe(1);
@@ -153,20 +271,21 @@ test("an owner filters grouped audit history by child event, exact IDs and local
     idSearches.push({ label: "operation", value: operationId }, { label: "event", value: credentialEvent.id }, { label: "request", value: credentialEvent.requestId }, { label: "resource", value: resource.id });
     expect(new Set(idSearches.map((entry) => entry.value)).size).toBe(4);
     await seeGroupedOperation();
-    evidence.recordAssertionEvidence("One operation groups the complete save", `${history.operations.length} operation contains ${timeline.events.length} events across ${requests.size} requests, including credential replacement and access-grant removal.`, history.operations.length === 1 && requests.size >= 3 && timeline.events.every((event) => event.operationId === operationId));
+    evidence.recordAssertionEvidence("One operation groups the complete save", `The provider credential action and resource query returns ${history.operations.length} operation containing ${timeline.events.length} events across ${requests.size} requests, including credential replacement and access-grant removal; other history contains initialization and reads.`, history.operations.length === 1 && requests.size >= 3 && timeline.events.every((event) => event.operationId === operationId));
     await owner.screenshot();
   });
 
   await step("after: selecting a child event type returns its whole grouped operation", async () => {
     await selectEventType("Provider created");
     await owner.click({ role: "button", label: "Apply filters" });
+    await historySettled();
     await owner.see({ testId: "audit-empty" }, { text: /No operations match these filters/ });
     await owner.notSee(groupedRow);
     await selectEventType("Provider credential updated");
     await owner.click({ role: "button", label: "Apply filters" });
     await owner.see({ role: "button", label: "Event type" }, { text: "Provider credential updated" });
     await seeGroupedOperation();
-    const response = await probe.api(world.den.admin, `${operationsPath}&action=provider.credential.updated`);
+    const response = await probe.api(world.den.admin, providerOperationsPath);
     expect(response.response.status).toBe(200);
     const history = auditOperationsResponseSchema.parse(response.body);
     expect(history.operations.map((operation) => operation.id)).toEqual([operationId]);
@@ -175,6 +294,7 @@ test("an owner filters grouped audit history by child event, exact IDs and local
     await owner.screenshot();
     await owner.click({ role: "button", label: "Clear filters" });
     await owner.see({ role: "button", label: "Event type" }, { text: "All event types" });
+    await filterProviderHistory();
     await seeGroupedOperation();
   });
 
@@ -183,20 +303,26 @@ test("an owner filters grouped audit history by child event, exact IDs and local
       expect(value.length).toBeGreaterThan(1);
       await owner.type({ label: "Search IDs" }, value.slice(0, -1), { replace: true, verify: true });
       await owner.click({ role: "button", label: "Apply filters" });
+      await historySettled();
       await owner.see({ testId: "audit-empty" }, { text: /No operations match these filters/ });
       await owner.notSee(groupedRow);
       await owner.type({ label: "Search IDs" }, value, { replace: true, verify: true });
       await owner.click({ role: "button", label: "Apply filters" });
       await owner.see({ label: "Search IDs" }, { value });
       await seeGroupedOperation();
-      const response = await probe.api(world.den.admin, `${operationsPath}&searchId=${encodeURIComponent(value)}`);
+      const prefixResponse = await probe.api(world.den.admin, `${providerOperationsPath}&searchId=${encodeURIComponent(value.slice(0, -1))}`);
+      expect(prefixResponse.response.status).toBe(200);
+      expect(auditOperationsResponseSchema.parse(prefixResponse.body).operations).toHaveLength(0);
+      const response = await probe.api(world.den.admin, `${providerOperationsPath}&searchId=${encodeURIComponent(value)}`);
       expect(response.response.status).toBe(200);
       const history = auditOperationsResponseSchema.parse(response.body);
       expect(history.operations.map((operation) => operation.id)).toEqual([operationId]);
-      evidence.recordAssertionEvidence(`Exact ${label} ID finds the same grouped operation`, `The ${label} ID prefix returns zero rows; the complete ID returns one row for ${operationId}; searchId read returned HTTP ${response.response.status}.`, history.operations.length === 1 && history.operations[0]?.id === operationId);
+      expect(history.nextCursor).toBeNull();
+      evidence.recordAssertionEvidence(`Exact ${label} ID finds the same grouped operation`, `Within provider credential changes, the ${label} ID prefix returns zero rows in UI and API; the complete ID returns only ${operationId}, with no next page; searchId read returned HTTP ${response.response.status}.`, history.operations.length === 1 && history.operations[0]?.id === operationId);
       await owner.screenshot();
       await owner.click({ role: "button", label: "Clear filters" });
       await owner.see({ label: "Search IDs" }, { value: "" });
+      await filterProviderHistory();
     });
   }
 
@@ -205,6 +331,7 @@ test("an owner filters grouped audit history by child event, exact IDs and local
     await enterPastDate(owner, "From (local time)", "1");
     await enterPastDate(owner, "To (local time)", "2");
     await owner.click({ role: "button", label: "Apply filters" });
+    await historySettled();
     await owner.see({ testId: "audit-empty" }, { text: /No operations match these filters/ });
     await owner.notSee(groupedRow);
     await owner.see({ label: "From (local time)" }, { value: "2000-01-01T01:00" });
@@ -221,9 +348,12 @@ test("an owner filters grouped audit history by child event, exact IDs and local
     await owner.see({ label: "To (local time)" }, { value: "" });
     await owner.see({ label: "Search IDs" }, { value: "" });
     await owner.see({ role: "button", label: "Event type" }, { text: "All event types" });
+    // Reads can push the saved operation beyond the unfiltered first page.
+    // Reapply its child action after verifying Clear resets every field.
+    await filterProviderHistory();
     await seeGroupedOperation();
     const rows = await audit.dom(`button[aria-controls="audit-operation-${operationId}"]`);
-    evidence.recordAssertionEvidence("Clearing filters restores the saved operation", `Both local dates and Search IDs are empty, all event types are selected, and ${rows.elements.length} row for ${operationId} is restored.`, rows.elements.length === 1);
+    evidence.recordAssertionEvidence("Clearing filters restores access to the saved operation", `Both local dates and Search IDs reset to empty and event type resets to All; reselecting Provider credential updated restores ${rows.elements.length} row for ${operationId} despite growing read history.`, rows.elements.length === 1);
     await owner.screenshot();
   });
 
@@ -272,10 +402,22 @@ test("an owner filters grouped audit history by child event, exact IDs and local
     expect(off.captureAvailable).toBe(true);
     expect(off.captureOn).toBe(false);
     expect(off.captureEnabled).toBe(false);
+    expect(off.policy).toMatchObject({ allowance: 6_000_000, source: "operator", excessMode: "keep_all" });
     const historyResponse = await probe.api(world.den.admin, `/v1/audit/operations/${encodeURIComponent(operationId)}/events?limit=50`);
     expect(historyResponse.response.status).toBe(200);
     const history = auditEventsResponseSchema.parse(historyResponse.body);
     expect(history.events.some((event) => event.action === "provider.credential.updated")).toBe(true);
+    expect(history.events.map((event) => event.id)).toEqual(originalEventIds);
+    // Refresh through the browser while OFF: the filtered original row survives.
+    await owner.click({ role: "button", label: "Refresh history" });
+    await seeGroupedOperation();
+    await owner.click(groupedRow);
+    await owner.see({ text: "Changed; values not retained" });
+    await owner.screenshot();
+    await owner.click({ role: "button", label: "Hide changes for Provider configuration update committed" });
+    await owner.click({ text: "Operation allowance" });
+    await owner.see({ text: "Not recording" });
+    await owner.see({ text: "6,000,000" });
     evidence.recordAssertionEvidence("Off is separate from entitlement and retained history", `Entitlement remains ${off.entitlement.enabled}; the organization setting is ${off.captureOn}; ${history.events.length} saved events remain readable.`, off.entitlement.enabled && !off.captureOn && !off.captureEnabled && history.events.length > 0);
     await owner.screenshot();
     await owner.click({ role: "switch", label: "Capture audit logs" });
@@ -286,6 +428,12 @@ test("an owner filters grouped audit history by child event, exact IDs and local
     expect(on.captureOn).toBe(true);
     expect(on.captureEnabled).toBe(true);
     expect(on.policy?.revision).toBe((off.policy?.revision ?? 0) + 1);
+    expect(on.policy).toMatchObject({ allowance: 6_000_000, source: "operator", excessMode: "keep_all" });
+    const initializedResponse = await probe.api(world.den.admin, `${operationsPath}&action=audit.policy.initialized`);
+    expect(initializedResponse.response.status).toBe(200);
+    const initialized = auditOperationsResponseSchema.parse(initializedResponse.body);
+    expect(initialized.operations.map((operation) => operation.id)).toEqual([initializationOperationId]);
+    expect(initialized.nextCursor).toBeNull();
     evidence.recordAssertionEvidence("The organization can resume recording", `Capture is ${on.captureOn}, effective recording is ${on.captureEnabled}, policy revision is ${on.policy?.revision}.`, on.captureOn && on.captureEnabled);
     await owner.screenshot();
   });

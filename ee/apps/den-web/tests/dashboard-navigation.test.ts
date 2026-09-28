@@ -17,6 +17,7 @@ const searchBar = readFileSync(
 );
 
 const baseCapabilities: DenOrgCapabilities = {
+  auditLogs: false,
   cloud: true,
   installLinks: true,
   mcpConnections: true,
@@ -48,7 +49,7 @@ describe("dashboard navigation index", () => {
     const gateway = items.find((item) => item.label === "AI Gateway");
     expect(gateway?.href).toBe("/dashboard/ai-gateway");
     expect(gateway?.children).toBeUndefined();
-    expect(sections.find((section) => section.label === "Observability")?.items.map((item) => item.label)).toEqual(["Analytics", "Audit logs"]);
+    expect(sections.find((section) => section.label === "Observability")?.items.map((item) => item.label)).toEqual(["Analytics"]);
     const search = flattenNavigationForSearch(sections);
     const hrefs = search.map((entry) => entry.href);
     expect(hrefs.some((href) => href.startsWith("/dashboard/gateway-providers"))).toBe(false);
@@ -79,8 +80,8 @@ describe("dashboard navigation index", () => {
     expect(flattenNavigationForSearch(sections).some((entry) => ["/dashboard/ai-gateway", "/dashboard/inference", "/dashboard/gateway-providers"].includes(entry.href))).toBe(false);
   });
 
-  test("keeps member work and locked audit discovery separate from admin management", () => {
-    expect(buildFor("member").map((section) => section.label)).toEqual(["Work", "Observability"]);
+  test("keeps member work separate from admin management with audit rollout off by default", () => {
+    expect(buildFor("member").map((section) => section.label)).toEqual(["Work"]);
     expect(buildFor("member")[0]?.items.map((item) => item.label)).toEqual(["My Library", "OpenWork Web"]);
     expect(buildFor("admin").map((section) => section.label)).toEqual(["Work", "Manage", "Observability", "Team"]);
     expect(buildFor("admin").find((section) => section.label === "Manage")?.items.map((item) => item.label)).toEqual([

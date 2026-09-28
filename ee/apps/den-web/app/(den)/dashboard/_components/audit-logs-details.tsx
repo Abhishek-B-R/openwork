@@ -58,11 +58,13 @@ export function AuditSkeleton({ rows = 5 }: { rows?: number }) {
   </div>;
 }
 
-export function AuditLocked({ error, children }: { error?: AuditReadError; children?: ReactNode }) {
-  const message = error?.code === "audit_visibility_disabled"
-    ? "Audit visibility is disabled for this deployment. Ask an instance administrator to enable it."
-    : error?.status === 401 ? "Your session could not be verified. Sign in again to view audit history."
-      : "Audit history is restricted to organization admins, super-admins and owners. Ask an organization owner to review your access.";
+export function AuditLocked({ error, unavailable = false, children }: { error?: AuditReadError; unavailable?: boolean; children?: ReactNode }) {
+  const message = unavailable || error?.code === "audit_feature_disabled"
+    ? "Audit logs are not enabled for this organization."
+    : error?.code === "audit_visibility_disabled"
+      ? "Audit visibility is disabled for this deployment. Ask an instance administrator to enable it."
+      : error?.status === 401 ? "Your session could not be verified. Sign in again to view audit history."
+        : "Audit history is restricted to organization admins, super-admins and owners. Ask an organization owner to review your access.";
   return <div className="flex flex-col gap-3 py-6" data-testid="audit-locked">
     <DenNotice tone="neutral" icon={LockKeyhole} message={message} />
     {children}

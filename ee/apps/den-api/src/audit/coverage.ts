@@ -59,7 +59,7 @@ export const providerCoverage: AuditCoverageDeclaration = {
     ...[...new Set([...providerCoveredRoutes.map(({ step }) => step), ...providerBackgroundSteps])].flatMap((step) => ["committed", "attempted"].map((outcome) => `provider.configuration.${step}.${outcome}`)),
   ],
   categories: ["change", "request", "security", "execution"],
-  capturePolicy: "Fresh Enterprise plan or explicit self-hosted installation entitlement AND deployment capture flag AND org opt-in policy AND selected category; organization share lock before snapshot reads, state/policy revision recheck before commit. Generic DB writer semantics are unchanged.",
+  capturePolicy: "Fresh literal metadata.capabilities.auditLogs=true AND (Enterprise plan OR explicit self-hosted installation entitlement) AND default-on deployment capture switch AND enabled stored policy AND selected category; missing policies initialize with temporary server defaults before snapshot reads. Organization share lock before snapshot reads, state/policy revision recheck before commit. Existing OFF stays OFF. Generic DB writer semantics are unchanged.",
   resources: [...providerCoveredResources.map(({ type }) => type), "organization", "member", "team"],
   snapshotPolicy: "Per-resource allowlisted before/after and changed fields; secret/configuration changes use markers, never secret values or comparison hashes; oversize rejects.",
   emitter: "src/audit/provider.ts:providerAuditMutation; recordProviderAttempt; src/llm/gateway-matrix.ts:refreshGatewayCatalog",
@@ -69,7 +69,7 @@ export const providerCoverage: AuditCoverageDeclaration = {
 export const auditReadCoverage: AuditCoverageDeclaration = {
   status: "implemented_scoped", operationKinds: ["audit.access"],
   actions: auditReadCoveredRoutes.flatMap(({ action }) => [`audit.${action}.requested`, `audit.${action}.served`]),
-  categories: ["access", "read"], capturePolicy: "Admin + visibility gate; fresh Enterprise/installation entitlement AND capture flag AND enabled policy; organization share fence before state/policy, access preferred, read fallback.",
+  categories: ["access", "read"], capturePolicy: "Admin + fresh org auditLogs feature + default-on visibility gate; capture also requires fresh Enterprise/installation entitlement AND default-on capture switch AND enabled policy; organization share fence before state/policy, access preferred, read fallback.",
   resources: ["audit_collection", "audit_operation"], snapshotPolicy: "Scope and requested/served outcome only; no content, response body or historical snapshots.",
   emitter: "src/routes/org/audit.ts:serveAudit", failurePolicy: "Durable request intent before read and served event before response release; required capture failure returns 503 without content.",
   limitations: "Only declared audit endpoints; served means response prepared, not human viewed. Authorization/visibility denials occur before capture. Legacy payloads excluded. Visibility does not itself require an enabled capture policy; no continuous drain.",
@@ -84,15 +84,23 @@ export const pilotPolicyCoverage: AuditCoverageDeclaration = {
 
 export const auditCaptureCoverage: AuditCoverageDeclaration = {
   status: "implemented_scoped", operationKinds: ["audit.policy"], actions: ["audit.capture.enabled", "audit.capture.disabled"], categories: ["lifecycle"],
-  capturePolicy: "Fresh administrator authorization and live role fence; ON requires fresh Enterprise or explicit installation entitlement and capture rollout; OFF remains allowed. Existing operator policy only, expected revision required.",
+  capturePolicy: "Fresh org auditLogs feature, visibility, administrator authorization and live role fence; ON requires fresh Enterprise or explicit installation entitlement and capture rollout; OFF remains allowed after entitlement loss while flagged. Missing ready policy initializes with server defaults; expected revision zero accepted only by its initializer, with explicit OFF applied atomically.",
   resources: ["audit_policy"], snapshotPolicy: "Only captureOn, revision and effectiveAt before/after; fixed immutable control evidence independent of new policy enabled state and lifecycle category selection.",
   emitter: "src/routes/org/audit.ts:updateAuditCapture; den-db/audit-log.ts:setAuditCaptureState",
   failurePolicy: "Organization share fence then live member/team authority, state and policy update locks; required evidence failure rolls back setting. Stale revisions reject; matching no-ops create no operation.",
-  limitations: "No capacity, category, entitlement, source or retention changes; no policy initialization, external effects or deletion. Retained history remains readable after capture OFF or plan loss.",
+  limitations: "No caller-supplied capacity, category, entitlement, source or retention changes; no external effects or deletion. Retained history remains readable after capture OFF or plan loss.",
+}
+
+export const defaultPolicyCoverage: AuditCoverageDeclaration = {
+  status: "implemented_scoped", operationKinds: ["audit.policy"], actions: ["audit.policy.initialized"], categories: ["lifecycle"],
+  capturePolicy: "Fresh locked literal org flag AND Enterprise/explicit self-hosted entitlement AND deployment capture availability. Lazy creation before capture snapshots, also on GET usage and first settings PATCH. Existing policies never updated by initialization.",
+  resources: ["audit_policy", "organization"], snapshotPolicy: "before=null; allowlisted server defaults only, honest system actor den-api.audit-defaults; first event sets captureStartedAt.",
+  emitter: "src/audit/capture.ts:initializeAuditPolicyInTx", failurePolicy: "Organization share fence then unique state INSERT/update lock then policy update lock; re-read concurrent winner. Policy, state and lifecycle evidence commit atomically or roll back.",
+  limitations: "Temporary 6,000,000 retained OPERATIONS, not events; 300-second grouping; PILOT_DEFAULT_CATEGORIES; cloud/delete_oldest or operator/keep_all declarations grant no entitlement. No enforced cap, billing, cleanup, deletion, legacy backfill or forced restore on upgrade.",
 }
 
 export function supportedAuditEventTypes(): string[] {
-  return [...new Set([...providerCoverage.actions, ...auditReadCoverage.actions, ...pilotPolicyCoverage.actions, ...auditCaptureCoverage.actions])].sort()
+  return [...new Set([...providerCoverage.actions, ...auditReadCoverage.actions, ...pilotPolicyCoverage.actions, ...auditCaptureCoverage.actions, ...defaultPolicyCoverage.actions])].sort()
 }
 
 function uncovered(limitations: string): AuditCoverageDeclaration {
@@ -152,6 +160,7 @@ export const orgAuditCoverage: Readonly<Record<string, AuditCoverageDeclaration>
 }
 
 export const otherAuditSurfaces: readonly Readonly<{ location: string; surface: "route" | "mcp" | "job" | "service" | "cli"; coverage: AuditCoverageDeclaration }>[] = [
+  { location: "ee/apps/den-api/src/audit/capture.ts", surface: "service", coverage: defaultPolicyCoverage },
   { location: "ee/apps/den-api/scripts/audit-pilot.ts", surface: "cli", coverage: pilotPolicyCoverage },
   { location: "ee/apps/den-api/src/routes/admin", surface: "route", coverage: { ...uncovered("Some platform-admin actions retain legacy events; remaining actions uncovered, not migrated to operation capture."), status: "legacy_only", emitter: "src/audit-events.ts:buildOrganizationAuditEvent" } },
   ...[

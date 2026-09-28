@@ -441,6 +441,7 @@ export function OrgDashboardShell({ children }: { children: React.ReactNode }) {
     orgSlug: activeOrg?.slug ?? null,
     access,
     capabilities: orgContext?.capabilities ?? {
+      auditLogs: false,
       cloud: false,
       installLinks: false,
       mcpConnections: false,

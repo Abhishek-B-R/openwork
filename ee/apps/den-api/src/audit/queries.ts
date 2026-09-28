@@ -1,10 +1,10 @@
 import { and, asc, desc, eq, gt, gte, isNotNull, lt, lte, or, sql } from "@openwork-ee/den-db/drizzle"
 import { AuditEventResourceTable, AuditEventTable, AuditOperationTable, AuditStateTable } from "@openwork-ee/den-db/schema"
-import { readAuditPolicy, type AuditDatabase, type AuditTx } from "@openwork-ee/den-db/audit-log"
+import { type AuditDatabase, type AuditTx } from "@openwork-ee/den-db/audit-log"
 import { normalizeDenTypeId, typeId } from "@openwork-ee/utils/typeid"
 import { auditEventEnvelopeSchema, auditEventsResponseSchema, auditOperationOutcomeSchema, auditOperationsResponseSchema, auditOriginSchema, auditUsageResponseSchema, type AuditOperationSummary } from "@openwork/types/den/audit"
 import { z } from "zod"
-import { readAuditEntitlement } from "./capture.js"
+import { initializeAuditPolicyInTx, readLockedAuditPolicy, requireAuditFeature } from "./capture.js"
 import { AUDIT_CURSOR_TTL_MS, AuditReadError, auditFilterHash, readAuditCursor, signAuditCursor, type AuditCursor, type AuditCursorBinding } from "./cursors.js"
 
 const safeText = (maximum: number) => z.string().min(1).max(maximum).regex(/^[^\u0000-\u001f\u007f]+$/)
@@ -80,6 +80,7 @@ function operationFilters(tx: AuditTx, organizationId: string, watermark: number
 }
 
 async function snapshot(tx: AuditTx, binding: AuditCursorBinding, cursor?: AuditCursor): Promise<Snapshot> {
+  await requireAuditFeature(tx, binding.organizationId)
   const [state] = await tx.select({ lastSequence: AuditStateTable.last_sequence, eventCount: AuditStateTable.event_count }).from(AuditStateTable).where(eq(AuditStateTable.organization_id, binding.organizationId)).limit(1).for("share")
   const watermark = state?.lastSequence ?? 0
   const removedEvents = watermark - (state?.eventCount ?? 0)
@@ -172,10 +173,14 @@ async function eventPage(context: QueryContext, query: Page, binding: AuditCurso
 export async function readAuditUsage(context: Pick<QueryContext, "database" | "organizationId">, captureEnabled: boolean) {
   const organizationId = normalizeDenTypeId("organization", context.organizationId)
   return context.database.transaction(async (tx) => {
-    const entitlement = await readAuditEntitlement(tx, organizationId, true)
+    const { entitlement, featureEnabled } = await requireAuditFeature(tx, organizationId)
+    const captureAvailable = featureEnabled && captureEnabled
+    // GET usage can provision a ready org. Initialize before taking the snapshot
+    // share lock so concurrent first reads never need a share-to-update upgrade.
+    await initializeAuditPolicyInTx(tx, organizationId, captureAvailable)
     const [state] = await tx.select({ retainedOperations: AuditStateTable.retained_operations, eventCount: AuditStateTable.event_count, logicalBytes: AuditStateTable.logical_bytes, measuredAt: AuditStateTable.updated_at }).from(AuditStateTable).where(eq(AuditStateTable.organization_id, organizationId)).limit(1).for("share")
-    const policy = await readAuditPolicy(tx, organizationId)
-    const [oldest] = await tx.select({ startedAt: AuditOperationTable.first_recorded_at }).from(AuditOperationTable).where(retained(organizationId)).orderBy(asc(AuditOperationTable.first_recorded_at), asc(AuditOperationTable.id)).limit(1)
-    return auditUsageResponseSchema.parse({ policy, entitlement, captureOn: policy?.enabled ?? false, captureAvailable: captureEnabled, captureEnabled: entitlement.enabled && captureEnabled && policy?.enabled === true, retainedOperations: state?.retainedOperations ?? 0, eventCount: state?.eventCount ?? 0, logicalBytes: state?.logicalBytes ?? 0, oldestAvailableAt: oldest?.startedAt.toISOString() ?? null, measuredAt: state?.measuredAt.toISOString() ?? null, billing: "disabled", cleanup: "dry_run", drains: "not_configured" })
+    const policy = await readLockedAuditPolicy(tx, organizationId)
+    const [oldest] = await tx.select({ startedAt: AuditOperationTable.first_recorded_at }).from(AuditOperationTable).where(retained(organizationId)).orderBy(asc(AuditOperationTable.first_recorded_at), asc(AuditOperationTable.id)).limit(1).for("share")
+    return auditUsageResponseSchema.parse({ policy, entitlement, captureOn: policy?.enabled ?? false, captureAvailable, captureEnabled: entitlement.enabled && captureAvailable && policy?.enabled === true, retainedOperations: state?.retainedOperations ?? 0, eventCount: state?.eventCount ?? 0, logicalBytes: state?.logicalBytes ?? 0, oldestAvailableAt: oldest?.startedAt.toISOString() ?? null, measuredAt: state?.measuredAt.toISOString() ?? null, billing: "disabled", cleanup: "dry_run", drains: "not_configured" })
   })
 }

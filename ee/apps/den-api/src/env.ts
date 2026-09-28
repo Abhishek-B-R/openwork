@@ -115,9 +115,10 @@ const EnvSchema = z.object({
   WORKER_ACTIVITY_BASE_URL: z.string().optional(),
   DEN_AUTOMATIONS_ENABLED: z.string().optional(),
   DEN_DASHBOARDS_ENABLED: z.string().optional(),
-  // Independent fail-closed rollout gates, not purchase or plan entitlements.
-  DEN_AUDIT_CAPTURE_ENABLED: z.enum(["true", "false"]).default("false"),
-  DEN_AUDIT_VISIBILITY_ENABLED: z.enum(["true", "false"]).default("false"),
+  // Default-on deployment kill switches; the per-org auditLogs capability stays opt-in.
+  DEN_AUDIT_CAPTURE_ENABLED: z.enum(["true", "false"]).default("true"),
+  DEN_AUDIT_VISIBILITY_ENABLED: z.enum(["true", "false"]).default("true"),
+  // Explicit installation entitlement, separate from feature availability and capture preference.
   DEN_AUDIT_SELF_HOSTED_ENABLED: z.enum(["true", "false"]).default("false"),
   DEN_OPENWORK_WEB_ENABLED: z.string().optional(),
   DEN_AUTOMATIONS_RUNTIME_ENABLED: z.string().optional(),
