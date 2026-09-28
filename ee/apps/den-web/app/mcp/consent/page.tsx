@@ -15,7 +15,7 @@ import {
 import { denApiCredentials, denBrowserEndpoint } from "../../(den)/_lib/den-api-origin";
 import { describeMcpOAuthError } from "../../(den)/_lib/mcp-oauth-route";
 import { getRuntimeConfig } from "../../(den)/_lib/runtime-config";
-import { McpReturnLine, mcpIdentityFacts, useMcpRedirect } from "../client-identity";
+import { McpReturnLine, McpUnverifiedAppWarning, mcpIdentityFacts, useMcpRedirect } from "../client-identity";
 import { McpConsentPermissions, McpTechnicalDetails } from "../consent-permissions";
 import { McpStoryTiles, mcpStoryCopy } from "../mcp-story";
 import { useLocationQuery } from "../use-location-query";
@@ -136,6 +136,7 @@ export default function McpConsentPage() {
       </div>
       <McpConsentPermissions scope={scope} actor={actor} />
       <div className="flex flex-col gap-3.5">
+        <McpUnverifiedAppWarning redirect={redirect} />
         <McpReturnLine client={client} redirect={redirect} />
         {error ? <SetupErrorLine>{error}</SetupErrorLine> : null}
         <button type="button" className="den-button-primary w-full" disabled={busy !== null} onClick={() => void decide(true)}>

@@ -1,6 +1,6 @@
 "use client";
 
-import type { SetupFact } from "../(den)/_components/setup-frame-parts";
+import { SetupLine, type SetupFact } from "../(den)/_components/setup-frame-parts";
 import { describeMcpRedirect, type McpRedirectDescription } from "./client-identity-model";
 import { McpAppFact } from "./mcp-story";
 import type { McpClient } from "./use-mcp-client";
@@ -16,6 +16,26 @@ export function mcpIdentityFacts(client: McpClient, redirect: McpRedirectDescrip
     app: { label: "App", value: <McpAppFact client={client} /> },
     returnsTo: { label: "Returns to", value: redirect?.host ?? "Unknown", mono: true, testId: "mcp-redirect-host" },
   };
+}
+
+/** Registration and a signed OAuth request do not verify the app's publisher. */
+export function McpUnverifiedAppWarning({ redirect }: { redirect: McpRedirectDescription | null }) {
+  return (
+    <section aria-label="Unverified application" className="flex min-w-0 flex-col gap-2 border-l-2 border-[var(--dls-text-secondary)] pl-3" data-testid="mcp-unverified-app-warning">
+      <SetupLine><strong className="font-semibold">Unverified application</strong></SetupLine>
+      <SetupLine>
+        OpenWork has not verified who is requesting this access. Only authorize if you started this connection and trust the app to act on your behalf with the permissions shown.
+      </SetupLine>
+      {redirect ? (
+        <div className="flex min-w-0 flex-col gap-1">
+          <SetupLine>Check the return address supplied by this app:</SetupLine>
+          <span dir="ltr" className="break-all font-mono text-xs leading-5 text-[var(--dls-text-primary)]" data-testid="mcp-redirect-url">{redirect.url}</span>
+        </div>
+      ) : (
+        <SetupLine>Return address unavailable. Cancel and restart the connection from the app you intended to use.</SetupLine>
+      )}
+    </section>
+  );
 }
 
 /**
