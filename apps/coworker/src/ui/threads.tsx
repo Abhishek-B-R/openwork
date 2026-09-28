@@ -1233,6 +1233,13 @@ function ThreadView({
 }) {
   const transcriptCacheKey = `${runtime.serverUrl}:${coworker.workspaceId}:${coworker.slug}:${coworker.createdAt}:${threadId}`;
   const [cachedTranscript] = useState(() => recentTranscript(transcriptCacheKey));
+  // Entrances belong to what arrives after the conversation first paints: a message
+  // already on screen when it loads, or handed over from a new discussion, stays still.
+  const [settled, setSettled] = useState(false);
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => setSettled(true));
+    return () => cancelAnimationFrame(frame);
+  }, []);
   const [messages, setMessages] = useState<TranscriptMessage[]>(cachedTranscript?.messages ?? []);
   const messageReactions = useMessageReactions(kind === "discussion" && browserEligible ? { kind: "private", slug: coworker.slug, threadId } : null, active, coworker.createdAt);
   const [nativeState, setNativeState] = useState<HeadlessThreadSnapshot["native"]>();
@@ -2647,6 +2654,7 @@ function ThreadView({
                 <TimeLabel label={timeLabelBetween(block.previous?.createdAt, block.message.createdAt)} />
                 <MessageBubble
                   message={block.message}
+                  entrance={settled}
                   reactions={messageReactions.get(block.message.id)}
                   coworker={coworker}
                   mcpClient={mcpClient}
@@ -2690,7 +2698,7 @@ function ThreadView({
           {kind === "discussion" ? (
             <WorkerDecisionCards coworker={coworker} threadId={threadId} workers={workers} onAnswered={() => onWorkersChanged?.()} />
           ) : null}
-          <LiveRowSlot open={working && outcome?.kind !== "retrying" && !["completed", "failed", "cancelled"].includes(progress.status)}>
+          <LiveRowSlot entrance={settled} open={working && outcome?.kind !== "retrying" && !["completed", "failed", "cancelled"].includes(progress.status)}>
             {phase === "writing" && !activeReply ? (
               // The words are arriving: the bubble is the live view. It renders in the transcript
               // once the engine has the reply; until then the words stand in here, in the same shape.
@@ -2700,6 +2708,7 @@ function ThreadView({
             ) : null}
              <LiveRow
                key={progress.executionId}
+               entrance={false}
                coworker={coworker}
                phase={phase}
                progress={progress}
@@ -2973,6 +2982,7 @@ function TimeLabel({ label }: { label: string | null }) {
 
 const MessageBubble = memo(function MessageBubble({
   message,
+  entrance = false,
   reactions,
   coworker,
   mcpClient,
@@ -2992,6 +3002,8 @@ const MessageBubble = memo(function MessageBubble({
   documents,
 }: {
   message: TranscriptMessage;
+  /** The conversation has painted: a person's message appearing from now on slides in, once. */
+  entrance?: boolean;
   /** The coworker's documents and how to open one, for the links and cards a reply's mentions become. */
   documents?: DocumentHooks;
   reactions?: readonly MessageReaction[];
@@ -3021,6 +3033,9 @@ const MessageBubble = memo(function MessageBubble({
   kind?: "discussion" | "assignment" | "worker";
 }) {
   const user = message.role === "user";
+  // Decided once, when the bubble first appears: a sent message (not yet recorded, or just
+  // recorded) slides in. Its record arriving a moment later must not start the entrance again.
+  const [entering] = useState(() => entrance && user && (message.createdAt === null || Date.now() - message.createdAt < 4_000));
   // How fast a reply came, for its tooltip only: from Send to the first words on screen and to the
   // close. Read once per landed reply, not on every render.
   const speed = useMemo(() => {
@@ -3089,7 +3104,7 @@ const MessageBubble = memo(function MessageBubble({
       );
     }
     return (
-      <article className={`flex flex-col items-end ${continued ? "-mt-1.5" : ""} ${message.createdAt && Date.now() - message.createdAt < 4_000 ? "message-enter" : ""}`} data-message-role="user" data-message-id={message.id} data-continued={continued ? "true" : "false"}>
+      <article className={`flex flex-col items-end ${continued ? "-mt-1.5" : ""} ${entering ? "message-enter" : ""}`} data-message-role="user" data-message-id={message.id} data-continued={continued ? "true" : "false"}>
         <div className={`relative max-w-[min(72%,30rem)] ${reactions?.length ? "mt-5" : ""}`}>
           <div className={`bubble bubble-user whitespace-pre-wrap ${tail ? "bubble-tail-right" : ""}`} title={message.createdAt ? new Date(message.createdAt).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }) : undefined}>
             {message.text || "…"}
@@ -3191,12 +3206,22 @@ function ReplyText({ message, active, turnCalls, tail, onLongReply, documents }:
  * down as the row went. The row leaves the moment the turn ends (nothing keeps
  * reporting "working" once it is not); the slot keeps its place.
  */
-function LiveRowSlot({ open, children }: { open: boolean; children: ReactNode }) {
+function LiveRowSlot({ open, entrance, children }: { open: boolean; entrance: boolean; children: ReactNode }) {
   return (
     <div className="live-row-slot" data-open={open ? "true" : "false"} data-testid="live-row-slot">
-      {open ? children : null}
+      {open ? <SlotEntrance animate={entrance}>{children}</SlotEntrance> : null}
     </div>
   );
+}
+
+/**
+ * The live row's entrance plays once as the slot opens. The row inside restarts
+ * when its execution is admitted (it is keyed by it); replaying the entrance
+ * then made the working line blink.
+ */
+function SlotEntrance({ animate, children }: { animate: boolean; children: ReactNode }) {
+  const [entering] = useState(animate);
+  return <div className={entering ? "message-enter" : undefined}>{children}</div>;
 }
 
 /** One underlined word inside a quiet line or the live row. */

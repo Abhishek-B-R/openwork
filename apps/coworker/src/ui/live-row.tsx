@@ -12,7 +12,7 @@ import { useActivityClock } from "@/ui/work-popover";
 /** Existing callers can pass their transcript call; no payload fields are read. */
 export type LiveRowCall = ExecutionMetadataInput;
 
-export function LiveRow({ coworker, phase = "thinking", step = null, stepCall = null, stepSince = null, stream = null, reply = null, wordsArrived = false, sentAt = null, stillWorking = "", progress, progressNote, onStop }: {
+export function LiveRow({ coworker, phase = "thinking", step = null, stepCall = null, stepSince = null, stream = null, reply = null, wordsArrived = false, sentAt = null, stillWorking = "", progress, progressNote, onStop, entrance = true }: {
   coworker: CoworkerSummary;
   phase?: LivePhase;
   step?: WorkStep | null;
@@ -29,6 +29,8 @@ export function LiveRow({ coworker, phase = "thinking", step = null, stepCall = 
   progress?: ProgressObservation;
   progressNote?: ProgressNote;
   onStop?: () => void;
+  /** Play its own entrance on mount; off where a slot around it already plays one for the turn. */
+  entrance?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const anchorRef = useRef<HTMLButtonElement | null>(null);
@@ -75,7 +77,7 @@ export function LiveRow({ coworker, phase = "thinking", step = null, stepCall = 
   // The thinking bubble has the reply bubble's place, shape and one-line height,
   // so the first words fill it instead of replacing a different layout.
   if (typing) return (
-    <div className="message-enter relative flex min-w-0 flex-col items-start" data-testid="coworker-working" data-phase={status} data-outcome={long ? "slow" : "working"} data-popover={open ? "open" : "closed"}>
+    <div className={`${entrance ? "message-enter " : ""}relative flex min-w-0 flex-col items-start`} data-testid="coworker-working" data-phase={status} data-outcome={long ? "slow" : "working"} data-popover={open ? "open" : "closed"}>
       <button
         ref={anchorRef}
         type="button"
