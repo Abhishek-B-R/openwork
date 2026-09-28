@@ -771,6 +771,27 @@
       "when": 1790207299296,
       "tag": "0110_early_hiroim",
       "breakpoints": true
+    },
+    {
+      "idx": 111,
+      "version": "5",
+      "when": 1790405726705,
+      "tag": "0111_device_authorization",
+      "breakpoints": true
+    },
+    {
+      "idx": 112,
+      "version": "5",
+      "when": 1790407468548,
+      "tag": "0112_claimable_workspaces",
+      "breakpoints": true
+    },
+    {
+      "idx": 113,
+      "version": "5",
+      "when": 1790454359250,
+      "tag": "0113_setup_agent_member",
+      "breakpoints": true
     }
   ]
 }
