@@ -69,12 +69,9 @@ Agent flow: `evals/specs/browser-tabs-mcp.e2e.test.ts` — the agent's tab list
 no longer offers suspend.
 ```
 
-- List the user-flow spec first, then the agent-flow spec. Each test is
-  tagged `user-flow` or `agent-flow` (`write-a-spec` → User flow vs agent
-  flow); the report groups them the same way.
-- If a person can see or click something that changed, a user-flow spec is
-  required. Agent-flow proof alone is fine only when nothing changes on
-  screen; the report says "No user-flow proof" otherwise.
+- List the user-flow spec first, then the agent-flow spec. If a person can
+  see or click something that changed, a user-flow spec is required; the rule
+  is in [docs/testing.md#user-flow-vs-agent-flow](../../../docs/testing.md#user-flow-vs-agent-flow).
 
 - The `before:` here and "What was the situation before?" are the same
   moment. If they disagree, fix one.

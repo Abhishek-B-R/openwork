@@ -49,37 +49,18 @@ reviewer would open, not every step. Run it locally with
 
 ### Journey tags
 
-A journey describes itself; there is no catalog to edit. Vitest discovers it
-(`evals/scripts/journeys.mjs` statically collects the specs and reads their tags).
-Put a JSDoc block at the very top of the spec: its first line is the readable
-name, and `@module-tag` lines tag the whole file. Engine tags go on each case's
-`test(...)`. Tests must be called `test`, `it`, `test…` or `…Test` (e.g.
-`const launchTest = spec.world(…)`) so Vitest's static parser finds them. The tag
-descriptions in `evals/vitest.config.ts` are the source of truth
-(`pnpm --dir evals exec vitest --list-tags`); unknown tags fail the run.
+A journey describes itself; there is no catalog to edit. Start from the
+scaffold, which already has the name line, flow tag and `resources`:
 
-| Tag | Use when the journey… | Example |
-| --- | --- | --- |
-| `critical` | must pass on every PR and dev merge | `app-smoke` |
-| `local-only` | needs loopback fixtures, the testkit DB, a fault proxy or host binary | `scim-okta-lifecycle` |
-| `live-model` | calls real paid models | `engine-live-chat` |
-| `live-openai` | streams from real OpenAI (needs `OPENAI_API_KEY` + opt-in) | `live-stream-continuity` |
-| `packaged` | boots a packaged desktop build (`OPENWORK_EVAL_ELECTRON_BINARY`) | `desktop-quit-path` |
-| `macos` | needs a macOS host | `computer-use-window-scope` |
-| `raw-desktop` | imports `desktop` from `@openwork/hosts`; manual only, never scheduled | `engine-v2-preview-flag` |
-| `engine-v1` / `engine-v2` | is a `--case`: title starts with its ID, e.g. `test("HOME-01 …", { tags: ["engine-v2"] }, …)` | `opencode-v2-session-home` |
-
-```ts
-/**
- * Quit an enterprise install cleanly
- *
- * @module-tag local-only
- * @module-tag packaged
- */
+```sh
+pnpm evals:new <kebab-name> --flow user    # or --flow agent; --engine v2, --critical
 ```
 
-`packaged`, `macos` and `live-openai` must match what the spec and its worlds
-guard; `node --test evals/scripts/journey-ci.test.mjs` checks both directions.
+The header JSDoc's first line is the readable name; `@module-tag` lines tag
+the file; engine tags go on each case's `test(...)`, whose title starts with a
+unique case ID. Which tag to use, and what CI does with it:
+[docs/testing.md#journey-tags](../../../docs/testing.md#journey-tags) (generated
+from `evals/vitest.config.ts`; `pnpm --dir evals exec vitest --list-tags`).
 
 ## Do not write one when…
 
@@ -95,23 +76,19 @@ steps still read as one person's before → after.
 
 ## User flow vs agent flow
 
-Tag every test with who acts in it. The report lists them under "User flow"
-and "Agent flow", so a reviewer sees at once whether a person could do it.
+Tag every test with who acts in it; the report groups them under "User flow"
+and "Agent flow". **If a person can see or click something that changed, the
+PR needs a user-flow spec.** Definitions and the rule:
+[docs/testing.md#user-flow-vs-agent-flow](../../../docs/testing.md#user-flow-vs-agent-flow).
 
 ```ts
 test("a member shares a chat with a teammate", { tags: ["user-flow"] }, async ({ user, step }) => …);
 test("an MCP client lists the shared chat", { tags: ["agent-flow"] }, async ({ agent, evidence }) => …);
 ```
 
-- **User flow**: a person (member, admin) goes through the real UI (app-web,
-  desktop or Den web). Every step is a `user.*` act (click, type, press) and
-  ends with a screenshot of what they see. Before and after come from the same
-  run. `seed.*` only arranges the world; it is never a step.
-- **Agent flow**: the actor is an agent, an MCP client or a server. The proof
-  is the requests and responses (`recordAssertionEvidence`). Fine as extra
-  proof, or alone when nothing changes on screen.
-- **Rule**: if a person can see or click something that changed, the PR needs
-  a user-flow spec. Untagged tests show as "Unlabelled".
+In a user flow every step is a `user.*` act (click, type, press) that ends
+with a screenshot, and before and after come from the same run; `seed.*` only
+arranges the world. An agent flow's proof is its requests and responses.
 
 ## The proof shape
 
