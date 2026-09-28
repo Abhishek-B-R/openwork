@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { AssignedCoworkers } from "@/ui/assigned-coworkers";
 import {
   coworkerBridge,
@@ -20,9 +21,10 @@ import { PROGRESS_LIMITS } from "@/lib/progress-config";
 import { effortStopLabel } from "@/lib/effort";
 import { usesAppConversationDefault } from "@/lib/model-defaults";
 import { AppModelDefaults } from "@/ui/app-model-defaults";
-import { CoworkerModelSettings } from "@/ui/coworker-model-settings";
+import { CoworkerAvatar } from "@/ui/coworker-avatar";
+import { CustomizeCoworker } from "@/ui/customize-coworker";
 import { CoworkerMark, InlineLoader } from "@/ui/brand";
-import { Button, ErrorNote, HelpTip, StatusDot } from "@/ui/kit";
+import { Button, ChevronIcon, ErrorNote, HelpTip, StatusDot } from "@/ui/kit";
 import { LocalProviders } from "@/ui/local-providers";
 import { ModelsMembershipCard } from "@/ui/models-membership";
 import { FreshStartSettings } from "@/ui/fresh-start-settings";
@@ -244,7 +246,12 @@ export function OpenWorkSettings({
 }) {
   const [section, setSection] = useState<SettingsSection>(initialSection);
   const sectionInfo = SECTIONS.find((item) => item.id === section);
-  const [editingCoworker, setEditingCoworker] = useState("");
+  // A coworker's own AI choices open in its Customize dialog, over Settings, instead of stretching the page.
+  const [openCoworker, setOpenCoworker] = useState("");
+  const configuring = coworkers.find((coworker) => coworker.slug === openCoworker) ?? null;
+  const mainRef = useRef<HTMLElement>(null);
+  // Every page starts at its top.
+  useEffect(() => { mainRef.current?.scrollTo({ top: 0 }); }, [section]);
   useEffect(() => {
     if (active && session && section === "account") void onSyncTemplates();
   }, [active, session, section, onSyncTemplates]);
@@ -389,11 +396,39 @@ export function OpenWorkSettings({
         </div>
       </aside>
 
+      {configuring && onCoworkerChanged ? createPortal(
+        <CustomizeCoworker
+          key={configuring.slug}
+          runtime={runtime}
+          session={session}
+          coworker={configuring}
+          focus="model"
+          onCoworkerChanged={onCoworkerChanged}
+          onSyncProviders={onSyncProviders}
+          onOpenAccount={() => { setOpenCoworker(""); setSection("account"); }}
+          onOpenModelDefaults={() => { setOpenCoworker(""); setSection("model-defaults"); }}
+          onDone={() => setOpenCoworker("")}
+        />,
+        document.body,
+      ) : null}
       <section className="glass-main flex min-w-0 flex-1 flex-col">
         <div className="window-drag h-8 shrink-0 sm:hidden" />
         <header className="glass-header window-drag flex min-h-[62px] shrink-0 items-center justify-between gap-3 border-b border-line px-4 py-3 short:min-h-[52px] short:py-2 sm:px-7">
           <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2">
+            <nav aria-label="Where you are in Settings" className="window-no-drag -ml-1 flex min-w-0 items-center gap-0.5 text-[11px] text-mist" data-testid="settings-breadcrumbs">
+              <button type="button" className="shrink-0 rounded-md px-1 py-0.5 transition-colors hover:bg-white/5 hover:text-snow" onClick={onClose} data-testid="settings-crumb-coworkers">Coworkers</button>
+              <ChevronIcon direction="right" className="size-3 shrink-0 text-mist/50" />
+              {section === "general" ? (
+                <span className="shrink-0 px-1 py-0.5 text-snow/80" aria-current="page">Settings</span>
+              ) : (
+                <>
+                  <button type="button" className="shrink-0 rounded-md px-1 py-0.5 transition-colors hover:bg-white/5 hover:text-snow" onClick={() => setSection("general")} data-testid="settings-crumb-home">Settings</button>
+                  <ChevronIcon direction="right" className="size-3 shrink-0 text-mist/50" />
+                  <span className="min-w-0 truncate px-1 py-0.5 text-snow/80" aria-current="page">{sectionTitle(section)}</span>
+                </>
+              )}
+            </nav>
+            <div className="mt-0.5 flex items-center gap-2">
               <h1 ref={headingRef} tabIndex={-1} className="text-[15px] font-semibold text-snow outline-none">{sectionTitle(section)}</h1>
               {sectionInfo?.help ? <HelpTip label={sectionInfo.label.toLowerCase()} content={sectionInfo.help} /> : null}
             </div>
@@ -401,7 +436,7 @@ export function OpenWorkSettings({
           </div>
           <Button variant="ghost" className="window-no-drag size-8 px-0" onClick={onClose} title="Close settings" aria-label="Close settings">×</Button>
         </header>
-        <main className="min-h-0 flex-1 overflow-y-auto px-4 py-5 short:py-3 sm:px-6 lg:px-8">
+        <main ref={mainRef} className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-5 short:py-3 sm:px-6 lg:px-8">
           {/* A container, so a page's columns follow the room it actually has beside the settings list. */}
           <div className={`@container mx-auto w-full space-y-5 short:space-y-3 ${sectionInfo?.wide ? "max-w-[1040px]" : "max-w-[760px]"}`}>
             <label className="block sm:hidden">
@@ -436,25 +471,28 @@ export function OpenWorkSettings({
                       <HelpTip label="each coworker's AI" content="Choose a conversation model and thinking pace for one coworker. Shared defaults stay available, and personal choices remain saved when you switch back." />
                       <p className="text-xs text-mist">{coworkers.length} coworker{coworkers.length === 1 ? "" : "s"}, each with its own workspace. Open one to make a personal choice.</p>
                     </div>
-                    {/* Side by side while closed; the one being edited takes the full width. */}
+                    {/* Each opens that coworker's AI choices in its own dialog; the page keeps its shape. */}
                     <div className="grid gap-3 @2xl:grid-cols-2">
                       {coworkers.map((coworker) => (
-                        <details key={coworker.slug} open={editingCoworker === coworker.slug} onToggle={(event) => {
-                          const open = event.currentTarget.open;
-                          setEditingCoworker((current) => open ? coworker.slug : current === coworker.slug ? "" : current);
-                        }} className={`min-w-0 overflow-hidden rounded-2xl border border-line bg-panel/45 ${editingCoworker === coworker.slug ? "@2xl:col-span-2" : ""}`} data-testid={`coworker-defaults-${coworker.slug}`}>
-                          <summary className="flex cursor-pointer items-start justify-between gap-3 px-4 py-3 text-xs text-snow">
-                            <span className="min-w-0 flex-1">
-                              <span className="block font-semibold">{coworker.name}</span>
-                              <span className="mt-0.5 block break-words">{modelLabel(coworker, models, catalogLoaded)}</span>
-                              <span className="mt-0.5 block text-mist">{modelHint(coworker)}</span>
-                            </span>
-                            <span className="shrink-0 text-spark">Edit AI choices</span>
-                          </summary>
-                          {editingCoworker === coworker.slug && onCoworkerChanged ? <div className="border-t border-line p-4">
-                            <CoworkerModelSettings runtime={runtime} session={session} coworker={coworker} onCoworkerChanged={onCoworkerChanged} onSyncProviders={onSyncProviders} onOpenAccount={() => setSection("account")} onOpenModelDefaults={() => setSection("model-defaults")} catalog={catalog} catalogLoading={refreshing} onRefreshCatalog={refreshConfiguration} />
-                          </div> : null}
-                        </details>
+                        <button
+                          key={coworker.slug}
+                          type="button"
+                          aria-haspopup="dialog"
+                          className="group flex min-w-0 items-center gap-3 rounded-2xl border border-line bg-panel/45 px-4 py-3 text-left transition-colors hover:border-white/15 hover:bg-white/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-spark/50"
+                          onClick={() => setOpenCoworker(coworker.slug)}
+                          data-testid={`coworker-defaults-${coworker.slug}`}
+                        >
+                          <CoworkerAvatar identity={`${coworker.slug}:settings`} color={coworker.avatarColor} glasses={coworker.avatarGlasses} name={coworker.name} size={36} animated={false} />
+                          <span className="min-w-0 flex-1 text-xs">
+                            <span className="block truncate text-sm font-semibold text-snow">{coworker.name}</span>
+                            <span className="mt-0.5 block truncate text-snow/85">{modelLabel(coworker, models, catalogLoaded)}</span>
+                            <span className="mt-0.5 block truncate text-mist">{modelHint(coworker)}</span>
+                          </span>
+                          <span className="flex shrink-0 items-center gap-1 text-[11px] text-mist transition-colors group-hover:text-snow">
+                            AI choices
+                            <ChevronIcon direction="right" className="size-3.5 transition-transform group-hover:translate-x-0.5" />
+                          </span>
+                        </button>
                       ))}
                     </div>
                   </section>
