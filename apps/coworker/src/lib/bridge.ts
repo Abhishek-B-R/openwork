@@ -588,6 +588,10 @@ export const coworkerBridge = {
     cancel: (requestId: string) => invoke<void>("voice.cancel", { requestId }),
     microphone: () => invoke<{ granted: boolean }>("voice.microphone"),
   },
+  appWindow: {
+    /** Dock the window as a small conversation at the right of the screen (hiding the macOS window buttons), or put it back where it was. */
+    focusMode: (on: boolean) => invoke<{ docked: boolean; controlsHidden: boolean }>("window.focusMode", { on }),
+  },
   browser: {
     bind: (slug: string, threadId: string, viewId: string) => invoke<BrowserSnapshot>("browser.bind", { slug, threadId, viewId }),
     detach: (viewId: string) => invoke<void>("browser.detach", { viewId }),

@@ -122,12 +122,12 @@ export function EffortDial({
         data-testid="effort-dial-pill"
         onClick={() => setOpen((current) => !current)}
       >
-        <DynamicEffortIcon /><span className="font-medium text-snow/90">Dynamic effort</span>{" "}
+        <DynamicEffortIcon /><span className="hidden font-medium text-snow/90 sm:inline">Dynamic effort</span>{" "}
         <span className="text-mist">{effortStopLabel(stop)}</span>{" "}
         <span aria-hidden="true">⌄</span>
       </button>
       {open ? (
-        <div role="dialog" aria-label={`Dynamic effort for ${coworkerName}`} className="absolute bottom-full right-0 z-30 mb-3 max-h-[min(540px,75vh)] overflow-y-auto rounded-[22px] border border-line bg-panel p-5 shadow-[0_16px_48px_rgba(0,0,0,0.4)]">
+        <div role="dialog" aria-label={`Dynamic effort for ${coworkerName}`} className="absolute bottom-full right-0 z-30 mb-3 max-h-[min(540px,75vh)] max-w-[calc(100vw-24px)] overflow-y-auto rounded-[22px] border border-line bg-panel p-4 shadow-[0_16px_48px_rgba(0,0,0,0.4)] sm:p-5">
           {dial}
         </div>
       ) : null}

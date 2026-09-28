@@ -4,7 +4,7 @@ import { useCalendarData } from "@/ui/calendar-data";
 import { useCalendarPreferences } from "@/ui/calendar-preferences";
 import { eventForTarget, groupEventTarget, type EventArtifact } from "@/lib/events";
 import type { DocumentNavigationGuard } from "@/ui/documents";
-import { Component, Suspense, lazy, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { Component, Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { coworkerBridge, type CoworkerActivityItem, type CoworkerGroupSummary, type CoworkerSummary, type CoworkerTemplateSync, type ProviderSyncRun, type RuntimeInfo } from "@/lib/bridge";
 import { acknowledgeCoworker } from "@/ui/coworker-avatar";
 import { publishGroupRun } from "@/lib/group-runs";
@@ -34,7 +34,9 @@ import { GroupChat } from "@/ui/group-chat";
 import { SignInGate } from "@/ui/sign-in";
 import { CoworkerHome, type CoworkerHomeRequest } from "@/ui/coworker-home";
 import { CoworkerRail, type CoworkerMainContent } from "@/ui/coworker-rail";
-import { useResizablePanel } from "@/ui/use-resizable-panel";
+import { FocusHome } from "@/ui/focus-home";
+import { useResizablePanel, type ResizablePanel } from "@/ui/use-resizable-panel";
+import { LayoutContext, useLayoutState } from "@/ui/use-layout";
 import type { PanelBounds } from "@/lib/panel-layout";
 
 /** The team rail: drag it narrower than a row can show and it folds to avatars. */
@@ -873,6 +875,29 @@ export default function App() {
     bounds: RAIL_BOUNDS,
     defaultWidth: 272,
   });
+  /**
+   * Focus mode, or a window too narrow for columns: only the conversation shows.
+   * The team then slides in over it from the left, full size, and leaves again
+   * once the person picks somewhere to go.
+   */
+  const layoutState = useLayoutState();
+  const { chatOnly, closeTeam } = layoutState;
+  const drawerWidth = Math.min(320, Math.round(layoutState.width * 0.86));
+  const railPanel = useMemo<ResizablePanel>(() => chatOnly
+    ? { ...rail, width: drawerWidth, collapsed: false, resizing: false, expand: () => {}, collapse: closeTeam, toggle: closeTeam, reset: () => {} }
+    : rail, [chatOnly, closeTeam, drawerWidth, rail]);
+  const unreadActivity = inbox.items.filter((item) => item.readAt === null && (features.calendar || item.kind !== "event-reminder")).length;
+  const layout = useMemo(() => ({ ...layoutState, teamAttention: features.notifications && unreadActivity > 0, teamUnread: features.notifications ? unreadActivity : 0 }), [features.notifications, layoutState, unreadActivity]);
+  /** A choice made in the team list closes it when it lies over the conversation. */
+  const fromTeam = <Args extends unknown[]>(run: (...args: Args) => void) => (...args: Args) => {
+    run(...args);
+    if (chatOnly) closeTeam();
+  };
+  // Shared by the team list and Focus mode's list of conversations.
+  const startNewCoworker = () => { navigationGeneration.current += 1; if (allowSourceNavigation()) setCreating(true); };
+  const openGroupChat = (id: string) => { navigationGeneration.current += 1; if (!allowSourceNavigation()) return; setActivityGroupRequest(null); setGroupDocumentRequest(null); setHomeRequest(null); setGroupEventSource(null); calendarConversationOrigin.current = null; setSelectedActivityId(null); setSelectedGroupId(id); navigate("chat"); setGroupDetailsOpen(false); };
+  /** In Focus mode the team is a list of conversations covering the window; otherwise, in a narrow window, a drawer. */
+  const drawerOpen = layout.teamOpen && !layout.focus;
 
   // The catalog the onboarding steps propose from, read once when they are first needed.
   useEffect(() => {
@@ -1309,7 +1334,8 @@ export default function App() {
 
   return (
     <VoiceContext.Provider value={{ accountKey: session ? `${sessionKey(session)}\u0000${session.userEmail}` : "signed-out", openModels: () => openGlobalSettings("models"), signIn: () => setConnecting(true) }}>
-    <div key={accountKey} className="window-shell relative flex h-full overflow-hidden" data-testid="coworker-shell">
+    <LayoutContext.Provider value={layout}>
+    <div key={accountKey} className="window-shell relative flex h-full overflow-hidden" data-testid="coworker-shell" data-layout={chatOnly ? (layoutState.compact ? "compact" : "focus") : "full"}>
       <div
         className={workspaceActive || customizeOpen ? "flex min-w-0 flex-1" : "hidden"}
         data-testid="coworker-workspace"
@@ -1335,7 +1361,16 @@ export default function App() {
           </div>
         ) : (
           <div key="team" className="flex min-w-0 flex-1">
+            {drawerOpen ? <div className="fixed inset-0 z-40 bg-black/45 backdrop-blur-[1px]" onClick={closeTeam} aria-hidden="true" data-testid="team-drawer-scrim" /> : null}
+            {/* In the conversation-only layout the team list is a drawer over the conversation; otherwise it is the left column. */}
+            <div
+              className={chatOnly ? `fixed inset-y-0 left-0 z-50 flex bg-ink transition-transform duration-200 ease-out motion-reduce:transition-none ${drawerOpen ? "translate-x-0 shadow-[24px_0_64px_rgb(0_0_0/0.5)]" : "-translate-x-full"}` : "contents"}
+              data-testid="team-drawer"
+              data-open={drawerOpen ? "true" : "false"}
+              inert={chatOnly && !drawerOpen}
+            >
             <CoworkerRail
+              drawer={chatOnly}
               calendarData={calendar}
               calendarPreferences={calendarPreferences}
               onCalendarPreferencesChange={setCalendarPreferences}
@@ -1345,6 +1380,8 @@ export default function App() {
                 setGroupDetailsOpen(false);
                 navigate(view, view !== "activity");
                 if (view === "activity") { setActivityMounted(true); void inbox.refresh(); }
+                // Activity opens inside the team list; Chat and Calendar leave it for the view.
+                else if (chatOnly) closeTeam();
               }}
               chatAvailable={Boolean(selected || selectedGroup)}
               runtime={runtime}
@@ -1352,22 +1389,22 @@ export default function App() {
               coworkers={coworkers}
               activityBySlug={visibleActivityBySlug}
               selectedSlug={activityVisible || selectedGroup ? "" : selectedSlug}
-              unreadActivity={inbox.items.filter((item) => item.readAt === null && (features.calendar || item.kind !== "event-reminder")).length}
+              unreadActivity={unreadActivity}
               unreadMentions={inbox.items.filter((item) => item.readAt === null && item.kind === "mention").length}
               activityError={Boolean(inbox.error)}
-              panel={rail}
-              onSelect={(slug) => visitCoworker(slug)}
+              panel={railPanel}
+              onSelect={fromTeam((slug: string) => visitCoworker(slug))}
               onOpenCalendar={(slug) => { void requestCalendar({ coworkerSlug: slug }); }}
               eventGroupIds={eventGroupIds}
-              onNewCoworker={() => { navigationGeneration.current += 1; if (allowSourceNavigation()) setCreating(true); }}
-              onOpenOpenWork={() => openGlobalSettings()}
-              onOpenMarketplace={() => setMarketplaceOpen(true)}
+              onNewCoworker={fromTeam(startNewCoworker)}
+              onOpenOpenWork={fromTeam(() => openGlobalSettings())}
+              onOpenMarketplace={fromTeam(() => setMarketplaceOpen(true))}
               groups={liveGroups}
               groupLines={groupLines}
               groupActiveSlugs={groupActiveSlugs}
               selectedGroupId={activityVisible ? "" : selectedGroup?.id ?? ""}
-              onSelectGroup={(id) => { navigationGeneration.current += 1; if (!allowSourceNavigation()) return; setActivityGroupRequest(null); setGroupDocumentRequest(null); setHomeRequest(null); setGroupEventSource(null); calendarConversationOrigin.current = null; setSelectedActivityId(null); setSelectedGroupId(id); navigate("chat"); setGroupDetailsOpen(false); }}
-              onNewGroup={() => { navigationGeneration.current += 1; if (allowSourceNavigation()) setCreatingGroup(true); }}
+              onSelectGroup={fromTeam(openGroupChat)}
+              onNewGroup={fromTeam(() => { navigationGeneration.current += 1; if (allowSourceNavigation()) setCreatingGroup(true); })}
               activityContent={activityMounted ? (
                 <DeferredView title="Activity" onBack={() => navigate("chat", true)}>
                 <Suspense fallback={<div className="h-full flex-1"><AppLoader message="Opening activity" detail="" /></div>}>
@@ -1376,8 +1413,8 @@ export default function App() {
                     selectedId={selectedActivityId}
                     items={inbox.items} loading={inbox.loading} error={inbox.error} busy={inbox.busy}
                     coworkers={coworkers} groups={liveGroups} activityBySlug={visibleActivityBySlug}
-                    onRefresh={() => void inbox.refresh()} onMarkRead={inbox.markRead} onOpen={openActivityItem}
-                    onOpenDocument={openActivityDocument}
+                    onRefresh={() => void inbox.refresh()} onMarkRead={inbox.markRead} onOpen={async (item) => { await openActivityItem(item); if (chatOnly) closeTeam(); }}
+                    onOpenDocument={async (target) => { await openActivityDocument(target); if (chatOnly) closeTeam(); }}
                     calendar={calendar}
                     onOpenEvent={openActivityEvent}
                     onOpenCalendar={() => { setSelectedActivityId(null); resumeCalendar(); }}
@@ -1387,6 +1424,24 @@ export default function App() {
                 </DeferredView>
               ) : undefined}
             />
+            </div>
+            {layout.focus ? (
+              <FocusHome
+                open={layout.teamOpen}
+                coworkers={coworkers}
+                groups={liveGroups}
+                eventGroupIds={eventGroupIds}
+                activityBySlug={visibleActivityBySlug}
+                groupLines={groupLines}
+                groupActiveSlugs={groupActiveSlugs}
+                items={inbox.items}
+                selectedSlug={activityVisible || selectedGroup ? "" : selectedSlug}
+                selectedGroupId={activityVisible ? "" : selectedGroup?.id ?? ""}
+                onSelect={fromTeam((slug: string) => visitCoworker(slug))}
+                onSelectGroup={fromTeam(openGroupChat)}
+                onNewCoworker={fromTeam(startNewCoworker)}
+              />
+            ) : null}
             {creatingGroup ? (
               <NewGroupSheet
                 coworkers={coworkers}
@@ -1471,7 +1526,7 @@ export default function App() {
               connect={connectBySlug[selected.slug] ?? null}
               onRepairConnect={() => syncConnect({ force: true, remint: true, slug: selected.slug })}
               onConnectAccount={() => setConnecting(true)}
-              railWidth={activityVisible ? Math.max(RAIL_BOUNDS.min, rail.width) : rail.width}
+              railWidth={chatOnly ? 0 : activityVisible ? Math.max(RAIL_BOUNDS.min, rail.width) : rail.width}
               onCoworkerAdded={addCoworkerToList}
               canHandOff={allowSourceNavigation}
               onHandOff={(slug, prompt) => visitCoworker(slug, prompt)}
@@ -1580,6 +1635,7 @@ export default function App() {
       </Suspense>
       </DeferredView> : null}
     </div>
+    </LayoutContext.Provider>
     </VoiceContext.Provider>
   );
 }

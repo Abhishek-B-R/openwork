@@ -10,6 +10,7 @@ import { acknowledgeCoworker, AvatarControls } from "@/ui/coworker-avatar";
 import { OnboardingMascotStack } from "@/ui/onboarding-mascot";
 import { DEFAULT_PERSONALITY, type Personality } from "@/lib/personalities";
 import { PersonalityPicker } from "@/ui/personality-picker";
+import { useLayout } from "@/ui/use-layout";
 import { Button, ErrorNote, Field, inputClass } from "@/ui/kit";
 import { RetiredCoworkers } from "@/ui/retired-coworkers";
 import { PickTeammateTile } from "@/ui/team-cards";
@@ -45,6 +46,7 @@ export function NewCoworker({
   team?: readonly CoworkerSummary[];
   onAskTeam?: (slug: string, prompt: string) => void;
 }) {
+  const layout = useLayout();
   const [step, setStep] = useState<Step>(team.length > 0 ? "choose" : "identity");
   const [name, setName] = useState("");
   const previewIdentity = useId();
@@ -140,13 +142,13 @@ export function NewCoworker({
           </button>
         ) : null}
       </header>
-      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-8 pt-2">
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-3 pt-1 sm:p-8 sm:pt-2">
         {/* m-auto centers the card and still lets it scroll from its top edge on a very short window. */}
-        <div className="creation-card glass-sheen relative m-auto grid min-w-0 w-full max-w-3xl shrink-0 overflow-hidden rounded-[30px] border border-line md:min-h-[540px] md:grid-cols-[290px_1fr]" data-glint="surface">
-          <div className="avatar-stage flex min-h-[300px] flex-col items-center justify-center border-b border-line p-7 md:border-b-0 md:border-r">
+        <div className="creation-card glass-sheen relative m-auto grid min-w-0 w-full max-w-3xl shrink-0 overflow-hidden rounded-[22px] border border-line sm:rounded-[30px] md:min-h-[540px] md:grid-cols-[290px_1fr]" data-glint="surface">
+          <div className="avatar-stage flex min-h-[190px] flex-col items-center justify-center border-b border-line p-5 sm:min-h-[300px] sm:p-7 md:border-b-0 md:border-r">
             <OnboardingMascotStack
               variant={{ kind: "coworker", identity: previewIdentity, name: name.trim() || "New coworker", color: avatarColor, glasses: avatarGlasses }}
-              size={140}
+              size={layout.compact ? 104 : 140}
               sessionKey="new-coworker"
             />
             <p className="mt-3 max-w-full truncate text-lg font-semibold tracking-[-0.025em] text-snow">
@@ -155,7 +157,7 @@ export function NewCoworker({
             {role.trim() ? <p className="mt-1 max-w-full truncate text-xs text-mist">{role.trim()}</p> : null}
           </div>
 
-          <div className="flex min-w-0 flex-col p-6 md:p-7" data-testid={`new-coworker-step-${step}`}>
+          <div className="flex min-w-0 flex-col p-4 sm:p-6 md:p-7" data-testid={`new-coworker-step-${step}`}>
             {step !== "details" ? (
               <>
                 <h1 className="text-2xl font-semibold tracking-[-0.035em] text-snow">Add a coworker</h1>

@@ -248,7 +248,7 @@ export function MarketplaceDialog({ session, team, current, connect, onRepairCon
               return inCategory.length ? (
                 <section key={category} aria-label={category} data-testid="marketplace-category">
                   <h2 className="mb-3 text-sm font-medium text-snow">{category}</h2>
-                  <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(190px,1fr))]">
+                  <div className="grid gap-2.5 [grid-template-columns:repeat(auto-fill,minmax(150px,1fr))] sm:gap-3 sm:[grid-template-columns:repeat(auto-fill,minmax(190px,1fr))]">
                     {inCategory.map((featured) => (
                       <CoworkerCard key={featured.id} featured={featured} action={addButton(featured)}
                         apps={appsOn ? featured.integrations.map((id) => connectorById(id)).filter((entry): entry is MarketplaceConnector => Boolean(entry)) : []}
@@ -265,10 +265,10 @@ export function MarketplaceDialog({ session, team, current, connect, onRepairCon
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-5 backdrop-blur-[2px]" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/55 backdrop-blur-[2px] sm:items-center sm:p-5" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
       <section role="dialog" aria-modal="true" aria-labelledby={titleId} data-testid="marketplace" data-view={view.kind} data-glint="surface"
-        className="glass-sheen window-no-drag relative flex h-[min(760px,calc(100vh-40px))] w-full max-w-[920px] flex-col overflow-hidden rounded-2xl border border-line bg-ink shadow-[0_32px_96px_rgb(0_0_0/0.6)]">
-        <header className="flex shrink-0 items-center gap-2 px-7 pb-2 pt-6">
+        className="glass-sheen window-no-drag relative flex h-[calc(100dvh-24px)] w-full max-w-[920px] flex-col overflow-hidden rounded-t-2xl border border-line bg-ink shadow-[0_32px_96px_rgb(0_0_0/0.6)] sm:h-[min(760px,calc(100vh-40px))] sm:rounded-2xl">
+        <header className="flex shrink-0 items-center gap-2 px-4 pb-2 pt-5 sm:px-7 sm:pt-6">
           {view.kind !== "home" ? <IconButton label="Back" tooltipSide="bottom" onClick={() => open({ kind: "home" })}><ChevronIcon direction="left" /></IconButton> : null}
           <h1 id={titleId} className="text-lg font-semibold tracking-[-0.015em] text-snow">Marketplace</h1>
           <div className="ml-auto flex items-center gap-1">
@@ -283,7 +283,7 @@ export function MarketplaceDialog({ session, team, current, connect, onRepairCon
           </div>
         </header>
         {view.kind === "home" ? (
-          <div className="flex shrink-0 items-center gap-6 px-7 pb-4 pt-2">
+          <div className="flex shrink-0 flex-wrap items-center gap-x-6 gap-y-3 px-4 pb-4 pt-2 sm:px-7">
             {appsOn ? (
               <div role="tablist" aria-label="Show" className="flex gap-5">
                 {(["coworkers", "apps"] as const).map((value) => (
@@ -302,7 +302,7 @@ export function MarketplaceDialog({ session, team, current, connect, onRepairCon
             </label>
           </div>
         ) : null}
-        <div ref={scrollRef} className="relative min-h-0 flex-1 overflow-y-auto px-7 pb-10 pt-4">{body}</div>
+        <div ref={scrollRef} className="relative min-h-0 flex-1 overflow-y-auto px-4 pb-[max(2.5rem,env(safe-area-inset-bottom))] pt-4 sm:px-7">{body}</div>
         {joined ? (
           <div role="status" data-testid="marketplace-joined" className="mk-toast absolute bottom-6 left-1/2 flex max-w-[calc(100%-48px)] -translate-x-1/2 items-center gap-3 rounded-xl border border-line bg-panel py-2 pl-2 pr-2 shadow-[0_16px_48px_rgb(0_0_0/0.5)]">
             <CoworkerAvatar identity={`${joined.coworker.slug}:joined`} name={joined.coworker.name} color={joined.coworker.avatarColor} glasses={joined.coworker.avatarGlasses} size={30} animated={false} gaze={false} />
@@ -333,9 +333,9 @@ function CoworkerCard({ featured, action, apps, onOpen }: { featured: FeaturedCo
         <CoworkerAvatar identity={identity} name={featured.name} color={featured.avatarColor} glasses={featured.avatarGlasses} size={60} motion="playful" />
       </span>
       <span className="pointer-events-none relative flex flex-1 flex-col p-3.5">
-        <span className="flex min-w-0 items-baseline gap-2">
+        <span className="flex min-w-0 flex-wrap items-baseline gap-x-2">
           <span className="shrink-0 text-[15px] font-medium text-snow">{featured.name}</span>
-          <span className="truncate text-xs text-mist">{featured.role}</span>
+          <span className="min-w-0 truncate text-xs text-mist">{featured.role}</span>
         </span>
         <span className="mt-1 line-clamp-2 text-[13px] leading-snug text-mist">{featured.tagline}</span>
         <span className="mt-auto flex items-center justify-between gap-2 pt-3">

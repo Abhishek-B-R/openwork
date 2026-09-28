@@ -3563,7 +3563,7 @@ function DiscussionComposer({
   const stopping = working && !assignmentMode && !value.trim() && Boolean(onStop);
   const submitLabel = busy ? "Working…" : assignmentMode ? "Create assignment" : working ? "Next" : "Send";
   return (
-    <div className="shrink-0 px-5 pb-2 pt-2" data-testid="coworker-composer" data-working={working ? "true" : "false"}>
+    <div className="shrink-0 px-3 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 sm:px-5" data-testid="coworker-composer" data-working={working ? "true" : "false"}>
       <div className="mx-auto max-w-3xl">
         {error ? <div className="mb-2"><ErrorNote>{error}</ErrorNote></div> : null}
         {assignmentMode ? (
@@ -3738,7 +3738,7 @@ function MessageComposer({
   const fieldRef = useRef<HTMLTextAreaElement>(null);
   useAutoGrow(fieldRef, value);
   return (
-    <div className="px-5 pb-2 pt-2" data-testid="coworker-composer" data-working={working ? "true" : "false"}>
+    <div className="px-3 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 sm:px-5" data-testid="coworker-composer" data-working={working ? "true" : "false"}>
       <div className="mx-auto max-w-3xl">
         <div className="glass-sheen relative rounded-[24px] border border-line bg-panel/55 p-3 shadow-[0_8px_32px_rgb(0_0_0/0.35)] backdrop-blur-xl backdrop-saturate-150 transition-colors focus-within:border-spark/50" data-glint="surface">
           <textarea

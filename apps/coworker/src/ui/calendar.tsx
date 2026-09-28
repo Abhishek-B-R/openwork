@@ -8,6 +8,7 @@ import {
   ChevronIcon,
   ErrorNote,
   IconButton,
+  PlusIcon,
   inputClass,
 } from "@/ui/kit";
 import type { CalendarData } from "@/ui/calendar-data";
@@ -18,6 +19,8 @@ import type {
 import { EventEditor } from "@/ui/event-editor";
 import { EventDetails, type EventSelection } from "@/ui/event-detail";
 import { EventSheet } from "@/ui/event-sheet";
+import { useLayout } from "@/ui/use-layout";
+import { FocusToggle, TeamButton } from "@/ui/layout-controls";
 import {
   CalendarGrid,
   calendarDate,
@@ -72,6 +75,7 @@ export function CalendarView({
   onExitActivity?: () => void;
   activityReminder?: { id: string; read: boolean; busy: boolean; onMarkRead: () => Promise<void> };
 }) {
+  const layout = useLayout();
   const [date, setDate] = useState(Date.now);
   const [query, setQuery] = useState("");
   const search = useDeferredValue(query.trim().toLowerCase());
@@ -370,7 +374,8 @@ export function CalendarView({
       data-testid="coworker-calendar"
       data-active={active}
     >
-      <header className="glass-header window-drag flex h-[78px] shrink-0 items-center gap-3 border-b border-line px-4 py-3">
+      <header className={`glass-header window-drag flex h-[78px] shrink-0 items-center gap-3 border-b border-line py-3 ${layout.chatOnly ? "window-controls-inset-sm px-3" : "px-4"}`}>
+        <TeamButton />
         {onExitActivity ? (
           <Button variant="ghost" className="window-no-drag shrink-0 text-xs" onClick={onExitActivity}>
             Go to calendar
@@ -378,13 +383,13 @@ export function CalendarView({
         ) : null}
         <div className="min-w-0 flex-1">
           <h1
-            className="truncate text-sm font-semibold text-snow"
+            className={layout.compact ? "sr-only" : "truncate text-sm font-semibold text-snow"}
             aria-live="polite"
             title={rangeTitle}
           >
             {rangeTitle}
           </h1>
-          <p className="mt-1 text-[10px] text-mist">Your team's calendar</p>
+          {layout.compact ? null : <p className="mt-1 text-[10px] text-mist">Your team's calendar</p>}
         </div>
         <div
           role="group"
@@ -395,7 +400,7 @@ export function CalendarView({
             <Button
               key={mode.value}
               variant="ghost"
-              className={`rounded-md px-2.5 text-xs ${preferences.view === mode.value ? "bg-white/8 text-snow" : ""}`}
+              className={`rounded-md text-xs ${layout.compact ? "px-2" : "px-2.5"} ${preferences.view === mode.value ? "bg-white/8 text-snow" : ""}`}
               aria-pressed={preferences.view === mode.value}
               onClick={() =>
                 setPreferences((value) => ({ ...value, view: mode.value }))
@@ -407,7 +412,8 @@ export function CalendarView({
         </div>
         <Button
           variant="primary"
-          className="window-no-drag shrink-0 text-xs"
+          className={`window-no-drag shrink-0 text-xs ${layout.compact ? "size-8 px-0" : ""}`}
+          aria-label="New event"
           disabled={coworkers.length === 0 || Boolean(editor)}
           title={
             coworkers.length === 0
@@ -417,8 +423,9 @@ export function CalendarView({
           onClick={(event) => create(undefined, event.currentTarget)}
           data-testid="new-event"
         >
-          New event
+          {layout.compact ? <PlusIcon /> : "New event"}
         </Button>
+        <FocusToggle />
       </header>
       <div className="flex min-h-0 flex-1 overflow-x-auto">
         <div className="flex min-h-0 min-w-[360px] flex-1 flex-col">

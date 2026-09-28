@@ -16,9 +16,10 @@ import { homedir } from "node:os";
 import { createServer as createPortProbe } from "node:net";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { BrowserWindow, Menu, app, dialog, ipcMain, nativeTheme, shell, systemPreferences } from "electron";
+import { BrowserWindow, Menu, app, dialog, ipcMain, nativeTheme, screen, shell, systemPreferences } from "electron";
 import { createVoice, installVoicePermissions } from "./voice.mjs";
 import { bindWindowAppearance, windowMaterial } from "./window-appearance.mjs";
+import { createFocusWindow } from "./focus-window.mjs";
 import { globalOpencodeConfigDir, openworkConfigDir } from "@openwork/paths";
 import { createHeadlessThreadClientV2 as createHeadlessThreadClient, createNativeV2Client, createNativeV2Id, nativeCatalogProviders, toTranscript } from "@openwork/headless-threads/v2";
 import { configureNativePluginBundles, verifyNativePluginBundles } from "./native-plugin.mjs";
@@ -307,6 +308,7 @@ function admitLocalRun(decide) {
 }
 /** @type {BrowserWindow | null} */
 let mainWindow = null;
+const focusWindow = createFocusWindow(screen);
 
 function parseExternalUrl(value) {
   const parsed = new URL(String(value ?? ""));
@@ -3566,6 +3568,8 @@ const commands = {
   "voice.speech": (input) => voice.speech(input),
   "voice.cancel": ({ requestId }) => voice.cancel(requestId),
   "voice.microphone": () => voice.microphone(),
+  /** Focus mode on a desktop docks the window as a small conversation beside your work; leaving it puts the window back. */
+  "window.focusMode": ({ on } = {}) => focusWindow.set(mainWindow, on === true),
   /** The renderer drains deep links queued while it was loading. */
   "deepLinks.subscribe": async () => {
     deepLinkListenerReady = true;
@@ -3803,7 +3807,7 @@ function registerIpc() {
       return { ok: false, error: "Open Coworker commands are only available to the main app frame." };
     }
     const command = typeof request?.command === "string" ? request.command : "";
-    if ((command === "coworkers.openFolder" || command.startsWith("events.") || command.startsWith("voice.") || command.startsWith("computer.") || command.startsWith("browser.") || command.startsWith("workers.") || command.startsWith("groups.documents.")) && !trustedComputerSender(event, mainWindow?.webContents, rendererUrl())) {
+    if ((command === "coworkers.openFolder" || command.startsWith("events.") || command.startsWith("voice.") || command.startsWith("window.") || command.startsWith("computer.") || command.startsWith("browser.") || command.startsWith("workers.") || command.startsWith("groups.documents.")) && !trustedComputerSender(event, mainWindow?.webContents, rendererUrl())) {
       return { ok: false, error: "Native controls require the trusted Open Coworker window and renderer URL." };
     }
     if (command === "voice.microphone" && request?.userGesture !== true) {
@@ -3890,8 +3894,9 @@ async function createMainWindow() {
     backgroundColor: "#090c12",
     width: 1280,
     height: 860,
-    minWidth: 960,
-    minHeight: 640,
+    // Down to phone width: below 760 px only the conversation shows and the team and panel open over it.
+    minWidth: 360,
+    minHeight: 520,
     title: APP_NAME,
     icon: APP_ICON_PATH,
     ...macWindowChrome,

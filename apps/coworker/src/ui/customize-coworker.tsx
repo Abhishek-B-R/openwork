@@ -132,7 +132,7 @@ export function CustomizeCoworker({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-5 backdrop-blur-[2px]"
+      className="fixed inset-0 z-50 flex items-end justify-center bg-black/55 backdrop-blur-[2px] sm:items-center sm:p-5"
       onMouseDown={(event) => { if (event.target === event.currentTarget && !dirty && !busy) onDone(); }}
     >
       <section
@@ -142,7 +142,7 @@ export function CustomizeCoworker({
         data-testid="customize-coworker"
         data-view={view}
         data-glint="surface"
-        className={`creation-card glass-sheen window-no-drag relative grid h-[min(600px,calc(100vh-40px))] w-full max-w-[860px] overflow-hidden rounded-[26px] border border-line shadow-[0_32px_96px_rgb(0_0_0/0.6)] ${advanced ? "" : "md:grid-cols-[300px_1fr]"}`}
+        className={`creation-card glass-sheen window-no-drag relative grid h-[calc(100dvh-24px)] w-full max-w-[860px] overflow-hidden rounded-t-[22px] border border-line sm:h-[min(600px,calc(100vh-40px))] sm:rounded-[26px] shadow-[0_32px_96px_rgb(0_0_0/0.6)] ${advanced ? "" : "md:grid-cols-[300px_1fr]"}`}
       >
         {/* The face and its look lead the profile; the model tabs take the whole width. */}
         {!advanced ? (

@@ -45,6 +45,8 @@ import { ConversationWindow, useConversationWindow } from "@/ui/conversation-win
 import { appendVoiceDraft, groupVoiceReply, type VoiceExpectation } from "@/lib/voice";
 import { useVoice } from "@/ui/use-voice";
 import { VoicePanel, VoiceToggle } from "@/ui/voice";
+import { useLayout } from "@/ui/use-layout";
+import { FocusToggle, TeamButton } from "@/ui/layout-controls";
 
 /** How long one coworker may take over one reply before the turn moves on. */
 export const REPLY_TIMEOUT_MS = 180_000;
@@ -263,6 +265,8 @@ function GroupChatView({
   const sending = localSends.some((item) => item.state === "pending" || item.state === "sending");
   const actionAttempts = useRef(new Map<string, GroupActionAttempt>());
   const [busyActions, setBusyActions] = useState<string[]>([]);
+  /** Focus mode or a narrow window: the team opens over the conversation from the header. */
+  const layout = useLayout();
   const mounted = useRef(true);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const submissionRevision = useRef(0);
@@ -799,8 +803,9 @@ function GroupChatView({
       <div className="@container/group relative flex min-w-0 flex-1 flex-col" data-testid="group-conversation" style={{ "--conversation-top": groupNotice ? "0px" : CONVERSATION_TOP } as CSSProperties}>
       {/* No header bar: it floats over the conversation, which scrolls the full height beneath it. A way back on the left,
           a pill for where you are, this conversation's controls on the right; top and side room clear the rounded corners. */}
-      <header className="window-drag absolute inset-x-0 top-0 z-30 flex items-center gap-2 bg-[linear-gradient(to_bottom,var(--color-ink)_40%,transparent)] px-4 pb-3 pt-3" data-testid="conversation-header">
-        <div className="flex min-w-0 flex-1 basis-0 items-center gap-1">
+      <header className={`window-drag absolute inset-x-0 top-0 z-30 flex items-center gap-2 pb-3 pt-3 ${layout.chatOnly ? "window-controls-inset-sm bg-[linear-gradient(to_bottom,var(--color-ink)_72%,transparent)] px-3" : "bg-[linear-gradient(to_bottom,var(--color-ink)_40%,transparent)] px-4"}`} data-testid="conversation-header">
+        <div className="flex min-w-fit flex-1 basis-0 items-center gap-1">
+          <TeamButton />
           {onExitActivity ? <IconButton className="window-no-drag" label="Go to chat" tooltip="Leave Activity and open this chat" tooltipSide="bottom" onClick={onExitActivity}><ChevronIcon direction="left" /></IconButton> : null}
         </div>
         <nav aria-label="Where you are" data-glint="surface" className="glass-sheen window-no-drag relative flex min-w-0 max-w-[70%] items-center gap-1 rounded-full border border-line bg-panel/90 py-1 pl-1 shadow-[0_8px_24px_rgb(0_0_0/0.35)] backdrop-blur pr-3" data-testid="conversation-breadcrumbs">
@@ -865,6 +870,7 @@ function GroupChatView({
           <span data-testid="coworker-top-status" data-tone={statusLine === "Ready" ? "ready" : "mist"} title={statusLine} className={`hidden min-w-0 max-w-[12rem] truncate pl-1 text-xs @min-[640px]/group:inline ${statusLine === "Ready" ? "text-ready" : "text-mist"}`}>
             {statusLine}
           </span>
+          <FocusToggle />
         </div>
       </header>
       {groupNotice ? <div style={{ height: CONVERSATION_TOP }} className="shrink-0" aria-hidden="true" /> : null}
@@ -938,7 +944,7 @@ function GroupChatView({
       {active && away && !pendingAssignment ? <JumpToLatest onClick={jumpToLatest} bottom={dockHeight + 12} /> : null}
       </div>
       {/* The composer floats over the conversation, which scrolls to the window's bottom beneath it. */}
-      <div ref={setDock} className="absolute inset-x-0 bottom-0 z-20 bg-[linear-gradient(to_top,var(--color-ink)_20%,transparent)] px-5 pb-4 pt-4" data-testid="coworker-composer">
+      <div ref={setDock} className="absolute inset-x-0 bottom-0 z-20 bg-[linear-gradient(to_top,var(--color-ink)_20%,transparent)] px-3 pb-[max(1rem,env(safe-area-inset-bottom))] pt-4 sm:px-5" data-testid="coworker-composer">
         <div className="mx-auto max-w-3xl">
           {assignmentMode ? (
             <p className="mb-2 px-2 text-[11px] text-mist" data-testid="group-assignment-mode">Something one of them should own, separate from this chat</p>

@@ -13,7 +13,9 @@ import { createCoworkerThreads, recommendModel, type CoworkerActivity, type Thre
 import { CoworkerAvatar } from "@/ui/coworker-avatar";
 import type { CustomizeFocus } from "@/ui/customize-coworker";
 import { useFeatures } from "@/ui/use-features";
-import { ActivityIcon, AppsIcon, Button, CONVERSATION_TOP, ChevronIcon, ErrorNote, IconButton, MemoryIcon, SlidersIcon } from "@/ui/kit";
+import { useLayout } from "@/ui/use-layout";
+import { FocusToggle, TeamButton } from "@/ui/layout-controls";
+import { ActivityIcon, AppsIcon, Button, CONVERSATION_TOP, ChevronIcon, ErrorNote, IconButton, MemoryIcon, SidebarIcon, SlidersIcon } from "@/ui/kit";
 import { useResizablePanel } from "@/ui/use-resizable-panel";
 import { PanelContent, PanelHeader, PanelLevel, usePanelNavigation } from "@/ui/panel-nav";
 import { isBackShortcut, pushCrumb, rootRoute, routeDepth, type PanelCrumb } from "@/lib/panel-route";
@@ -248,6 +250,8 @@ export function CoworkerHome({
   const features = useFeatures();
   const scheduled = features.calendar ? holdings.scheduled : NO_SCHEDULED;
   const panelViews = PANEL_VIEWS.filter((view) => view !== "memory" || features.memory);
+  /** Focus mode or a narrow window: the conversation alone, the side panel opening over it. */
+  const layout = useLayout();
   /** The conversation views place their own title line and actions into the one header. */
   const [headerTitleSlot, setHeaderTitleSlot] = useState<HTMLElement | null>(null);
   const [headerActionsSlot, setHeaderActionsSlot] = useState<HTMLElement | null>(null);
@@ -345,7 +349,7 @@ export function CoworkerHome({
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
   }, []);
-  const panelWidth = contextPanel.collapsed ? CONTEXT_PANEL_BOUNDS.collapsedWidth : contextPanel.width;
+  const panelWidth = layout.chatOnly ? 0 : contextPanel.collapsed ? CONTEXT_PANEL_BOUNDS.collapsedWidth : contextPanel.width;
   const canOpenBeside = windowWidth - railWidth - panelWidth - BESIDE_PANE_WIDTH >= MAIN_WORKSPACE_MIN_WIDTH;
 
   /** An App or skill detail open in a column beside the conversation, while the window is wide enough; its path is the levels below Apps & tools. */
@@ -368,7 +372,9 @@ export function CoworkerHome({
       row?.focus();
     });
   }
-  const overlayPanel = windowWidth < NARROW_WINDOW && !contextPanel.collapsed;
+  const overlayPanel = (windowWidth < NARROW_WINDOW || layout.chatOnly) && !contextPanel.collapsed;
+  /** Over the conversation the panel keeps its width, or takes the whole window on a phone. */
+  const overlayWidth = layout.width < 480 ? layout.width : Math.min(contextPanel.width, layout.width);
   // The side panel never has to be closed to go somewhere else. Only a document draft asks first.
   // A narrow window's overlay panel steps aside instead of blocking.
   useDocumentNavigationGuard(navigationGuard, () => {
@@ -536,13 +542,26 @@ export function CoworkerHome({
   // Notices sit below the floating header; without one, the conversation starts beneath it itself.
   const headerNotice = Boolean(documentNotice || (besideDocumentId && !canOpenBeside) || !runtime.engineManaged);
 
+  // The browser and computer controls: in the strip beside the panel icons, or in the header while only the conversation shows.
+  // Focus mode keeps them mounted but out of sight, so a coworker's browser or computer still opens over the conversation.
+  const toolsHost = (
+    <div
+      ref={setDiscussionToolsSlot}
+      role="group"
+      aria-label="Discussion tools"
+      data-testid="coworker-discussion-tools"
+      className={`window-no-drag shrink-0 items-center gap-1 empty:hidden ${layout.focus ? "hidden" : "flex"} ${layout.chatOnly ? "flex-row" : "flex-col"}`}
+    />
+  );
+
   return (
     <div className="glass-main relative flex h-full min-w-0 flex-1">
       <div className="relative flex min-w-0 flex-1 flex-col" style={{ "--conversation-top": headerNotice ? "0px" : CONVERSATION_TOP } as CSSProperties}>
         {/* No header bar: it floats over the conversation, which scrolls the full height beneath it. A way back on the left,
             a pill for where you are, this conversation's controls on the right; top and side room clear the rounded corners. */}
-        <header className="window-drag absolute inset-x-0 top-0 z-30 flex items-center gap-2 bg-[linear-gradient(to_bottom,var(--color-ink)_40%,transparent)] px-4 pb-3 pt-3" data-testid="conversation-header">
-          <div className="flex min-w-0 flex-1 basis-0 items-center gap-1">
+        <header className={`window-drag absolute inset-x-0 top-0 z-30 flex items-center gap-2 pb-3 pt-3 ${layout.chatOnly ? "window-controls-inset-sm bg-[linear-gradient(to_bottom,var(--color-ink)_72%,transparent)] px-3" : "bg-[linear-gradient(to_bottom,var(--color-ink)_40%,transparent)] px-4"}`} data-testid="conversation-header">
+          <div className="flex min-w-fit flex-1 basis-0 items-center gap-1">
+            <TeamButton />
             {onExitActivity ? <IconButton className="window-no-drag" label="Go to coworker" tooltip={`Leave Activity and open ${coworker.name}`} tooltipSide="bottom" onClick={onExitActivity}><ChevronIcon direction="left" /></IconButton> : null}
             <div ref={setHeaderLeadSlot} className="window-no-drag flex items-center empty:hidden" />
           </div>
@@ -555,12 +574,21 @@ export function CoworkerHome({
               name={coworker.name}
               size={26}
             />
-            <h1 className="min-w-[3rem] max-w-[14rem] shrink-[2] truncate pl-1 text-sm font-semibold text-snow" title={coworker.name}>{coworker.name}</h1>
-            <ChevronIcon direction="right" className="size-3 shrink-0 text-mist/60" />
+            {/* On a phone the face names the coworker; the room goes to the discussion. */}
+            <h1 className={layout.compact ? "sr-only" : "min-w-[3rem] max-w-[14rem] shrink-[2] truncate pl-1 text-sm font-semibold text-snow"} title={coworker.name}>{coworker.name}</h1>
+            {layout.compact ? null : <ChevronIcon direction="right" className="size-3 shrink-0 text-mist/60" />}
             <div ref={setHeaderTitleSlot} className="flex min-w-0 items-center gap-1.5 text-xs text-mist" data-testid="conversation-header-title" />
           </nav>
           <div className="flex min-w-fit flex-1 basis-0 items-center justify-end gap-1">
             <div ref={setHeaderActionsSlot} className="window-no-drag flex shrink-0 items-center gap-0.5" data-testid="conversation-header-actions" />
+            {layout.chatOnly ? toolsHost : null}
+            {layout.chatOnly && !layout.focus ? (
+              <IconButton label="Show panel" tooltip={`${coworker.name}'s activity, memory and settings`} tooltipSide="bottom" className="window-no-drag relative" data-testid="context-panel-open" onClick={() => showContext(contextView)}>
+                <SidebarIcon side="right" />
+                {documentsChanged > 0 ? <span className="absolute right-1 top-1 size-1.5 rounded-full bg-spark" aria-hidden="true" /> : null}
+              </IconButton>
+            ) : null}
+            <FocusToggle />
             <HeaderStatusWord activity={activity} engineManaged={runtime.engineManaged} />
           </div>
         </header>
@@ -658,8 +686,8 @@ export function CoworkerHome({
         <div className="absolute inset-0 z-30 bg-black/40" data-testid="context-panel-scrim" onClick={closeContextPanel} aria-hidden="true" />
       ) : null}
       <aside
-        className={`glass-context flex h-full shrink-0 flex-col border-l border-line ${overlayPanel ? "absolute inset-y-0 right-0 z-40 shadow-[-24px_0_48px_rgba(0,0,0,0.45)]" : "relative"} ${contextPanel.resizing ? "" : "transition-[width] duration-[180ms] ease-out motion-reduce:transition-none"}`}
-        style={{ width: contextPanel.width }}
+        className={`glass-context h-full shrink-0 flex-col border-l border-line ${layout.chatOnly && contextPanel.collapsed ? "hidden" : "flex"} ${overlayPanel ? "absolute inset-y-0 right-0 z-40 shadow-[-24px_0_48px_rgba(0,0,0,0.45)]" : "relative"} ${contextPanel.resizing ? "" : "transition-[width] duration-[180ms] ease-out motion-reduce:transition-none"}`}
+        style={{ width: overlayPanel ? overlayWidth : contextPanel.width }}
         data-testid="context-panel"
         data-collapsed={contextPanel.collapsed ? "true" : "false"}
         data-view={contextView}
@@ -672,6 +700,7 @@ export function CoworkerHome({
       >
         <div
           {...contextPanel.separatorProps}
+          hidden={layout.compact}
           onPointerDown={(event) => { if (allowDocumentNavigation()) contextPanel.separatorProps.onPointerDown(event); }}
           onClick={() => { if (allowDocumentNavigation()) contextPanel.separatorProps.onClick(); }}
           onKeyDown={(event) => { if (allowDocumentNavigation()) contextPanel.separatorProps.onKeyDown(event); else event.preventDefault(); }}
@@ -708,13 +737,7 @@ export function CoworkerHome({
               </IconButton>
             );
           })}
-          <div
-            ref={setDiscussionToolsSlot}
-            role="group"
-            aria-label="Discussion tools"
-            data-testid="coworker-discussion-tools"
-            className="window-no-drag flex shrink-0 flex-col items-center gap-1 empty:hidden"
-          />
+          {layout.chatOnly ? null : toolsHost}
         </nav>
         {!contextPanel.collapsed ? (
           <>
@@ -725,9 +748,23 @@ export function CoworkerHome({
           onBack={() => { if (allowDocumentNavigation()) nav.back(); }}
           onToDepth={(depth) => { if (allowDocumentNavigation()) nav.toDepth(depth); }}
           actions={(
-            <IconButton label="Close sidebar" className="window-no-drag" data-testid="context-panel-close" onClick={closeContextPanel}>
-              <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" className="size-4" aria-hidden="true"><path d="m5 5 10 10M15 5 5 15" /></svg>
-            </IconButton>
+            <>
+              {/* Over the conversation there is no strip, so the panel carries its own way between views. */}
+              {layout.chatOnly ? panelViews.map((view) => {
+                const Icon = CONTEXT_ICONS[view];
+                const current = view === contextView;
+                return (
+                  <IconButton key={view} label={PANEL_VIEW_TITLES[view]} tooltipSide="bottom" aria-current={current ? "true" : undefined} data-testid={`context-view-${view}`}
+                    className={`window-no-drag ${current ? "bg-white/8 text-snow" : ""}`}
+                    onClick={() => { if (!allowDocumentNavigation()) return; if (current) nav.toRoot(view); else nav.showView(view); }}>
+                    <Icon />
+                  </IconButton>
+                );
+              }) : null}
+              <IconButton label="Close sidebar" className="window-no-drag" data-testid="context-panel-close" onClick={closeContextPanel}>
+                <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" className="size-4" aria-hidden="true"><path d="m5 5 10 10M15 5 5 15" /></svg>
+              </IconButton>
+            </>
           )}
           leading={contextView !== "overview" ? (
             <IconButton label="Back to activity" className="window-no-drag" onClick={() => { if (allowDocumentNavigation()) nav.toRoot("overview"); }}>

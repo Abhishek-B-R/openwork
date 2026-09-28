@@ -856,9 +856,14 @@ body.is-resizing-panel * {
   user-select: none;
 }
 
-/* Full-window content shares the hiddenInset titlebar's traffic-light corner. */
-:root[data-window-platform="darwin"] .window-controls-inset {
+/* Full-window content shares the hiddenInset titlebar's traffic-light corner (unless Focus mode has hidden the traffic lights). */
+:root[data-window-platform="darwin"]:not([data-window-controls="hidden"]) .window-controls-inset {
   padding-left: 96px;
+}
+
+/* A floating header that keeps just clear of the traffic lights, when no team column sits under them. */
+:root[data-window-platform="darwin"]:not([data-window-controls="hidden"]) .window-controls-inset-sm {
+  padding-left: 80px;
 }
 
 /*
