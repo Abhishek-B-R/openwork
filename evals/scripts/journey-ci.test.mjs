@@ -140,82 +140,47 @@ test('mixed-world specs: a prerequisite one case declares is never promoted to t
   assert.deepEqual(wholeFileBlockers('', ['const v = process.env.OPENWORK_EVAL_OPTIONAL?.trim() || null;\nreturn v;']), { env: [], platform: undefined });
 });
 
-test('registered case metadata names exact files, supported execution axes, and defaults', async () => {
+// The catalog is the only list of registered cases. Instead of a second
+// hand-written copy, check it against what the specs actually declare: every
+// registered case names a real test in its spec, and a spec that registers
+// cases cannot grow or keep an ID-titled test the catalog does not list.
+const CASE_TITLE = /\b[A-Za-z]*[tT]est\(\s*["'`]([A-Z][A-Z0-9]*-[A-Za-z0-9-]+)(?=[\s:$`"'])/g;
+
+async function caseTitles(spec) {
+  const source = await readFile(new URL(`../specs/${spec}`, import.meta.url), 'utf8');
+  return [...source.matchAll(CASE_TITLE)].map(match => match[1]);
+}
+
+test('registered cases match the case-titled tests their specs declare, in both directions', async () => {
   const entries = await catalog();
-  assert.deepEqual(registeredCases.map(({ spec, id, engines }) => ({ spec, id, engines })), [
-    { spec: 'opencode-v2-context-activity.e2e.test.ts', id: 'V2-CONTEXT-ACTIVITY', engines: ['v2'] },
-    { spec: 'edit-running-message.e2e.test.ts', id: 'EDIT-BUSY', engines: ['v1', 'v2'] },
-    { spec: 'opencode-v2-session-home.e2e.test.ts', id: 'HOME-01', engines: ['v2'] },
-    { spec: 'opencode-v2-session-home.e2e.test.ts', id: 'HOME-02', engines: ['v2'] },
-    { spec: 'opencode-v2-session-home.e2e.test.ts', id: 'HOME-03', engines: ['v2'] },
-    {
-      spec: 'composer-model-picker-no-subscribe-promo.e2e.test.ts',
-      id: 'MODEL-01',
-      engines: ['v2'],
-    },
-    {
-      spec: 'task-activity-shimmer.e2e.test.ts',
-      id: 'ACT-01',
-      engines: ['v1', 'v2'],
-    },
-    {
-      spec: 'v2-sessionless-first-send.e2e.test.ts',
-      id: 'DEN-LOCAL-SEND',
-      engines: ['v1'],
-    },
-    {
-      spec: 'v2-sessionless-first-send.e2e.test.ts',
-      id: 'MOBILE-CHAT-01',
-      engines: ['v1', 'v2'],
-    },
-    {
-      spec: 'streamed-markdown-answer.e2e.test.ts',
-      id: 'CONT-01',
-      engines: ['v1', 'v2'],
-    },
-    {
-      spec: 'live-stream-continuity.e2e.test.ts',
-      id: 'CONT-01-live',
-      engines: ['v1'],
-    },
-    {
-      spec: 'live-stream-continuity.e2e.test.ts',
-      id: 'CONT-01-live-history',
-      engines: ['v1'],
-    },
-    {
-      spec: 'live-tool-visible-after-session-switch.e2e.test.ts',
-      id: 'SWITCH-10',
-      engines: ['v1', 'v2'],
-    },
-    {
-      spec: 'unfinished-tool-lifecycle.e2e.test.ts',
-      id: 'STOP-01',
-      engines: ['v1', 'v2'],
-    },
-    {
-      spec: 'saved-app-creation.e2e.test.ts',
-      id: 'APP-ISOLATION',
-      engines: ['v1', 'v2'],
-    },
-    {
-      spec: 'saved-app-creation.e2e.test.ts',
-      id: 'APP-DRAFT-ROUTING',
-      engines: ['v1', 'v2'],
-    },
-    { spec: 'opencode-v2-skill-jit.e2e.test.ts', id: 'SKILL-ATTACH', engines: ['v1', 'v2'] },
-    { spec: 'opencode-v2-skill-jit.e2e.test.ts', id: 'SKILL-MISSING', engines: ['v2'] },
-    {
-      spec: 'opencode-v2-skill-jit.e2e.test.ts',
-      id: 'SKILL-NATIVE-01',
-      engines: ['v2'],
-    },
-    { spec: 'opencode-v2-reads-during-mcp-startup.e2e.test.ts', id: 'UPKEEP-01', engines: ['v2'] },
-  ]);
+  const bySpec = new Map();
   for (const registered of registeredCases) {
-    assert(entries.some(entry => entry.spec === registered.spec));
+    assert(entries.some(entry => entry.spec === registered.spec), `${registered.spec}: registered but not in the catalog`);
     assert.equal('surfaces' in registered, false);
+    assert(registered.engines.length > 0, `${registered.spec} ${registered.id}: runs on no engine`);
+    assert.equal(new Set(registered.engines).size, registered.engines.length, `${registered.spec} ${registered.id}: duplicate engine`);
+    for (const engine of registered.engines) assert(['v1', 'v2'].includes(engine), `${registered.spec} ${registered.id}: unknown engine ${engine}`);
+    bySpec.set(registered.spec, [...(bySpec.get(registered.spec) ?? []), registered.id]);
   }
+  for (const [spec, ids] of bySpec) {
+    assert.equal(new Set(ids).size, ids.length, `${spec}: a case is registered twice`);
+    const titles = await caseTitles(spec);
+    for (const id of ids) {
+      assert.equal(titles.filter(title => title === id).length, 1, `${spec}: registered case ${id} has no test titled "${id} …" (or more than one)`);
+    }
+    assert.deepEqual(titles.filter(title => !ids.includes(title)), [], `${spec}: case-titled tests missing from journey-catalog.mjs`);
+  }
+});
+
+test('the case-title check sees template and wrapped test titles, and nothing else', () => {
+  const source = [
+    'test(`EDIT-BUSY ${engine()}: replace`, async () => {});',
+    'liveContinuityTest("CONT-01-live-history a member returns", async () => {});',
+    'test("V2-CONTEXT-ACTIVITY: query another chat", async () => {});',
+    'test("workspace skills change", async () => {});',
+    'const note = "HOME-01 is described elsewhere";',
+  ].join('\n');
+  assert.deepEqual([...source.matchAll(CASE_TITLE)].map(match => match[1]), ['EDIT-BUSY', 'CONT-01-live-history', 'V2-CONTEXT-ACTIVITY']);
 });
 
 test('live continuity is isolated, local, v1-only and never scheduled from a provider key alone', async () => {
