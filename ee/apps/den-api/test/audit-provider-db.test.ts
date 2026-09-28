@@ -1,5 +1,5 @@
 import assert from "node:assert/strict"
-import { after, before, test } from "node:test"
+import { after, before, test, type TestContext } from "node:test"
 import { randomUUID } from "node:crypto"
 import { createDenDb } from "@openwork-ee/den-db"
 import { and, eq, inArray } from "@openwork-ee/den-db/drizzle"
@@ -40,8 +40,28 @@ after(async () => {
   if (instance && "end" in instance.client) await instance.client.end()
   if (globalDb && "end" in globalDb.client) await globalDb.client.end()
 })
-const dbTest = (name: string, run: () => Promise<void>) => test(name, { skip: !url }, run)
+const dbTest = (name: string, run: (t: TestContext) => Promise<void>) => test(name, { skip: !url }, run)
 function database() { assert.ok(instance); return instance.db }
+// Observe only synthetic comparison caches without exposing a production test hook.
+function watchComparisons(t: TestContext) {
+  const caches = new Set<Map<unknown, unknown>>()
+  const tokens = new Set<string>()
+  const original = Map.prototype.set
+  t.mock.method(Map.prototype, "set", function (this: Map<unknown, unknown>, key: unknown, value: unknown) {
+    const result = original.call(this, key, value)
+    if (typeof key === "string" && key.startsWith("synthetic-sensitive-") && typeof value === "string") caches.add(this)
+    if (caches.has(this)) for (const token of this.values()) {
+      assert.equal(typeof token, "string")
+      if (typeof token === "string") tokens.add(token)
+    }
+    return result
+  })
+  const assertPrivate = (value: unknown) => {
+    const encoded = JSON.stringify(value)
+    for (const forbidden of ["synthetic-sensitive-", "materialRevision", "configurationRevision", ...tokens]) assert.equal(encoded.includes(forbidden), false)
+  }
+  return { caches, tokens, assertPrivate }
+}
 function barrier() {
   let resolve = () => {}
   const promise = new Promise<void>((complete) => { resolve = complete })
@@ -354,7 +374,7 @@ dbTest("grouped Save changes provider, universe, models, group, set, credential 
   assert.equal((await f.db.select().from(AuditUsageFactTable).where(eq(AuditUsageFactTable.organization_id, f.org))).length, 1)
 })
 
-dbTest("non-allowlisted catalog metadata changes retain a marker without leaking content or comparison hashes", async () => {
+dbTest("non-allowlisted catalog metadata changes retain a marker; equal or reordered metadata is a no-op", async () => {
   const f = await fixture()
   const write = (value: string) => f.mutate("catalog.refresh", (tx, provider) => matrix.writeGatewayModels(tx, provider, [{ id: "model-a", name: "Model A", config: { id: "model-a", options: { arbitraryPrivateExtension: value } } }]))
   await write("synthetic-private-first")
@@ -367,6 +387,112 @@ dbTest("non-allowlisted catalog metadata changes retain a marker without leaking
   const count = (await f.events()).length
   await write("synthetic-private-second")
   assert.equal((await f.events()).length, count)
+  await f.mutate("catalog.refresh", (tx, provider) => matrix.writeGatewayModels(tx, provider, [{ id: "model-a", name: "Model A", config: { options: { arbitraryPrivateExtension: "synthetic-private-second" }, id: "model-a" } }]))
+  assert.equal((await f.events()).length, count)
+})
+
+dbTest("exact secret and OAuth client-secret rotations emit only markers, including null versus empty", async (t) => {
+  const f = await fixture()
+  await f.db.update(GatewayCredentialSetTable).set({ oauth_client_id: "synthetic-client", oauth_client_secret: "synthetic-sensitive-client-first" }).where(eq(GatewayCredentialSetTable.id, f.setId))
+  const watched = watchComparisons(t)
+  onQuery = (query, params) => {
+    if (/^insert into `audit_/i.test(query)) {
+      for (const cache of watched.caches) assert.equal(cache.size, 0, "plaintext references must be released before audit writes")
+      watched.assertPrivate(params)
+    }
+  }
+  try {
+    await f.mutate("set.update", async (tx) => {
+      await tx.update(GatewayProviderCredentialTable).set({ secret: "synthetic-sensitive-second" }).where(eq(GatewayProviderCredentialTable.id, f.credentialId))
+      await tx.update(GatewayCredentialSetTable).set({ oauth_client_secret: "synthetic-sensitive-client-second" }).where(eq(GatewayCredentialSetTable.id, f.setId))
+    })
+    const changes = (await f.events()).filter((event) => event.category === "change")
+    assert.deepEqual(changes.map((event) => event.action).sort(), ["provider.credential.updated", "provider.credential_set.updated"])
+    for (const event of changes) {
+      assert.deepEqual(event.changes?.changedFields, ["credentialMaterial"])
+      assert.deepEqual(event.changes?.before, event.changes?.after)
+    }
+    await f.mutate("set.update", async (tx) => {
+      await tx.update(GatewayProviderCredentialTable).set({ secret: "synthetic-sensitive-second" }).where(eq(GatewayProviderCredentialTable.id, f.credentialId))
+      await tx.update(GatewayCredentialSetTable).set({ oauth_client_secret: "synthetic-sensitive-client-second" }).where(eq(GatewayCredentialSetTable.id, f.setId))
+    })
+    assert.equal((await f.events()).filter((event) => event.category === "change").length, 2)
+    await f.db.update(GatewayCredentialSetTable).set({ oauth_client_secret: null }).where(eq(GatewayCredentialSetTable.id, f.setId))
+    for (const secret of ["", null]) {
+      const count = (await f.events()).length
+      await f.mutate("set.update", (tx) => tx.update(GatewayCredentialSetTable).set({ oauth_client_secret: secret }).where(eq(GatewayCredentialSetTable.id, f.setId)))
+      const [change] = (await f.events()).slice(count)
+      assert.equal(change.action, "provider.credential_set.updated")
+      assert.deepEqual(change.changes?.changedFields, ["credentialMaterial"])
+      assert.deepEqual(change.changes?.before, change.changes?.after)
+    }
+    assert.equal(watched.caches.size, 4)
+    for (const cache of watched.caches) assert.equal(cache.size, 0)
+    watched.assertPrivate(await f.events())
+  } finally { onQuery = undefined }
+})
+
+dbTest("comparison caches are cleared on before/after snapshot, mutation and audit-write failures with rollback", async (t) => {
+  const watched = watchComparisons(t)
+  for (const stage of ["before", "mutation", "after", "append"]) {
+    const f = await fixture()
+    await f.db.update(GatewayCredentialSetTable).set({ oauth_client_secret: "synthetic-sensitive-client-first" }).where(eq(GatewayCredentialSetTable.id, f.setId))
+    if (stage === "before") await f.db.insert(GatewayProviderModelTable).values({ id: createDenTypeId("inferenceProviderModel"), gateway_provider_id: f.providerId, model_id: "model-a", name: "Bearer synthetic-sensitive-invalid", model_config: {} })
+    if (stage === "append") await f.db.insert(AuditEventTable).values({ id: createDenTypeId("auditEvent"), org_id: f.org, action: "synthetic.sequence_conflict", sequence: 1 })
+    let mutated = false
+    await assert.rejects(f.mutate("set.update", async (tx) => {
+      mutated = true
+      await tx.update(GatewayProviderCredentialTable).set({ secret: "synthetic-sensitive-second" }).where(eq(GatewayProviderCredentialTable.id, f.credentialId))
+      if (stage === "mutation") throw new Error("synthetic-mutation-failed")
+      if (stage === "after") await tx.update(GatewayProviderTable).set({ name: "Bearer synthetic-sensitive-invalid" }).where(eq(GatewayProviderTable.id, f.providerId))
+    }), (error: unknown) => {
+      assert.ok(error instanceof Error)
+      watched.assertPrivate({ message: error.message, stack: error.stack })
+      if (stage === "before" || stage === "after") assert.equal(error.message, "audit_invalid_input")
+      return true
+    })
+    assert.equal(mutated, stage !== "before")
+    assert.equal(watched.caches.size, ["before", "mutation", "after", "append"].indexOf(stage) + 1)
+    for (const cache of watched.caches) assert.equal(cache.size, 0)
+    assert.equal((await f.current()).name, "Before")
+    const [credential] = await f.db.select().from(GatewayProviderCredentialTable).where(eq(GatewayProviderCredentialTable.id, f.credentialId))
+    assert.equal(credential.secret, "synthetic-sensitive-first")
+    assert.deepEqual(await f.events(), [])
+    if (stage !== "append") {
+      await recordProviderAttempt(f.db, await loadProviderAudit(f.db, true, f.context(), "set.update"), 500)
+      watched.assertPrivate(await f.events())
+    }
+  }
+})
+
+dbTest("overlapping requests have distinct equality caches; one cleanup cannot invalidate another snapshot", async (t) => {
+  const first = await fixture()
+  const second = await fixture()
+  const watched = watchComparisons(t)
+  const holding = barrier()
+  const release = barrier()
+  const pending = first.mutate("set.update", async () => { holding.resolve(); await release.promise })
+  try {
+    await within(Promise.race([holding.promise, pending]), "first request holding its comparison cache")
+    assert.equal(watched.caches.size, 1)
+    const [firstCache] = watched.caches
+    const firstToken = firstCache.get("synthetic-sensitive-first")
+    await second.mutate("set.update", async (tx) => {
+      assert.equal(watched.caches.size, 2)
+      const secondCache = [...watched.caches].find((cache) => cache !== firstCache)
+      assert.ok(secondCache)
+      assert.notEqual(secondCache.get("synthetic-sensitive-first"), firstToken)
+      await tx.update(GatewayProviderCredentialTable).set({ secret: "synthetic-sensitive-second" }).where(eq(GatewayProviderCredentialTable.id, second.credentialId))
+    })
+    assert.equal(firstCache.get("synthetic-sensitive-first"), firstToken)
+    for (const cache of watched.caches) if (cache !== firstCache) assert.equal(cache.size, 0)
+  } finally { release.resolve(); await pending }
+  for (const cache of watched.caches) assert.equal(cache.size, 0)
+  assert.equal((await first.events()).filter((event) => event.category === "change").length, 0)
+  const changes = (await second.events()).filter((event) => event.category === "change")
+  assert.equal(changes.length, 1)
+  assert.deepEqual(changes[0].changes?.changedFields, ["credentialMaterial"])
+  watched.assertPrivate([await first.events(), await second.events()])
 })
 
 dbTest("stored attachment window prevents an expired correlation collecting later provider requests", async () => {

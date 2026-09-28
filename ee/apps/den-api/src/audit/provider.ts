@@ -1,4 +1,4 @@
-import { createHmac, randomBytes } from "node:crypto"
+import { randomUUID } from "node:crypto"
 import { AUDIT_WORKFLOW_REGISTRY, AuditLogError, appendAuditEvent, assertAuditPolicyCurrent, canonicalAuditJson, type AuditContext, type AuditDatabase, type AuditEventInput, type AuditPolicy, type AuditTx } from "@openwork-ee/den-db/audit-log"
 import { and, eq, inArray } from "@openwork-ee/den-db/drizzle"
 import { GatewayCredentialSetTable, GatewayModelGroupModelTable, GatewayModelGroupTable, GatewayProviderAccessTable, GatewayProviderCredentialTable, GatewayProviderModelTable, GatewayProviderOauthStateTable, GatewayProviderTable } from "@openwork-ee/den-db/schema"
@@ -109,7 +109,7 @@ export async function loadProviderAudit(database: AuditDatabase, enabled: boolea
   return { context, policy, step }
 }
 
-async function providerSnapshot(tx: AuditTx, context: AuditContext, comparisonKey: Buffer): Promise<ProviderAuditSnapshot> {
+async function providerSnapshot(tx: AuditTx, context: AuditContext, revision: (value: string | null) => string): Promise<ProviderAuditSnapshot> {
   const id = normalizeDenTypeId("inferenceProvider", context.scope)
   const organizationId = normalizeDenTypeId("organization", context.organizationId)
   const result: ProviderAuditSnapshot = new Map()
@@ -117,7 +117,6 @@ async function providerSnapshot(tx: AuditTx, context: AuditContext, comparisonKe
   if (!provider) return result
   const add = (entry: ProviderAuditResource) => { result.set(`${entry.type}:${entry.id}`, entry) }
   const related = (type: string, id: string): AuditEventInput["resources"][number] => ({ type, id, relationship: "related" })
-  const revision = (value: string | null) => createHmac("sha256", new Uint8Array(comparisonKey)).update(JSON.stringify(value)).digest("hex")
   const universe = related("provider_model_universe", id)
   add({ type: "provider", id, action: "provider", snapshot: serializeProvider(provider), related: [] })
   add({ type: "provider_model_universe", id, action: "provider.universe", snapshot: serializeProviderUniverse(provider), related: [] })
@@ -145,17 +144,35 @@ export async function providerAuditMutation<T>(tx: AuditTx, capture: ProviderAud
   if (!capture) return mutate()
   await recheckAuditEntitlement(tx, capture.context.organizationId)
   const changesEnabled = capture.policy.categories.includes("change")
-  const comparisonKey = changesEnabled ? randomBytes(32) : null
-  // A create has no before state: probing its absent PK FOR UPDATE would acquire
-  // a gap lock and deadlock otherwise independent concurrent provider inserts.
-  const before: ProviderAuditSnapshot | null = comparisonKey
-    ? capture.step === "create" ? new Map() : await providerSnapshot(tx, capture.context, comparisonKey)
-    : null
-  const result = await mutate()
-  const events = before && comparisonKey ? diffProviderSnapshots(capture.context.scope, before, await providerSnapshot(tx, capture.context, comparisonKey)) : []
+  // Exact equality of already-decrypted values, not password authentication.
+  // Only opaque, value-independent tokens enter snapshots; neither these tokens
+  // nor the lookup are audit evidence or shared with another mutation.
+  const revisions = new Map<string | null, string>()
+  const revision = (value: string | null): string => {
+    const existing = revisions.get(value)
+    if (existing !== undefined) return existing
+    const token = randomUUID()
+    revisions.set(value, token)
+    return token
+  }
+  let result: T
+  let events: AuditEventInput[]
+  try {
+    // A create has no before state: probing its absent PK FOR UPDATE would acquire
+    // a gap lock and deadlock otherwise independent concurrent provider inserts.
+    const before: ProviderAuditSnapshot | null = changesEnabled
+      ? capture.step === "create" ? new Map() : await providerSnapshot(tx, capture.context, revision)
+      : null
+    result = await mutate()
+    events = before ? diffProviderSnapshots(capture.context.scope, before, await providerSnapshot(tx, capture.context, revision)) : []
+  } finally {
+    // Drop plaintext references before audit writes, also on snapshot/mutation
+    // failure. JS strings cannot be zeroized; do not retain them past comparison.
+    revisions.clear()
+  }
   await assertAuditPolicyCurrent(tx, capture.policy)
   for (const event of events) await appendAuditEvent(tx, { ...capture, event })
-  if (before && capture.step === "catalog.refresh" && !events.length) return result
+  if (changesEnabled && capture.step === "catalog.refresh" && !events.length) return result
   await appendAuditEvent(tx, { ...capture, event: providerAttemptEvent(capture, "succeeded") })
   return result
 }

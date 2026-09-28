@@ -84,7 +84,7 @@ test("create, update and delete evidence preserves snapshots and changed fields"
   assert.equal(event.changes?.after?.name, "Renamed")
 })
 
-test("rotation records a marker and stable credential identity, never comparison digests", () => {
+test("rotation records a marker and stable credential identity, never comparison tokens", () => {
   const entry = { type: "provider_credential", id: credential.id, action: "provider.credential", snapshot: serializeProviderCredential(credential), related: [], materialRevision: "private-comparison-before" }
   const before: ProviderAuditSnapshot = new Map([[credential.id, entry]])
   const after: ProviderAuditSnapshot = new Map([[credential.id, { ...entry, materialRevision: "private-comparison-after" }]])
@@ -94,6 +94,24 @@ test("rotation records a marker and stable credential identity, never comparison
   assert.equal(JSON.stringify(event).includes("private-comparison"), false)
   assert.equal(event.resources[0].id, credential.id)
   assert.deepEqual(diffProviderSnapshots(provider.id, after, after), [])
+})
+
+test("opaque material and configuration revisions never enter create, update or delete evidence", () => {
+  for (const entry of [
+    { type: "provider_credential_set", id: set.id, action: "provider.credential_set", snapshot: serializeProviderSet(set), related: [], materialRevision: randomUUID() },
+    { type: "provider_model", id: model.id, action: "provider.model", snapshot: serializeProviderModel(model), related: [], configurationRevision: randomUUID() },
+  ]) {
+    const next = { ...entry, ...(entry.materialRevision ? { materialRevision: randomUUID() } : { configurationRevision: randomUUID() }) }
+    const before: ProviderAuditSnapshot = new Map([[entry.id, entry]])
+    const after: ProviderAuditSnapshot = new Map([[entry.id, next]])
+    assert.deepEqual(diffProviderSnapshots(provider.id, before, new Map([[entry.id, { ...entry }]])), [])
+    const [updated] = diffProviderSnapshots(provider.id, before, after)
+    assert.deepEqual(updated.changes?.changedFields, [entry.materialRevision ? "credentialMaterial" : "configuration"])
+    assert.deepEqual(updated.changes?.before, updated.changes?.after)
+    const evidence = JSON.stringify([...diffProviderSnapshots(provider.id, new Map(), before), updated, ...diffProviderSnapshots(provider.id, after, new Map())])
+    for (const token of [entry.materialRevision, entry.configurationRevision, next.materialRevision, next.configurationRevision]) if (token) assert.equal(evidence.includes(token), false)
+    for (const forbidden of ["materialRevision", "configurationRevision", "synthetic-sensitive-material"]) assert.equal(evidence.includes(forbidden), false)
+  }
 })
 
 test("per-resource evidence limits reject oversized UTF-8 and references without truncation", () => {
