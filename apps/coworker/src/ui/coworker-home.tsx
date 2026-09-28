@@ -557,7 +557,7 @@ export function CoworkerHome({
       <div className="relative flex min-w-0 flex-1 flex-col" style={{ "--conversation-top": headerNotice ? "0px" : CONVERSATION_TOP } as CSSProperties}>
         {/* No header bar: it floats over the conversation, which scrolls the full height beneath it. A way back on the left,
             a pill for where you are, this conversation's controls on the right; top and side room clear the rounded corners. */}
-        <header className={`window-drag absolute inset-x-0 top-0 z-30 flex items-center gap-2 pb-3 pt-3 ${layout.chatOnly ? "window-controls-inset-sm bg-[linear-gradient(to_bottom,var(--color-ink)_72%,transparent)] px-3" : "bg-[linear-gradient(to_bottom,var(--color-ink)_40%,transparent)] px-4"}`} data-testid="conversation-header">
+        <header className={`window-drag absolute inset-x-0 top-0 z-30 flex items-center gap-2 pb-3 pt-3 ${layout.chatOnly ? "window-controls-inset-sm bg-[linear-gradient(to_bottom,var(--color-ink)_82%,transparent)] px-3" : "bg-[linear-gradient(to_bottom,var(--color-ink)_40%,transparent)] px-4"}`} data-testid="conversation-header">
           <div className="flex min-w-fit flex-1 basis-0 items-center gap-1">
             <TeamButton />
             {onExitActivity ? <IconButton className="window-no-drag" label="Go to coworker" tooltip={`Leave Activity and open ${coworker.name}`} tooltipSide="bottom" onClick={onExitActivity}><ChevronIcon direction="left" /></IconButton> : null}
