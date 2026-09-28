@@ -39,11 +39,16 @@ function readFocus(): boolean {
 }
 
 /** On a desktop, Focus mode also docks the window as a small conversation at the right of the screen. While the macOS window buttons are hidden, headers stop keeping room for them. */
-function dockWindow(on: boolean) {
-  coworkerBridge.appWindow.focusMode(on)
+function dockWindow(on: boolean): Promise<void> {
+  return coworkerBridge.appWindow.focusMode(on)
     .then(({ controlsHidden }) => { document.documentElement.dataset.windowControls = controlsHidden ? "hidden" : "shown"; })
     .catch(() => { /* Without the native window the layout alone changes. */ });
 }
+
+/** The window has its size once resizing has been quiet this long after the native change reports back. */
+const SETTLE_QUIET_MS = 140;
+/** Longest the full layout waits for the window to finish growing back, if the window never reports it. */
+const SETTLE_MAX_MS = 900;
 
 /**
  * The window's layout, owned by the app shell. Focus mode is remembered across
@@ -55,8 +60,11 @@ export function useLayoutState(): Layout {
   const [width, setWidth] = useState(() => window.innerWidth);
   const [focus, setFocus] = useState(readFocus);
   const [teamOpen, setTeamOpen] = useState(false);
+  // Leaving Focus mode, the window grows back over a moment. The conversation alone keeps the window until it
+  // has its size, then the team and the side panel come back once, instead of flickering at every width in between.
+  const [settling, setSettling] = useState(false);
   const compact = width < COMPACT_WIDTH;
-  const chatOnly = focus || compact;
+  const chatOnly = focus || compact || settling;
 
   useEffect(() => {
     const onResize = () => setWidth(window.innerWidth);
@@ -72,8 +80,26 @@ export function useLayoutState(): Layout {
   const toggleFocus = useCallback(() => {
     const next = !focus;
     setFocus(next);
+    if (!next) setSettling(true);
     try { window.localStorage.setItem(FOCUS_KEY, next ? "1" : "0"); } catch { /* Focus mode still toggles for this session. */ }
-    dockWindow(next);
+    const docked = dockWindow(next);
+    if (!next) {
+      let reported = false;
+      let quiet: number | undefined;
+      const settled = () => {
+        window.removeEventListener("resize", onResize);
+        window.clearTimeout(fallback);
+        window.clearTimeout(quiet);
+        setSettling(false);
+      };
+      const onResize = () => {
+        window.clearTimeout(quiet);
+        quiet = window.setTimeout(() => { if (reported) settled(); }, SETTLE_QUIET_MS);
+      };
+      window.addEventListener("resize", onResize);
+      const fallback = window.setTimeout(settled, SETTLE_MAX_MS);
+      void docked.then(() => { reported = true; onResize(); });
+    }
   }, [focus]);
   const openTeam = useCallback(() => setTeamOpen(true), []);
   const closeTeam = useCallback(() => setTeamOpen(false), []);

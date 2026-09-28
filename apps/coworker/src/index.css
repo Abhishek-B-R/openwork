@@ -1223,3 +1223,50 @@ body.is-resizing-panel * {
     animation: none;
   }
 }
+
+/* Focus mode navigates like a phone: the list of conversations is the root, and a conversation is pushed over
+   it from the right. The pushed page casts a soft shadow on its leading edge; the list beneath drifts a little
+   to the left and dims, and both come back on the way out. At rest the pushed page carries no transform, so
+   nothing inside it is re-anchored. */
+.focus-stack-root {
+  transition: transform 460ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+.focus-stack-root::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 60;
+  pointer-events: none;
+  background: rgb(0 0 0);
+  opacity: 0;
+  transition: opacity 460ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+.focus-stack-root[data-open="false"] {
+  transform: translateX(-26%);
+}
+
+.focus-stack-root[data-open="false"]::after {
+  opacity: 0.32;
+}
+
+.focus-stack-detail {
+  position: relative;
+  z-index: 45;
+  background: var(--color-ink);
+  transition: transform 460ms cubic-bezier(0.32, 0.72, 0, 1), box-shadow 460ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+.focus-stack-detail[data-stack="under"] {
+  transform: translateX(100%);
+  box-shadow: -18px 0 44px rgb(0 0 0 / 0.5);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .focus-stack-root,
+  .focus-stack-root::after,
+  .focus-stack-detail {
+    transition: none;
+  }
+}

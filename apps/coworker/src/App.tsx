@@ -1490,7 +1490,14 @@ export default function App() {
                 }}
               />
             ) : null}
-            <div className="flex min-h-0 min-w-0 flex-1 flex-col" onPointerDownCapture={() => { navigationGeneration.current += 1; }} onKeyDownCapture={() => { navigationGeneration.current += 1; }}>
+            {/* In Focus mode the conversation is pushed over the list of conversations, as a phone app navigates. */}
+            <div
+              className={`flex min-h-0 min-w-0 flex-1 flex-col ${layout.focus ? "focus-stack-detail" : ""}`}
+              data-stack={layout.focus ? (layout.teamOpen ? "under" : "top") : undefined}
+              inert={layout.focus && layout.teamOpen}
+              onPointerDownCapture={() => { navigationGeneration.current += 1; }}
+              onKeyDownCapture={() => { navigationGeneration.current += 1; }}
+            >
             {navigationNotice ? <NavigationNoticeDialog message={navigationNotice} onReturn={() => navigate("chat", true)} onDismiss={() => setNavigationNotice("")} /> : null}
             <div className={!calendarVisible ? "flex min-h-0 min-w-0 flex-1" : "hidden"} data-testid="chat-main-content" data-active={chatActive}>
             {selectedGroup ? (

@@ -144,7 +144,7 @@ export function FocusHome({
       inert={!open}
       data-testid="focus-home"
       data-open={open ? "true" : "false"}
-      className={`fixed inset-0 z-50 flex flex-col bg-ink outline-none transition-transform duration-300 ease-out motion-reduce:transition-none ${open ? "translate-x-0" : "-translate-x-full"}`}
+      className="focus-stack-root fixed inset-0 z-40 flex flex-col bg-ink outline-none"
     >
       <div className="window-drag flex h-12 shrink-0 items-center justify-end gap-1 px-3 pt-2">
         <IconButton label="New coworker" tooltip="New coworker" tooltipSide="bottom" className="window-no-drag" onClick={onNewCoworker} data-testid="focus-home-compose">
@@ -179,7 +179,7 @@ export function FocusHome({
               aria-description={conversation.preview}
               data-testid="focus-home-row"
               data-key={conversation.key}
-              className={`flex w-full items-center gap-2.5 pl-1.5 pr-3 text-left transition-colors hover:bg-white/[0.04] focus-visible:bg-white/[0.07] focus-visible:outline-none ${conversation.selected ? "bg-white/[0.06]" : ""}`}
+              className={`flex w-full items-center gap-2.5 pl-1.5 pr-3 text-left transition-colors hover:bg-white/[0.04] active:bg-white/[0.09] active:duration-0 focus-visible:bg-white/[0.07] focus-visible:outline-none ${conversation.selected ? "bg-white/[0.06]" : ""}`}
             >
               <span className="flex w-2.5 shrink-0 justify-center">
                 {notifications && conversation.unread ? <span className="size-2.5 rounded-full bg-spark" aria-hidden="true" data-testid="focus-home-unread" /> : null}
