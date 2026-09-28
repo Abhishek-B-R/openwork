@@ -978,3 +978,20 @@ test("a coworker added after startup gets its owner agent before its workspace c
   assert.equal(runs.length, 2, "a new teammate is installed and warmed, not served by the older warmup");
   assert.match(runs[1], /builder/);
 });
+
+test("preparation waits out the engine reloading owner policies after the team configuration changes", async () => {
+  let calls = 0;
+  const waits = [];
+  await prepareNativeTurnRoles(async () => {
+    calls += 1;
+    if (calls < 3) throw new Error("The native AI service answered with HTTP 500.");
+    return { output: { ready: true, filesystemScopeRequired: true } };
+  }, { requireFilesystemScope: true, wait: async (ms) => { waits.push(ms); } });
+  assert.equal(calls, 3);
+  assert.deepEqual(waits, [150, 300]);
+
+  let stopped = 0;
+  await assert.rejects(prepareNativeTurnRoles(async () => { stopped += 1; throw new Error("The native AI service changed or stopped. Refresh before continuing."); }, { wait: async () => {} }), /changed or stopped/);
+  assert.equal(stopped, 1, "only a reload race is tried again");
+  await assert.rejects(prepareNativeTurnRoles(async () => { throw new Error("The native AI service answered with HTTP 500."); }, { retryDelaysMs: [1, 1], wait: async () => {} }), /HTTP 500/);
+});

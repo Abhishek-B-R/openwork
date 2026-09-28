@@ -240,10 +240,34 @@ export async function awaitNativePluginActivation(request, { apiContract = "beta
   }
 }
 
-export async function prepareNativeTurnRoles(request, { requireFilesystemScope = false } = {}) {
-  const result = await request("POST", "/api/rpc/coworker.turn-roles/prepare", { input: {} });
-  if (result?.output?.ready !== true) throw new Error("Native turn role inheritance is not ready.");
-  if (requireFilesystemScope && result.output.filesystemScopeRequired !== true) throw new Error("The admitted filesystem scope hook is not ready.");
+/**
+ * Right after the team configuration is rewritten (a feature switched in
+ * Settings, a teammate added), the engine can still hold the previous owner
+ * policies for a moment, and prepare fails ("The native owner policy did not
+ * match the current configuration") until its own watcher reloads them. That
+ * failure arrives as a bare HTTP 500, so a 500 is tried again for about ten
+ * seconds before it reaches the person. Any definite answer (not ready, a
+ * stopped service) is final at once.
+ */
+const PREPARE_RETRY_DELAYS_MS = [150, 300, 600, 1_000, 1_500, 2_500, 4_000];
+
+function transientPrepareFailure(error) {
+  return /answered with HTTP 5\d\d\b/.test(error instanceof Error ? error.message : String(error));
+}
+
+export async function prepareNativeTurnRoles(request, { requireFilesystemScope = false, retryDelaysMs = PREPARE_RETRY_DELAYS_MS, wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms)) } = {}) {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      const result = await request("POST", "/api/rpc/coworker.turn-roles/prepare", { input: {} });
+      if (result?.output?.ready !== true) throw new Error("Native turn role inheritance is not ready.");
+      if (requireFilesystemScope && result.output.filesystemScopeRequired !== true) throw new Error("The admitted filesystem scope hook is not ready.");
+      return;
+    } catch (error) {
+      const delay = retryDelaysMs[attempt];
+      if (delay === undefined || !transientPrepareFailure(error)) throw error;
+      await wait(delay);
+    }
+  }
 }
 
 export async function installTurnRolesPlugin(coworker) {
