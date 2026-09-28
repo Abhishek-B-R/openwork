@@ -6,9 +6,9 @@ import { useEffect } from "react";
  */
 const GAPS_MS = [30_000, 30_000, 60_000, 60_000, 60_000];
 const LATER_GAP_MS = 120_000;
-/** How fast the light crosses the window, and how wide its band is. */
-const PX_PER_MS = 1.2;
-const BAND_PX = 240;
+/** How fast the light crosses the window, and how wide its soft glow is: slow and wide, so it reads as light, not a shine. */
+const PX_PER_MS = 0.45;
+const BAND_PX = 560;
 
 /**
  * Now and then, one faint light passes through the app: it crosses every glass
