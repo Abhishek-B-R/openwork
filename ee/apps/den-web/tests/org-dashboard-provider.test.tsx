@@ -210,6 +210,8 @@ test("switch commits default-deny state and unmounts Gateway before changing req
 });
 
 test.each(["/dashboard/members", "/dashboard/manage-members"])("%s quietly refreshes only visible members context on poll, focus and visibility", async (pathname) => {
+  const initialMetadata = JSON.stringify({ revision: 1 });
+  const refreshedMetadata = JSON.stringify({ revision: 2 });
   await withDashboard(async ({ state, calls, hold, tick, workerRefreshCount }) => {
     const workersBefore = workerRefreshCount();
     calls.length = 0;
@@ -217,11 +219,11 @@ test.each(["/dashboard/members", "/dashboard/manage-members"])("%s quietly refre
     const next = hold("/v1/org", "org-a");
     await act(async () => tick());
     expect(state().orgBusy).toBe(false);
-    expect(state().orgContext?.organization.metadata).toBe(enabledMetadata);
+    expect(state().orgContext?.organization.metadata).toBe(initialMetadata);
     await act(async () => window.dispatchEvent(new Event("focus")));
     expect(calls).toEqual([{ path: "/v1/org", orgId: "org-a" }]);
-    await act(async () => next.resolve(context("org-a", "{}")));
-    expect(state().orgContext?.organization.metadata).toBe("{}");
+    await act(async () => next.resolve(context("org-a", refreshedMetadata)));
+    expect(state().orgContext?.organization.metadata).toBe(refreshedMetadata);
     Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" });
     await act(async () => { tick(); window.dispatchEvent(new Event("focus")); document.dispatchEvent(new Event("visibilitychange")); });
     expect(calls).toHaveLength(1);
@@ -231,7 +233,7 @@ test.each(["/dashboard/members", "/dashboard/manage-members"])("%s quietly refre
     expect(calls).toEqual(Array.from({ length: 3 }, () => ({ path: "/v1/org", orgId: "org-a" })));
     expect(workerRefreshCount()).toBe(workersBefore);
     expect(state()).toMatchObject({ orgBusy: false, orgError: null });
-  }, { pathname, outsideGateway: true });
+  }, { pathname, metadata: initialMetadata, outsideGateway: true });
 });
 
 test("non-members pages do not poll or refresh on focus", async () => {
