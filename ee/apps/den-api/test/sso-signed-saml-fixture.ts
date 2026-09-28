@@ -1,6 +1,9 @@
 import assert from "node:assert/strict"
 import { execFileSync } from "node:child_process"
 import { generateKeyPairSync, randomUUID } from "node:crypto"
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { inflateRawSync } from "node:zlib"
 import { SignedXml } from "xml-crypto"
 
@@ -25,10 +28,19 @@ function signingMaterial() {
     privateKeyEncoding: { type: "pkcs8", format: "pem" },
     publicKeyEncoding: { type: "spki", format: "pem" },
   })
-  const cert = execFileSync("openssl", ["req", "-new", "-x509", "-key", "/dev/stdin", "-subj", "/CN=synthetic-saml.example.test", "-days", "1"], {
-    input: privateKey, encoding: "utf8", timeout: 10_000,
-  })
-  return { privateKey, cert }
+  // Node uses a socket for piped stdin on Linux; OpenSSL cannot reopen that
+  // through /dev/stdin. A disposable file works on both Linux and macOS.
+  const directory = mkdtempSync(join(tmpdir(), "openwork-saml-fixture-"))
+  try {
+    const keyPath = join(directory, "key.pem")
+    writeFileSync(keyPath, privateKey, { mode: 0o600 })
+    const cert = execFileSync("openssl", ["req", "-new", "-x509", "-key", keyPath, "-subj", "/CN=synthetic-saml.example.test", "-days", "1"], {
+      encoding: "utf8", timeout: 10_000,
+    })
+    return { privateKey, cert }
+  } finally {
+    rmSync(directory, { recursive: true, force: true })
+  }
 }
 
 const material = signingMaterial()
