@@ -2739,7 +2739,7 @@ function ThreadView({
       {active && transcriptLoaded && away ? <JumpToLatest onClick={jumpToLatest} bottom={dockHeight + 12} /> : null}
       </div>
       {/* The composer and what sits with it float over the conversation, which scrolls to the window's bottom beneath them. */}
-      <div ref={setDock} className="pointer-events-none absolute inset-x-0 bottom-0 z-20 bg-[linear-gradient(to_top,var(--color-ink)_20%,transparent)] [&>*]:pointer-events-auto" data-testid="coworker-composer-dock">
+      <div ref={setDock} className="composer-dock pointer-events-none absolute inset-x-0 bottom-0 z-20 bg-[linear-gradient(to_top,var(--color-ink)_20%,transparent)] [&>*]:pointer-events-auto" data-testid="coworker-composer-dock">
       {kind !== "worker" && turnState.next.length > 0 ? (
         <NextRows items={turnState.next} onEdit={editQueued} onRemove={(id) => commitTurnState((state) => removeQueued(state, id))} onSendNow={(id) => void sendQueuedNow(id)} />
       ) : null}

@@ -316,7 +316,7 @@ function CoworkerCard({ featured, action, apps, onOpen, tall = false }: { featur
       className="group relative flex flex-col overflow-hidden rounded-xl border border-line bg-white/[0.015] transition-colors hover:border-white/15">
       <button type="button" onClick={onOpen} aria-label={`Meet ${featured.name}`} className="absolute inset-0 z-0 rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-spark/60" />
       <span className={`pointer-events-none relative flex items-center justify-center ${tall ? "min-h-24 flex-1" : "h-24"}`} style={{ background: `color-mix(in srgb, ${avatarFill(featured.avatarColor)} 12%, transparent)` }} data-testid="marketplace-coworker-stage">
-        <CoworkerAvatar identity={identity} name={featured.name} color={featured.avatarColor} glasses={featured.avatarGlasses} size={tall ? 84 : 60} motion="playful" />
+        <CoworkerAvatar identity={identity} name={featured.name} color={featured.avatarColor} glasses={featured.avatarGlasses} size={tall ? 84 : 60} motion="playful" temperament={featured.personality} />
       </span>
       {/* Tall cards share one text height, so faces and edges line up across the row. */}
       <span className={`pointer-events-none relative flex flex-col p-3.5 ${tall ? "" : "flex-1"}`}>
@@ -508,7 +508,7 @@ function CoworkerPage({ featured, member, action, error, show, waiting, app, onA
   return (
     <article className="view-enter max-w-2xl" data-testid="marketplace-coworker-detail" data-id={featured.id}>
       <div className="flex items-center gap-4">
-        <CoworkerAvatar identity={identity} name={featured.name} color={featured.avatarColor} glasses={featured.avatarGlasses} size={64} motion="playful" />
+        <CoworkerAvatar identity={identity} name={featured.name} color={featured.avatarColor} glasses={featured.avatarGlasses} size={64} motion="playful" temperament={featured.personality} />
         <div className="min-w-0 flex-1">
           <h2 className="text-xl font-semibold tracking-[-0.015em] text-snow">{featured.name}</h2>
           <p className="text-sm text-mist">{featured.role}{member ? <span className="text-mint"> · on your team</span> : null}</p>

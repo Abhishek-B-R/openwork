@@ -568,7 +568,7 @@ export function CoworkerHome({
       <div className="relative flex min-w-0 flex-1 flex-col" style={{ "--conversation-top": headerNotice ? "0px" : CONVERSATION_TOP } as CSSProperties}>
         {/* No header bar: it floats over the conversation, which scrolls the full height beneath it. A way back on the left,
             a pill for where you are, this conversation's controls on the right; top and side room clear the rounded corners. */}
-        <header className={`window-drag absolute inset-x-0 top-0 z-30 flex items-center gap-2 pb-3 pt-3 ${layout.chatOnly ? "window-controls-inset-sm bg-[linear-gradient(to_bottom,var(--color-ink)_82%,transparent)] px-3" : "bg-[linear-gradient(to_bottom,var(--color-ink)_40%,transparent)] px-4"}`} data-testid="conversation-header">
+        <header className={`frosted-bar window-drag absolute inset-x-0 top-0 z-30 flex items-center gap-2 pb-3 pt-3 ${layout.chatOnly ? "window-controls-inset-sm px-3" : "px-4"}`} data-testid="conversation-header">
           <div className="flex min-w-fit flex-1 basis-0 items-center gap-1">
             <TeamButton />
             {onExitActivity ? <IconButton className="window-no-drag" label="Go to coworker" tooltip={`Leave Activity and open ${coworker.name}`} tooltipSide="bottom" onClick={onExitActivity}><ChevronIcon direction="left" /></IconButton> : null}
@@ -583,6 +583,7 @@ export function CoworkerHome({
               name={coworker.name}
               size={26}
               expression={faceFor(activity)}
+              temperament={coworker.personality}
             />
             {/* On a phone the face names the coworker; the room goes to the discussion. */}
             <h1 className={layout.compact ? "sr-only" : "min-w-[3rem] max-w-[14rem] shrink-[2] truncate pl-1 text-sm font-semibold text-snow"} title={coworker.name}>{coworker.name}</h1>
@@ -1178,7 +1179,7 @@ function CoworkerSettings({
   return (
     <div className="space-y-6">
       <section className="flex flex-col items-center pt-2 text-center" data-testid="coworker-profile-settings">
-        <CoworkerAvatar identity={`${coworker.slug}:profile-preview`} motion="playful" color={coworker.avatarColor} glasses={coworker.avatarGlasses} name={coworker.name} size={72} />
+        <CoworkerAvatar identity={`${coworker.slug}:profile-preview`} motion="playful" color={coworker.avatarColor} glasses={coworker.avatarGlasses} name={coworker.name} size={72} temperament={coworker.personality} />
         <p className="mt-2 max-w-full truncate text-base font-semibold tracking-[-0.02em] text-snow">{coworker.name}</p>
         <p className="max-w-full truncate text-xs text-mist">{coworker.role || "Coworker"}</p>
         <Button className="mt-3 rounded-full px-4 text-xs" onClick={onCustomize} data-testid="customize-coworker-button">Customize</Button>

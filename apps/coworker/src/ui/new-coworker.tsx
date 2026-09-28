@@ -47,6 +47,7 @@ export function NewCoworker({
   onAskTeam?: (slug: string, prompt: string) => void;
 }) {
   const layout = useLayout();
+  const [typing, setTyping] = useState(false);
   const [step, setStep] = useState<Step>(team.length > 0 ? "choose" : "identity");
   const [name, setName] = useState("");
   const previewIdentity = useId();
@@ -87,7 +88,7 @@ export function NewCoworker({
     for (let suffix = 2; takenSlugs.has(slugOfName(free)); suffix += 1) free = `${item.defaultName} ${suffix}`;
     setName(free);
     acknowledgedName.current = free;
-    acknowledgeCoworker(previewIdentity);
+    acknowledgeCoworker(previewIdentity, "restyle");
     setRole(item.role);
     setMission(item.mission);
     setAvatarColor(item.avatarColor);
@@ -148,7 +149,9 @@ export function NewCoworker({
         <div className="creation-card glass-sheen relative m-auto grid min-w-0 w-full max-w-3xl shrink-0 overflow-hidden rounded-[22px] border border-line sm:rounded-[30px] md:min-h-[min(660px,calc(100vh-92px))] md:grid-cols-[290px_1fr] short:min-h-[calc(100vh-64px)]" data-glint="surface">
           <div className="avatar-stage flex min-h-[190px] flex-col items-center justify-center border-b border-line p-5 sm:min-h-[300px] sm:p-7 md:border-b-0 md:border-r">
             <OnboardingMascotStack
-              variant={{ kind: "coworker", identity: previewIdentity, name: name.trim() || "New coworker", color: avatarColor, glasses: avatarGlasses }}
+              variant={{ kind: "coworker", identity: previewIdentity, name: name.trim() || "New coworker", color: avatarColor, glasses: avatarGlasses, temperament: personality,
+                // While the person types, the face watches the form: beside it on a wide window, below it on a narrow one.
+                regard: typing ? (layout.width < 768 ? { x: 0, y: 0.8 } : { x: 0.75, y: 0.15 }) : undefined }}
               size={layout.compact ? 104 : 140}
               sessionKey="new-coworker"
             />
@@ -158,7 +161,9 @@ export function NewCoworker({
             {role.trim() ? <p className="mt-1 max-w-full truncate text-xs text-mist">{role.trim()}</p> : null}
           </div>
 
-          <div className="flex min-w-0 flex-col p-4 sm:p-6 md:p-7 short:p-5" data-testid={`new-coworker-step-${step}`}>
+          <div className="flex min-w-0 flex-col p-4 sm:p-6 md:p-7 short:p-5" data-testid={`new-coworker-step-${step}`}
+            onFocusCapture={(event) => setTyping(event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement)}
+            onBlurCapture={() => setTyping(false)}>
             {step !== "details" ? (
               <>
                 <h1 className="text-2xl font-semibold tracking-[-0.035em] text-snow">Add a coworker</h1>
@@ -215,7 +220,7 @@ export function NewCoworker({
                       onChange={(event) => setName(event.target.value)}
                       onBlur={() => {
                         const next = name.trim();
-                        if (next && next !== acknowledgedName.current) acknowledgeCoworker(previewIdentity);
+                        if (next && next !== acknowledgedName.current) acknowledgeCoworker(previewIdentity, "greet");
                         acknowledgedName.current = next;
                       }}
                       onKeyDown={(event) => {
@@ -228,11 +233,11 @@ export function NewCoworker({
                     glasses={avatarGlasses}
                     onColorChange={(color) => {
                       setAvatarColor(color);
-                      if (color !== avatarColor) acknowledgeCoworker(previewIdentity);
+                      if (color !== avatarColor) acknowledgeCoworker(previewIdentity, "restyle");
                     }}
                     onGlassesChange={(glasses) => {
                       setAvatarGlasses(glasses);
-                      if (glasses !== avatarGlasses) acknowledgeCoworker(previewIdentity);
+                      if (glasses !== avatarGlasses) acknowledgeCoworker(previewIdentity, "glasses");
                     }}
                   />
                 </div> : null}
@@ -262,7 +267,10 @@ export function NewCoworker({
                       onChange={(event) => setMission(event.target.value)}
                     />
                   </Field>
-                  <PersonalityPicker value={personality} seed={name.trim() || "coworker"} onChange={setPersonality} />
+                  <PersonalityPicker value={personality} seed={name.trim() || "coworker"} onChange={(next) => {
+                    setPersonality(next);
+                    if (next !== personality) acknowledgeCoworker(previewIdentity, "personality");
+                  }} />
                 </div>
                 <details className="mt-5 border-t border-line pt-4" data-testid="new-coworker-advanced" onToggle={(event) => { if (event.currentTarget.open) setAdvancedOpen(true); }}>
                   <summary className="cursor-pointer text-sm font-medium text-snow">Advanced</summary>

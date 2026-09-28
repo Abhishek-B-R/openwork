@@ -8,6 +8,9 @@ import { CoworkerModelSettings, type ModelSettingsPart } from "@/ui/coworker-mod
 import { PersonalityPicker } from "@/ui/personality-picker";
 import { Button, ChevronIcon, ErrorNote, Field, IconButton, inputClass } from "@/ui/kit";
 
+/* The profile form sits to the right of the face. */
+const FORM_REGARD = { x: 0.75, y: 0.15 };
+
 export type CustomizeFocus = "model";
 
 const MODEL_TABS: ReadonlyArray<{ id: ModelSettingsPart; title: string }> = [
@@ -55,6 +58,8 @@ export function CustomizeCoworker({
   const [avatarColor, setAvatarColor] = useState(coworker.avatarColor);
   const [avatarGlasses, setAvatarGlasses] = useState(coworker.avatarGlasses);
   const [personality, setPersonality] = useState(coworker.personality);
+  // While the person types in the profile, the face beside it glances over at the form.
+  const [typing, setTyping] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const tabsRef = useRef<HTMLDivElement>(null);
@@ -116,11 +121,11 @@ export function CustomizeCoworker({
       glasses={avatarGlasses}
       onColorChange={(color) => {
         setAvatarColor(color);
-        if (color !== avatarColor) acknowledgeCoworker(preview);
+        if (color !== avatarColor) acknowledgeCoworker(preview, "restyle");
       }}
       onGlassesChange={(glasses) => {
         setAvatarGlasses(glasses);
-        if (glasses !== avatarGlasses) acknowledgeCoworker(preview);
+        if (glasses !== avatarGlasses) acknowledgeCoworker(preview, "glasses");
       }}
     />
   );
@@ -147,7 +152,7 @@ export function CustomizeCoworker({
         {/* The face and its look lead the profile; the model tabs take the whole width. */}
         {!advanced ? (
           <div className="avatar-stage hidden min-h-0 flex-col items-center overflow-y-auto border-r border-line px-4 pb-6 pt-9 md:flex">
-            <CoworkerAvatar identity={preview} motion="playful" color={avatarColor} glasses={avatarGlasses} name={coworker.name} size={104} />
+            <CoworkerAvatar identity={preview} motion="playful" color={avatarColor} glasses={avatarGlasses} name={coworker.name} size={104} temperament={personality} regard={typing ? FORM_REGARD : undefined} />
             <p className="mt-3 max-w-full truncate text-lg font-semibold tracking-[-0.025em] text-snow">{coworker.name}</p>
             {role.trim() ? <p className="mt-0.5 max-w-full truncate text-xs text-mist">{role.trim()}</p> : null}
             <div className="mt-6 w-full" data-testid="customize-look">{look}</div>
@@ -216,7 +221,9 @@ export function CustomizeCoworker({
               </div>
             </>
           ) : (
-            <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-5 pt-5 md:px-7" data-testid="customize-profile">
+            <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-5 pt-5 md:px-7" data-testid="customize-profile"
+              onFocusCapture={(event) => setTyping(event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement)}
+              onBlurCapture={() => setTyping(false)}>
               <div className="space-y-4">
                 <div className="md:hidden">{look}</div>
                 <Field label="Role">
@@ -225,7 +232,10 @@ export function CustomizeCoworker({
                 <Field label="What it is here for">
                   <textarea className={`${inputClass} min-h-[68px] resize-none bg-ink`} rows={2} value={mission} placeholder="What should this coworker own over time?" onChange={(event) => setMission(event.target.value)} />
                 </Field>
-                <PersonalityPicker value={personality} seed={coworker.slug} onChange={setPersonality} />
+                <PersonalityPicker value={personality} seed={coworker.slug} onChange={(next) => {
+                  setPersonality(next);
+                  if (next !== personality) acknowledgeCoworker(preview, "personality");
+                }} />
               </div>
               <button
                 type="button"

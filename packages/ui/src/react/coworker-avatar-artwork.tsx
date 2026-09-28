@@ -12,6 +12,14 @@ export type AvatarGlasses = "round" | "square" | "oval" | "none" | "sunglasses" 
  * reactions, happy or sorry, are cues instead (see `expressCoworker`).
  */
 export type AvatarExpression = "none" | "thinking" | "curious";
+/**
+ * A coworker's temperament: which small habits its face falls into when idle
+ * (a playful one winks, a detective squints) and the signature move it shows
+ * when you pick that personality. Any other value behaves like "neutral".
+ */
+export type AvatarTemperament =
+  | "none" | "neutral" | "warm" | "calm" | "eager" | "playful" | "dry" | "blunt"
+  | "curious" | "thoughtful" | "meticulous" | "detective";
 
 /* Soft colors keep their original values. The bold six share the same lightness steps
  * (fill, edge, depth) at two to three times the chroma, so glasses stay legible and the
@@ -48,6 +56,9 @@ export type StaticCoworkerAvatarProps = {
   expression?: AvatarExpression;
   identity?: string;
   motion?: AvatarMotion;
+  temperament?: AvatarTemperament;
+  /** The coworker whose conversation is open: it keeps glancing toward it. */
+  selected?: boolean;
   svgRef?: Ref<SVGSVGElement>;
 };
 
@@ -63,6 +74,8 @@ export function StaticCoworkerAvatar({
   svgRef,
   identity = name,
   motion = size <= 44 ? "quiet" : "attentive",
+  temperament = "neutral",
+  selected = false,
 }: StaticCoworkerAvatarProps) {
   const palette = PALETTES[color];
 
@@ -80,6 +93,8 @@ export function StaticCoworkerAvatar({
       data-reaction="none"
       data-expression={expression}
       data-cue="none"
+      data-temperament={temperament}
+      data-selected={selected}
       data-glasses={glasses}
       role="img"
       style={{ width: size, height: size }}
@@ -123,6 +138,13 @@ export function StaticCoworkerAvatar({
                   <g className="coworker-avatar__happy-eyes" fill="none" stroke="#0b0e14" strokeLinecap="round" strokeWidth="4.5">
                     <path className="coworker-avatar__mood" d="M31.5 60.5q6-7.5 12 0" opacity="0" />
                     <path className="coworker-avatar__mood" d="M76.5 60.5q6-7.5 12 0" opacity="0" />
+                  </g>
+                  {/* Lids: flat over half-open eyes when unimpressed, closed curves when dozing; hidden until used. */}
+                  <g className="coworker-avatar__lids" fill="none" stroke="#0b0e14" strokeLinecap="round" strokeWidth="3.4">
+                    <path className="coworker-avatar__mood coworker-avatar__lid-flat" d="M32 55h11" opacity="0" />
+                    <path className="coworker-avatar__mood coworker-avatar__lid-flat" d="M77 55h11" opacity="0" />
+                    <path className="coworker-avatar__mood coworker-avatar__lid-sleep" d="M32 57.5q5.5 4.5 11 0" opacity="0" />
+                    <path className="coworker-avatar__mood coworker-avatar__lid-sleep" d="M77 57.5q5.5 4.5 11 0" opacity="0" />
                   </g>
                 </g>
               </g>
@@ -170,14 +192,25 @@ export function StaticCoworkerAvatar({
               ) : null}
               {/* A small mouth, shown only with an expression: "hmm" while thinking, "o" when curious, a smile or a frown for a moment.
                   Hidden by attribute so artwork rendered without the stylesheet (a social image) shows the plain face. */}
+              {/* Soft cheeks for a delighted, poked or greeting moment; hidden by attribute like the mouth. */}
+              <g className="coworker-avatar__cheeks" fill="#ff8fa3">
+                <ellipse className="coworker-avatar__mood" cx="27" cy="82" rx="6.5" ry="3.6" opacity="0" />
+                <ellipse className="coworker-avatar__mood" cx="93" cy="82" rx="6.5" ry="3.6" opacity="0" />
+              </g>
               <g className="coworker-avatar__mouth" fill="none" stroke="#11151d" strokeLinecap="round" strokeLinejoin="round" strokeWidth="3.4">
                 <path className="coworker-avatar__mood coworker-avatar__mouth-hmm" d="M55 89.5q4.5-3.6 9.5-0.6" opacity="0" />
                 <ellipse className="coworker-avatar__mood coworker-avatar__mouth-o" cx="60" cy="89" rx="2.6" ry="3.2" strokeWidth="2.8" opacity="0" />
                 <path className="coworker-avatar__mood coworker-avatar__mouth-smile" d="M53.5 86.5q6.5 6 13 0" opacity="0" />
                 <path className="coworker-avatar__mood coworker-avatar__mouth-frown" d="M54.5 91q5.5-4.2 11 0" opacity="0" />
+                <path className="coworker-avatar__mood coworker-avatar__mouth-flat" d="M55 89.5h10" opacity="0" />
               </g>
             </g>
           </g>
+        </g>
+        {/* Two small sparkles for a new look (a color or glasses change); hidden until one plays. */}
+        <g className="coworker-avatar__sparkles" fill="#ffffff">
+          <path className="coworker-avatar__mood" d="M105 4l1.7 4.6 4.6 1.7-4.6 1.7L105 16.6l-1.7-4.6-4.6-1.7 4.6-1.7Z" opacity="0" />
+          <path className="coworker-avatar__mood" d="M13 20l1.2 3.2 3.2 1.2-3.2 1.2L13 28.8l-1.2-3.2-3.2-1.2 3.2-1.2Z" opacity="0" />
         </g>
       </g>
     </svg>

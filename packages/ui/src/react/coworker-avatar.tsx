@@ -4,7 +4,7 @@ import { useCallback, useRef } from "react";
 import { StaticCoworkerAvatar, type StaticCoworkerAvatarProps, type AvatarColor, type AvatarGlasses } from "./coworker-avatar-artwork";
 import { useAvatarMotion, type AvatarGather } from "./coworker-avatar-motion";
 
-export type { AvatarColor, AvatarExpression, AvatarGlasses } from "./coworker-avatar-artwork";
+export type { AvatarColor, AvatarExpression, AvatarGlasses, AvatarTemperament } from "./coworker-avatar-artwork";
 export { avatarFill } from "./coworker-avatar-artwork";
 export { acknowledgeCoworker, expressCoworker } from "./coworker-avatar-motion";
 export type { AvatarCue, AvatarMotion, AvatarReaction } from "./coworker-avatar-motion";
@@ -41,7 +41,14 @@ const AVATAR_GLASSES: Array<{ id: AvatarGlasses; label: string }> = [
   { id: "star", label: "Star" },
 ];
 
-export type CoworkerAvatarProps = StaticCoworkerAvatarProps & { gaze?: boolean };
+export type CoworkerAvatarProps = StaticCoworkerAvatarProps & {
+  gaze?: boolean;
+  /** Where the face rests its eyes, -1..1 on each axis (toward a form being filled in, a speaker); pointer and idle glances return to it. */
+  regard?: { x: number; y: number };
+};
+
+/* A selected face in the team list rests its eyes toward the open conversation, to its right. */
+const SELECTED_REGARD = { x: 0.42, y: 0.06 };
 
 export function CoworkerAvatar(props: CoworkerAvatarProps) {
   return <AnimatedAvatar {...props} />;
@@ -58,11 +65,13 @@ function AnimatedAvatar({
   svgRef,
   identity = name,
   motion = size <= 44 ? "quiet" : "attentive",
+  temperament = "neutral",
+  selected = false,
   gaze = true,
   gather,
-  regard,
-}: CoworkerAvatarProps & { gather?: AvatarGather; regard?: { x: number; y: number } }) {
-  const motionRef = useAvatarMotion({ identity, motion, animated, gaze, prominent: motion !== "quiet" && motion !== "navigation", gather, regardX: regard?.x ?? 0, regardY: regard?.y ?? 0 });
+  regard = selected ? SELECTED_REGARD : undefined,
+}: CoworkerAvatarProps & { gather?: AvatarGather }) {
+  const motionRef = useAvatarMotion({ identity, motion, animated, gaze, prominent: motion !== "quiet" && motion !== "navigation", gather, regardX: regard?.x ?? 0, regardY: regard?.y ?? 0, temperament });
   // A stable callback avoids detaching the observed SVG on ordinary parent renders.
   const setRef = useCallback((node: SVGSVGElement | null) => {
     motionRef.current = node;
@@ -70,7 +79,7 @@ function AnimatedAvatar({
     if (svgRef) svgRef.current = node;
   }, [motionRef, svgRef]);
 
-  return <StaticCoworkerAvatar name={name} color={color} glasses={glasses} size={size} animated={animated} working={working} expression={expression} identity={identity} motion={motion} svgRef={setRef} />;
+  return <StaticCoworkerAvatar name={name} color={color} glasses={glasses} size={size} animated={animated} working={working} expression={expression} identity={identity} motion={motion} temperament={temperament} selected={selected} svgRef={setRef} />;
 }
 
 export type GroupAvatarsProps = {

@@ -1130,7 +1130,8 @@ export default function App() {
   /** Open another coworker's conversation, optionally with a message to send there as the person's own. */
   function visitCoworker(slug: string, prompt?: string) {
     if (!allowSourceNavigation()) return false;
-    acknowledgeCoworker(slug);
+    // Being chosen gets a little hello: a hop, happy eyes and a smile.
+    acknowledgeCoworker(slug, "greet");
     setSelectedActivityId(null);
     setGroupDetailsOpen(false);
     setActivityGroupRequest(null);

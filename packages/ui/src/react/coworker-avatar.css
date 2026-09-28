@@ -271,7 +271,7 @@
   transition: opacity 180ms ease-out, transform 280ms ease-out;
 }
 
-.coworker-avatar :is(.coworker-avatar__happy-eyes, .coworker-avatar__mouth) .coworker-avatar__mood {
+.coworker-avatar :is(.coworker-avatar__happy-eyes, .coworker-avatar__lids, .coworker-avatar__mouth, .coworker-avatar__cheeks, .coworker-avatar__sparkles) .coworker-avatar__mood {
   opacity: 0;
 }
 
@@ -373,6 +373,287 @@
 @keyframes avatar-sorry-sink {
   0%, 100% { transform: translateY(0) rotate(0deg); }
   25%, 70% { transform: translateY(1.6px) rotate(-1deg); }
+}
+
+/* Play and personality. Each moment is one data-reaction value with a fixed length (see CUE_DURATION):
+ * pointer play (delight on arrival, boop on a poke, dizzy after a flurry), being chosen (greet), being
+ * set up (restyle for a new color, glasses dropping on), and the small habits a temperament falls into
+ * (wink, smile, nod, adjust, squint, unimpressed, ponder). They override a held face for their moment. */
+.coworker-avatar[data-reaction="greet"] .coworker-avatar__pointer-body {
+  animation: avatar-greet 1050ms cubic-bezier(0.3, 0.7, 0.4, 1);
+}
+
+.coworker-avatar:is([data-reaction="greet"], [data-reaction="restyle"]) .coworker-avatar__pupils .coworker-avatar__mood {
+  opacity: 0;
+  transform: scaleY(0.2);
+}
+
+.coworker-avatar:is([data-reaction="greet"], [data-reaction="restyle"]) :is(.coworker-avatar__happy-eyes .coworker-avatar__mood, .coworker-avatar__mouth-smile) {
+  opacity: 1;
+}
+
+.coworker-avatar:is([data-reaction="greet"], [data-reaction="boop"], [data-reaction="delight"], [data-reaction="restyle"]) .coworker-avatar__cheeks .coworker-avatar__mood {
+  opacity: 0.55;
+}
+
+.coworker-avatar[data-reaction="delight"] .coworker-avatar__pointer-body {
+  animation: avatar-delight 760ms ease-out;
+}
+
+.coworker-avatar[data-reaction="delight"] .coworker-avatar__pupils .coworker-avatar__mood {
+  transform: scale(1.12, 1.18);
+}
+
+.coworker-avatar[data-reaction="delight"] .coworker-avatar__mouth-smile {
+  opacity: 1;
+}
+
+.coworker-avatar[data-reaction="boop"] .coworker-avatar__pointer-body {
+  animation: avatar-boop 460ms cubic-bezier(0.3, 0.8, 0.4, 1);
+}
+
+.coworker-avatar[data-reaction="boop"] .coworker-avatar__pupils {
+  animation: avatar-squeeze 380ms ease-in-out;
+}
+
+.coworker-avatar[data-reaction="dizzy"] .coworker-avatar__pointer-body {
+  animation: avatar-dizzy 1500ms ease-in-out;
+}
+
+.coworker-avatar[data-reaction="dizzy"] .coworker-avatar__pupils .coworker-avatar__mood {
+  animation: avatar-dizzy-eyes 500ms linear 3;
+}
+
+.coworker-avatar[data-reaction="dizzy"] .coworker-avatar__mouth-o {
+  opacity: 1;
+}
+
+.coworker-avatar[data-reaction="restyle"] .coworker-avatar__pointer-body {
+  animation: avatar-restyle 1150ms ease-in-out;
+}
+
+.coworker-avatar[data-reaction="restyle"] .coworker-avatar__sparkles .coworker-avatar__mood {
+  animation: avatar-sparkle 1150ms ease-out both;
+}
+
+.coworker-avatar[data-reaction="restyle"] .coworker-avatar__sparkles .coworker-avatar__mood:nth-child(2) {
+  animation-delay: 140ms;
+}
+
+.coworker-avatar[data-reaction="glasses"] .coworker-avatar__glasses {
+  animation: avatar-glasses-on 900ms cubic-bezier(0.34, 1.4, 0.5, 1);
+}
+
+.coworker-avatar[data-reaction="glasses"] .coworker-avatar__pupils {
+  animation: avatar-blink 240ms ease-in-out 520ms;
+}
+
+.coworker-avatar[data-reaction="glasses"] .coworker-avatar__sparkles .coworker-avatar__mood:first-child {
+  animation: avatar-sparkle 900ms ease-out 380ms both;
+}
+
+.coworker-avatar[data-reaction="wink"] .coworker-avatar__pupils .coworker-avatar__mood:nth-child(2) {
+  animation: avatar-wink 760ms ease-in-out;
+}
+
+.coworker-avatar[data-reaction="wink"] .coworker-avatar__pointer-body {
+  animation: avatar-wink-tilt 760ms ease-in-out;
+}
+
+.coworker-avatar:is([data-reaction="wink"], [data-reaction="smile"]) .coworker-avatar__mouth-smile {
+  opacity: 1;
+}
+
+.coworker-avatar[data-reaction="smile"] .coworker-avatar__pupils .coworker-avatar__mood {
+  transform: translateY(0.6px) scaleY(0.86);
+}
+
+.coworker-avatar[data-reaction="smile"] .coworker-avatar__cheeks .coworker-avatar__mood {
+  opacity: 0.32;
+}
+
+.coworker-avatar[data-reaction="nod"] .coworker-avatar__pointer-body {
+  animation: avatar-nod 900ms ease-in-out;
+}
+
+.coworker-avatar[data-reaction="nod"] .coworker-avatar__pupils {
+  animation: avatar-blink 260ms ease-in-out 220ms;
+}
+
+.coworker-avatar[data-reaction="adjust"] .coworker-avatar__glasses {
+  animation: avatar-adjust 760ms ease-in-out;
+}
+
+.coworker-avatar[data-reaction="adjust"] .coworker-avatar__pupils {
+  animation: avatar-blink 220ms ease-in-out 320ms;
+}
+
+.coworker-avatar[data-reaction="squint"] .coworker-avatar__pupils .coworker-avatar__mood {
+  animation: avatar-squint 1300ms ease-in-out;
+}
+
+.coworker-avatar[data-reaction="squint"] .coworker-avatar__pointer-body {
+  animation: avatar-squint-lean 1300ms ease-in-out;
+}
+
+.coworker-avatar:is([data-reaction="squint"], [data-reaction="unimpressed"]) .coworker-avatar__mouth-flat {
+  opacity: 1;
+}
+
+.coworker-avatar[data-reaction="unimpressed"] .coworker-avatar__pupils .coworker-avatar__mood {
+  transform: translateY(2.6px) scaleY(0.46);
+}
+
+.coworker-avatar[data-reaction="unimpressed"] .coworker-avatar__lid-flat {
+  opacity: 1;
+}
+
+.coworker-avatar[data-reaction="ponder"] .coworker-avatar__pupils .coworker-avatar__mood {
+  transform: translate(3px, -4px) scaleY(0.74);
+}
+
+.coworker-avatar[data-reaction="ponder"] .coworker-avatar__mouth-hmm {
+  opacity: 1;
+}
+
+.coworker-avatar[data-reaction="ponder"] .coworker-avatar__pointer-body {
+  animation: avatar-ponder 1800ms ease-in-out;
+}
+
+/* A moment of play replaces a held mouth for its length. */
+.coworker-avatar:is([data-reaction="greet"], [data-reaction="delight"], [data-reaction="restyle"], [data-reaction="wink"], [data-reaction="smile"], [data-reaction="squint"], [data-reaction="unimpressed"]) :is(.coworker-avatar__mouth-hmm, .coworker-avatar__mouth-o, .coworker-avatar__mouth-frown),
+.coworker-avatar[data-reaction="dizzy"] :is(.coworker-avatar__mouth-hmm, .coworker-avatar__mouth-frown) {
+  opacity: 0;
+  animation: none;
+}
+
+/* Drowsy after a quiet while: eyes almost closed and breathing slowly, the float slowed down. It lifts the
+ * moment the person moves, with a perk-up; a face at work or waiting on the person never dozes. */
+.coworker-avatar[data-sleepy="true"] .coworker-avatar__pupils .coworker-avatar__mood {
+  opacity: 0;
+}
+
+.coworker-avatar[data-sleepy="true"] .coworker-avatar__lid-sleep {
+  opacity: 1;
+}
+
+.coworker-avatar[data-sleepy="true"][data-motion-paused="false"] .coworker-avatar__lid-sleep {
+  animation: avatar-doze 4.8s ease-in-out infinite;
+}
+
+.coworker-avatar[data-sleepy="true"][data-motion-paused="false"] :is(.coworker-avatar__body, .coworker-avatar__depth) {
+  animation-duration: calc(var(--avatar-float-duration, 8.8s) * 1.7);
+}
+
+@keyframes avatar-greet {
+  0%, 100% { transform: translateY(0) scale(1) rotate(0deg); }
+  16% { transform: translateY(0.9px) scale(1.035, 0.955); }
+  40% { transform: translateY(-4.2px) scale(0.975, 1.035) rotate(-2deg); }
+  62% { transform: translateY(0.5px) scale(1.015, 0.985) rotate(1deg); }
+  80% { transform: translateY(-1.1px) rotate(0deg); }
+}
+
+@keyframes avatar-delight {
+  0%, 100% { transform: translateY(0) scale(1); }
+  35% { transform: translateY(-1.6px) scale(1.035); }
+  70% { transform: translateY(0.2px) scale(0.995); }
+}
+
+@keyframes avatar-boop {
+  0%, 100% { transform: translateY(0) scale(1); }
+  28% { transform: translateY(1.4px) scale(1.075, 0.9); }
+  58% { transform: translateY(-0.8px) scale(0.965, 1.05); }
+  80% { transform: translateY(0.2px) scale(1.01, 0.99); }
+}
+
+@keyframes avatar-dizzy {
+  0%, 100% { transform: rotate(0deg); }
+  12% { transform: rotate(-6deg) translateX(-0.6px); }
+  28% { transform: rotate(5deg) translateX(0.6px); }
+  44% { transform: rotate(-4deg); }
+  60% { transform: rotate(3deg); }
+  76% { transform: rotate(-1.6deg); }
+  90% { transform: rotate(0.6deg); }
+}
+
+/* The pupils roll around in small circles. */
+@keyframes avatar-dizzy-eyes {
+  0%, 100% { transform: translate(2px, 0); }
+  25% { transform: translate(0, 2px); }
+  50% { transform: translate(-2px, 0); }
+  75% { transform: translate(0, -2px); }
+}
+
+@keyframes avatar-restyle {
+  0%, 100% { transform: rotate(0deg) scale(1); }
+  15% { transform: rotate(-3.5deg) scale(1.03); }
+  35% { transform: rotate(3deg) scale(1.03); }
+  55% { transform: rotate(-2deg) scale(1.015); }
+  75% { transform: rotate(1deg); }
+}
+
+@keyframes avatar-sparkle {
+  0% { opacity: 0; transform: scale(0.2) rotate(0deg); }
+  30% { opacity: 1; transform: scale(1.25) rotate(45deg); }
+  70% { opacity: 0.9; transform: scale(0.9) rotate(80deg); }
+  100% { opacity: 0; transform: scale(0.4) rotate(110deg); }
+}
+
+@keyframes avatar-glasses-on {
+  0% { transform: translateY(-13px) rotate(-6deg); opacity: 0.2; }
+  55% { transform: translateY(1.6px) rotate(1deg); opacity: 1; }
+  78% { transform: translateY(-0.7px) rotate(0deg); }
+  100% { transform: translateY(0) rotate(var(--avatar-turn, 0deg)); }
+}
+
+@keyframes avatar-wink {
+  0%, 100% { transform: scaleY(1); }
+  18%, 62% { transform: scaleY(0.12); }
+}
+
+@keyframes avatar-wink-tilt {
+  0%, 100% { transform: rotate(0deg) translateY(0); }
+  30%, 60% { transform: rotate(-2.2deg) translateY(-0.6px); }
+}
+
+@keyframes avatar-nod {
+  0%, 100% { transform: translateY(0) scale(1); }
+  28% { transform: translateY(1.9px) scale(1, 0.985); }
+  52% { transform: translateY(-0.5px) scale(1); }
+  74% { transform: translateY(1.1px); }
+}
+
+/* A nudge up the nose, a small wiggle into place, and settle. */
+@keyframes avatar-adjust {
+  0%, 100% { transform: translateY(0) rotate(var(--avatar-turn, 0deg)); }
+  26% { transform: translateY(-4px) rotate(-1.5deg); }
+  46% { transform: translateY(-3.6px) rotate(1.2deg); }
+  66% { transform: translateY(-3.8px) rotate(0deg); }
+  84% { transform: translateY(0.5px) rotate(0deg); }
+}
+
+@keyframes avatar-squint {
+  0%, 100% { transform: scaleY(1) translateX(0); }
+  14% { transform: scaleY(0.36) translateX(0); }
+  34%, 46% { transform: scaleY(0.36) translateX(2.8px); }
+  64%, 78% { transform: scaleY(0.36) translateX(-2.8px); }
+  90% { transform: scaleY(0.36) translateX(0); }
+}
+
+@keyframes avatar-squint-lean {
+  0%, 100% { transform: rotate(0deg); }
+  20%, 80% { transform: rotate(-1.6deg); }
+}
+
+@keyframes avatar-ponder {
+  0%, 100% { transform: rotate(0deg); }
+  25%, 75% { transform: rotate(2.2deg) translateY(-0.4px); }
+}
+
+/* Slow breathing while asleep. */
+@keyframes avatar-doze {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(0.9px); }
 }
 
 @media (prefers-reduced-motion: reduce) {

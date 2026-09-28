@@ -351,6 +351,8 @@ export function CoworkerRail({
                     size={44}
                     working={activity?.state === "working"}
                     expression={faceFor(activity)}
+                    temperament={coworker.personality}
+                    selected={active}
                   />
                   <span
                     aria-hidden="true"
@@ -456,6 +458,8 @@ export function CoworkerRail({
                       size={44}
                       working={activity?.state === "working"}
                       expression={faceFor(activity)}
+                      temperament={coworker.personality}
+                      selected={active}
                     />
                   </span>
                   {/* Every text slot is one fixed-height line: changing words truncate instead of wrapping or moving the row. */}

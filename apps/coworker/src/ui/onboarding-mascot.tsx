@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { AvatarColor, AvatarGlasses } from "@/lib/bridge";
 import { CoworkerMark } from "@/ui/brand";
-import { CoworkerAvatar } from "@/ui/coworker-avatar";
+import { CoworkerAvatar, type AvatarTemperament } from "@/ui/coworker-avatar";
 
 /**
  * The onboarding mascot: the same composition as the app icon — one white
@@ -24,7 +24,7 @@ import { CoworkerAvatar } from "@/ui/coworker-avatar";
 
 export type OnboardingMascotVariant =
   | { kind: "mark"; label?: string }
-  | { kind: "coworker"; identity?: string; name: string; color: AvatarColor; glasses: AvatarGlasses };
+  | { kind: "coworker"; identity?: string; name: string; color: AvatarColor; glasses: AvatarGlasses; temperament?: AvatarTemperament; regard?: { x: number; y: number } };
 
 export type MascotVisitor = { name: string; color: AvatarColor; glasses: AvatarGlasses };
 
@@ -257,7 +257,7 @@ export function OnboardingMascotStack({
         {variant.kind === "mark" ? (
           <CoworkerMark size={size} label={variant.label} tile={false} />
         ) : (
-          <CoworkerAvatar identity={variant.identity ?? sessionKey} motion="playful" color={variant.color} glasses={variant.glasses} name={variant.name} size={size} />
+          <CoworkerAvatar identity={variant.identity ?? sessionKey} motion="playful" color={variant.color} glasses={variant.glasses} name={variant.name} size={size} temperament={variant.temperament} regard={variant.regard} />
         )}
       </div>
     </div>

@@ -837,7 +837,7 @@ function GroupChatView({
       <div className="@container/group relative flex min-w-0 flex-1 flex-col" data-testid="group-conversation" style={{ "--conversation-top": groupNotice ? "0px" : CONVERSATION_TOP } as CSSProperties}>
       {/* No header bar: it floats over the conversation, which scrolls the full height beneath it. A way back on the left,
           a pill for where you are, this conversation's controls on the right; top and side room clear the rounded corners. */}
-      <header className={`window-drag absolute inset-x-0 top-0 z-30 flex items-center gap-2 pb-3 pt-3 ${layout.chatOnly ? "window-controls-inset-sm bg-[linear-gradient(to_bottom,var(--color-ink)_82%,transparent)] px-3" : "bg-[linear-gradient(to_bottom,var(--color-ink)_40%,transparent)] px-4"}`} data-testid="conversation-header">
+      <header className={`frosted-bar window-drag absolute inset-x-0 top-0 z-30 flex items-center gap-2 pb-3 pt-3 ${layout.chatOnly ? "window-controls-inset-sm px-3" : "px-4"}`} data-testid="conversation-header">
         <div className="flex min-w-fit flex-1 basis-0 items-center gap-1">
           <TeamButton />
           {onExitActivity ? <IconButton className="window-no-drag" label="Go to chat" tooltip="Leave Activity and open this chat" tooltipSide="bottom" onClick={onExitActivity}><ChevronIcon direction="left" /></IconButton> : null}
@@ -979,7 +979,7 @@ function GroupChatView({
       {active && away && !pendingAssignment ? <JumpToLatest onClick={jumpToLatest} bottom={dockHeight + 12} /> : null}
       </div>
       {/* The composer floats over the conversation, which scrolls to the window's bottom beneath it. */}
-      <div ref={setDock} className="absolute inset-x-0 bottom-0 z-20 bg-[linear-gradient(to_top,var(--color-ink)_20%,transparent)] px-3 pb-[max(1rem,env(safe-area-inset-bottom))] pt-4 sm:px-5" data-testid="coworker-composer">
+      <div ref={setDock} className="composer-dock absolute inset-x-0 bottom-0 z-20 bg-[linear-gradient(to_top,var(--color-ink)_20%,transparent)] px-3 pb-[max(1rem,env(safe-area-inset-bottom))] pt-4 sm:px-5" data-testid="coworker-composer">
         <div className="mx-auto max-w-3xl">
           {assignmentMode ? (
             <p className="mb-2 px-2 text-[11px] text-mist" data-testid="group-assignment-mode">Something one of them should own, separate from this chat</p>

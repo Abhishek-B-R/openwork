@@ -106,7 +106,7 @@ export function FocusHome({
       working,
       selected: coworker.slug === selectedSlug && !selectedGroupId,
       search: `${coworker.name} ${coworker.role} ${preview}`.toLowerCase(),
-      face: <CoworkerAvatar identity={coworker.slug} motion="navigation" color={coworker.avatarColor} glasses={coworker.avatarGlasses} name={coworker.name} size={46} working={working} expression={faceFor(activity)} />,
+      face: <CoworkerAvatar identity={coworker.slug} motion="navigation" color={coworker.avatarColor} glasses={coworker.avatarGlasses} name={coworker.name} size={46} working={working} expression={faceFor(activity)} temperament={coworker.personality} />,
       open: () => onSelect(coworker.slug),
     };
   });
