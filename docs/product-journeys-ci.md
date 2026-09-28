@@ -16,12 +16,24 @@ consumers and branch rules; visible workflow names describe their purpose.
 
 ## Selection and coverage
 
-`evals/scripts/journey-catalog.mjs` owns readable names, critical membership,
-model requirements, and execution placement. New `evals/specs/*.e2e.test.ts`
-files automatically enter full regression. Existing raw-desktop specs remain
-manual-only unless explicitly supported in the catalog. Every plan lists those
-coverage gaps; “full regression passed” means all selected automatic coverage,
-not every possible scenario or every manual test.
+Each spec describes itself with [Vitest test tags](https://vitest.dev/guide/test-tags):
+the first line of a JSDoc block at the top of the file is its readable name, and
+`@module-tag` lines set critical membership (`critical`), placement
+(`local-only`), model (`live-model`) and lane prerequisites (`packaged`,
+`macos`, `live-openai`). Registered `--case`s are tests titled with their ID and
+tagged `engine-v1`/`engine-v2`. The tag descriptions in `evals/vitest.config.ts`
+are the source of truth; list them with `pnpm --dir evals exec vitest --list-tags`.
+`evals/scripts/journey-catalog.mjs` reads the tags statically (it never imports
+spec code) to build the plan, so adding a journey means editing only its spec.
+Select a tag group with a `--tags-filter` expression, e.g.
+`pnpm --dir evals exec vitest list --project e2e --tags-filter 'critical && !live-model'`.
+
+New `evals/specs/*.e2e.test.ts` files automatically enter full regression.
+Raw-desktop specs (they import `desktop` from `@openwork/hosts`) stay manual-only.
+For PR required verification, a spec that already exists on the default branch
+keeps that branch's tags, and removing a critical spec blocks the plan. Every
+plan lists coverage gaps; “full regression passed” means all selected automatic
+coverage, not every possible scenario or every manual test.
 
 The four critical specs cover startup, the two-person team lifecycle (including
 real model/skill use), default/team permissions, and atomic enrollment recovery.

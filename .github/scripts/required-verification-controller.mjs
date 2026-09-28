@@ -4,7 +4,7 @@ import { appendFile, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { catalog, selectJourneys, unmetLaneNeeds } from '../../evals/scripts/journey-catalog.mjs';
+import { catalog, selectJourneys, unmetLaneNeeds, withTrustedMetadata } from '../../evals/scripts/journey-catalog.mjs';
 import { CHECK, POLICY, digest, upstreamIdentity, validateRun, validateReceipt, reconcile, summaryText } from './required-verification.mjs';
 
 function command(program, args, input) {
@@ -133,7 +133,9 @@ export async function authorize(event, repo) {
     if (names.some(name => !/^[a-zA-Z0-9_.-]+\.e2e\.test\.ts$/.test(name))) throw new Error('Unresolved spec filename; required plan is incomplete');
     for (const name of names)
       await writeFile(join(directory, name), command('git', ['show', `${identity.sha}:evals/specs/${name}`]));
-    const selected = selectJourneys(await catalog(pathToFileURL(`${directory}/`)), { critical: true,
+    // Journey tags live in the specs; a spec already on the trusted default branch keeps that branch's disposition.
+    const journeys = withTrustedMetadata(await catalog(pathToFileURL(`${directory}/`)), await catalog());
+    const selected = selectJourneys(journeys, { critical: true,
       changed: files.filter(file => file.status !== 'removed').map(file => file.filename.replace(/^evals\/specs\//, '')) });
     const manual = selected.filter(entry => entry.placement === 'manual');
     const eligible = selected.filter(entry => entry.placement !== 'manual');

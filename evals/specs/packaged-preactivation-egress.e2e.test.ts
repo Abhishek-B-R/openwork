@@ -1,3 +1,11 @@
+/**
+ * Keep an unactivated enterprise install off the network
+ *
+ * Boots the packaged enterprise artifact twice (fresh and pre-activated) behind a refusing proxy; only packaged-smoke provides that binary.
+ *
+ * @module-tag local-only
+ * @module-tag packaged
+ */
 import { expect } from "vitest";
 import { spec } from "@openwork/testkit";
 import type { Probe } from "@openwork/testkit";

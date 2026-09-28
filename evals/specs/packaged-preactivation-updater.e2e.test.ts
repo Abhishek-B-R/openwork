@@ -1,3 +1,11 @@
+/**
+ * Keep an unactivated enterprise install from updating itself
+ *
+ * Boots the packaged enterprise artifact twice (fresh and pre-activated); only packaged-smoke provides that binary.
+ *
+ * @module-tag local-only
+ * @module-tag packaged
+ */
 import { expect } from "vitest";
 import { spec } from "@openwork/testkit";
 import type { Probe } from "@openwork/testkit";
