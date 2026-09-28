@@ -1,6 +1,7 @@
 import { afterAll, beforeEach, expect, mock, test } from "bun:test"
 import { createDenTypeId } from "@openwork-ee/utils/typeid"
 import { Hono, type MiddlewareHandler } from "hono"
+import { generateSpecs } from "hono-openapi"
 import * as validation from "../src/middleware/validation.js"
 import { buildGatewayProviderConfig } from "../src/llm/inference-provider-config.js"
 import { assertManagedModelsAllowed } from "@openwork/types/den/managed-models-policy"
@@ -36,7 +37,7 @@ const memberRoute: MiddlewareHandler = async (c, next) => {
     organization: { id: organizationId, metadata: { capabilities: { gatewayDashboard: legacyDashboard } } },
     currentMember: { id: memberId, role, isOwner: role === "owner" },
   })
-  c.set("session", { createdAt: new Date(Date.now() - (fresh ? 0 : 3_600_000)) })
+  c.set("session", { createdAt: new Date(Date.now() - (fresh ? 0 : 3 * 3_600_000)) })
   await next()
 }
 mock.module("../src/middleware/index.js", () => ({
@@ -94,6 +95,24 @@ for (const [method, path] of managementRoutes) {
     }
   })
 }
+
+test("OpenAPI authorization requests optionally carry the same model contract as ready models", async () => {
+  const spec = await generateSpecs(app)
+  const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value)
+  const record = (value: unknown) => {
+    if (!isRecord(value)) throw new Error("Expected schema object")
+    return value
+  }
+  for (const name of ["GatewayProviderSummary", "GatewayProviderDetails"]) {
+    const properties = record(record(spec.components?.schemas?.[name]).properties)
+    const authorizationRequest = record(record(properties.authorizationRequests).items)
+    const pendingModels = record(authorizationRequest.properties).models
+    expect(pendingModels).toEqual(properties.models)
+    expect(pendingModels).toMatchObject({ type: "array", items: { type: "object", properties: { id: { type: "string" }, config: { type: "object" } } } })
+    expect(authorizationRequest.required).toEqual(["credentialSetId", "name", "authUrl"])
+  }
+  expect(storageCalls).toBe(0)
+})
 
 test("deployment capability stays separate from dashboard metadata and storage health", () => {
   expect(deploymentCapabilities()).toEqual({ version: 1, aiGateway: false })

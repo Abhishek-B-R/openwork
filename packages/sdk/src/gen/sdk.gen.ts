@@ -183,6 +183,8 @@ import type {
   GetV1AuthBootstrapStatusResponses,
   GetV1AuthLoginOptionsErrors,
   GetV1AuthLoginOptionsResponses,
+  GetV1BootstrapWorkspaceByBootstrapIdClaimErrors,
+  GetV1BootstrapWorkspaceByBootstrapIdClaimResponses,
   GetV1BrandAssetsByOrganizationIdByKindByVersionErrors,
   GetV1BrandAssetsByOrganizationIdByKindByVersionResponses,
   GetV1CapabilitiesGoogleWorkspaceCalendarEventsErrors,
@@ -306,8 +308,14 @@ import type {
   GetV1InferenceProvidersByInferenceProviderIdOauthStartResponses,
   GetV1InferenceProvidersByInferenceProviderIdResponses,
   GetV1InferenceProvidersErrors,
+  GetV1InferenceProvidersMemberConnectionsErrors,
+  GetV1InferenceProvidersMemberConnectionsResponses,
   GetV1InferenceProvidersModelManagementErrors,
   GetV1InferenceProvidersModelManagementResponses,
+  GetV1InferenceProvidersOauthBrowserStartErrors,
+  GetV1InferenceProvidersOauthBrowserStartResponses,
+  GetV1InferenceProvidersOauthBrowserStatusErrors,
+  GetV1InferenceProvidersOauthBrowserStatusResponses,
   GetV1InferenceProvidersOauthCallbackErrors,
   GetV1InferenceProvidersOauthCallbackResponses,
   GetV1InferenceProvidersResponses,
@@ -570,6 +578,8 @@ import type {
   PostV1AuthBootstrapVerifyResponses,
   PostV1BootstrapClaimsAcceptErrors,
   PostV1BootstrapClaimsAcceptResponses,
+  PostV1BootstrapWorkspaceByBootstrapIdClaimErrors,
+  PostV1BootstrapWorkspaceByBootstrapIdClaimResponses,
   PostV1BootstrapWorkspaceErrors,
   PostV1BootstrapWorkspaceResponses,
   PostV1CapabilitiesGoogleWorkspaceCalendarEventsErrors,
@@ -1790,6 +1800,52 @@ export class DenClient extends HeyApiClient {
         ...options?.headers,
         ...params.headers,
       },
+    });
+  }
+
+  /**
+   * Read the claim state of a provisional workspace
+   *
+   * Authenticated with the workspace's pre-claim identity assertion. Works after the claim so the agent can observe `reconciled`; the assertion itself no longer exchanges for tokens by then.
+   */
+  public getV1BootstrapWorkspaceByBootstrapIdClaim<ThrowOnError extends boolean = false>(
+    parameters: {
+      bootstrapId: string;
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "path", key: "bootstrapId" }] }]);
+    return (options?.client ?? this.client).get<
+      GetV1BootstrapWorkspaceByBootstrapIdClaimResponses,
+      GetV1BootstrapWorkspaceByBootstrapIdClaimErrors,
+      ThrowOnError
+    >({
+      url: "/v1/bootstrap/workspace/{bootstrapId}/claim",
+      ...options,
+      ...params,
+    });
+  }
+
+  /**
+   * Create a claim code for a provisional workspace
+   *
+   * Authenticated with the workspace's pre-claim identity assertion as a Bearer token. Returns an RFC 8628-style user code and verification URL for a person to claim the workspace. Each call cancels the previous unused code.
+   */
+  public postV1BootstrapWorkspaceByBootstrapIdClaim<ThrowOnError extends boolean = false>(
+    parameters: {
+      bootstrapId: string;
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "path", key: "bootstrapId" }] }]);
+    return (options?.client ?? this.client).post<
+      PostV1BootstrapWorkspaceByBootstrapIdClaimResponses,
+      PostV1BootstrapWorkspaceByBootstrapIdClaimErrors,
+      ThrowOnError
+    >({
+      url: "/v1/bootstrap/workspace/{bootstrapId}/claim",
+      ...options,
+      ...params,
     });
   }
 
@@ -4676,7 +4732,7 @@ export class DenClient extends HeyApiClient {
   /**
    * Create organization invitation
    *
-   * Creates or refreshes a pending organization invitation for an email address and sends the invite email. Returns 502 when the invitation row is persisted but the configured email provider failed to send; the client should surface the error and give the user a retry affordance.
+   * Creates or refreshes a pending organization invitation for an email address and sends the invite email. Returns 502 when the invitation row is persisted but the configured email provider failed to send; the client should surface the error and give the user a retry affordance. Returns 402 with billingUrl when the workspace has used its free members: give the user billingUrl to start seat billing, then invite again.
    */
   public postV1Invitations<ThrowOnError extends boolean = false>(
     parameters: {
@@ -4732,9 +4788,9 @@ export class DenClient extends HeyApiClient {
   }
 
   /**
-   * Create organization install link
+   * Create organization install link (download desktop app, install OpenWork)
    *
-   * Mints a shareable OpenWork desktop install link for a signed-in organization member. Older active links remain valid unless an owner or admin explicitly requests rotation.
+   * Download the desktop app and install OpenWork pointed at this organization. Returns installPageUrl, a shareable page that downloads OpenWork for this organization, and connectUrl, a short-lived link that opens an already-installed desktop app signed in to this organization. Any member can mint one. Older active links remain valid unless an owner or admin explicitly requests rotation.
    */
   public postV1OrgsByOrganizationIdInstallLinks<ThrowOnError extends boolean = false>(
     parameters: {
@@ -6205,6 +6261,21 @@ export class DenClient extends HeyApiClient {
   }
 
   /**
+   * List the caller's member Google connections
+   *
+   * Requires a signed-in user session and current organization membership, without an administrator gate. Returns independently selectable Google member credential sets with current effective access, credential readiness, verified account email and an opaque completed-authorization revision. Includes retained nonrevoked caller-owned credentials after grant loss or provider disablement for disconnection. Never returns another member's credentials, Google subject, OAuth client details or tokens. Readiness is not a Vertex IAM probe.
+   */
+  public getV1InferenceProvidersMemberConnections<ThrowOnError extends boolean = false>(
+    options?: Options<never, ThrowOnError>,
+  ) {
+    return (options?.client ?? this.client).get<
+      GetV1InferenceProvidersMemberConnectionsResponses,
+      GetV1InferenceProvidersMemberConnectionsErrors,
+      ThrowOnError
+    >({ url: "/v1/inference-providers/member-connections", ...options });
+  }
+
+  /**
    * List organization inference gateway providers
    *
    * Defaults to scope=usable: returns active providers granted to the caller through active model groups and credential sets, with usable model aliases and any member authorization requests. A granted provider can remain discoverable with no usable models. scope=manageable requires owner/admin permission and enabled Gateway management, and returns provider details including disabled providers; credential secrets are never returned.
@@ -6259,6 +6330,7 @@ export class DenClient extends HeyApiClient {
       allMembers?: boolean;
       memberIds?: Array<string>;
       teamIds?: Array<string>;
+      reuseCredentialFrom?: string;
     },
     options?: Options<never, ThrowOnError>,
   ) {
@@ -6280,6 +6352,7 @@ export class DenClient extends HeyApiClient {
             { in: "body", key: "allMembers" },
             { in: "body", key: "memberIds" },
             { in: "body", key: "teamIds" },
+            { in: "body", key: "reuseCredentialFrom" },
           ],
         },
       ],
@@ -7007,7 +7080,7 @@ export class DenClient extends HeyApiClient {
   /**
    * Begin Google sign-in for a member inference credential
    *
-   * Requires a signed-in user session, not an API key, and an active provider with an effective grant to a member credential set. Specify credentialSetId when multiple sets are available. Creates a ten-minute, single-use PKCE state and returns { authUrl } for Accept: application/json, otherwise redirects to Google. An optional redirectTo must use an allowed web origin or the openwork scheme. The callback browser must independently be signed in to Den as the same user.
+   * Requires a user session and granted member credential set. Returns { authUrl } for Accept: application/json, otherwise redirects to the Den web /gateway/connect bridge. The ten-minute entry handle binds the initiating user, organization, provider, set, client configuration and allowlisted redirectTo. It is not authentication and cannot be used at the Google callback. The bridge must establish a matching signed-in browser session before browser-start creates Google state and PKCE.
    */
   public getV1InferenceProvidersByInferenceProviderIdOauthStart<ThrowOnError extends boolean = false>(
     parameters: {
@@ -7035,6 +7108,52 @@ export class DenClient extends HeyApiClient {
       ThrowOnError
     >({
       url: "/v1/inference-providers/{inferenceProviderId}/oauth/start",
+      ...options,
+      ...params,
+    });
+  }
+
+  /**
+   * Check browser readiness for member Google sign-in
+   *
+   * Read-only check of a ten-minute entry handle and the live signed OpenWork browser cookie, never a bearer substitute. Returns sign_in_required without a live cookie, account_mismatch for another signed-in user without revealing identities, or ready only after validating the original member, provider, credential set, OAuth client configuration and current grants. Does not consume or rotate the entry, create Google state, exchange tokens or revoke credentials. Browser-start and callback independently repeat authorization checks.
+   */
+  public getV1InferenceProvidersOauthBrowserStatus<ThrowOnError extends boolean = false>(
+    parameters: {
+      attempt: string;
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "query", key: "attempt" }] }]);
+    return (options?.client ?? this.client).get<
+      GetV1InferenceProvidersOauthBrowserStatusResponses,
+      GetV1InferenceProvidersOauthBrowserStatusErrors,
+      ThrowOnError
+    >({
+      url: "/v1/inference-providers/oauth/browser-status",
+      ...options,
+      ...params,
+    });
+  }
+
+  /**
+   * Continue member Google sign-in in a signed-in browser
+   *
+   * Consumes a ten-minute entry handle only with a live signed Den cookie for the initiating user. Rechecks the original member, provider, credential set and OAuth client configuration, independent of the browser's active organization. Returns { authUrl } for JSON clients or redirects to Google. Bearer authentication alone is not accepted.
+   */
+  public getV1InferenceProvidersOauthBrowserStart<ThrowOnError extends boolean = false>(
+    parameters: {
+      attempt: string;
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "query", key: "attempt" }] }]);
+    return (options?.client ?? this.client).get<
+      GetV1InferenceProvidersOauthBrowserStartResponses,
+      GetV1InferenceProvidersOauthBrowserStartErrors,
+      ThrowOnError
+    >({
+      url: "/v1/inference-providers/oauth/browser-start",
       ...options,
       ...params,
     });
@@ -7079,7 +7198,7 @@ export class DenClient extends HeyApiClient {
   /**
    * Disconnect the caller's Google credential for an inference provider
    *
-   * Revokes only the caller's Google credential and cancels their pending sign-ins for a granted member credential set, returning an empty 204. Other members and grants are unchanged. Requires an active provider and current access; specify credentialSetId when multiple member sets are available.
+   * Immediately revokes and erases the caller's local credential and cancels pending sign-ins, even after inference grant loss or provider disablement. Requires current organization membership, not inference access. Specify credentialSetId when multiple sets exist. Google revocation is best effort with sanitized outcome telemetry and no retained retry tokens; revoking a Google grant can affect other connections using that grant. Returns an empty 204.
    */
   public deleteV1InferenceProvidersByInferenceProviderIdOauth<ThrowOnError extends boolean = false>(
     parameters: {
@@ -9446,7 +9565,7 @@ export class DenClient extends HeyApiClient {
   /**
    * Register a new External MCP Connection for the org
    *
-   * Admin-only. Registers a third-party MCP server by name + URL and grants access (org-wide, teams, or members). Use GET /v1/mcp-connections/presets for known server URLs (Notion, Linear, Stripe, Sentry, Slack, Context7). For credentialMode per_member, each member connects their own account afterwards — share links.yourConnections from the response so teammates know where to sign in. For servers with pre-registered OAuth apps, whitelist links.oauthCallback. API-key and OAuth-client credentials cannot be created through the agent surface; use the dashboard.
+   * Owners and admins can register any server. Other members can add one for themselves: an OAuth server where each person signs in (credentialMode per_member) or a server with no sign-in, shared with specific members or teams but never org-wide; the caller is always kept in its access. Registers a third-party MCP server by name + URL and grants access (org-wide, teams, or members). Use GET /v1/mcp-connections/presets for known server URLs (Notion, Linear, Stripe, Sentry, Slack, Context7). For credentialMode per_member, each member connects their own account afterwards — give the user links.signIn (a one-click browser sign-in page for this connection) when you cannot show a sign-in card, and share links.yourConnections so teammates know where to sign in. For servers with pre-registered OAuth apps, whitelist links.oauthCallback. API-key and OAuth-client credentials cannot be created through the agent surface; use the dashboard.
    */
   public postV1McpConnections<ThrowOnError extends boolean = false>(
     parameters: {
@@ -9716,7 +9835,7 @@ export class DenClient extends HeyApiClient {
   /**
    * Remove an External MCP Connection
    *
-   * Permanently deletes the connection together with its access grants, stored shared and per-member accounts, OAuth client registration, and plugin MCP requirement bindings. Workspace owners and super-admins can remove any connection; other members only the connections they created. Session callers must have signed in within the last 15 minutes (403 reauth); API-key callers are exempt.
+   * Permanently deletes the connection together with its access grants, stored shared and per-member accounts, OAuth client registration, and plugin MCP requirement bindings. Workspace owners and super-admins can remove any connection; other members only the connections they created. Session callers must have signed in within the last 2 hours (403 reauth); API-key callers are exempt.
    */
   public deleteV1McpConnectionsByConnectionId<ThrowOnError extends boolean = false>(
     parameters: {
@@ -9825,7 +9944,7 @@ export class DenClient extends HeyApiClient {
   /**
    * Replace who can use an External MCP Connection
    *
-   * Admin-only. Full-replace semantics: send the complete desired access set (orgWide, or memberIds + teamIds). Team and member ids come from GET /v1/org.
+   * Owners, admins, and the member who added the connection. Full-replace semantics: send the complete desired access set (orgWide, or memberIds + teamIds). Team and member ids come from GET /v1/org. A non-admin creator cannot grant org-wide access and always keeps their own access.
    */
   public putV1McpConnectionsByConnectionIdAccess<ThrowOnError extends boolean = false>(
     parameters: {
@@ -10601,6 +10720,13 @@ export class DenClient extends HeyApiClient {
       limit?: number;
       status?: "active" | "inactive" | "deleted" | "archived";
       q?: string;
+      name?: string;
+      teamId?: string;
+      memberId?: string;
+      includeAccess?: "true" | "false";
+      includeTotal?: "true" | "false";
+      ownerId?: string;
+      includeFacets?: "true" | "false";
     },
     options?: Options<never, ThrowOnError>,
   ) {
@@ -10613,6 +10739,13 @@ export class DenClient extends HeyApiClient {
             { in: "query", key: "limit" },
             { in: "query", key: "status" },
             { in: "query", key: "q" },
+            { in: "query", key: "name" },
+            { in: "query", key: "teamId" },
+            { in: "query", key: "memberId" },
+            { in: "query", key: "includeAccess" },
+            { in: "query", key: "includeTotal" },
+            { in: "query", key: "ownerId" },
+            { in: "query", key: "includeFacets" },
           ],
         },
       ],
@@ -10627,7 +10760,7 @@ export class DenClient extends HeyApiClient {
   /**
    * Create plugin
    *
-   * Creates a plugin and can also create components, share org-wide, and publish to a marketplace in one request. An mcp component may carry the same connection setup as the Connections page (authentication, credential mode, API key, OAuth app), or instead reference an existing organization connection by connectionId, so its server is configured immediately; owners and admins only.
+   * Creates a plugin and can also create components, share org-wide, and publish to a marketplace in one request. An mcp component may carry the same connection setup as the Connections page (authentication, credential mode, API key, OAuth app), or instead reference an existing organization connection by connectionId, so its server is configured immediately. Connection setup is for owners and admins; other members may reference only a connection they added themselves.
    */
   public postV1Plugins<ThrowOnError extends boolean = false>(
     parameters: {
@@ -13643,7 +13776,7 @@ export class DenClient extends HeyApiClient {
   /**
    * Delete worker
    *
-   * Deletes a worker and cascades cleanup for its tokens, runtime records, and provider-specific resources.
+   * Deletes a worker and cascades cleanup for its tokens, runtime records, and provider-specific resources. Only the creator can delete a cloud worker.
    */
   public deleteV1WorkersById<ThrowOnError extends boolean = false>(
     parameters: {
@@ -13720,7 +13853,7 @@ export class DenClient extends HeyApiClient {
   /**
    * Get worker connection tokens
    *
-   * Returns connection tokens and the resolved OpenWork connect URL for an existing worker.
+   * Returns connection tokens and the resolved OpenWork connect URL for an existing worker. Cloud workers require the caller to be their creator, including API-key callers.
    */
   public postV1WorkersByIdTokens<ThrowOnError extends boolean = false>(
     parameters: {
@@ -13743,7 +13876,7 @@ export class DenClient extends HeyApiClient {
   /**
    * Get worker runtime status
    *
-   * Fetches runtime version and status information from a specific worker's runtime endpoint.
+   * Fetches runtime version and status information from a specific worker's runtime endpoint. Only the creator can access a cloud worker's runtime.
    */
   public getV1WorkersByIdRuntime<ThrowOnError extends boolean = false>(
     parameters: {
@@ -13766,7 +13899,7 @@ export class DenClient extends HeyApiClient {
   /**
    * Upgrade worker runtime
    *
-   * Forwards a runtime upgrade request to a specific worker and returns the worker runtime's response.
+   * Forwards a runtime upgrade request to a specific worker and returns the worker runtime's response. Only the creator can upgrade a cloud worker's runtime.
    */
   public postV1WorkersByIdRuntimeUpgrade<ThrowOnError extends boolean = false>(
     parameters: {

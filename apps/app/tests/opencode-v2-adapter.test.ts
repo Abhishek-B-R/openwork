@@ -4,6 +4,7 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import {
   createClientV2,
   createV2EventTranslationState,
+  mapV2McpStatuses,
   translateV2Event,
   v2PromptText,
   type V2MappedMessage,
@@ -13,8 +14,134 @@ import { codeModeToolCalls } from "../src/lib/code-mode-tools";
 import { getModelBehaviorControls, getModelBehaviorOptions } from "../src/app/lib/model-behavior";
 import { catalogFastVariants, fastVariantId, nativeModelVariants } from "@openwork/types/cloud-model-fast";
 import { mentionPromptParts } from "../src/react-app/domains/session/sync/mention-parts";
+import { subscribeProviderCatalogChanges } from "../src/app/lib/provider-events";
+
+describe("MCP status", () => {
+  test("reads the native v2 catalog instead of reporting no servers", async () => {
+    const originalFetch = globalThis.fetch;
+    const requests: Request[] = [];
+    globalThis.fetch = async (input, init) => {
+      const request = new Request(input, init); requests.push(request);
+      return jsonResponse({ data: [
+        { name: "linear", status: { status: "needs_auth" } },
+        { name: "github", status: { status: "connected" } },
+        { name: "broken", status: { status: "failed", error: "boom" } },
+        { name: "registering", status: { status: "needs_client_registration", error: "no client" } },
+        { name: "starting", status: { status: "pending" } },
+      ] });
+    };
+    try {
+      const client = createClientV2("http://localhost/opencode2", "/workspace", {});
+      const result = await client.mcp.status();
+      expect(new URL(requests[0]!.url).pathname).toBe("/opencode2/api/mcp");
+      expect(result.data).toEqual({
+        linear: { status: "needs_auth" },
+        github: { status: "connected" },
+        broken: { status: "failed", error: "boom" },
+        registering: { status: "needs_client_registration", error: "no client" },
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test("maps unknown statuses to failed and rejects a malformed catalog", () => {
+    expect(mapV2McpStatuses({ data: [{ name: "x", status: { status: "weird" } }] })).toEqual({
+      x: { status: "failed", error: "Unknown MCP status: weird" },
+    });
+    expect(mapV2McpStatuses({ data: { nope: true } })).toBeNull();
+  });
+});
+
+describe("native conversation mutations", () => {
+  test("fork excludes the selected boundary and preserves a root conversation", async () => {
+    const originalFetch = globalThis.fetch;
+    const requests: Request[] = [];
+    globalThis.fetch = async (input, init) => {
+      const request = new Request(input, init); requests.push(request);
+      return jsonResponse({ data: { id: "ses_branch", fork: { sessionID: "ses_original" } } });
+    };
+    try {
+      const client = createClientV2("http://localhost/opencode2", "/workspace", {});
+      const result = await client.session.fork({ sessionID: "ses_original", messageID: "msg_next" });
+      expect(result.data).toMatchObject({ id: "ses_branch" });
+      expect(result.data?.parentID).toBeUndefined();
+      expect(new URL(requests[0]!.url).pathname).toBe("/opencode2/api/session/ses_original/fork");
+      expect(await requests[0]!.json()).toEqual({ boundary: { type: "before", messageID: "msg_next" } });
+    } finally { globalThis.fetch = originalFetch; }
+  });
+
+  test("revert stages file changes, reads authoritative cursor, and restores it through clear", async () => {
+    const originalFetch = globalThis.fetch;
+    const calls: { path: string; body: unknown }[] = [];
+    let reverted = false;
+    globalThis.fetch = async (input, init) => {
+      const request = new Request(input, init);
+      const path = new URL(request.url).pathname;
+      calls.push({ path, body: request.method === "POST" && path.endsWith("stage") ? await request.json() : null });
+      if (path.endsWith("stage")) { reverted = true; return jsonResponse({ data: { messageID: "msg_last" } }); }
+      if (path.endsWith("clear")) { reverted = false; return new Response(null, { status: 204 }); }
+      return jsonResponse({ data: { id: "ses_original", ...(reverted ? { revert: { messageID: "msg_last", snapshot: "snapshot" } } : {}) } });
+    };
+    try {
+      const client = createClientV2("http://localhost/opencode2", "/workspace", {});
+      expect((await client.session.revert({ sessionID: "ses_original", messageID: "msg_last" })).data?.revert).toEqual({ messageID: "msg_last" });
+      expect((await client.session.unrevert({ sessionID: "ses_original" })).data?.revert).toBeUndefined();
+      expect(calls.map(call => call.path)).toEqual(["/opencode2/api/session/ses_original/revert/stage", "/opencode2/api/session/ses_original", "/opencode2/api/session/ses_original/revert/clear", "/opencode2/api/session/ses_original"]);
+      expect(calls[0]?.body).toEqual({ messageID: "msg_last", files: true });
+    } finally { globalThis.fetch = originalFetch; }
+  });
+
+  test("failed mutations remain failures and do not fetch a success-shaped session", async () => {
+    const originalFetch = globalThis.fetch;
+    let calls = 0;
+    globalThis.fetch = async () => { calls++; return new Response(JSON.stringify({ message: "Session busy" }), { status: 409 }); };
+    try {
+      const client = createClientV2("http://localhost/opencode2", "/workspace", {});
+      for (const result of [await client.session.revert({ sessionID: "ses_busy", messageID: "msg_last" }), await client.session.unrevert({ sessionID: "ses_busy" }), await client.session.fork({ sessionID: "ses_busy" })]) {
+        expect(result.response.status).toBe(409); expect(result.data).toBeUndefined();
+      }
+      expect(calls).toBe(3);
+    } finally { globalThis.fetch = originalFetch; }
+  });
+
+  test("native staged, cleared and committed events keep the visible cursor synchronized", () => {
+    const state = createV2EventTranslationState();
+    expect(translateV2Event({ type: "session.revert.staged", data: { sessionID: "ses_one", revert: { messageID: "msg_last" } } }, state)).toEqual([
+      { type: "session.updated", properties: { info: { id: "ses_one", revert: { messageID: "msg_last" } } } },
+    ]);
+    expect(translateV2Event({ type: "session.revert.cleared", data: { sessionID: "ses_one" } }, state)).toEqual([
+      { type: "session.updated", properties: { info: { id: "ses_one", revert: undefined } } },
+    ]);
+    expect(translateV2Event({ type: "session.revert.committed", data: { sessionID: "ses_one", to: "msg_last" } }, state)).toEqual([
+      { type: "session.history.truncated", properties: { sessionID: "ses_one", messageID: "msg_last" } },
+      { type: "session.updated", properties: { info: { id: "ses_one", revert: undefined } } },
+    ]);
+  });
+});
 
 describe("explicit native skill attachments", () => {
+  test.each([false, true])("keeps Cloud selections on the v1 Connect path (legacy metadata: %s)", async legacy => {
+    const originalFetch = globalThis.fetch;
+    const requests: { path: string; body: unknown }[] = [];
+    globalThis.fetch = async (input, init) => {
+      const request = new Request(input, init);
+      requests.push({ path: new URL(request.url).pathname, body: request.method === "POST" ? await request.json() : null });
+      return jsonResponse({ data: {} });
+    };
+    try {
+      const capability = "plugin:plg_cobalt:cob_release";
+      const parts = mentionPromptParts({ type: "connect-skill", slug: "cobalt", name: "Cobalt", marketplace: "Releases", capability })
+        .map(part => legacy && part.synthetic ? { ...part, metadata: { openworkSelectedSkill: { id: capability } } } : part);
+      const result = await createClientV2("http://localhost:4096/opencode2", "/workspace", {}).session.promptAsync({ sessionID: "ses_cloud", model: { providerID: "witness", modelID: "model" }, parts });
+      expect(result.error).toBeUndefined();
+      expect(requests.map(request => request.path)).toEqual(["/opencode2/api/session/ses_cloud/model", "/opencode2/api/session/ses_cloud/prompt"]);
+      expect(requests.at(-1)?.body).toEqual({ text: v2PromptText(parts) });
+      expect(v2PromptText(parts)).toContain(capability);
+      expect(v2PromptText(parts)).toContain("openwork-cloud_");
+    } finally { globalThis.fetch = originalFetch; }
+  });
+
   test("preserves v1 instructions but attaches live native IDs on v2, deduplicated", async () => {
     const originalFetch = globalThis.fetch;
     const requests: { path: string; body: unknown }[] = [];
@@ -294,6 +421,18 @@ describe("OpenCode v2 event translation", () => {
     expect(translateV2Event({ ...admitted, data: {
       ...admitted.data, item: { type: "synthetic", payload: { text: "Internal instructions" }, delivery: "steer" },
     } }, state)).toBeNull();
+  });
+
+  test("a native move updates the stable UI home without settling the active execution", () => {
+    const state = createV2EventTranslationState();
+    translateV2Event({ type: "session.execution.started", data: { sessionID: "ses_move" } }, state);
+    expect(translateV2Event({
+      type: "session.moved", location: { directory: "/home" },
+      openworkWorkingLocation: { directory: "/worktree" },
+      data: { sessionID: "ses_move", location: { directory: "/worktree" } },
+    }, state)).toEqual([{ type: "session.updated", properties: { info: { id: "ses_move", directory: "/home" } } }]);
+    expect(translateV2Event({ type: "session.execution.interrupted", data: { sessionID: "ses_move", reason: "user" } }, state))
+      .toEqual([{ type: "session.execution.interrupted", properties: { sessionID: "ses_move", reason: "user", sequence: undefined } }]);
   });
 
   test("uses the created envelope timestamp for an untitled session", () => {
@@ -1036,7 +1175,7 @@ describe("OpenCode v2 message pagination", () => {
         return jsonResponse({ data: [{ id: "msg_system", type: "system", text: "Internal context" }], cursor: { next: cursor } });
       }
       expect(url.searchParams.get("cursor")).toBe(cursor);
-      return jsonResponse({ data: [], cursor: {} });
+      return jsonResponse({ data: [], cursor: { previous: null, next: null } });
     };
     try {
       const client = createClientV2("https://worker.example/workspace/ws/opencode2", undefined, { token: "page-token" });
@@ -1812,6 +1951,30 @@ describe("OpenCode v2 client compatibility", () => {
     }
   });
 
+  test("native catalog updates notify only the matching workspace without inventing a reload event", async () => {
+    const originalFetch = globalThis.fetch;
+    const updates: Array<{ baseUrl: string; directory?: string }> = [];
+    const unsubscribe = subscribeProviderCatalogChanges((scope) => updates.push(scope));
+    globalThis.fetch = async () => new Response([
+      { type: "catalog.updated", data: {} },
+      { type: "catalog.updated", location: { directory: "/other" }, data: {} },
+      { type: "catalog.updated", location: { directory: "/workspace" }, data: {} },
+    ].map((event) => `data: ${JSON.stringify(event)}\n\n`).join(""));
+    try {
+      const client = createClientV2("http://opencode.test/opencode2", "/workspace", {});
+      const { stream } = await client.event.subscribe();
+      expect((await stream.next()).done).toBe(true);
+      expect(updates).toEqual([{ baseUrl: "http://opencode.test/opencode2", directory: "/workspace" }]);
+      updates.length = 0;
+      // The session sync client is scoped by its mounted URL, not a directory
+      // constructor argument. Preserve the native event's directory for it.
+      const mounted = createClientV2("http://opencode.test/opencode2", undefined, {});
+      const subscription = await mounted.event.subscribe();
+      expect((await subscription.stream.next()).done).toBe(true);
+      expect(updates.at(-1)).toEqual({ baseUrl: "http://opencode.test/opencode2", directory: "/workspace" });
+    } finally { unsubscribe(); globalThis.fetch = originalFetch; }
+  });
+
   test("a reconnected subscription rebuilds the same completed parts without retaining old payloads or tombstones", async () => {
     const originalFetch = globalThis.fetch;
     const identity = { sessionID: "s", assistantMessageID: "m", ordinal: 0 };
@@ -1885,8 +2048,9 @@ describe("OpenCode v2 client compatibility", () => {
         ["GET", "/workspace/owned/opencode2/api/event"], ["GET", "/workspace/owned/opencode2/api/session/ses_fork"],
       ]);
       expect(requests.every((request) => request.headers.get("Authorization") === "Bearer fixture-token")).toBe(true);
-      expect((await client.session.fork({ sessionID: "ses_source" })).response.status).toBe(501);
-      expect(requests).toHaveLength(2);
+      expect((await client.session.fork({ sessionID: "ses_source" })).data?.id).toBe("ses_fork");
+      expect(requests).toHaveLength(3);
+      expect(await requests[2]?.json()).toEqual({ boundary: { type: "through" } });
     } finally { globalThis.fetch = originalFetch; }
   });
 
@@ -2293,9 +2457,9 @@ test("v2 provider catalog retains display names and advertised effort without ex
     const models = result.data?.all[0]?.models;
     expect(models?.coding?.variants).toEqual({ low: { reasoningEffort: "low" }, high: { reasoningEffort: "high" }, CustomExact: { thinking: { budgetTokens: 4096 } } });
     if (!models?.coding || !models.standard || !models.builtin) throw new Error("Missing mapped models");
-    expect(getModelBehaviorOptions("lpr_fixture", models.coding).map((option) => option.value)).toEqual(["low", "high", "CustomExact"]);
-    expect(getModelBehaviorOptions("lpr_fixture", models.standard)).toEqual([]);
-    expect(getModelBehaviorOptions("lpr_fixture", models.builtin)).toEqual([]);
+    expect(getModelBehaviorOptions("lpr_fixture", models.coding).map((option) => option.value)).toEqual([null, "low", "high", "CustomExact"]);
+    expect(getModelBehaviorOptions("lpr_fixture", models.standard).map((option) => option.value)).toEqual([null]);
+    expect(getModelBehaviorOptions("lpr_fixture", models.builtin).map((option) => option.value)).toEqual([null]);
     expect(JSON.stringify(result.data)).not.toContain("fixture-private");
   } finally {
     globalThis.fetch = originalFetch;
@@ -2386,6 +2550,59 @@ describe("v2 question forms", () => {
         { type: expected, properties: { requestID: form.id, sessionID: form.sessionID } },
       ]);
     }
+  });
+
+  test("an owned live question can be recovered and answered while the global pending list is unavailable", async () => {
+    const originalFetch = globalThis.fetch;
+    const paths: string[] = [];
+    let reply: unknown;
+    globalThis.fetch = async (input, init) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      const path = new URL(request.url).pathname;
+      paths.push(path);
+      if (path.endsWith("/api/form/request")) return Response.json({ message: "Unrelated conversation is unavailable" }, { status: 500 });
+      if (request.method === "GET" && path.endsWith("/form")) return Response.json({ data: [form] });
+      if (request.method === "GET" && path.endsWith("/form/frm_choice")) return Response.json({ data: form });
+      reply = await request.json();
+      return new Response(null, { status: 204 });
+    };
+    try {
+      const client = createClientV2("http://owner.test/opencode2", "/workspace", {});
+      // This client saw only the SSE question, not a successful pending list.
+      expect((await client.replySessionQuestion({ sessionID: form.sessionID, requestID: form.id,
+        answers: [["Summary"], ["Facts", "Custom section"]] })).data).toBe(true);
+      expect(reply).toEqual({ answer: { q0: "summary_value", q1: ["facts_value", "Custom section"] } });
+      expect(paths).toEqual([
+        "/opencode2/api/session/ses_side/form/frm_choice",
+        "/opencode2/api/session/ses_side/form/frm_choice/reply",
+      ]);
+      expect((await client.listSessionQuestions({ sessionID: form.sessionID })).data?.[0]?.id).toBe(form.id);
+      expect(paths.at(-1)).toBe("/opencode2/api/session/ses_side/form");
+    } finally { globalThis.fetch = originalFetch; }
+  });
+
+  test("a failed owned reply stays retryable and never sends a mismatched form", async () => {
+    const originalFetch = globalThis.fetch;
+    let failReply = true;
+    let mismatch = false;
+    let writes = 0;
+    globalThis.fetch = async (input, init) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      if (request.method === "GET") return Response.json({ data: mismatch ? { ...form, sessionID: "ses_other" } : form });
+      writes += 1;
+      return failReply ? Response.json({ message: "Retry later" }, { status: 503 }) : new Response(null, { status: 204 });
+    };
+    try {
+      const client = createClientV2("http://owner.test/opencode2", "/workspace", {});
+      const input = { sessionID: form.sessionID, requestID: form.id, answers: [["Summary"], ["Facts"]] };
+      expect((await client.replySessionQuestion(input)).response.status).toBe(503);
+      failReply = false;
+      expect((await client.replySessionQuestion(input)).data).toBe(true);
+      expect(writes).toBe(2);
+      mismatch = true;
+      expect((await client.replySessionQuestion(input)).error).toEqual({ name: "InvalidV2QuestionResponse" });
+      expect(writes).toBe(2);
+    } finally { globalThis.fetch = originalFetch; }
   });
 
   test("an interaction client can answer a live form it never listed, preserving values and custom text", async () => {

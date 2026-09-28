@@ -1202,6 +1202,10 @@ export type InvitePaymentRequiredError = {
   currentCount: number;
   freeSeatCount: number;
   message: string;
+  /**
+   * Open in a browser to start seat billing; an owner can finish it there, then retry the invitation.
+   */
+  billingUrl: string;
 };
 
 export type InviteEmailDomainNotAllowedError = {
@@ -1233,7 +1237,15 @@ export type InvitationNotPendingError = {
 
 export type CreateInstallLinkResponse = {
   token: string;
+  /**
+   * Share this page: it downloads the OpenWork desktop app for this organization.
+   */
   installPageUrl: string;
+  /**
+   * Open on a computer that already has OpenWork installed to point the desktop app at this organization. Short-lived; mint a new link when it expires.
+   */
+  connectUrl: string;
+  connectExpiresAt: string;
 };
 
 export type CapabilityDisabledError = {
@@ -1453,6 +1465,25 @@ export type GatewayProviderDetails = {
     credentialSetId: string;
     name: string;
     authUrl: string;
+    models?: Array<{
+      id: string;
+      name: string;
+      config: {
+        id: string;
+        [key: string]: unknown;
+      };
+      upstreamModelId: string;
+      /**
+       * Den TypeID with 'gmg_' prefix and a 26-character base32 suffix.
+       */
+      modelGroupId: string;
+      modelGroupName: string;
+      /**
+       * Den TypeID with 'gcs_' prefix and a 26-character base32 suffix.
+       */
+      credentialSetId: string;
+      credentialSetName: string;
+    }>;
   }>;
   migration?: {
     /**
@@ -1595,6 +1626,25 @@ export type GatewayProviderSummary = {
     credentialSetId: string;
     name: string;
     authUrl: string;
+    models?: Array<{
+      id: string;
+      name: string;
+      config: {
+        id: string;
+        [key: string]: unknown;
+      };
+      upstreamModelId: string;
+      /**
+       * Den TypeID with 'gmg_' prefix and a 26-character base32 suffix.
+       */
+      modelGroupId: string;
+      modelGroupName: string;
+      /**
+       * Den TypeID with 'gcs_' prefix and a 26-character base32 suffix.
+       */
+      credentialSetId: string;
+      credentialSetName: string;
+    }>;
   }>;
   migration?: {
     /**
@@ -2294,6 +2344,7 @@ export type ExternalMcpPresetResponse = {
   authType: "oauth" | "apikey" | "none";
   supportedAuthTypes?: Array<"oauth" | "apikey" | "none">;
   requiresOAuthClient?: boolean;
+  defaultOAuthClientId?: string;
   authorizationServerIssuer?: string;
   defaultOAuthScopes?: Array<string>;
 };
@@ -2639,6 +2690,10 @@ export type ExternalMcpConnectionCreatedResponse = {
   requestedScopes?: Array<string>;
   links: {
     yourConnections: string;
+    /**
+     * Browser link where the person signs in to this connection. Give it to the user when you cannot show a sign-in card.
+     */
+    signIn: string;
     oauthCallback: string;
   };
 };
@@ -3012,6 +3067,51 @@ export type PluginArchExtensionProjection = {
   manifest: OpenWorkExtensionManifest | null;
 };
 
+export type PluginArchPluginListItem = {
+  /**
+   * Den TypeID with 'plg_' prefix and a 26-character base32 suffix.
+   */
+  id: string;
+  /**
+   * Den TypeID with 'org_' prefix and a 26-character base32 suffix.
+   */
+  organizationId: string;
+  name: string;
+  description: string | null;
+  sourceRepositoryUrl: string | null;
+  sourceFormat:
+    | "agent-plugin"
+    | "openwork-builtin"
+    | "openwork-extension-manifest"
+    | "claude-plugin"
+    | "opencode-plugin"
+    | "mcp-directory"
+    | "manual"
+    | null;
+  sourceSchemaVersion: string | null;
+  status: "active" | "inactive" | "deleted" | "archived";
+  /**
+   * Den TypeID with 'om_' prefix and a 26-character base32 suffix.
+   */
+  createdByOrgMembershipId: string;
+  createdAt: string;
+  updatedAt: string;
+  deletedAt: string | null;
+  memberCount?: number;
+  marketplaces?: Array<{
+    /**
+     * Den TypeID with 'mkt_' prefix and a 26-character base32 suffix.
+     */
+    id: string;
+    name: string;
+  }>;
+  extension?: PluginArchExtensionProjection | null;
+  /**
+   * Active access grants. Present only when includeAccess is true and the caller manages the plugin.
+   */
+  access?: Array<PluginArchAccessGrant>;
+};
+
 export type PluginArchPlugin = {
   /**
    * Den TypeID with 'plg_' prefix and a 26-character base32 suffix.
@@ -3051,11 +3151,6 @@ export type PluginArchPlugin = {
     name: string;
   }>;
   extension?: PluginArchExtensionProjection | null;
-};
-
-export type PluginArchPluginListResponse = {
-  items: Array<PluginArchPlugin>;
-  nextCursor: string | null;
 };
 
 export type PluginArchPluginMutationResponse = {
@@ -5964,6 +6059,15 @@ export type PostV1BootstrapWorkspaceResponses = {
       url: string;
       expiresAt: string;
     }>;
+    identity: {
+      type: "anonymous";
+      assertion: string;
+      assertionType: "urn:ietf:params:oauth:grant-type:jwt-bearer";
+      tokenEndpoint: string;
+      scope: string;
+      expiresAt: string;
+      claimEndpoint: string;
+    };
   };
 };
 
@@ -6021,6 +6125,85 @@ export type PostV1BootstrapClaimsAcceptResponses = {
 
 export type PostV1BootstrapClaimsAcceptResponse =
   PostV1BootstrapClaimsAcceptResponses[keyof PostV1BootstrapClaimsAcceptResponses];
+
+export type GetV1BootstrapWorkspaceByBootstrapIdClaimData = {
+  body?: never;
+  path: {
+    /**
+     * Den TypeID with 'wbt_' prefix and a 26-character base32 suffix.
+     */
+    bootstrapId: string;
+  };
+  query?: never;
+  url: "/v1/bootstrap/workspace/{bootstrapId}/claim";
+};
+
+export type GetV1BootstrapWorkspaceByBootstrapIdClaimErrors = {
+  /**
+   * The pre-claim assertion is missing or invalid.
+   */
+  401: {
+    error: string;
+    error_description: string;
+  };
+};
+
+export type GetV1BootstrapWorkspaceByBootstrapIdClaimError =
+  GetV1BootstrapWorkspaceByBootstrapIdClaimErrors[keyof GetV1BootstrapWorkspaceByBootstrapIdClaimErrors];
+
+export type GetV1BootstrapWorkspaceByBootstrapIdClaimResponses = {
+  /**
+   * Current claim state.
+   */
+  200: {
+    state: "none" | "pending" | "expired" | "accepted" | "reconciled";
+    reconciled: boolean;
+  };
+};
+
+export type GetV1BootstrapWorkspaceByBootstrapIdClaimResponse =
+  GetV1BootstrapWorkspaceByBootstrapIdClaimResponses[keyof GetV1BootstrapWorkspaceByBootstrapIdClaimResponses];
+
+export type PostV1BootstrapWorkspaceByBootstrapIdClaimData = {
+  body?: never;
+  path: {
+    /**
+     * Den TypeID with 'wbt_' prefix and a 26-character base32 suffix.
+     */
+    bootstrapId: string;
+  };
+  query?: never;
+  url: "/v1/bootstrap/workspace/{bootstrapId}/claim";
+};
+
+export type PostV1BootstrapWorkspaceByBootstrapIdClaimErrors = {
+  /**
+   * The pre-claim assertion is missing, invalid, or revoked.
+   */
+  401: {
+    error: string;
+    error_description: string;
+  };
+};
+
+export type PostV1BootstrapWorkspaceByBootstrapIdClaimError =
+  PostV1BootstrapWorkspaceByBootstrapIdClaimErrors[keyof PostV1BootstrapWorkspaceByBootstrapIdClaimErrors];
+
+export type PostV1BootstrapWorkspaceByBootstrapIdClaimResponses = {
+  /**
+   * Claim code created.
+   */
+  200: {
+    user_code: string;
+    verification_uri: string;
+    verification_uri_complete: string;
+    expires_in: number;
+    interval: number;
+  };
+};
+
+export type PostV1BootstrapWorkspaceByBootstrapIdClaimResponse =
+  PostV1BootstrapWorkspaceByBootstrapIdClaimResponses[keyof PostV1BootstrapWorkspaceByBootstrapIdClaimResponses];
 
 export type GetV1CloudInstanceData = {
   body?: never;
@@ -11100,7 +11283,7 @@ export type PostV1InvitationsErrors = {
    */
   401: UnauthorizedError;
   /**
-   * A seat subscription is required before inviting more members.
+   * A seat subscription is required before inviting more members. The body includes billingUrl, where an owner starts seat billing.
    */
   402: InvitePaymentRequiredError;
   /**
@@ -14069,6 +14252,75 @@ export type PostV1InferenceProvidersByInferenceProviderIdEnableModelsResponses =
 export type PostV1InferenceProvidersByInferenceProviderIdEnableModelsResponse =
   PostV1InferenceProvidersByInferenceProviderIdEnableModelsResponses[keyof PostV1InferenceProvidersByInferenceProviderIdEnableModelsResponses];
 
+export type GetV1InferenceProvidersMemberConnectionsData = {
+  body?: never;
+  path?: never;
+  query?: never;
+  url: "/v1/inference-providers/member-connections";
+};
+
+export type GetV1InferenceProvidersMemberConnectionsErrors = {
+  /**
+   * Invalid request or provider configuration.
+   */
+  400:
+    | InvalidRequestError
+    | {
+        error: string;
+        message?: string;
+      };
+  /**
+   * Sign-in required.
+   */
+  401: UnauthorizedError;
+  /**
+   * Access denied or Gateway management disabled.
+   */
+  403:
+    | ForbiddenError
+    | {
+        error: "gateway_not_enabled";
+        message: string;
+      };
+  /**
+   * Resource not found.
+   */
+  404: NotFoundError;
+  /**
+   * Selection or resource conflict.
+   */
+  409: {
+    error: string;
+    message?: string;
+  };
+};
+
+export type GetV1InferenceProvidersMemberConnectionsError =
+  GetV1InferenceProvidersMemberConnectionsErrors[keyof GetV1InferenceProvidersMemberConnectionsErrors];
+
+export type GetV1InferenceProvidersMemberConnectionsResponses = {
+  /**
+   * List the caller's member Google connections
+   */
+  200: {
+    connections: Array<{
+      providerId: string;
+      credentialSetId: string;
+      providerName: string;
+      name: string;
+      ready: boolean;
+      hasAccess: boolean;
+      hasCredential: boolean;
+      configurationRequired?: boolean;
+      authorizationRevision: string | null;
+      accountEmail: string | null;
+    }>;
+  };
+};
+
+export type GetV1InferenceProvidersMemberConnectionsResponse =
+  GetV1InferenceProvidersMemberConnectionsResponses[keyof GetV1InferenceProvidersMemberConnectionsResponses];
+
 export type GetV1InferenceProvidersData = {
   body?: never;
   path?: never;
@@ -14157,6 +14409,10 @@ export type PostV1InferenceProvidersData = {
     allMembers?: boolean;
     memberIds?: Array<string>;
     teamIds?: Array<string>;
+    /**
+     * Amazon Bedrock only: copy the organization AWS keys of another Amazon Bedrock provider in this organization, server-side. Mutually exclusive with credential and apiKeys.
+     */
+    reuseCredentialFrom?: string;
   };
   path?: never;
   query?: never;
@@ -14532,6 +14788,25 @@ export type GetV1InferenceProvidersByInferenceProviderIdConnectResponses = {
         credentialSetId: string;
         name: string;
         authUrl: string;
+        models?: Array<{
+          id: string;
+          name: string;
+          config: {
+            id: string;
+            [key: string]: unknown;
+          };
+          upstreamModelId: string;
+          /**
+           * Den TypeID with 'gmg_' prefix and a 26-character base32 suffix.
+           */
+          modelGroupId: string;
+          modelGroupName: string;
+          /**
+           * Den TypeID with 'gcs_' prefix and a 26-character base32 suffix.
+           */
+          credentialSetId: string;
+          credentialSetName: string;
+        }>;
       }>;
       migration?: {
         /**
@@ -15805,6 +16080,124 @@ export type GetV1InferenceProvidersByInferenceProviderIdOauthStartResponses = {
 
 export type GetV1InferenceProvidersByInferenceProviderIdOauthStartResponse =
   GetV1InferenceProvidersByInferenceProviderIdOauthStartResponses[keyof GetV1InferenceProvidersByInferenceProviderIdOauthStartResponses];
+
+export type GetV1InferenceProvidersOauthBrowserStatusData = {
+  body?: never;
+  path?: never;
+  query: {
+    attempt: string;
+  };
+  url: "/v1/inference-providers/oauth/browser-status";
+};
+
+export type GetV1InferenceProvidersOauthBrowserStatusErrors = {
+  /**
+   * Invalid request or provider configuration.
+   */
+  400:
+    | InvalidRequestError
+    | {
+        error: string;
+        message?: string;
+      };
+  /**
+   * Sign-in required.
+   */
+  401: UnauthorizedError;
+  /**
+   * Provider access or OAuth configuration changed.
+   */
+  403: {
+    error: string;
+    message?: string;
+  };
+  /**
+   * Resource not found.
+   */
+  404: NotFoundError;
+  /**
+   * Selection or resource conflict.
+   */
+  409: {
+    error: string;
+    message?: string;
+  };
+};
+
+export type GetV1InferenceProvidersOauthBrowserStatusError =
+  GetV1InferenceProvidersOauthBrowserStatusErrors[keyof GetV1InferenceProvidersOauthBrowserStatusErrors];
+
+export type GetV1InferenceProvidersOauthBrowserStatusResponses = {
+  /**
+   * Check browser readiness for member Google sign-in
+   */
+  200: {
+    status: "sign_in_required" | "account_mismatch" | "ready";
+  };
+};
+
+export type GetV1InferenceProvidersOauthBrowserStatusResponse =
+  GetV1InferenceProvidersOauthBrowserStatusResponses[keyof GetV1InferenceProvidersOauthBrowserStatusResponses];
+
+export type GetV1InferenceProvidersOauthBrowserStartData = {
+  body?: never;
+  path?: never;
+  query: {
+    attempt: string;
+  };
+  url: "/v1/inference-providers/oauth/browser-start";
+};
+
+export type GetV1InferenceProvidersOauthBrowserStartErrors = {
+  /**
+   * Invalid request or provider configuration.
+   */
+  400:
+    | InvalidRequestError
+    | {
+        error: string;
+        message?: string;
+      };
+  /**
+   * Sign-in required.
+   */
+  401: UnauthorizedError;
+  /**
+   * Access denied or Gateway management disabled.
+   */
+  403:
+    | ForbiddenError
+    | {
+        error: "gateway_not_enabled";
+        message: string;
+      };
+  /**
+   * Resource not found.
+   */
+  404: NotFoundError;
+  /**
+   * Selection or resource conflict.
+   */
+  409: {
+    error: string;
+    message?: string;
+  };
+};
+
+export type GetV1InferenceProvidersOauthBrowserStartError =
+  GetV1InferenceProvidersOauthBrowserStartErrors[keyof GetV1InferenceProvidersOauthBrowserStartErrors];
+
+export type GetV1InferenceProvidersOauthBrowserStartResponses = {
+  /**
+   * Continue member Google sign-in in a signed-in browser
+   */
+  200: {
+    authUrl: string;
+  };
+};
+
+export type GetV1InferenceProvidersOauthBrowserStartResponse =
+  GetV1InferenceProvidersOauthBrowserStartResponses[keyof GetV1InferenceProvidersOauthBrowserStartResponses];
 
 export type GetV1InferenceProvidersOauthCallbackData = {
   body?: never;
@@ -19637,7 +20030,7 @@ export type PostV1McpConnectionsErrors = {
    */
   401: UnauthorizedError;
   /**
-   * Only workspace owners and admins can add MCP connections.
+   * The caller cannot add this kind of connection.
    */
   403: ForbiddenError;
   /**
@@ -20159,7 +20552,7 @@ export type PutV1McpConnectionsByConnectionIdAccessErrors = {
    */
   401: UnauthorizedError;
   /**
-   * Only workspace owners and admins can change connection access.
+   * Only workspace owners, admins, or the member who added the connection can change its access, and only admins can grant org-wide access.
    */
   403: ForbiddenError;
   /**
@@ -21200,10 +21593,41 @@ export type GetV1PluginsData = {
   body?: never;
   path?: never;
   query?: {
+    /**
+     * Opaque cursor returned as nextCursor by the previous page. Omit for the first page.
+     */
     cursor?: string;
     limit?: number;
     status?: "active" | "inactive" | "deleted" | "archived";
     q?: string;
+    /**
+     * Case-insensitive substring of the plugin name.
+     */
+    name?: string;
+    /**
+     * Plugins effectively accessible to this team, including organization and collection access.
+     */
+    teamId?: string;
+    /**
+     * Plugins effectively accessible to this member, including team, organization and collection access.
+     */
+    memberId?: string;
+    /**
+     * When true, each plugin the caller manages includes its active access grants.
+     */
+    includeAccess?: "true" | "false";
+    /**
+     * When true, returns the total matching plugins before the cursor.
+     */
+    includeTotal?: "true" | "false";
+    /**
+     * Plugins created by this organization member.
+     */
+    ownerId?: string;
+    /**
+     * Include team and owner counts across all matching pages. Each facet ignores its own current selection.
+     */
+    includeFacets?: "true" | "false";
   };
   url: "/v1/plugins";
 };
@@ -21225,7 +21649,22 @@ export type GetV1PluginsResponses = {
   /**
    * Plugins returned successfully.
    */
-  200: PluginArchPluginListResponse;
+  200: {
+    items: Array<PluginArchPluginListItem>;
+    nextCursor: string | null;
+    total?: number;
+    teamCounts?: Array<{
+      /**
+       * Den TypeID with 'tem_' prefix and a 26-character base32 suffix.
+       */
+      id: string;
+      count: number;
+    }>;
+    ownerCounts?: Array<{
+      id: string | null;
+      count: number;
+    }>;
+  };
 };
 
 export type GetV1PluginsResponse = GetV1PluginsResponses[keyof GetV1PluginsResponses];
@@ -25264,6 +25703,10 @@ export type DeleteV1WorkersByIdErrors = {
    */
   401: UnauthorizedError;
   /**
+   * Only the worker owner can delete this cloud worker.
+   */
+  403: ForbiddenError;
+  /**
    * The worker could not be found.
    */
   404: NotFoundError;
@@ -25384,9 +25827,9 @@ export type PostV1WorkersByIdTokensErrors = {
    */
   401: UnauthorizedError;
   /**
-   * OpenWork Web access is required to use cloud worker tokens.
+   * Cloud worker tokens require the worker owner and OpenWork Web access.
    */
-  403: WorkerOpenWorkWebAccessRequiredError;
+  403: ForbiddenError | WorkerOpenWorkWebAccessRequiredError;
   /**
    * The worker could not be found.
    */
@@ -25430,9 +25873,9 @@ export type GetV1WorkersByIdRuntimeErrors = {
    */
   401: UnauthorizedError;
   /**
-   * OpenWork Web access is required to use a cloud worker runtime.
+   * Cloud runtime access requires the worker owner and OpenWork Web access.
    */
-  403: WorkerRuntimeOpenWorkWebAccessRequiredError;
+  403: ForbiddenError | WorkerRuntimeOpenWorkWebAccessRequiredError;
   /**
    * The worker could not be found.
    */
@@ -25474,9 +25917,9 @@ export type PostV1WorkersByIdRuntimeUpgradeErrors = {
    */
   401: UnauthorizedError;
   /**
-   * OpenWork Web access is required to upgrade a cloud worker runtime.
+   * Cloud runtime upgrades require the worker owner and OpenWork Web access.
    */
-  403: WorkerRuntimeOpenWorkWebAccessRequiredError;
+  403: ForbiddenError | WorkerRuntimeOpenWorkWebAccessRequiredError;
   /**
    * The worker could not be found.
    */

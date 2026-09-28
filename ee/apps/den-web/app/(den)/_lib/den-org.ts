@@ -706,6 +706,11 @@ export function getEditPluginSkillRoute(orgSlug: string | null | undefined, plug
   return `${getPluginSkillRoute(orgSlug, pluginId, skillId)}/edit`;
 }
 
+/** The full plugin editor: hooks, agents, marketplaces and skill files. */
+export function getPluginDetailsRoute(orgSlug: string | null | undefined, pluginId: string): string {
+  return `${getPluginRoute(orgSlug, pluginId)}/details`;
+}
+
 export function getNewPluginRoute(orgSlug?: string | null): string {
   return `${getPluginsRoute(orgSlug)}/new`;
 }
@@ -738,16 +743,7 @@ export function getMcpConnectionsRoute(orgSlug?: string | null): string {
   return `${getOrgDashboardRoute(orgSlug)}/mcp-connections`;
 }
 
-export function getConfiguredMcpConnectionsRoute(orgSlug?: string | null, connectionId?: string | null): string {
-  const base = `${getMcpConnectionsRoute(orgSlug)}/configured`;
-  return connectionId ? `${base}?connectionId=${encodeURIComponent(connectionId)}` : base;
-}
-
-/**
- * Detail page for one connector. `connectorId` is a configured connection id
- * or, for connectors nobody has added yet, the catalog id (`gmail`, `notion`,
- * `microsoft-365`) so the page can explain the connector and start setup.
- */
+/** A configured connector's page in Manage, Google Workspace and Microsoft 365 included. */
 export function getMcpConnectionRoute(orgSlug: string | null | undefined, connectorId: string): string {
   return `${getMcpConnectionsRoute(orgSlug)}/${encodeURIComponent(connectorId)}`;
 }
@@ -766,6 +762,39 @@ export function getLibraryRoute(orgSlug?: string | null): string {
 
 export function getLibraryPluginRoute(orgSlug: string | null | undefined, pluginId: string): string {
   return `${getLibraryRoute(orgSlug)}/plugins/${encodeURIComponent(pluginId)}`;
+}
+
+export function getLibraryPluginShareRoute(orgSlug: string | null | undefined, pluginId: string): string {
+  return `${getLibraryPluginRoute(orgSlug, pluginId)}/share`;
+}
+
+export function getLibraryNewPluginRoute(orgSlug?: string | null, start?: "skill"): string {
+  return `${getLibraryRoute(orgSlug)}/plugins/new${start ? `?start=${start}` : ""}`;
+}
+
+export function getLibraryModelsRoute(orgSlug?: string | null): string {
+  return `${getLibraryRoute(orgSlug)}?show=models`;
+}
+
+export function getLibraryModelRoute(orgSlug: string | null | undefined, providerId: string): string {
+  return `${getLibraryRoute(orgSlug)}/models/${encodeURIComponent(providerId)}`;
+}
+
+export function getLibraryConnectorRoute(orgSlug: string | null | undefined, connectionId: string): string {
+  return `${getLibraryRoute(orgSlug)}/connectors/${encodeURIComponent(connectionId)}`;
+}
+
+export function getLibraryConnectorShareRoute(orgSlug: string | null | undefined, connectionId: string): string {
+  return `${getLibraryConnectorRoute(orgSlug, connectionId)}/share`;
+}
+
+/** The connector catalog, or one entry's setup checks when a catalog id is given. */
+export function getLibraryAddConnectorRoute(orgSlug?: string | null, catalogId?: string): string {
+  return `${getLibraryRoute(orgSlug)}/connectors/new${catalogId ? `/${encodeURIComponent(catalogId)}` : ""}`;
+}
+
+export function getAddConnectorRoute(orgSlug?: string | null, catalogId?: string): string {
+  return `${getMcpConnectionsRoute(orgSlug)}/new${catalogId ? `/${encodeURIComponent(catalogId)}` : ""}`;
 }
 
 export function getGithubIntegrationSetupRoute(orgSlug: string | null | undefined, connectorInstanceId: string): string {

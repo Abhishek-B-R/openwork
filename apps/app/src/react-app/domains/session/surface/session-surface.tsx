@@ -977,6 +977,7 @@ export function SessionSurface(props: SessionSurfaceProps) {
     (state) => state.statusesByWorkspaceId[props.workspaceId]?.[props.sessionId] ?? "idle",
   );
   const draft = useComposerStateStore((state) => getComposerDraft(state, props.sessionId));
+  const editing = useComposerStateStore((state) => Boolean(getComposerRevertMessageId(state, props.sessionId)));
   const attachments = useComposerStateStore((state) => getComposerAttachments(state, props.sessionId));
   // Preparation belongs to the submitted message, not the next composer draft.
   const [attachmentsUploading, setAttachmentsUploading] = useState(false);
@@ -1562,7 +1563,17 @@ export function SessionSurface(props: SessionSurfaceProps) {
   });
   const gatewaySelected = isGatewayUsageModel(sessionModel.selectedModel.providerID, props.gatewayProviderIds);
   const latestUsageMessage = renderedMessages.at(-1);
-  const latestUsageEvidence = useMemo(() => latestUsageMessage ? sessionErrorPresentationFromUIMessage(latestUsageMessage)?.gatewayUsage ?? null : null, [latestUsageMessage]);
+  // The turn's error, not whatever renders last: a trailing empty or retry message must not hide it.
+  const usageError = useMemo(() => {
+    for (let index = renderedMessages.length - 1; index >= 0; index--) {
+      const message = renderedMessages[index];
+      if (message.role === "user") return null;
+      const presentation = sessionErrorPresentationFromUIMessage(message);
+      if (presentation) return { message, presentation };
+    }
+    return null;
+  }, [renderedMessages]);
+  const latestUsageEvidence = usageError?.presentation.gatewayUsage ?? null;
   const gatewayUsage = useGatewayUsage(gatewaySelected, false, gatewayUsageRefreshKey({
     sessionOwner,
     providerId: sessionModel.selectedModel.providerID,
@@ -1574,13 +1585,24 @@ export function SessionSurface(props: SessionSurfaceProps) {
   const gatewayNotice = gatewayUsageNoticeState({ gatewaySelected: gatewayUsage.active, status: gatewayUsage.data });
   const hideGatewayError = useGatewayUsageErrorHandled({
     scopeKey: gatewayUsage.scopeKey, sessionOwner, gatewaySelected: gatewayUsage.active, status: gatewayUsage.data,
-    errorKey: latestUsageMessage?.id ?? null, evidence: latestUsageEvidence,
+    errorKey: usageError?.message.id ?? null, evidence: latestUsageEvidence, rateLimited: usageError?.presentation.kind === "rate-limited",
   });
   const hideDirectGatewayError = useGatewayUsageErrorHandled({
     scopeKey: gatewayUsage.scopeKey, sessionOwner, gatewaySelected: gatewayUsage.active, status: gatewayUsage.data,
-    errorKey: error?.message ?? null, evidence: error?.presentation?.gatewayUsage ?? null,
+    errorKey: error?.message ?? null, evidence: error?.presentation?.gatewayUsage ?? null, rateLimited: error?.presentation?.kind === "rate-limited",
   });
-  const visibleMessages = hideGatewayError ? renderedMessages.filter((message) => message !== latestUsageMessage) : renderedMessages;
+  const visibleMessages = useMemo(() => {
+    if (!hideGatewayError) return renderedMessages;
+    let lastUser = -1;
+    renderedMessages.forEach((message, index) => { if (message.role === "user") lastUser = index; });
+    // Engine retries leave one error per attempt; the confirmed block explains every one of them.
+    return renderedMessages.filter((message, index) => {
+      if (message === usageError?.message) return false;
+      if (index < lastUser) return true;
+      const presentation = sessionErrorPresentationFromUIMessage(message);
+      return !presentation || (presentation.kind !== "rate-limited" && !presentation.gatewayUsage);
+    });
+  }, [hideGatewayError, renderedMessages, usageError]);
   const renderedMessagesRef = useRef(renderedMessages);
   useEffect(() => {
     renderedMessagesRef.current = renderedMessages;
@@ -2334,6 +2356,12 @@ export function SessionSurface(props: SessionSurfaceProps) {
   // Queue: hold the draft locally and clear the composer. The drain effect
   // sends it once the session reports idle.
   const handleQueue = useCallback(() => {
+    // Read the current store as well as the rendered composer state: an edit
+    // must never lose its original turn boundary through a stale queue callback.
+    if (getComposerRevertMessageId(useComposerStateStore.getState(), props.sessionId)) {
+      void handleSend();
+      return;
+    }
     if (archived || !archiveStateKnown || sessionWorkHeld(props.opencodeBaseUrl, props.sessionId)) return;
     if ([...pendingSendsRef.current.values()].includes(sessionOwner)) return;
     const text = draft.trim();
@@ -2342,7 +2370,7 @@ export function SessionSurface(props: SessionSurfaceProps) {
     if (!queuedDraft) return;
     appendQueuedDraft(props.sessionId, queuedDraft);
     clearComposer();
-  }, [archived, archiveStateKnown, appendQueuedDraft, attachments, buildDraft, clearComposer, draft, props.opencodeBaseUrl, props.sessionId, sessionOwner]);
+  }, [archived, archiveStateKnown, appendQueuedDraft, attachments, buildDraft, clearComposer, draft, handleSend, props.opencodeBaseUrl, props.sessionId, sessionOwner]);
 
   const removeQueuedDraft = useCallback((id: string) => {
     const target = queuedItems.find((item) => item.id === id);
@@ -3419,6 +3447,7 @@ export function SessionSurface(props: SessionSurfaceProps) {
                         messageIdReplacements={pendingReconciliation.messageIdReplacements}
                         viewport={messageViewport}
                         messages={visibleMessages}
+                        sessionErrorHandled={hideGatewayError}
                         status={status}
                         activityStatus={effectiveActivityStatus}
                         retryStatus={liveStatus.type === "retry" ? liveStatus : null}
@@ -3517,6 +3546,7 @@ export function SessionSurface(props: SessionSurfaceProps) {
         onQueue={handleQueue}
         onStop={async () => { await handleAbort(); }}
         busy={chatStreaming}
+        editing={editing}
         stopping={stopping}
         steering={steering}
         submissionPreparing={preparingCloudTools || sending || autoSending}
