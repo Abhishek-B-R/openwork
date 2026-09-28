@@ -45,7 +45,8 @@ describe("cost calculator results", () => {
     expect(page).toContain("Claude Team · Sonnet 5 (Premium seats)");
     expect(page).toContain(`OpenWork · ${sonnet.label}`);
     expect(page).toContain(`OpenWork · ${deepseek.label}`);
-    expect(page).toContain("Claude on 3P · Sonnet 5");
+    // The main page chart compares the Claude plan with OpenWork only; 3P has its own page.
+    expect(page).not.toContain("Claude on 3P · Sonnet 5");
   });
 
   test("says plainly when Claude costs less on the 3P variant", () => {
