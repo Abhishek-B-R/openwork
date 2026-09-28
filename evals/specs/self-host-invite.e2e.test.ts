@@ -20,7 +20,7 @@ const test = spec.world(async (seed, { place }) => {
   }
 }, { resources: { surfaces: ["web"], services: ["den"] }, needs: { placement: "local" }, timeout: 600_000 });
 
-test("private self-host signup admits the bootstrap owner and invited outsider, but not an uninvited outsider", async ({ world, user, probe, seed, step }) => {
+test("private self-host signup admits the bootstrap owner and invited outsider, but not an uninvited outsider", async ({ world, user, probe, seed, step, evidence }) => {
   let orgId = "";
   await step("the configured bootstrap administrator auto-joins without an invitation", async () => {
     await user.navigate(world.den.ref.webUrl);
@@ -40,6 +40,7 @@ test("private self-host signup admits the bootstrap owner and invited outsider, 
     const replay = await witness.api("/v1/auth/bootstrap/verify", { method: "POST", body: JSON.stringify({ email: world.owner.email, code: world.bootstrapCode }) });
     expect(replay.response.status).toBe(409);
     expect(replay.body).not.toHaveProperty("grant");
+    evidence.recordAssertionEvidence("Bootstrap creates exactly one owner and cannot be replayed", "One organization and one owner membership; no owner invitation; replay returned 409 without a grant", true);
   });
 
   const witness = invitationWitnesses(world.den.admin);
@@ -52,6 +53,7 @@ test("private self-host signup admits the bootstrap owner and invited outsider, 
     expect(membersFor(before, world.rejected.email)).toEqual([]);
     expect(invitationsFor(before, world.rejected.email)).toEqual([]);
     expect(await witness.emails("verification", world.rejected.email)).toEqual([]);
+    evidence.recordAssertionEvidence("Disabled public signup rejects an uninvited outsider", "Signup returned 403 without a token; organization unchanged; no membership, invitation, or verification email", true);
   });
 
   await step("an invited outsider can create their account despite disabled public signup", async () => {
@@ -77,5 +79,6 @@ test("private self-host signup admits the bootstrap owner and invited outsider, 
     const replay = await seed.api(member, "/v1/orgs/invitations/accept", { method: "POST", body: JSON.stringify({ id: invite.token }) });
     expect(replay.response.ok, replay.text).toBe(true);
     expect(membersFor(await witness.org(orgId), world.outsider.email)).toHaveLength(1);
+    evidence.recordAssertionEvidence("The invited outsider joins the private workspace exactly once", "One member-role membership after signup, reload, and acceptance replay; pending placeholder removed; owner unchanged; access limited to the invited organization", true);
   });
 });

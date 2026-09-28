@@ -157,27 +157,6 @@ export async function ssoInvite(seed: Seed, options: { mismatchedEmail?: boolean
       headless: true,
       viewport: { width: 1280, height: 900, deviceScaleFactor: 1 },
     });
-    const debuggerUrl = web.client.webSocketDebuggerUrl;
-    if (!debuggerUrl) throw new Error("SSO browser requires a debugger URL");
-    const network = new WebSocket(debuggerUrl);
-    await new Promise<void>((resolve, reject) => {
-      network.addEventListener("open", () => {
-        network.send(JSON.stringify({ id: 1, method: "Network.enable" }));
-      });
-      network.addEventListener("error", () => reject(new Error("SSO network observer could not attach")));
-      network.addEventListener("message", ({ data }) => {
-        const event: unknown = JSON.parse(String(data));
-        if (typeof event === "object" && event !== null && Reflect.get(event, "id") === 1) resolve();
-        if (stringField(event, "method") !== "Network.loadingFailed") return;
-        const params = recordField(event, "params");
-        // Browser error codes only: never emit requests, tokens, or headers.
-        console.error("[sso-browser-network]", JSON.stringify({
-          error: stringField(params, "errorText"), blockedReason: stringField(params, "blockedReason"),
-          corsError: stringField(recordField(params, "corsErrorStatus"), "corsError"),
-          canceled: booleanField(params, "canceled"), type: stringField(params, "type"),
-        }));
-      });
-    });
     return {
       web,
       adminWeb: configurationWeb,
@@ -188,7 +167,6 @@ export async function ssoInvite(seed: Seed, options: { mismatchedEmail?: boolean
       invitee,
       joinUrl: `${webOrigin}/join-org?invite=${encodeURIComponent(inviteToken)}`,
       async [Symbol.asyncDispose]() {
-        network.close();
         await idp[Symbol.asyncDispose]();
       },
     };
