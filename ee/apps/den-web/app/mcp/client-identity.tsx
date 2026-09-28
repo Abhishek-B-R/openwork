@@ -4,7 +4,7 @@ import { SetupLine, type SetupFact } from "../(den)/_components/setup-frame-part
 import { describeMcpRedirect, type McpRedirectDescription } from "./client-identity-model";
 import { McpAppFact } from "./mcp-story";
 import type { McpClient } from "./use-mcp-client";
-import { knownMcpCimdDomain } from "./client-trust-constants";
+import { knownMcpCimdDomain, mcpCimdDomain } from "./client-trust-constants";
 
 /** Where the approval is sent, from the signed authorize query. */
 export function useMcpRedirect(oauthQuery: string): McpRedirectDescription | null {
@@ -13,8 +13,14 @@ export function useMcpRedirect(oauthQuery: string): McpRedirectDescription | nul
 
 /** The App and Returns to rows that lead every consent panel (P9). */
 export function mcpIdentityFacts(client: McpClient, redirect: McpRedirectDescription | null): { app: SetupFact; returnsTo: SetupFact } {
+  const domain = mcpCimdDomain(client.clientId);
   return {
-    app: { label: "App", value: <McpAppFact client={client} /> },
+    app: { label: "App", value: (
+      <span className="flex min-w-0 flex-col items-end gap-1">
+        <span className="flex min-w-0 items-center gap-2"><McpAppFact client={client} /></span>
+        {domain ? <span dir="ltr" className="break-all whitespace-normal font-mono text-xs" data-testid="mcp-client-domain">{domain}</span> : null}
+      </span>
+    ) },
     returnsTo: { label: "Returns to", value: redirect?.host ?? "Unknown", mono: true, testId: "mcp-redirect-host" },
   };
 }
@@ -40,8 +46,8 @@ export function McpUnverifiedAppWarning({ redirect, client }: { redirect: McpRed
       </SetupLine>
       {redirect ? (
         <div className="flex min-w-0 flex-col gap-1">
-          <SetupLine>Check the return address supplied by this app:</SetupLine>
-          <span dir="ltr" className="break-all font-mono text-xs leading-5 text-[var(--dls-text-primary)]" data-testid="mcp-redirect-url">{redirect.url}</span>
+          <SetupLine>Check the return host supplied by this app:</SetupLine>
+          <span dir="ltr" className="break-all font-mono text-xs leading-5 text-[var(--dls-text-primary)]" data-testid="mcp-warning-redirect-host">{redirect.host}</span>
         </div>
       ) : (
         <SetupLine>Return address unavailable. Cancel and restart the connection from the app you intended to use.</SetupLine>

@@ -394,7 +394,7 @@ export default function McpSelectOrganizationPage() {
           </button>
         )}
         <div className="flex items-start justify-between gap-4">
-          <McpTechnicalDetails scope={requestedScope} clientId={client.clientId} />
+          <McpTechnicalDetails scope={requestedScope} clientId={client.clientId} redirect={redirect} />
           <SetupQuietButton onClick={() => void cancelFlow()} disabled={isBusy || flowState === "loading"}>
             Cancel
           </SetupQuietButton>

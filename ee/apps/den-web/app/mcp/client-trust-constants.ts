@@ -7,13 +7,18 @@
  */
 export const KNOWN_MCP_CIMD_DOMAINS: readonly string[] = ["claude.ai"];
 
-export function knownMcpCimdDomain(clientId: string | null): string | null {
+export function mcpCimdDomain(clientId: string | null): string | null {
   if (!clientId) return null;
   try {
     const url = new URL(clientId);
-    if (url.protocol !== "https:" || url.username || url.password || url.port || url.hash || url.pathname === "/") return null;
-    return KNOWN_MCP_CIMD_DOMAINS.includes(url.hostname) ? url.hostname : null;
+    if (url.protocol !== "https:" || url.username || url.password || url.hash || url.pathname === "/") return null;
+    return url.host;
   } catch {
     return null;
   }
+}
+
+export function knownMcpCimdDomain(clientId: string | null): string | null {
+  const domain = mcpCimdDomain(clientId);
+  return domain && KNOWN_MCP_CIMD_DOMAINS.includes(domain) ? domain : null;
 }

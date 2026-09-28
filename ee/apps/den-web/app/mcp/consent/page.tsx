@@ -143,7 +143,7 @@ export default function McpConsentPage() {
           {busy === "accept" ? "Authorizing…" : client.name ? `Authorize ${client.name}` : "Authorize this app"}
         </button>
         <div className="flex items-start justify-between gap-4">
-          <McpTechnicalDetails scope={scope} clientId={client.clientId} />
+          <McpTechnicalDetails scope={scope} clientId={client.clientId} redirect={redirect} />
           <SetupQuietButton onClick={() => void decide(false)} disabled={busy !== null}>
             Deny
           </SetupQuietButton>

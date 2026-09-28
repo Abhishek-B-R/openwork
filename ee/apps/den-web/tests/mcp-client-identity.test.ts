@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { createElement } from "react";
+import { createElement, Fragment } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { McpReturnLine, McpUnverifiedAppWarning } from "../app/mcp/client-identity";
+import { mcpIdentityFacts, McpReturnLine, McpUnverifiedAppWarning } from "../app/mcp/client-identity";
+import { McpTechnicalDetails } from "../app/mcp/consent-permissions";
 import { knownMcpCimdDomain } from "../app/mcp/client-trust-constants";
 import { describeMcpRedirect, fallbackClientName, isLoopbackHost } from "../app/mcp/client-identity-model";
 
@@ -28,6 +29,29 @@ describe("MCP consent client identity", () => {
     expect(fallbackClientName("https://app.example.com/oauth/client.json")).toBe("app.example.com");
     expect(fallbackClientName("abc123")).toBe("An app without a name");
   });
+
+  test.each([
+    ["https://claude.ai/oauth/claude-code-client-metadata", "claude.ai"],
+    ["https://unknown.example/client.json", "unknown.example"],
+    ["https://unknown.example:8443/client.json", "unknown.example:8443"],
+  ])("shows the CIMD domain beside a trusted-looking name for %s", (clientId, domain) => {
+    const client = { name: "Claude", logoUri: null, clientId, loaded: true, metadataResolved: true };
+    const markup = renderToStaticMarkup(createElement(Fragment, null, mcpIdentityFacts(client, null).app.value));
+    expect(markup).toContain('data-testid="mcp-client-name">Claude</span>');
+    expect(markup).toContain(`data-testid="mcp-client-domain">${domain}</span>`);
+    if (domain === "unknown.example") {
+      expect(renderToStaticMarkup(createElement(McpUnverifiedAppWarning, { client, redirect: null }))).toContain("Unverified application");
+    }
+  });
+
+  test("does not infer a domain from an opaque DCR client's name or redirect", () => {
+    const client = { name: "Claude", logoUri: null, clientId: "dcr-client", loaded: true, metadataResolved: true };
+    const redirect = describeMcpRedirect("https://claude.ai/api/mcp/auth_callback");
+    const markup = renderToStaticMarkup(createElement(Fragment, null, mcpIdentityFacts(client, redirect).app.value));
+    expect(markup).toContain('data-testid="mcp-client-name">Claude</span>');
+    expect(markup).not.toContain('data-testid="mcp-client-domain"');
+    expect(renderToStaticMarkup(createElement(McpUnverifiedAppWarning, { client, redirect }))).toContain("Unverified application");
+  });
 });
 
 describe("unverified application warning", () => {
@@ -52,16 +76,18 @@ describe("unverified application warning", () => {
   });
 
   test.each([
-    "https://assistant.example.com/oauth/callback",
-    "http://127.0.0.1:39421/callback",
-    "cursor://anysphere.cursor-mcp/oauth/callback",
-  ])("always warns and shows the complete callback for %s", (url) => {
+    ["https://assistant.example.com/oauth/callback", "assistant.example.com"],
+    ["http://127.0.0.1:39421/callback", "127.0.0.1:39421"],
+    ["cursor://anysphere.cursor-mcp/oauth/callback", "cursor://"],
+  ])("always warns and shows only the return host for %s", (url, host) => {
     const markup = renderToStaticMarkup(createElement(McpUnverifiedAppWarning, { redirect: describeMcpRedirect(url) }));
     expect(markup).toContain("Unverified application");
     expect(markup).toContain("OpenWork has not verified who is requesting this access.");
     expect(markup).toContain("Only authorize if you started this connection and trust the app to act on your behalf with the permissions shown.");
-    expect(markup).toContain("Check the return address supplied by this app:");
-    expect(markup).toContain(url);
+    expect(markup).toContain("Check the return host supplied by this app:");
+    expect(markup).toContain(`data-testid="mcp-warning-redirect-host">${host}</span>`);
+    expect(markup).not.toContain(url);
+    expect(markup).not.toContain('data-testid="mcp-redirect-url"');
     expect(markup).toContain('dir="ltr"');
     expect(markup).toContain("break-all");
     expect(markup).not.toContain("<a ");
@@ -73,12 +99,15 @@ describe("unverified application warning", () => {
     expect(markup).toContain("Unverified application");
     expect(markup).toContain("Return address unavailable. Cancel and restart the connection from the app you intended to use.");
     expect(markup).not.toContain('data-testid="mcp-redirect-url"');
+    expect(markup).not.toContain('data-testid="mcp-warning-redirect-host"');
   });
 
-  test("renders attacker-controlled callback content as inert text", () => {
+  test("renders the escaped full callback as inert text inside collapsed technical details", () => {
     const url = "https://assistant.example.com/callback?label=<img src=x onerror=alert(1)>&next=review";
-    const markup = renderToStaticMarkup(createElement(McpUnverifiedAppWarning, { redirect: describeMcpRedirect(url) }));
-    expect(markup).toContain("%3Cimg%20src=x%20onerror=alert(1)%3E&amp;next=review");
+    const markup = renderToStaticMarkup(createElement(McpTechnicalDetails, { scope: "mcp:read", clientId: "dcr-client", redirect: describeMcpRedirect(url) }));
+    expect(markup).toMatch(/<details\b[^>]*>[\s\S]*data-testid="mcp-redirect-url"[\s\S]*<\/details>/);
+    expect(markup).not.toMatch(/<details\b[^>]*\sopen(?:[\s=>])/);
+    expect(markup).toContain('data-testid="mcp-redirect-url">https://assistant.example.com/callback?label=%3Cimg%20src=x%20onerror=alert(1)%3E&amp;next=review</span>');
     expect(markup).not.toContain("<img");
     expect(markup).not.toContain("href=");
   });
@@ -87,6 +116,11 @@ describe("unverified application warning", () => {
     const redirect = describeMcpRedirect("https://trusted.example@untrusted.example/oauth/callback");
     expect(redirect?.host).toBe("untrusted.example");
     const markup = renderToStaticMarkup(createElement(McpUnverifiedAppWarning, { redirect }));
-    expect(markup).toContain("https://trusted.example@untrusted.example/oauth/callback");
+    expect(markup).toContain('data-testid="mcp-warning-redirect-host">untrusted.example</span>');
+    expect(markup).not.toContain("trusted.example@");
+    expect(markup).not.toContain("/oauth/callback");
+    expect(markup).not.toContain('data-testid="mcp-redirect-url"');
+    const details = renderToStaticMarkup(createElement(McpTechnicalDetails, { scope: "mcp:read", clientId: "dcr-client", redirect }));
+    expect(details).toContain('data-testid="mcp-redirect-url">https://trusted.example@untrusted.example/oauth/callback</span>');
   });
 });

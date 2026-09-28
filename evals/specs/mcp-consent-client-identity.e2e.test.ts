@@ -16,10 +16,24 @@ test("a member sees that an app is unverified and can decline MCP access", async
     await person.see({ testId: "mcp-unverified-app-warning" });
     await person.see({ text: "Unverified application" });
     await person.see({ text: "OpenWork has not verified who is requesting this access. Only authorize if you started this connection and trust the app to act on your behalf with the permissions shown." });
-    await person.see({ text: "Check the return address supplied by this app:" });
+    await person.see({ text: "Check the return host supplied by this app:" });
+    const host = new URL(redirectUri).host;
+    await person.see({ testId: "mcp-warning-redirect-host", text: host });
+    expect((await browser.dom('[data-testid="mcp-warning-redirect-host"]')).elements.map(element => element.text.trim())).toEqual([host]);
+    expect((await browser.dom('[data-testid="mcp-unverified-app-warning"]')).elements.some(element => element.text.includes(redirectUri))).toBe(false);
+    await person.notSee({ testId: "mcp-client-domain" });
+    await person.notSee({ testId: "mcp-redirect-url" });
+    expect((await browser.dom('details:not([open]):has([data-testid="mcp-redirect-url"])')).elements).toHaveLength(1);
+    await person.click({ text: "Technical details" });
     await person.see({ testId: "mcp-redirect-url", text: redirectUri });
+    expect((await browser.dom('details[open] [data-testid="mcp-redirect-url"]')).elements).toHaveLength(1);
     expect((await browser.dom('[data-testid="mcp-redirect-url"]')).elements.map(element => element.text.trim())).toEqual([redirectUri]);
     expect((await browser.dom('a[data-testid="mcp-redirect-url"], a:has([data-testid="mcp-redirect-url"]), [data-testid="mcp-redirect-url"] a')).elements).toHaveLength(0);
+    expect((await browser.dom('[data-testid="mcp-redirect-url"] *')).elements).toHaveLength(0);
+    await person.click({ text: "Technical details" });
+    await person.notSee({ testId: "mcp-redirect-url" });
+    expect((await browser.dom('details:not([open]):has([data-testid="mcp-redirect-url"])')).elements).toHaveLength(1);
+    await person.see({ testId: "mcp-warning-redirect-host", text: host });
   }
 
   await step("given a member who signs in from the app's authorization link", async () => {
@@ -39,7 +53,7 @@ test("a member sees that an app is unverified and can decline MCP access", async
     await seeUnverifiedWarning(world.loopback.redirectUri);
     evidence.recordAssertionEvidence(
       "The workspace chooser warns that the named loopback app is unverified",
-      `App "${world.loopback.name}"; full return address ${world.loopback.redirectUri} shown as plain text; unverified-app and loopback warnings shown`,
+      `App "${world.loopback.name}"; return host ${world.loopback.redirectHost} visible; full return address verified as plain text only after expanding Technical details, then collapsed again; unverified-app and loopback warnings shown`,
       true,
     );
     await person.screenshot();
@@ -53,7 +67,7 @@ test("a member sees that an app is unverified and can decline MCP access", async
     await seeUnverifiedWarning(world.hosted.redirectUri);
     evidence.recordAssertionEvidence(
       "A public return address does not make the app verified",
-      `App "${world.hosted.name}"; full return address ${world.hosted.redirectUri} shown as plain text; unverified-app warning shown; no loopback warning`,
+      `App "${world.hosted.name}"; return host ${world.hosted.redirectHost} visible; full return address verified as plain text only after expanding Technical details, then collapsed again; unverified-app warning shown; no loopback warning`,
       true,
     );
     await person.screenshot();
@@ -74,7 +88,7 @@ test("a member sees that an app is unverified and can decline MCP access", async
     await person.see({ text: `This app did not share its name. Only continue if you know ${world.unnamed.redirectHost} and started this sign-in.` });
     await person.see({ role: "button", label: "Authorize this app" });
     await seeUnverifiedWarning(world.unnamed.redirectUri);
-    evidence.recordAssertionEvidence("An unnamed app retains its guidance and is explicitly unverified", `Full return address ${world.unnamed.redirectUri} shown as plain text; unverified-app warning and unnamed-app guidance shown`, true);
+    evidence.recordAssertionEvidence("An unnamed app retains its guidance and is explicitly unverified", `Return host ${world.unnamed.redirectHost} visible; full return address verified as plain text only after expanding Technical details, then collapsed again; unverified-app warning and unnamed-app guidance shown`, true);
     await person.screenshot();
   });
 
@@ -86,7 +100,7 @@ test("a member sees that an app is unverified and can decline MCP access", async
     await person.notSee({ testId: "mcp-loopback-warning" });
     await person.see({ role: "button", label: `Authorize ${world.hosted.name}` });
     await person.see({ role: "button", label: "Deny" });
-    evidence.recordAssertionEvidence("Hosted-app consent warns before authorization", `App "${world.hosted.name}"; full return address ${world.hosted.redirectUri} shown as plain text; unverified-app warning, Authorize and Deny visible; no loopback warning`, true);
+    evidence.recordAssertionEvidence("Hosted-app consent warns before authorization", `App "${world.hosted.name}"; return host ${world.hosted.redirectHost} visible; full return address verified as plain text only after expanding Technical details, then collapsed again; unverified-app warning, Authorize and Deny visible; no loopback warning`, true);
     await person.screenshot();
   });
 
@@ -99,7 +113,7 @@ test("a member sees that an app is unverified and can decline MCP access", async
     await person.see({ role: "button", label: `Authorize ${world.loopback.name}` });
     await person.see({ role: "button", label: "Deny" });
     await person.notSee({ text: /OpenWork MCP|Authorize MCP access/ });
-    evidence.recordAssertionEvidence("Loopback consent retains both warnings and a way to decline", `App "${world.loopback.name}"; full return address ${world.loopback.redirectUri} shown as plain text; unverified-app and loopback warnings, Authorize and Deny visible`, true);
+    evidence.recordAssertionEvidence("Loopback consent retains both warnings and a way to decline", `App "${world.loopback.name}"; return host ${world.loopback.redirectHost} visible; full return address verified as plain text only after expanding Technical details, then collapsed again; unverified-app and loopback warnings, Authorize and Deny visible`, true);
     await person.screenshot();
   });
 
@@ -117,7 +131,7 @@ test("a member sees that an app is unverified and can decline MCP access", async
     await person.see({ text: "Allow this app to use" }, { timeoutMs: 60_000 });
     await person.see({ testId: "mcp-unnamed-app-line" });
     await seeUnverifiedWarning(world.unnamed.redirectUri);
-    evidence.recordAssertionEvidence("Unnamed-app consent retains both warnings", `Full return address ${world.unnamed.redirectUri} shown as plain text; unverified-app warning and unnamed-app guidance shown`, true);
+    evidence.recordAssertionEvidence("Unnamed-app consent retains both warnings", `Return host ${world.unnamed.redirectHost} visible; full return address verified as plain text only after expanding Technical details, then collapsed again; unverified-app warning and unnamed-app guidance shown`, true);
     await person.screenshot();
   });
 });
