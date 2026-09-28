@@ -171,7 +171,8 @@ export function LlmProvidersScreen() {
     try {
       setAccessSaving(true);
       await runReauthableAction("save-model-access", async () => {
-        await saveModelAccess(accessState, { mode: accessMode, adminException: adminExceptionChecked, zenAllowed });
+        // The free starter switch only shows in managed mode here, so "Any model" keeps it on.
+        await saveModelAccess(accessState, { mode: accessMode, adminException: adminExceptionChecked, zenAllowed: accessMode === "managed" ? zenAllowed : true });
         await reloadPolicies();
       });
       setAccessSaved("Model access saved.");
@@ -267,7 +268,7 @@ export function LlmProvidersScreen() {
             <DenOptionCard
               type="checkbox"
               testId="models-access-zen"
-              title="Allow OpenCode Zen models"
+              title="Allow the free starter model (Auto and OpenCode Zen)"
               checked={zenAllowed}
               disabled={accessFormDisabled}
               onChange={(checked) => {

@@ -119,6 +119,7 @@ describe("openwork runtime config file", () => {
     await expect(post("/opencode/session/s1/prompt_async", { model: { providerID: "ollama", modelID: "local" } })).rejects.toMatchObject({ code: "organization_model_denied" });
     await expect(post("/opencode2/api/session/s1/message", { model: { providerID: "lpr_team", id: "team" } })).resolves.toBeUndefined();
     await expect(post("/opencode/session/s1/prompt_async", { model: { providerID: "opencode", modelID: "big-pickle" } })).resolves.toBeUndefined();
+    await expect(post("/opencode/session/s1/prompt_async", { model: { providerID: "openwork-free", modelID: "auto" } })).resolves.toBeUndefined();
     await expect(post("/opencode/session/s1/prompt_async", "not json")).resolves.toBeUndefined();
     await expect(policy.assertRequest(new Request("http://localhost/opencode/auth/ollama"), "/opencode/auth/ollama", true)).resolves.toBeUndefined();
     // Adding managed providers (cloud imports) and removing any provider stay allowed; adding a personal one does not.
@@ -146,6 +147,21 @@ describe("openwork runtime config file", () => {
     expect(read).toBe(false);
   });
 
+  for (const managedOnly of [true, false]) test(`the free starter model switch off refuses free Auto and Zen ${managedOnly ? "with" : "without"} only managed providers`, async () => {
+    const { config } = await setup();
+    const den = Bun.serve({ port: 0, fetch: () => Response.json({ allowCustomProviders: !managedOnly, allowZenModel: false }) });
+    cleanups.push(() => den.stop(true));
+    const policy = managedDesktopPolicy(config);
+    await policy.setSession({ baseUrl: `http://127.0.0.1:${den.port}`, token: "test-token", orgId: "test-org" });
+    await policy.current();
+    for (const providerID of ["openwork-free", "opencode"]) {
+      await expect(policy.assert("model", { providerID })).rejects.toMatchObject({ code: "organization_policy_denied" });
+    }
+    await expect(policy.assert("model", { providerID: "ipr_gateway" })).resolves.toBeUndefined();
+    if (!managedOnly) await expect(policy.assert("model", { providerID: "anthropic" })).resolves.toBeUndefined();
+    await policy.clearSession();
+  });
+
   test("a first policy read that fails leaves the desktop fully usable", async () => {
     const { config } = await setup();
     const den = Bun.serve({ port: 0, fetch: () => new Response(null, { status: 503 }) });
@@ -158,14 +174,19 @@ describe("openwork runtime config file", () => {
     await expect(policy.assert("model", { providerID: "ollama" })).resolves.toBeUndefined();
   });
 
-  test("only managed providers lists the managed providers for the engine, with Zen only when allowed", () => {
+  test("only managed providers lists the managed providers for the engine, with free Auto and Zen only when the free starter model is on", () => {
     const provider = { lpr_legacy: {}, ipr_gateway: {}, openwork: {}, personal: {}, opencode: {} };
     expect(buildOpenworkRuntimeConfigObjectFromSnapshot({
       managedPolicy: { allowCustomProviders: false, allowZenModel: false }, provider,
     }).enabled_providers).toEqual(["lpr_legacy", "ipr_gateway", "openwork"]);
     expect(buildOpenworkRuntimeConfigObjectFromSnapshot({
       managedPolicy: { allowCustomProviders: false }, provider,
-    }).enabled_providers).toEqual(["lpr_legacy", "ipr_gateway", "openwork", "opencode"]);
+    }).enabled_providers).toEqual(["lpr_legacy", "ipr_gateway", "openwork", "openwork-free", "opencode"]);
+    // With personal providers allowed, the switch off still disables free Auto and Zen in the engine.
+    const starterOff = buildOpenworkRuntimeConfigObjectFromSnapshot({ managedPolicy: { allowZenModel: false }, provider, disabled_providers: ["anthropic"] });
+    expect(starterOff.enabled_providers).toBeUndefined();
+    expect(starterOff.disabled_providers).toEqual(["anthropic", "openwork-free", "opencode"]);
+    expect(buildOpenworkRuntimeConfigObjectFromSnapshot({ managedPolicy: { allowCustomProviders: false }, provider }).disabled_providers).toBeUndefined();
     expect(buildOpenworkRuntimeConfigObjectFromSnapshot({ managedPolicy: { allowCustomProviders: true }, provider }).enabled_providers).toBeUndefined();
     expect(buildOpenworkRuntimeConfigObjectFromSnapshot({ provider }).enabled_providers).toBeUndefined();
   });

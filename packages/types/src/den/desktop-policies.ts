@@ -13,13 +13,23 @@ import { z } from "zod";
 export const DESKTOP_POLICY_ENFORCEMENT_ENABLED: boolean = false;
 
 /**
- * The two keys that keep "only managed providers" true are enforced again,
- * while every other desktop feature policy stays suspended with the flag
- * above: Airwallex, Brainforce and other enterprise customers rely on it.
+ * The two keys behind "Only models you provide" are enforced again, while
+ * every other desktop feature policy stays suspended with the flag above.
  * Enforcement never blocks startup, sign-in or chat: callers apply the last
  * known policy and allow when none is known (see #5131).
  */
 export const ENFORCED_DESKTOP_POLICY_KEYS = ["allowCustomProviders", "allowZenModel"] as const;
+
+/**
+ * Den's "Free starter model (Auto)" switch is stored as `allowZenModel`. It
+ * covers OpenWork's free Auto and OpenCode Zen, which the free starter model
+ * was before Auto: on allows both, off blocks both.
+ */
+export const FREE_STARTER_PROVIDER_IDS = ["openwork-free", "opencode"] as const;
+
+export function isFreeStarterProvider(providerId: string): boolean {
+  return (FREE_STARTER_PROVIDER_IDS as readonly string[]).includes(providerId.trim().toLowerCase());
+}
 
 export function desktopPolicyKeyEnforced(key: string): boolean {
   return DESKTOP_POLICY_ENFORCEMENT_ENABLED || (ENFORCED_DESKTOP_POLICY_KEYS as readonly string[]).includes(key);

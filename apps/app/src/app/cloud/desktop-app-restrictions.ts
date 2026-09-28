@@ -1,5 +1,6 @@
 import {
   desktopPolicyKeyEnforced,
+  isFreeStarterProvider,
   desktopPolicyUserNotices,
   type DesktopPolicyKey,
 } from "@openwork/types/den/desktop-policies";
@@ -51,7 +52,7 @@ export function isDesktopProviderBlocked(input: {
   const providerId = input.providerId.trim().toLowerCase();
   if (!providerId) return false;
 
-  if (providerId === DESKTOP_RESTRICTION_OPENCODE_PROVIDER_ID) {
+  if (isFreeStarterProvider(providerId)) {
     return input.checkRestriction({ restriction: "allowZenModel" });
   }
 

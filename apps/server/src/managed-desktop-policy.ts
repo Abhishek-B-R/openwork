@@ -1,6 +1,6 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
-import { DESKTOP_POLICY_ENFORCEMENT_ENABLED, desktopConfigSchema, type DesktopConfig } from "@openwork/types/den/desktop-policies-runtime";
+import { DESKTOP_POLICY_ENFORCEMENT_ENABLED, desktopConfigSchema, isFreeStarterProvider, type DesktopConfig } from "@openwork/types/den/desktop-policies-runtime";
 import type { CloudProviderDenSession } from "./cloud-provider-sync.js";
 import type { ServerConfig } from "./types.js";
 import { isRecord } from "./workspace-kv-store.js";
@@ -284,7 +284,7 @@ class ManagedDesktopPolicy {
     const ids = Array.isArray(input.providerIDs) ? input.providerIDs.filter((id): id is string => typeof id === "string")
       : typeof input.providerID === "string" ? [input.providerID] : [];
     for (const id of ids) {
-      if (id.toLowerCase() === "opencode") {
+      if (isFreeStarterProvider(id)) {
         if (policy.allowZenModel === false) throw new ApiError(403, "organization_policy_denied", "Your organization has disabled this AI provider.");
         continue;
       }

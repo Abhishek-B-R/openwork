@@ -1,5 +1,5 @@
 import { legacyExecutionPermissions } from "./managed-policy-rules.js";
-import { DESKTOP_POLICY_ENFORCEMENT_ENABLED, desktopCapabilityConfig } from "@openwork/types/den/desktop-policies-runtime";
+import { DESKTOP_POLICY_ENFORCEMENT_ENABLED, FREE_STARTER_PROVIDER_IDS, desktopCapabilityConfig } from "@openwork/types/den/desktop-policies-runtime";
 import { materializeLegacyFastProviders } from "@openwork/types/cloud-model-fast";
 import { isManagedPolicyPlugin } from "./managed-policy-plugin.js";
 /**
@@ -67,7 +67,12 @@ export function buildOpenworkRuntimeConfigObjectFromSnapshot(
     const { managedPolicy, ...localConfig } = runtimeConfig;
     runtimeConfig = managedPolicy ? { ...localConfig, managedPolicy: desktopCapabilityConfig(managedPolicy) } : localConfig;
   }
-  const disabledProviders = runtimeDisabledProviderList(runtimeConfig);
+  // "Free starter model (Auto)" off blocks free Auto and Zen whether or not personal providers are allowed.
+  const freeStarterAllowed = runtimeConfig.managedPolicy?.allowZenModel !== false;
+  const disabledProviders = [...new Set([
+    ...runtimeDisabledProviderList(runtimeConfig),
+    ...(freeStarterAllowed ? [] : FREE_STARTER_PROVIDER_IDS),
+  ])];
   const permissions = legacyExecutionPermissions(runtimeConfig.managedPolicy?.execution);
   const { managedPolicy: _managedPolicy, ...engineConfig } = runtimeConfig;
   const provider = materializeLegacyFastProviders(runtimeProviderMap(runtimeConfig));
@@ -75,7 +80,7 @@ export function buildOpenworkRuntimeConfigObjectFromSnapshot(
     ...engineConfig,
     ...(runtimeConfig.managedPolicy?.allowCustomProviders === false ? { enabled_providers: [
       ...Object.keys(provider).filter((id) => /^(?:lpr_|ipr_|openwork$)/i.test(id)),
-      ...(runtimeConfig.managedPolicy.allowZenModel !== false ? ["opencode"] : []),
+      ...(freeStarterAllowed ? FREE_STARTER_PROVIDER_IDS : []),
     ] } : {}),
     permission: { ...engineConfig.permission, ...permissions },
     default_agent: runtimeConfig.default_agent ?? "openwork",

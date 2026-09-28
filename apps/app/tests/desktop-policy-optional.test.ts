@@ -48,17 +48,21 @@ test("policy readiness never delays activated desktop egress; activation remains
   } }, { desktopConfigLoading: true })).toBe(true);
 });
 
-test("with only managed providers, adding a personal provider is blocked and the picker keeps managed models; Zen follows allowZenModel", () => {
+test("with only managed providers, adding a personal provider is blocked and the picker keeps managed models; free Auto and Zen follow the free starter switch", () => {
   for (const allowZenModel of [true, false]) {
     const config = { allowCustomProviders: false, allowZenModel };
     const checkRestriction = ({ restriction }: { restriction: Parameters<typeof checkDesktopAppRestriction>[0]["restriction"] }) => checkDesktopAppRestriction({ config, restriction });
     for (const providerId of ["anthropic", "ollama", "personal"]) expect(isProviderAddRestrictedByDesktopPolicy({ providerId, checkRestriction })).toBe(true);
     for (const providerId of ["lpr_team", "ipr_gateway", "openwork"]) expect(isProviderAddRestrictedByDesktopPolicy({ providerId, checkRestriction })).toBe(false);
-    expect(isProviderAddRestrictedByDesktopPolicy({ providerId: "opencode", checkRestriction })).toBe(!allowZenModel);
+    for (const providerId of ["opencode", "openwork-free"]) expect(isProviderAddRestrictedByDesktopPolicy({ providerId, checkRestriction })).toBe(!allowZenModel);
     const options = ["anthropic", "lpr_team", "ipr_gateway", "openwork", "opencode", "openwork-free"].map((providerID) => ({ providerID }));
     expect(filterEntitledModelOptions(options, { restrictToCloud: true, checkRestriction }).map((option) => option.providerID))
-      .toEqual(["lpr_team", "ipr_gateway", "openwork", ...(allowZenModel ? ["opencode"] : [])]);
+      .toEqual(["lpr_team", "ipr_gateway", "openwork", ...(allowZenModel ? ["opencode", "openwork-free"] : [])]);
   }
+  // With personal providers allowed, switching the free starter model off still hides free Auto and Zen.
+  const starterOff = ({ restriction }: { restriction: Parameters<typeof checkDesktopAppRestriction>[0]["restriction"] }) => checkDesktopAppRestriction({ config: { allowZenModel: false }, restriction });
+  expect(filterEntitledModelOptions(["anthropic", "opencode", "openwork-free"].map((providerID) => ({ providerID })), { restrictToCloud: false, checkRestriction: starterOff })
+    .map((option) => option.providerID)).toEqual(["anthropic"]);
   // Organizations without the policy see no change.
   const open = ({ restriction }: { restriction: Parameters<typeof checkDesktopAppRestriction>[0]["restriction"] }) => checkDesktopAppRestriction({ config: {}, restriction });
   expect(isProviderAddRestrictedByDesktopPolicy({ providerId: "anthropic", checkRestriction: open })).toBe(false);

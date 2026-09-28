@@ -109,7 +109,7 @@ export function GatewayWhoCanUseModels() {
                 <Sparkles className="h-4 w-4 shrink-0 text-gray-400" aria-hidden="true" />
                 <span className="min-w-0 flex-1">
                   <span className="block text-[13px] font-medium text-gray-900">Free starter model (Auto)</span>
-                  <span className="block text-[12px] text-gray-500">Members can fall back to OpenWork's free model. Rate-limited.</span>
+                  <span className="block text-[12px] text-gray-500">Members can use OpenWork's free Auto and OpenCode Zen. Rate-limited.</span>
                 </span>
                 <DenSwitch checked={zenAllowed} onChange={setZenAllowed} aria-label="Free starter model" />
               </div>
