@@ -142,9 +142,10 @@ export function NewCoworker({
           </button>
         ) : null}
       </header>
-      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-3 pt-1 sm:p-8 sm:pt-2">
-        {/* m-auto centers the card and still lets it scroll from its top edge on a very short window. */}
-        <div className="creation-card glass-sheen relative m-auto grid min-w-0 w-full max-w-3xl shrink-0 overflow-hidden rounded-[22px] border border-line sm:rounded-[30px] md:min-h-[540px] md:grid-cols-[290px_1fr]" data-glint="surface">
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-3 pt-1 sm:p-8 sm:pt-2 short:p-3 short:pt-0">
+        {/* m-auto centers the card and still lets it scroll from its top edge on a very short window. Its
+            minimum height fits the tallest step (or the window), so moving between steps never changes its size. */}
+        <div className="creation-card glass-sheen relative m-auto grid min-w-0 w-full max-w-3xl shrink-0 overflow-hidden rounded-[22px] border border-line sm:rounded-[30px] md:min-h-[min(660px,calc(100vh-92px))] md:grid-cols-[290px_1fr] short:min-h-[calc(100vh-64px)]" data-glint="surface">
           <div className="avatar-stage flex min-h-[190px] flex-col items-center justify-center border-b border-line p-5 sm:min-h-[300px] sm:p-7 md:border-b-0 md:border-r">
             <OnboardingMascotStack
               variant={{ kind: "coworker", identity: previewIdentity, name: name.trim() || "New coworker", color: avatarColor, glasses: avatarGlasses }}
@@ -157,7 +158,7 @@ export function NewCoworker({
             {role.trim() ? <p className="mt-1 max-w-full truncate text-xs text-mist">{role.trim()}</p> : null}
           </div>
 
-          <div className="flex min-w-0 flex-col p-4 sm:p-6 md:p-7" data-testid={`new-coworker-step-${step}`}>
+          <div className="flex min-w-0 flex-col p-4 sm:p-6 md:p-7 short:p-5" data-testid={`new-coworker-step-${step}`}>
             {step !== "details" ? (
               <>
                 <h1 className="text-2xl font-semibold tracking-[-0.035em] text-snow">Add a coworker</h1>
@@ -165,7 +166,7 @@ export function NewCoworker({
                   {step === "choose" ? "Choose a starting role, or create your own. Every detail is editable." : "Start with a name and a look. You can teach the job in the first assignment."}
                 </p>
                 {step === "choose" ? <>
-                  <label className="mt-4 block text-xs text-mist">
+                  <label className="mt-4 block text-xs text-mist short:mt-3">
                     Suggestions for your work
                     <select className={`${inputClass} mt-1.5 bg-ink`} aria-label="Profession" value={patternId} onChange={(event) => setPatternId(event.target.value)}>
                       <option value="">Any profession</option>
@@ -174,7 +175,7 @@ export function NewCoworker({
                   </label>
                   {workPattern(patternId) ? <p className="mt-2 text-xs leading-relaxed text-mist" data-testid="work-pattern-outcome">{workPattern(patternId)?.outcome}</p> : null}
                   {suggested.length > 0 ? (
-                    <div className="mt-4" data-testid="new-coworker-suggested">
+                    <div className="mt-4 short:mt-3" data-testid="new-coworker-suggested">
                       <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-mist/75">Suggested · tap one to start from it</p>
                       <div className="mt-2 grid min-w-0 gap-2">
                         {suggested.map((item) => (
@@ -190,7 +191,7 @@ export function NewCoworker({
                     </div>
                   ) : null}
                   {team.length > 0 && onAskTeam ? (
-                    <details className="mt-4 rounded-xl border border-line p-3" data-testid="coworker-team-advice">
+                    <details className="mt-4 rounded-xl border border-line p-3 short:mt-3 short:py-2" data-testid="coworker-team-advice">
                       <summary className="cursor-pointer text-xs font-medium text-snow">Ask AI to shape your team</summary>
                       <p className="mt-2 text-xs leading-relaxed text-mist">Describe your work. A coworker can suggest a workflow and a missing teammate; you choose who joins. Uses that coworker's current AI model.</p>
                       <label className="mt-3 block text-xs text-mist">Ask
@@ -273,7 +274,7 @@ export function NewCoworker({
 
             {error ? <div className="mt-4"><ErrorNote>{error}</ErrorNote></div> : null}
 
-            <div className="mt-auto flex items-center justify-between gap-3 pt-6">
+            <div className="mt-auto flex items-center justify-between gap-3 pt-6 short:pt-4">
               {step === "choose" ? (
                 <Button variant="primary" onClick={() => setStep("identity")} data-testid="new-coworker-scratch">Start from scratch</Button>
               ) : step === "identity" ? (

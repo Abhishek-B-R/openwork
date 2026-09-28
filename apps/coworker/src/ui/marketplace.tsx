@@ -90,6 +90,8 @@ export function MarketplaceDialog({ session, team, current, connect, onRepairCon
   const [view, setView] = useState<View>({ kind: "home" });
   const [tab, setTab] = useState<Tab>("coworkers");
   const [query, setQuery] = useState("");
+  /** One category of coworkers at a time, so the gallery fits without scrolling; a search looks across all of them. */
+  const [category, setCategory] = useState<(typeof FEATURED_CATEGORIES)[number]>(FEATURED_CATEGORIES[0]);
   const { catalog, loading, error, refresh } = useConnectorCatalog(session, appsOn);
   const [pending, setPending] = useState<Record<string, string>>({});
   const [adding, setAdding] = useState("");
@@ -220,7 +222,7 @@ export function MarketplaceDialog({ session, team, current, connect, onRepairCon
     const coworkers = FEATURED_COWORKERS.filter((featured) => matchesQuery(search, featured.name, featured.role, featured.tagline, featured.category));
     const apps = CONNECTORS.filter((entry) => matchesQuery(search, entry.name, entry.description, entry.category));
     body = (
-      <div className="view-enter">
+      <div className={`view-enter ${!showingApps && !search && coworkers.length ? "flex h-full flex-col" : ""}`}>
         {addError ? <p role="alert" className="mb-6 text-sm text-rose">{addError}</p> : null}
         {showingApps ? (
           <>
@@ -242,15 +244,16 @@ export function MarketplaceDialog({ session, team, current, connect, onRepairCon
             ) : <p className="py-16 text-center text-sm text-mist">No app matches “{search}”.</p>}
           </>
         ) : coworkers.length ? (
-          <div className="space-y-9">
-            {FEATURED_CATEGORIES.map((category) => {
-              const inCategory = coworkers.filter((featured) => featured.category === category);
+          <div className={search ? "space-y-9" : "min-h-0 flex-1"}>
+            {(search ? FEATURED_CATEGORIES : [category]).map((shown) => {
+              const inCategory = coworkers.filter((featured) => featured.category === shown);
               return inCategory.length ? (
-                <section key={category} aria-label={category} data-testid="marketplace-category">
-                  <h2 className="mb-3 text-sm font-medium text-snow">{category}</h2>
-                  <div className="grid gap-2.5 [grid-template-columns:repeat(auto-fill,minmax(150px,1fr))] sm:gap-3 sm:[grid-template-columns:repeat(auto-fill,minmax(190px,1fr))]">
+                <section key={shown} aria-label={shown} data-testid="marketplace-category" role={search ? undefined : "tabpanel"} id={search ? undefined : `${titleId}-category`} className={search ? undefined : "h-full"}>
+                  {search ? <h2 className="mb-3 text-sm font-medium text-snow">{shown}</h2> : null}
+                  {/* One category fills the window's height with tall character cards; search results stay compact. */}
+                  <div className={`grid gap-2.5 [grid-template-columns:repeat(auto-fill,minmax(150px,1fr))] sm:gap-3 sm:[grid-template-columns:repeat(auto-fill,minmax(190px,1fr))] ${search ? "" : "h-full auto-rows-[minmax(260px,1fr)]"}`}>
                     {inCategory.map((featured) => (
-                      <CoworkerCard key={featured.id} featured={featured} action={addButton(featured)}
+                      <CoworkerCard key={featured.id} featured={featured} tall={!search} action={addButton(featured)}
                         apps={appsOn ? featured.integrations.map((id) => connectorById(id)).filter((entry): entry is MarketplaceConnector => Boolean(entry)) : []}
                         onOpen={() => open({ kind: "coworker", id: featured.id })} />
                     ))}
@@ -300,6 +303,20 @@ export function MarketplaceDialog({ session, team, current, connect, onRepairCon
               <input ref={searchRef} autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search"
                 className="h-8 w-full rounded-lg border border-line bg-transparent pl-8 pr-3 text-[13px] text-snow outline-none placeholder:text-mist/70 focus:border-spark/50" />
             </label>
+            {!showingApps && !search ? (
+              <div role="tablist" aria-label="Kinds of work" className="flex w-full flex-wrap gap-2" data-testid="marketplace-categories">
+                {FEATURED_CATEGORIES.map((value) => {
+                  const selected = category === value;
+                  return (
+                    <button key={value} type="button" role="tab" aria-selected={selected} aria-controls={`${titleId}-category`} onClick={() => { setCategory(value); scrollRef.current?.scrollTo({ top: 0 }); }} data-testid="marketplace-category-tab"
+                      className={`flex h-8 items-center gap-1.5 rounded-full border px-3 text-[13px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-spark/60 ${selected ? "border-spark/50 bg-spark/10 text-snow" : "border-line text-mist hover:bg-white/[0.04] hover:text-snow"}`}>
+                      {value}
+                      <span className="tabular-nums text-mist/80">{FEATURED_COWORKERS.filter((featured) => featured.category === value).length}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            ) : null}
           </div>
         ) : null}
         <div ref={scrollRef} className="relative min-h-0 flex-1 overflow-y-auto px-4 pb-[max(2.5rem,env(safe-area-inset-bottom))] pt-4 sm:px-7">{body}</div>
@@ -323,21 +340,41 @@ export function MarketplaceDialog({ session, team, current, connect, onRepairCon
  * on a backdrop of its own color, then its name, role and one line, the apps
  * it works with when Apps & tools is on, and Add or Open. The card opens its page.
  */
-function CoworkerCard({ featured, action, apps, onOpen }: { featured: FeaturedCoworker; action: ReactNode; apps: MarketplaceConnector[]; onOpen: () => void }) {
+function CoworkerCard({ featured, action, apps, onOpen, tall = false }: { featured: FeaturedCoworker; action: ReactNode; apps: MarketplaceConnector[]; onOpen: () => void; tall?: boolean }) {
   const identity = `marketplace:${featured.id}`;
   return (
     <article data-testid="marketplace-coworker" data-id={featured.id} onPointerEnter={() => acknowledgeCoworker(identity)}
       className="group relative flex flex-col overflow-hidden rounded-xl border border-line bg-white/[0.015] transition-colors hover:border-white/15">
       <button type="button" onClick={onOpen} aria-label={`Meet ${featured.name}`} className="absolute inset-0 z-0 rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-spark/60" />
-      <span className="pointer-events-none relative flex h-24 items-center justify-center" style={{ background: `color-mix(in srgb, ${avatarFill(featured.avatarColor)} 12%, transparent)` }} data-testid="marketplace-coworker-stage">
-        <CoworkerAvatar identity={identity} name={featured.name} color={featured.avatarColor} glasses={featured.avatarGlasses} size={60} motion="playful" />
+      <span className={`pointer-events-none relative flex items-center justify-center ${tall ? "min-h-24 flex-1" : "h-24"}`} style={{ background: `color-mix(in srgb, ${avatarFill(featured.avatarColor)} 12%, transparent)` }} data-testid="marketplace-coworker-stage">
+        <CoworkerAvatar identity={identity} name={featured.name} color={featured.avatarColor} glasses={featured.avatarGlasses} size={tall ? 84 : 60} motion="playful" />
       </span>
-      <span className="pointer-events-none relative flex flex-1 flex-col p-3.5">
-        <span className="flex min-w-0 flex-wrap items-baseline gap-x-2">
+      {/* Tall cards share one text height, so faces and edges line up across the row. */}
+      <span className={`pointer-events-none relative flex flex-col p-3.5 ${tall ? "" : "flex-1"}`}>
+        <span className={`flex min-w-0 items-baseline gap-x-2 ${tall ? "flex-nowrap" : "flex-wrap"}`}>
           <span className="shrink-0 text-[15px] font-medium text-snow">{featured.name}</span>
           <span className="min-w-0 truncate text-xs text-mist">{featured.role}</span>
         </span>
-        <span className="mt-1 line-clamp-2 text-[13px] leading-snug text-mist">{featured.tagline}</span>
+        <span className={`mt-1 line-clamp-2 text-[13px] leading-snug text-mist ${tall ? "min-h-[2lh]" : ""}`}>{featured.tagline}</span>
+        {tall && !featured.routines.length ? (
+          <span className="mt-3 flex min-h-[68px] items-start gap-1.5 text-xs text-mist">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.25" strokeLinejoin="round" className="mt-0.5 size-3 shrink-0" aria-hidden="true"><path d="M2.75 4.25A1.5 1.5 0 0 1 4.25 2.75h7.5a1.5 1.5 0 0 1 1.5 1.5v5a1.5 1.5 0 0 1-1.5 1.5H7l-3 2.5v-2.5h.25a1.5 1.5 0 0 1-1.5-1.5v-5Z" /></svg>
+            Works when you ask
+          </span>
+        ) : null}
+        {tall && featured.routines.length ? (
+          <span className="mt-3 block min-h-[68px] space-y-1" data-testid="marketplace-coworker-routines">
+            {featured.routines.slice(0, 2).map((routine) => (
+              <span key={routine.name} className="flex min-w-0 items-start gap-1.5 text-xs text-mist">
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" className="mt-0.5 size-3 shrink-0" aria-hidden="true"><circle cx="8" cy="8" r="6" /><path d="M8 4.75V8l2 1.5" /></svg>
+                <span className="min-w-0">
+                  <span className="block truncate text-snow/85">{routine.name}</span>
+                  <span className="block truncate">{describeRoutine(routine)}</span>
+                </span>
+              </span>
+            ))}
+          </span>
+        ) : null}
         <span className="mt-auto flex items-center justify-between gap-2 pt-3">
           <span className="flex min-w-0 items-center gap-1.5" aria-label={apps.length ? `Works with ${apps.map((entry) => entry.name).join(", ")}` : undefined}>
             {apps.slice(0, 4).map((entry) => <ConnectorLogo key={entry.id} entry={entry} size={18} />)}

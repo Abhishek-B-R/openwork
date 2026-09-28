@@ -4,6 +4,9 @@
 @source "../../../packages/ui/src/react/coworker-avatar.tsx";
 @source "../../../packages/ui/src/react/coworker-option.tsx";
 
+/* A short window (a small laptop screen, or a window made low): spacing tightens so pages still fit without scrolling. */
+@custom-variant short (@media (max-height: 760px));
+
 @theme {
   --color-ink: #090c12;
   --color-panel: #121822;

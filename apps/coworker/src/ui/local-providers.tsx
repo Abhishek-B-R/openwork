@@ -549,7 +549,7 @@ export function LocalProviders({
   const setupBlocked = setupGuard !== null && !(setupGuard.kind === "confirm" && replacementConfirmed);
 
   return (
-    <div className="space-y-5" data-testid="local-providers" data-loaded={loaded ? "true" : "false"} data-found={found ? "true" : "false"}>
+    <div className="space-y-5 short:space-y-3" data-testid="local-providers" data-loaded={loaded ? "true" : "false"} data-found={found ? "true" : "false"}>
       {offer ? (
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-spark/25 bg-spark/8 px-3 py-2 text-[12px] text-snow" data-testid="model-growth-offer" data-offer-id={offer.id}>
           <span className="min-w-0 flex-[1_1_220px]">{offer.title}</span>

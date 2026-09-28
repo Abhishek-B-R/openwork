@@ -31,8 +31,11 @@ function ModelDefaultRows({ runtime, session, defaults, catalog, catalogLoaded, 
     const preview: ModelChoicePreview = catalogLoaded ? resolveModelPreview(catalog, id, defaults) : { state: "context", detail: "Model availability is unverified. Refresh the catalog to check this choice." };
     return (
       <section key={id} className="min-w-0 rounded-2xl border border-line bg-panel/45 p-4" aria-labelledby={`model-default-${id}`} data-testid={`model-default-${id}`}>
-        <div className="flex items-center gap-2"><h2 id={`model-default-${id}`} className="text-sm font-semibold text-snow">{title}</h2><HelpTip label={title.toLowerCase()} content={help} /></div>
-        <p className="mb-3 mt-1 text-xs text-mist">{description}</p>
+        <div className="mb-2.5 flex flex-wrap items-center gap-x-2 gap-y-0.5">
+          <h2 id={`model-default-${id}`} className="text-sm font-semibold text-snow">{title}</h2>
+          <HelpTip label={title.toLowerCase()} content={help} />
+          <p className="text-xs text-mist">{description}</p>
+        </div>
         <ModelPicker runtime={runtime} session={session} catalog={catalog} catalogLoading={catalogLoading} onRefreshCatalog={onRefreshCatalog} defaultPurpose={id} value={selection.model} modelVariant={selection.modelVariant} compact onChange={(value) => onChange(id, value)} previewLoading={previewLoading} automaticPreview={preview} />
       </section>
     );
@@ -92,27 +95,28 @@ export function AppModelDefaults({ active, runtime, session, catalog, catalogLoa
 
   return (
     <div className="min-w-0 space-y-4" data-testid="app-model-defaults">
-      <p className="text-sm text-mist">Starting models for everyone. Personal choices still win.</p>
       {catalogLoading ? <InlineLoader label="Reading connected models" /> : !catalogLoaded || !catalog.models.length ? (
         <div className="rounded-xl border border-line bg-panel/45 p-3 text-xs leading-relaxed text-mist">
           {catalogLoaded ? "No connected models are listed yet." : "The model catalog is not ready. It needs a coworker workspace and the local AI service."} You can configure Automatic now and choose a specific model once the catalog is ready.
           <button type="button" className="mt-2 block font-medium text-spark hover:underline" onClick={onOpenModels}>Manage AI models</button>
         </div>
       ) : null}
-      <div className="sticky top-0 z-10 space-y-2 rounded-xl border border-line bg-ink/95 p-3">
+      <div className="space-y-2">
         <p className="text-xs text-mist" role="status">{loading ? "Reading model defaults..." : saving ? "Saving model defaults..." : saved ? "Model defaults saved." : defaults ? "Changes save automatically." : "Defaults cannot be edited until saved settings are read."}</p>
         {error ? <div role="alert"><ErrorNote>{error}</ErrorNote></div> : null}
         {!loading && !defaults ? <Button type="button" variant="ghost" onClick={() => setReload((value) => value + 1)}>Retry loading defaults</Button> : null}
       </div>
-      <fieldset disabled={!active || !defaults || loading || saving} aria-busy={loading || saving} aria-label="Model defaults" className="min-w-0 space-y-3 disabled:opacity-70">
+      <fieldset disabled={!active || !defaults || loading || saving} aria-busy={loading || saving} aria-label="Model defaults" className="grid min-w-0 gap-3 disabled:opacity-70 @2xl:grid-cols-2">
         <ModelDefaultRows runtime={runtime} session={session} defaults={defaults ?? DEFAULT_MODEL_DEFAULTS} catalog={catalog} catalogLoaded={Boolean(defaults) && catalogLoaded} catalogLoading={catalogLoading} onRefreshCatalog={onRefreshCatalog} onChange={(purpose, selection) => void choose(purpose, selection)} previewLoading={loading} />
       </fieldset>
-      <details className="text-xs text-mist"><summary className="cursor-pointer">When do changes apply?</summary><p className="mt-1">New helpers use these choices. Existing helpers and scheduled assignments keep theirs.</p></details>
-      <details className="text-xs leading-relaxed text-mist">
-        <summary className="cursor-pointer font-medium text-snow">How Automatic chooses</summary>
-        <p className="mt-2">Automatic applies role-specific rules to connected catalog facts: capabilities, supported effort and known token prices. It does not choose models or providers at random. Catalog facts are not measured speed or proof of paid access; missing facts stay unknown.</p>
-        <p className="mt-2">Choose an explicit model to keep that choice, or inspect its catalog facts in the picker. An empty effort setting means Automatic for that role, not a fixed effort level.</p>
-      </details>
+      <div className="grid items-start gap-3 @lg:grid-cols-2">
+        <details className="text-xs text-mist"><summary className="cursor-pointer">When do changes apply?</summary><p className="mt-1">New helpers use these choices. Existing helpers and scheduled assignments keep theirs.</p></details>
+        <details className="text-xs leading-relaxed text-mist">
+          <summary className="cursor-pointer font-medium text-snow">How Automatic chooses</summary>
+          <p className="mt-2">Automatic applies role-specific rules to connected catalog facts: capabilities, supported effort and known token prices. It does not choose models or providers at random. Catalog facts are not measured speed or proof of paid access; missing facts stay unknown.</p>
+          <p className="mt-2">Choose an explicit model to keep that choice, or inspect its catalog facts in the picker. An empty effort setting means Automatic for that role, not a fixed effort level.</p>
+        </details>
+      </div>
     </div>
   );
 }

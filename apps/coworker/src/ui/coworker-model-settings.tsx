@@ -145,19 +145,22 @@ export function CoworkerModelSettings({ runtime, session, coworker, onCoworkerCh
       {show("model") ? <section data-testid="coworker-model-settings">
         <div className="flex items-center gap-2"><h3 className="text-sm font-semibold text-snow">My conversation model</h3><HelpTip label="conversation model" content={`The AI model ${coworker.name} uses to reply to you. You can use the shared choice or choose one just for ${coworker.name}. Switching back keeps the personal choice saved.`} /></div>
         <p className="mb-3 mt-1 text-xs text-mist" data-testid="coworker-model-note">How {coworker.name} answers your messages.</p>
-        <div className="mb-3 space-y-2 rounded-xl border border-line bg-panel p-3" role="radiogroup" aria-label="Conversation model source">
-          <label className="flex items-start gap-2 text-xs leading-relaxed text-snow">
-            <input className="mt-0.5 shrink-0" type="radio" name={inheritanceId} checked={inheritsConversation} onChange={() => void update({ useAppModelDefaults: true })} />
-            <span>Use the shared model</span>
-          </label>
-          <label className="flex items-start gap-2 text-xs leading-relaxed text-snow">
-            <input className="mt-0.5 shrink-0" type="radio" name={inheritanceId} checked={!inheritsConversation} onChange={() => void update({ useAppModelDefaults: false })} />
-            <span>Choose a model for {coworker.name}</span>
-          </label>
+        {/* The two choices side by side, with the way to the shared models on the same line. */}
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-x-5 gap-y-2 rounded-xl border border-line bg-panel px-3 py-2.5">
+          <div className="flex flex-wrap items-center gap-x-5 gap-y-2" role="radiogroup" aria-label="Conversation model source">
+            <label className="flex items-center gap-2 text-xs text-snow">
+              <input className="shrink-0" type="radio" name={inheritanceId} checked={inheritsConversation} onChange={() => void update({ useAppModelDefaults: true })} />
+              <span>Use the shared model</span>
+            </label>
+            <label className="flex items-center gap-2 text-xs text-snow">
+              <input className="shrink-0" type="radio" name={inheritanceId} checked={!inheritsConversation} onChange={() => void update({ useAppModelDefaults: false })} />
+              <span>Choose a model for {coworker.name}</span>
+            </label>
+          </div>
+          <p className="text-[11px] text-mist">
+            {onOpenModelDefaults ? <button type="button" className="font-medium text-spark hover:underline" onClick={onOpenModelDefaults}>Change shared models</button> : "Change shared models in Settings."}
+          </p>
         </div>
-        <p className="mb-3 text-[11px] leading-relaxed text-mist">
-          {onOpenModelDefaults ? <button type="button" className="font-medium text-spark hover:underline" onClick={onOpenModelDefaults}>Change shared models</button> : "Change shared models in Settings."}
-        </p>
         {inheritsConversation ? (
           <div className="space-y-1 break-words text-xs leading-relaxed text-mist">
             <p className="font-semibold text-snow">{defaults && !defaults.conversation.model ? "Chosen automatically" : "Shared model"}</p>

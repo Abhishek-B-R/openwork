@@ -63,12 +63,22 @@ export function ModelsMembershipCard({ session, baseUrl, onConnect, onRefreshMod
   const subscribed = membership?.subscribed === true;
   const now = Date.now();
   return (
-    <section className="rounded-2xl border border-line bg-panel/45 p-5" data-testid="models-membership" data-state={!session ? "signed-out" : state.kind}>
-      <h3 className="text-sm font-semibold text-snow">OpenWork Models</h3>
-      <p className="mt-1 text-xs leading-5 text-mist">
-        A separate monthly subscription for managed AI models. Keep your coworkers, conversations, and documents as you choose a model for the work.
-      </p>
-      {!session ? <p className="mt-3 text-xs text-mist">Sign in to check your membership, or compare the current models and pricing. Your own providers stay available.</p> : null}
+    <section className="rounded-2xl border border-line bg-panel/45 px-5 py-4" data-testid="models-membership" data-state={!session ? "signed-out" : state.kind}>
+      {/* What it is on the left, what to do on the right: one band instead of a tall card. */}
+      <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
+        <div className="min-w-0 flex-1 basis-80">
+          <h3 className="text-sm font-semibold text-snow">OpenWork Models</h3>
+          <p className="mt-1 text-xs leading-5 text-mist">
+            A separate monthly subscription for managed AI models. {session ? "Keep your coworkers, conversations, and documents as you choose a model for the work." : "Sign in to check your membership, or compare the current models and pricing. Your own providers stay available."}
+          </p>
+        </div>
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
+          <Button variant="primary" data-testid="models-membership-open" onClick={() => void open(subscribed && membership.enabled && membership.upstreamProviderConfigured ? "billing" : "models")}>
+            {subscribed ? (membership.enabled && membership.upstreamProviderConfigured ? "Manage membership" : "Finish Models setup") : "View models & pricing"}
+          </Button>
+          {session ? <Button variant="ghost" disabled={refreshing} onClick={() => void refresh()}>{refreshing ? "Refreshing…" : "Refresh membership & models"}</Button> : <Button variant="ghost" onClick={onConnect}>Sign in</Button>}
+        </div>
+      </div>
       {session && state.kind === "loading" ? <p className="mt-3 text-xs text-mist" role="status">Checking membership…</p> : null}
       {session && state.kind === "admin" ? <p className="mt-3 text-xs text-mist">Your workspace admin manages the membership and shared usage. Models already available to you can still be used here.</p> : null}
       {session && state.kind === "unavailable" ? <p className="mt-3 text-xs text-mist">Membership status is unavailable. Check in OpenWork or refresh; this does not mean you need another subscription.</p> : null}
@@ -87,12 +97,6 @@ export function ModelsMembershipCard({ session, baseUrl, onConnect, onRefreshMod
           }) : null}
         </div>
       ) : null}
-      <div className="mt-4 flex flex-wrap items-center gap-2">
-        <Button variant="primary" data-testid="models-membership-open" onClick={() => void open(subscribed && membership.enabled && membership.upstreamProviderConfigured ? "billing" : "models")}>
-          {subscribed ? (membership.enabled && membership.upstreamProviderConfigured ? "Manage membership" : "Finish Models setup") : "View models & pricing"}
-        </Button>
-        {session ? <Button variant="ghost" disabled={refreshing} onClick={() => void refresh()}>{refreshing ? "Refreshing…" : "Refresh membership & models"}</Button> : <Button variant="ghost" onClick={onConnect}>Sign in</Button>}
-      </div>
       {session ? <p className="mt-2 text-[11px] leading-5 text-mist">In the browser, check that {session.orgName || "your workspace"} is selected. After subscribing, return here, refresh, and choose your model.</p> : null}
       {error ? <div className="mt-3"><ErrorNote>{error}</ErrorNote></div> : null}
     </section>
