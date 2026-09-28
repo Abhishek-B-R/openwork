@@ -132,6 +132,20 @@ describe("openwork runtime config file", () => {
     await expect(policy.assert("model", { providerID: "ipr_gateway" })).resolves.toBeUndefined();
   });
 
+  test("without a restrictive policy, sends are never read or held", async () => {
+    const { config } = await setup();
+    const den = Bun.serve({ port: 0, fetch: () => Response.json({ allowCustomProviders: true }) });
+    cleanups.push(() => den.stop(true));
+    const policy = managedDesktopPolicy(config);
+    await policy.setSession({ baseUrl: `http://127.0.0.1:${den.port}`, token: "test-token", orgId: "test-org" });
+    await policy.current();
+    let read = false;
+    const body = new ReadableStream({ pull(controller) { read = true; controller.close(); } }, { highWaterMark: 0 });
+    const send = new Request("http://localhost/opencode/session/s1/prompt_async", { method: "POST", body, duplex: "half" } as RequestInit);
+    await expect(policy.assertRequest(send, "/opencode/session/s1/prompt_async", true)).resolves.toBeUndefined();
+    expect(read).toBe(false);
+  });
+
   test("a first policy read that fails leaves the desktop fully usable", async () => {
     const { config } = await setup();
     const den = Bun.serve({ port: 0, fetch: () => new Response(null, { status: 503 }) });

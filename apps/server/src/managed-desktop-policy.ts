@@ -255,6 +255,9 @@ class ManagedDesktopPolicy {
    */
   private async assertProviderUse(request: Request, path: string, engine: boolean): Promise<void> {
     if (!engine || ["GET", "HEAD", "OPTIONS"].includes(request.method)) return;
+    // Without a known restrictive policy there is nothing to check, so sends are never read or delayed.
+    const policy = this.knownPolicy();
+    if (!policy || (policy.allowCustomProviders !== false && policy.allowZenModel !== false)) return;
     const enginePath = decodeURIComponent(path).replace(/^\/opencode2?/, "").replace(/^\/api/, "");
     const providerID = enginePath.match(/^\/auth\/([^/]+)(?:\/|$)/)?.[1]
       ?? enginePath.match(/^\/provider\/([^/]+)\/oauth\/(?:authorize|callback)$/)?.[1];
