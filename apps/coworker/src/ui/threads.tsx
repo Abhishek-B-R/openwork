@@ -65,7 +65,8 @@ import { carryVariant, chooseFallbackModel, describeModelChoice, markAutoPicked,
 import { usesAppConversationDefault, type ModelDefaults } from "@/lib/model-defaults";
 import { describeReview, parseWorkerReview, parseWorkerTurn, workerNameFromTitle, type WorkerReview, type WorkerSummary } from "@/lib/workers";
 import { WorkerDecisionCards } from "@/ui/worker-decision";
-import { WorkersPanel } from "@/ui/workers";
+import { WorkerTray, useWorkerFeed } from "@/ui/worker-tray";
+import { WorkerLinksContext, useWorkerLinks } from "@/ui/worker-links";
 import { useFeatures } from "@/ui/use-features";
 import { coworkerToolName } from "@/lib/coworker-tools";
 import { EXECUTION_KINDS, executionMetadata, executionState, safeWorkLabel, summarizeWorkerReceipt } from "@/lib/work-receipt";
@@ -124,6 +125,7 @@ import { ChatReply } from "@/ui/chat-reply";
 import { MessageReactions, useMessageReactions } from "@/ui/message-reactions";
 import { ReplyReferences } from "@/ui/reply-references";
 import { linkDocumentMentions, type DocumentReference } from "@/lib/message-references";
+import { linkWorkerMentions } from "@/lib/workers";
 import { DocumentCard } from "@/ui/documents";
 import { documentCardsFromCalls, isDocumentTool, shouldFoldReply, splitReplyLead, type DocumentCardData } from "@/lib/documents";
 import { connectCardsFromCalls, type ConnectCardData } from "@/lib/connect-cards";
@@ -1233,6 +1235,10 @@ function ThreadView({
 }) {
   const transcriptCacheKey = `${runtime.serverUrl}:${coworker.workspaceId}:${coworker.slug}:${coworker.createdAt}:${threadId}`;
   const [cachedTranscript] = useState(() => recentTranscript(transcriptCacheKey));
+  // The conversation's Workers, read once for its tray and for the Worker names its replies link.
+  const workerFeed = useWorkerFeed(coworker, threadId, { enabled: kind === "discussion" && browserEligible });
+  const [openWorkerId, setOpenWorkerId] = useState("");
+  const workerLinks = useMemo(() => ({ workers: workerFeed.workers ?? [], open: setOpenWorkerId }), [workerFeed.workers]);
   // Entrances belong to what arrives after the conversation first paints: a message
   // already on screen when it loads, or handed over from a new discussion, stays still.
   const [settled, setSettled] = useState(false);
@@ -2602,6 +2608,7 @@ function ThreadView({
           {activityOpenError ? <p role="alert" className="text-xs text-amber">{activityOpenError}</p> : null}
           {!transcriptLoaded && !readErrors.transcript ? <p role="status" className="text-xs text-mist">Loading conversation...</p> : null}
           {freshDiscussion ? <QuietEmptyConversation coworker={coworker} proposerName={team?.coworkers.find((member) => member.slug === coworker.suggestedBy?.slug)?.name ?? ""} /> : null}
+          <WorkerLinksContext.Provider value={workerLinks}>
           <TranscriptAppContext.Provider value={{ sessionId: threadId, engine: "v2", readOnly: !active || kind !== "discussion" }}>
           <ConversationWindow items={blocks} {...conversationWindow} render={(block) => {
             const retriedWith = block.kind === "message" ? executionsByMessage.get(block.message.id)?.retryLabel : undefined;
@@ -2678,6 +2685,7 @@ function ThreadView({
             );
           }} />
           </TranscriptAppContext.Provider>
+          </WorkerLinksContext.Provider>
           <CollaborationReceipts receipts={collaborationReceipts} />
           <InteractionCards
             coworker={coworker}
@@ -2752,12 +2760,12 @@ function ThreadView({
       {kind !== "worker" && turnState.next.length > 0 ? (
         <NextRows items={turnState.next} onEdit={editQueued} onRemove={(id) => commitTurnState((state) => removeQueued(state, id))} onSendNow={(id) => void sendQueuedNow(id)} />
       ) : null}
-      {kind === "discussion" && browserEligible ? <WorkersPanel coworker={coworker} threadId={threadId} compact onOpenComputer={computerUse ? () => setComputerOpenRequest((value) => value + 1) : undefined} onOpenBrowser={() => setBrowserOpenRequest((value) => value + 1)} /> : null}
       {kind === "discussion" ? (
         <div ref={setControlStatusSlot} className="shrink-0 space-y-2 px-5 pt-2 empty:hidden" data-testid="coworker-control-status" />
       ) : null}
       {kind === "discussion" ? (
         <DiscussionComposer
+          tray={browserEligible ? <WorkerTray coworker={coworker} feed={workerFeed} openWorkerId={openWorkerId} onOpenWorker={setOpenWorkerId} onCloseWorker={() => setOpenWorkerId("")} onOpenWorkersView={onOpenSummary ? () => { setOpenWorkerId(""); onOpenSummary("workers"); } : undefined} /> : null}
           skills={draft.skills}
           onRemoveSkill={(index) => setDraft((draft) => ({ ...draft, skills: draft.skills.filter((_, position) => position !== index) }))}
           voice={voice}
@@ -3175,7 +3183,11 @@ function ReplyText({ message, active, turnCalls, tail, onLongReply, documents }:
   const [open, setOpen] = useState(false);
   const long = !active && shouldFoldReply(message.text, turnCalls);
   // A document the reply names by id or title opens in place from its name.
-  const text = useMemo(() => documents?.list.length ? linkDocumentMentions(message.text, documents.list) : message.text, [documents?.list, message.text]);
+  const workerLinks = useWorkerLinks();
+  const text = useMemo(() => {
+    const withDocuments = documents?.list.length ? linkDocumentMentions(message.text, documents.list) : message.text;
+    return workerLinks?.workers.length ? linkWorkerMentions(withDocuments, workerLinks.workers) : withDocuments;
+  }, [documents?.list, message.text, workerLinks?.workers]);
   const onOpenDocument = documents?.onOpenDocument;
   const split = useMemo(() => long ? splitReplyLead(text) : null, [long, text]);
   useEffect(() => {
@@ -3583,6 +3595,7 @@ function ArtifactIcon({ kind }: { kind: CoworkerArtifactKind }) {
 }
 
 function DiscussionComposer({
+  tray = null,
   skills = [],
   onRemoveSkill,
   voice,
@@ -3641,6 +3654,8 @@ function DiscussionComposer({
   onEffortChange?: (stop: EffortStop) => void;
   /** The conversation is scrolled to its end, where the quiet line under it may show. */
   atBottom?: boolean;
+  /** On the composer's top edge, in its column: the coworker's Workers in this discussion. */
+  tray?: ReactNode;
 }) {
   // Recurring work needs Calendar; without it the starting points stay with one-off work.
   const { calendar: calendarEnabled } = useFeatures();
@@ -3663,6 +3678,7 @@ function DiscussionComposer({
             Something {coworkerName} should own, separate from this chat
           </p>
         ) : null}
+        {tray}
         <div className={`glass-sheen @container relative rounded-[24px] border bg-panel/55 p-3 shadow-[0_8px_32px_rgb(0_0_0/0.35)] backdrop-blur-xl backdrop-saturate-150 transition-colors focus-within:border-spark/50 ${assignmentMode ? "border-spark/35" : "border-line"}`} data-testid="coworker-input-surface" data-glint="surface" data-super={superKey.active ? "true" : "false"}>
           <SuperKeyStrip pace={Boolean(effortStop && onEffortChange)} />
           <SuperKeyHint />

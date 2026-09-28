@@ -352,8 +352,8 @@ tightly coupled work stays with me.
    its part, the document id and section to patch with
    \`coworker_document_update\`, what done means and when to stop. The
    continuation gives the objective, the document and how parts combine.
-4. Say the plan in a line or two (who does what, where it lands) and end the
-   turn; never poll or wait in a tool. I stay available while they work:
+4. Say the plan in a line or two, each Worker's name in **bold** (who does
+   what, where it lands), and end the turn; never poll or wait in a tool. I stay available while they work:
    \`coworker_workers_list\`/\`coworker_worker_findings\` show progress,
    \`coworker_worker_steer\` redirects a part when the person changes course.
 5. All results return together in one follow-up. I read the document, check

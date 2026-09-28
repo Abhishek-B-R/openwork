@@ -362,3 +362,28 @@ export function parseWorkerDecision(text: string): WorkerDecision {
   if (options.length < 2) return { question: text.trim(), options: [] };
   return { question: question.join(" ").trim(), options };
 }
+
+const escapePattern = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/**
+ * The reply with each Worker it names turned into a worker: link, so the
+ * name opens that Worker in place: its name in bold (how the coworker is
+ * asked to name them), or its id in code. Like documents, never bare words.
+ */
+export function linkWorkerMentions(text: string, workers: ReadonlyArray<Pick<WorkerSummary, "id" | "name">>): string {
+  let linked = text;
+  for (const worker of workers) {
+    const name = worker.name.trim();
+    const link = `[${name.replace(/[[\]]/g, "")}](worker:${worker.id})`;
+    linked = linked.replace(new RegExp(`\`${escapePattern(worker.id)}\``, "g"), link);
+    if (name.length >= 2) linked = linked.replace(new RegExp(`\\*\\*${escapePattern(name)}\\*\\*`, "gi"), link);
+  }
+  return linked;
+}
+
+/** How a Worker link shows its Worker: at work, needing the person, done, or ended otherwise. */
+export function workerLinkState(worker: Pick<WorkerSummary, "status" | "waitingFor" | "control">): "working" | "attention" | "done" | "ended" {
+  if (isLiveWorker(worker) && (worker.control?.state === "needs-approval" || (worker.status === "waiting" && worker.waitingFor === "decision"))) return "attention";
+  if (isLiveWorker(worker)) return "working";
+  return worker.status === "finished" ? "done" : "ended";
+}

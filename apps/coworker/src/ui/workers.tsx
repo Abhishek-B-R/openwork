@@ -1,4 +1,4 @@
-import { useEffect, useEffectEvent, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { coworkerBridge, type CoworkerSummary } from "@/lib/bridge";
 import { relativeTime } from "@/lib/activity-summary";
 import { workerTurnsFor } from "@/lib/effort";
@@ -9,186 +9,56 @@ import {
   lifespanFromChoice,
   workerTone,
   type LifespanChoice,
-  type WorkerEvent,
   type WorkerSummary,
   type WorkerPurpose,
 } from "@/lib/workers";
 import { Button, ErrorNote, inputClass } from "@/ui/kit";
 import { WorkerDetail } from "@/ui/worker-detail";
+import { useWorkerFeed, type WorkerNote } from "@/ui/worker-tray";
 
 type WorkersPanelProps = {
   coworker: CoworkerSummary;
   threadId?: string;
-  compact?: boolean;
   onOpenThread?: (threadId: string) => void;
   onOpenComputer?: () => void;
   onOpenBrowser?: () => void;
 };
 
-/** The shelf and Activity share controls, but never borrow another discussion's tasks. */
+/** The Workers view in the panel; never borrows another discussion's tasks. Beside the chat, `WorkerTray` shows the same feed. */
 export function WorkersPanel({ coworker, threadId = coworker.conversationThreadId, ...props }: WorkersPanelProps) {
   return <WorkerList key={`${coworker.slug}:${threadId}`} coworker={coworker} threadId={threadId} {...props} />;
 }
 
-/** Finished Workers stay beside the chat this long, so the outcome is seen instead of the row vanishing. */
-const RECENTLY_ENDED_MS = 10 * 60_000;
-
-/** What a Worker last said about its work: its latest finding, or for one that ended, how it ended. */
-type WorkerNote = { key: string; text: string; at: number; kind: "finding" | "decision" | "done" | "status" };
-
-function noteKey(worker: WorkerSummary): string {
-  return `${worker.status}:${worker.lastFindingAt ?? 0}:${worker.updatedAt}`;
-}
-
-function latestNote(events: readonly WorkerEvent[], worker: WorkerSummary): Omit<WorkerNote, "key"> | null {
-  const finding = [...events].reverse().find((event) => event.kind === "finding" && event.text.trim());
-  if (finding) return { text: finding.text.trim(), at: finding.at, kind: finding.report === "decision" ? "decision" : finding.report === "done" ? "done" : "finding" };
-  if (isLiveWorker(worker)) return null;
-  const status = [...events].reverse().find((event) => event.kind === "status" && event.text.trim());
-  // The row already says how it ended; the note keeps only the why.
-  const why = status?.text.trim().replace(/^(?:Didn't finish|Done|Stopped|Finished)[:.]\s*/i, "") ?? "";
-  return status && why ? { text: why, at: status.at, kind: "status" } : null;
-}
-
-function recentlyEnded(worker: WorkerSummary, now: number): boolean {
-  return !isLiveWorker(worker) && worker.endedAt !== null && now - worker.endedAt < RECENTLY_ENDED_MS;
-}
-
-function WorkerList({ coworker, threadId, compact = false, onOpenThread, onOpenComputer, onOpenBrowser }: WorkersPanelProps & { threadId: string }) {
-  const [workers, setWorkers] = useState<WorkerSummary[] | null>(null);
-  const [notes, setNotes] = useState<Record<string, WorkerNote>>({});
+/** Every Worker of one discussion, in the Workers view: what each is doing, and each opens to steer, approve or stop it. */
+function WorkerList({ coworker, threadId, onOpenThread, onOpenComputer, onOpenBrowser }: WorkersPanelProps & { threadId: string }) {
+  const feed = useWorkerFeed(coworker, threadId, { everyNote: true });
   const [expandedId, setExpandedId] = useState("");
   const [creating, setCreating] = useState(false);
-  // Beside the chat the shelf starts as a small pill; the full Workers view is always in the panel.
-  const [open, setOpen] = useState(!compact);
-  const [error, setError] = useState("");
-  const [now, setNow] = useState(() => Date.now());
-  const request = useRef(0);
-  const reading = useRef(false);
-  const noteKeys = useRef(new Map<string, string>());
-  const live = (workers ?? []).some(isLiveWorker);
-
-  // Only the Workers on show say what they last did; each is read again only when it changed.
-  async function readNotes(shown: readonly WorkerSummary[], version: number) {
-    for (const worker of shown) {
-      const key = noteKey(worker);
-      if (noteKeys.current.get(worker.id) === key) continue;
-      try {
-        const events = await coworkerBridge.workers.findings(coworker.slug, worker.id, 8);
-        if (version !== request.current) return;
-        noteKeys.current.set(worker.id, key);
-        const note = latestNote(events, worker);
-        setNotes((current) => {
-          const next = { ...current };
-          if (note) next[worker.id] = { key, ...note };
-          else delete next[worker.id];
-          return next;
-        });
-      } catch {
-        // The row keeps its status line; the note returns with the next read.
-      }
-    }
-  }
-
-  async function refresh(): Promise<void> {
-    if (reading.current) return;
-    reading.current = true;
-    const version = ++request.current;
-    try {
-      const items = await coworkerBridge.workers.list(coworker.slug);
-      if (version !== request.current) return;
-      const mine = items.filter((worker) => worker.slug === coworker.slug && worker.spawnedFromThreadId === threadId);
-      setWorkers(mine);
-      setNow(Date.now());
-      setError("");
-      const at = Date.now();
-      await readNotes(mine.filter((worker) => isLiveWorker(worker) || recentlyEnded(worker, at) || !compact), version);
-    } catch (cause) {
-      if (version === request.current) setError(`Task updates unavailable. Last known tasks are kept. ${cause instanceof Error ? cause.message : String(cause)}`);
-    } finally { reading.current = false; }
-  }
-  const readLatest = useEffectEvent(refresh);
-  useEffect(() => {
-    void readLatest();
-    const timer = window.setInterval(() => void readLatest(), live ? 2_000 : 6_000);
-    return () => {
-      request.current += 1;
-      window.clearInterval(timer);
-    };
-  }, [live]);
-
-  function changed(worker: WorkerSummary) {
-    if (worker.slug !== coworker.slug || worker.spawnedFromThreadId !== threadId) return;
-    // A list read begun before a confirmed action must not overwrite that action.
-    request.current += 1;
-    setWorkers((current) => current?.some((item) => item.id === worker.id) ? current.map((item) => item.id === worker.id ? worker : item) : [worker, ...(current ?? [])]);
-  }
-
-  const all = workers ?? [];
-  // Beside the chat: work under way, and what just ended, for a few minutes. Everything stays in the Workers view.
-  const items = compact ? all.filter((worker) => isLiveWorker(worker) || recentlyEnded(worker, now)) : all;
-  const liveItems = items.filter(isLiveWorker);
-  const needsApproval = liveItems.filter((worker) => worker.control?.state === "needs-approval").length;
-  const deciding = liveItems.filter((worker) => worker.status === "waiting" && worker.waitingFor === "decision").length;
-  const approvalOpened = useRef(false);
-  useEffect(() => {
-    if (!compact) return;
-    if (needsApproval > 0 && !approvalOpened.current) { approvalOpened.current = true; setOpen(true); }
-    if (needsApproval === 0) approvalOpened.current = false;
-  }, [compact, needsApproval]);
-  if (compact && items.length === 0 && !error && !creating) return null;
-
-  // The newest thing any of them said, for the pill.
-  const freshest = items
-    .map((worker) => ({ worker, note: notes[worker.id] }))
-    .filter((entry): entry is { worker: WorkerSummary; note: WorkerNote } => Boolean(entry.note))
-    .sort((a, b) => b.note.at - a.note.at)[0];
-  const headline = shelfHeadline(items, liveItems.length, deciding, needsApproval);
-
-  if (compact && !open && !creating) return (
-    <div className="mx-5 mt-2 flex min-w-0" data-testid="coworker-worker-shelf" data-origin-thread={threadId} data-open="false">
-      <button type="button" aria-expanded={false} onClick={() => setOpen(true)} data-testid="coworker-worker-shelf-toggle"
-        className="inline-flex min-w-0 max-w-full items-center gap-2 rounded-full border border-line bg-panel/60 py-1 pl-2 pr-3 text-xs text-snow backdrop-blur-xl transition-colors hover:bg-panel focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-spark/50">
-        <span className="flex shrink-0 -space-x-1" aria-hidden="true">
-          {items.slice(0, 3).map((worker) => <WorkerMark key={worker.id} worker={worker} size="small" />)}
-        </span>
-        <span className="shrink-0 font-medium">{headline}</span>
-        {freshest ? <span className="min-w-0 truncate text-mist" data-testid="coworker-worker-shelf-latest">· {freshest.worker.name}: {freshest.note.text}</span> : null}
-        <span aria-hidden="true" className="shrink-0 text-mist">▸</span>
-      </button>
-    </div>
-  );
+  const items = feed.workers ?? [];
 
   return (
-    <div className={compact ? "mx-5 mt-2 flex max-h-[34dvh] min-h-0 shrink flex-col rounded-2xl border border-line bg-panel/70 px-3 pb-1 pt-1 backdrop-blur-xl" : "flex min-h-full flex-col gap-5"} data-testid={compact ? "coworker-worker-shelf" : "coworker-workers"} data-origin-thread={threadId} data-open={compact ? "true" : undefined}>
-      <section className={compact ? "flex min-h-0 flex-col" : ""} aria-label={compact ? `${coworker.name}'s Workers beside this conversation` : "Workers in this discussion"}>
-        <div className="mb-0.5 flex shrink-0 items-center justify-between gap-2 px-1">
-          {compact ? <button type="button" className="flex min-w-0 items-baseline gap-2 py-2 text-left focus-visible:outline-spark" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
-            <span className="shrink-0 text-xs font-semibold text-snow">{coworker.name}'s Workers</span>
-            <span className="truncate text-[11px] text-mist">{headline}</span>
-          </button> : <h3 className="text-[11px] font-semibold text-mist">Workers in this discussion</h3>}
-          <div className="flex shrink-0 items-center gap-1">
-            {!creating ? (
-              <Button variant="ghost" className="shrink-0 px-2 text-xs" onClick={() => { setCreating(true); setOpen(true); }} data-testid="new-worker-button">New Worker</Button>
-            ) : null}
-            {compact ? <Button variant="ghost" className="shrink-0 px-2 text-xs text-mist" onClick={() => setOpen(false)} data-testid="coworker-worker-shelf-minimize">Minimize</Button> : null}
-          </div>
+    <div className="flex min-h-full flex-col gap-5" data-testid="coworker-workers" data-origin-thread={threadId}>
+      <section aria-label="Workers in this discussion">
+        <div className="mb-1 flex shrink-0 items-center justify-between px-1">
+          <h3 className="text-[11px] font-semibold text-mist">Workers in this discussion</h3>
+          {!creating ? (
+            <Button variant="ghost" className="shrink-0 px-2 text-xs" onClick={() => setCreating(true)} data-testid="new-worker-button">New Worker</Button>
+          ) : null}
         </div>
-        {error ? <div className="mb-2"><p role="alert" className="text-xs text-amber">{error}</p><Button variant="ghost" className="text-xs" onClick={() => void refresh()}>Check tasks</Button></div> : null}
-        <div hidden={!open} className={compact ? "min-h-0 overflow-y-auto overscroll-contain" : ""}>
+        {feed.error ? <div className="mb-2"><p role="alert" className="text-xs text-amber">{feed.error}</p><Button variant="ghost" className="text-xs" onClick={() => void feed.refresh()}>Check tasks</Button></div> : null}
         {creating ? (
           <NewWorker
             coworker={coworker}
             threadId={threadId}
             onCancel={() => setCreating(false)}
             onCreated={async (worker) => {
-              changed(worker);
+              feed.changed(worker);
               setCreating(false);
               setExpandedId(worker.id);
             }}
           />
         ) : null}
-        {workers !== null && items.length === 0 && !creating ? (
+        {feed.workers !== null && items.length === 0 && !creating ? (
           <p className="px-1 py-2 text-xs leading-relaxed text-mist" data-testid="workers-empty">
             No Workers in this discussion. Ask {coworker.name} to delegate a task, or start one here.
           </p>
@@ -199,10 +69,10 @@ function WorkerList({ coworker, threadId, compact = false, onOpenThread, onOpenC
               const expanded = expandedId === worker.id;
               return (
                 <li key={worker.id} className={`overflow-hidden rounded-xl border transition-colors ${expanded ? "border-white/12 bg-white/[0.04]" : "border-transparent"}`} data-testid="worker-row" data-status={worker.status} data-expanded={expanded ? "true" : "false"}>
-                  <WorkerRow worker={worker} note={notes[worker.id] ?? null} now={now} expanded={expanded} detailed={!compact} onToggle={() => setExpandedId(expanded ? "" : worker.id)} />
+                  <WorkerRow worker={worker} note={feed.notes[worker.id] ?? null} now={feed.now} expanded={expanded} detailed onToggle={() => setExpandedId(expanded ? "" : worker.id)} />
                   {expanded ? (
                     <div className="px-2 pb-2">
-                      <WorkerDetail key={worker.id} coworker={coworker} initialWorker={worker} onChanged={changed} onOpenThread={onOpenThread} onOpenComputer={onOpenComputer} onOpenBrowser={onOpenBrowser} />
+                      <WorkerDetail key={worker.id} coworker={coworker} initialWorker={worker} onChanged={feed.changed} onOpenThread={onOpenThread} onOpenComputer={onOpenComputer} onOpenBrowser={onOpenBrowser} />
                     </div>
                   ) : null}
                 </li>
@@ -210,24 +80,9 @@ function WorkerList({ coworker, threadId, compact = false, onOpenThread, onOpenC
             })}
           </ul>
         ) : null}
-        </div>
       </section>
     </div>
   );
-}
-
-/** The shelf's one line: what needs the person first, then how many are at it and how many just ended. */
-function shelfHeadline(items: readonly WorkerSummary[], live: number, deciding: number, needsApproval: number): string {
-  const parts: string[] = [];
-  if (needsApproval > 0) parts.push(needsApproval === 1 ? "1 needs your approval" : `${needsApproval} need your approval`);
-  if (deciding > 0) parts.push(deciding === 1 ? "1 needs a decision" : `${deciding} need a decision`);
-  const working = live - needsApproval - deciding;
-  if (working > 0) parts.push(parts.length ? `${working} working` : working === 1 ? "1 Worker working" : `${working} Workers working`);
-  const done = items.filter((worker) => worker.status === "finished").length;
-  const unfinished = items.length - live - done;
-  if (done > 0) parts.push(parts.length ? `${done} done` : done === 1 ? "1 Worker done" : `${done} Workers done`);
-  if (unfinished > 0) parts.push(parts.length ? `${unfinished} didn't finish` : unfinished === 1 ? "1 Worker didn't finish" : `${unfinished} Workers didn't finish`);
-  return parts.join(" · ");
 }
 
 /** "just now", "3m ago", "2h ago". */

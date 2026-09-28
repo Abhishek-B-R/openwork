@@ -1,8 +1,10 @@
 import DOMPurify from "dompurify";
 import { Marked } from "marked";
-import { useCallback, useMemo, useState, type MouseEvent, type ReactNode } from "react";
+import { useCallback, useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { coworkerBridge } from "@/lib/bridge";
 import { renderDocument, type DocumentBlock, type DocumentTocEntry } from "@/lib/document-markdown";
+import { workerLinkState } from "@/lib/workers";
+import { useWorkerLinks, type WorkerLinks } from "@/ui/worker-links";
 
 /**
  * Coworker replies are Markdown. They are rendered through `marked` (GFM,
@@ -18,26 +20,38 @@ export function renderMarkdown(text: string): string {
     USE_PROFILES: { html: true },
     FORBID_TAGS: ["style", "img", "svg", "math", "iframe", "form", "input", "button"],
     FORBID_ATTR: ["style", "onerror", "onload"],
-    // doc: links name one of the coworker's documents and open it in place.
-    ALLOWED_URI_REGEXP: /^(?:https?:|mailto:|doc:)/i,
+    // doc: links name one of the coworker's documents and worker: links one of its Workers; both open in place.
+    ALLOWED_URI_REGEXP: /^(?:https?:|mailto:|doc:|worker:)/i,
   });
 }
 
-function openLink(event: MouseEvent<HTMLDivElement>, onOpenDocument?: (documentId: string) => void): void {
+function openLink(event: MouseEvent<HTMLDivElement>, onOpenDocument?: (documentId: string) => void, workerLinks?: WorkerLinks | null): void {
   const target = event.target instanceof Element ? event.target.closest("a") : null;
   if (!target) return;
   event.preventDefault();
   const href = target.getAttribute("href") ?? "";
   if (href.startsWith("doc:")) onOpenDocument?.(href.slice(4));
+  else if (href.startsWith("worker:")) workerLinks?.open(href.slice(7));
   else if (/^https?:\/\//i.test(href)) void coworkerBridge.openUntrustedExternal(href);
 }
 
 export function Markdown({ text, className = "", onOpenDocument }: { text: string; className?: string; onOpenDocument?: (documentId: string) => void }) {
   const html = useMemo(() => renderMarkdown(text), [text]);
+  const workerLinks = useWorkerLinks();
+  const ref = useRef<HTMLDivElement>(null);
+  // A Worker's link carries its state, so its mark works, waits for the person, or shows it done.
+  useLayoutEffect(() => {
+    if (!ref.current) return;
+    for (const anchor of ref.current.querySelectorAll<HTMLAnchorElement>('a[href^="worker:"]')) {
+      const worker = workerLinks?.workers.find((item) => item.id === anchor.getAttribute("href")?.slice(7));
+      anchor.dataset.workerState = worker ? workerLinkState(worker) : "ended";
+    }
+  }, [html, workerLinks]);
   return (
     <div
+      ref={ref}
       className={`coworker-markdown text-sm leading-relaxed text-snow ${className}`}
-      onClick={(event) => openLink(event, onOpenDocument)}
+      onClick={(event) => openLink(event, onOpenDocument, workerLinks)}
       // Sanitized above; DOMPurify's default profile keeps only safe HTML.
       dangerouslySetInnerHTML={{ __html: html }}
     />
