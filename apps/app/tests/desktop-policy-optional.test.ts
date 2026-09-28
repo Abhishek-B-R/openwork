@@ -1,13 +1,13 @@
 import { expect, test } from "bun:test";
-import { ENFORCED_DESKTOP_POLICY_KEYS, desktopCapabilityConfig, desktopPolicyKeys, normalizeDesktopConfig, restrictedDesktopPolicyValue } from "@openwork/types/den/desktop-policies";
+import { MODEL_ACCESS_POLICY_KEYS, desktopCapabilityConfig, desktopPolicyKeys, normalizeDesktopConfig, restrictedDesktopPolicyValue } from "@openwork/types/den/desktop-policies";
 import { checkDesktopAppRestriction } from "../src/app/cloud/desktop-app-restrictions";
 import { filterEntitledModelOptions, isProviderAddRestrictedByDesktopPolicy } from "../src/react-app/domains/connections/provider-auth/provider-policy";
 import { outboundEgressAllowed } from "../src/app/lib/enterprise-activation";
 import type { DesktopDistributionInfo } from "../src/app/lib/desktop";
 
-const enforced = new Set<string>(ENFORCED_DESKTOP_POLICY_KEYS);
+const enforced = new Set<string>(MODEL_ACCESS_POLICY_KEYS);
 
-test("only managed providers is enforced; every other desktop flag stays advisory, and absent config restricts nothing", () => {
+test("model access is enforced; every other desktop flag stays advisory, and absent config restricts nothing", () => {
   expect([...enforced].sort()).toEqual(["allowCustomProviders", "allowZenModel"]);
   for (const config of [null, undefined, {}]) {
     for (const restriction of desktopPolicyKeys) expect(checkDesktopAppRestriction({ config, restriction })).toBe(false);
@@ -48,7 +48,7 @@ test("policy readiness never delays activated desktop egress; activation remains
   } }, { desktopConfigLoading: true })).toBe(true);
 });
 
-test("with only managed providers, adding a personal provider is blocked and the picker keeps managed models; free Auto and Zen follow the free starter switch", () => {
+test("with \"Only models you provide\", adding a personal provider is blocked and the picker keeps managed models; free Auto and Zen follow the free starter switch", () => {
   for (const allowZenModel of [true, false]) {
     const config = { allowCustomProviders: false, allowZenModel };
     const checkRestriction = ({ restriction }: { restriction: Parameters<typeof checkDesktopAppRestriction>[0]["restriction"] }) => checkDesktopAppRestriction({ config, restriction });

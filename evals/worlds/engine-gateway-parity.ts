@@ -16,7 +16,7 @@ function string(value: unknown): string {
 }
 
 /** Real Den + Gateway + MySQL. Only the upstream model response is synthetic. */
-export async function engineGatewayParity(seed: Seed, context: { place: Place }, options: { managedOnly?: boolean } = {}) {
+export async function engineGatewayParity(seed: Seed, context: { place: Place }, options: { onlyProvidedModels?: boolean } = {}) {
   await using setup = new AsyncDisposableStack();
   const port = await allocateFreePort();
   const gatewayUrl = `http://127.0.0.1:${port}`;
@@ -27,14 +27,14 @@ export async function engineGatewayParity(seed: Seed, context: { place: Place },
     GATEWAY_ENABLED: "true", GATEWAY_PROXY_BASE_URL: gatewayUrl, GATEWAY_PUBLIC_BASE_URL: gatewayUrl,
     GATEWAY_EGRESS_ALLOWED_ORIGINS: new URL(mock.url).origin,
   }, org: { name: "Engine parity", members: { member: { name: "Parity Member" } } } });
-  if (options.managedOnly) {
-    // "Only managed providers", with Zen off, before the member signs in.
+  if (options.onlyProvidedModels) {
+    // Model access "Only models you provide", free starter model off, saved as the AI Gateway dialog does, before the member signs in.
     const stored = await readDefaultDesktopPolicy(seed, den.admin);
     const policy = { ...(parityRecord(stored.policy ?? {})), allowCustomProviders: false, allowZenModel: false };
     const updated = await seed.api(den.admin, `/v1/desktop-policies/${String(stored.id)}`, {
       method: "PATCH", body: JSON.stringify({ policyName: stored.policyName, policy }),
     });
-    if (!updated.response.ok) throw new Error(`Setting the only-managed-providers policy failed: ${updated.response.status}`);
+    if (!updated.response.ok) throw new Error(`Saving model access failed: ${updated.response.status}`);
   }
   const base = setup.use(await engineParity(seed, context, { mock, env: {
     OPENWORK_DEV_HEADLESS_WEB_DEN_PROXY: "1", OPENWORK_DEV_DEN_PROXY_TARGET: den.ref.webUrl,
@@ -162,7 +162,7 @@ export async function engineGatewayParity(seed: Seed, context: { place: Place },
   };
 }
 
-/** The same real Gateway world, for an organization that allows only its managed providers. */
-export function engineGatewayManagedOnly(seed: Seed, context: { place: Place }) {
-  return engineGatewayParity(seed, context, { managedOnly: true });
+/** The same real Gateway world, for an organization whose model access is "Only models you provide". */
+export function engineGatewayModelAccess(seed: Seed, context: { place: Place }) {
+  return engineGatewayParity(seed, context, { onlyProvidedModels: true });
 }

@@ -68,7 +68,7 @@ describe("openwork runtime config file", () => {
     expect(OPENWORK_AGENT_PROMPT).toContain("context.features.connectionQuestions === true");
   });
 
-  test("a verified only-managed-providers policy limits the engine while signed in; signing out lifts it; execution stays suspended", async () => {
+  test("a verified \"Only models you provide\" setting limits the engine while signed in; signing out lifts it; execution stays suspended", async () => {
     const { config } = await setup();
     const provider = { ollama: { models: { "local-model": { name: "Local model" } } }, lpr_team: { models: { team: { name: "Team" } } } };
     await writeGlobalRuntimeOpencodeConfig(config, (current) => ({ ...current, provider }));
@@ -104,7 +104,7 @@ describe("openwork runtime config file", () => {
     expect(signedOut.provider).toEqual(provider);
   });
 
-  test("only managed providers is enforced on engine sign-in and sends, keeps the last verified policy when Den drops, and never parses non-JSON bodies", async () => {
+  test("model access is enforced on engine sign-in and sends, keeps the last verified policy when Den drops, and never parses non-JSON bodies", async () => {
     const { config } = await setup();
     let down = false;
     const den = Bun.serve({ port: 0, fetch: () => down ? new Response(null, { status: 503 }) : Response.json({ allowCustomProviders: false, allowZenModel: true }) });
@@ -147,9 +147,9 @@ describe("openwork runtime config file", () => {
     expect(read).toBe(false);
   });
 
-  for (const managedOnly of [true, false]) test(`the free starter model switch off refuses free Auto and Zen ${managedOnly ? "with" : "without"} only managed providers`, async () => {
+  for (const onlyProvidedModels of [true, false]) test(`the free starter model switch off refuses free Auto and Zen ${onlyProvidedModels ? "with" : "without"} \"Only models you provide\"`, async () => {
     const { config } = await setup();
-    const den = Bun.serve({ port: 0, fetch: () => Response.json({ allowCustomProviders: !managedOnly, allowZenModel: false }) });
+    const den = Bun.serve({ port: 0, fetch: () => Response.json({ allowCustomProviders: !onlyProvidedModels, allowZenModel: false }) });
     cleanups.push(() => den.stop(true));
     const policy = managedDesktopPolicy(config);
     await policy.setSession({ baseUrl: `http://127.0.0.1:${den.port}`, token: "test-token", orgId: "test-org" });
@@ -158,7 +158,7 @@ describe("openwork runtime config file", () => {
       await expect(policy.assert("model", { providerID })).rejects.toMatchObject({ code: "organization_policy_denied" });
     }
     await expect(policy.assert("model", { providerID: "ipr_gateway" })).resolves.toBeUndefined();
-    if (!managedOnly) await expect(policy.assert("model", { providerID: "anthropic" })).resolves.toBeUndefined();
+    if (!onlyProvidedModels) await expect(policy.assert("model", { providerID: "anthropic" })).resolves.toBeUndefined();
     await policy.clearSession();
   });
 
@@ -174,7 +174,7 @@ describe("openwork runtime config file", () => {
     await expect(policy.assert("model", { providerID: "ollama" })).resolves.toBeUndefined();
   });
 
-  test("only managed providers lists the managed providers for the engine, with free Auto and Zen only when the free starter model is on", () => {
+  test("\"Only models you provide\" lists the organization's providers for the engine, with free Auto and Zen only when the free starter model is on", () => {
     const provider = { lpr_legacy: {}, ipr_gateway: {}, openwork: {}, personal: {}, opencode: {} };
     expect(buildOpenworkRuntimeConfigObjectFromSnapshot({
       managedPolicy: { allowCustomProviders: false, allowZenModel: false }, provider,

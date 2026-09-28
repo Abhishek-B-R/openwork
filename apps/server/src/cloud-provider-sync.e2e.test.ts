@@ -1803,7 +1803,7 @@ describe("cloud provider sync gateway", () => {
     expect((await deliverIdentity()).status).toBe(204);
     await Bun.sleep(80);
     expect(await runSync(base, "identity-is-not-ready")).toEqual({ status: "no_session" });
-    // Installing an identity reads only the desktop policy ("only managed providers" is enforced); it does not
+    // Installing an identity reads only the desktop policy (model access is enforced); it does not
     // start provider sync, and a policy that restricts nothing leaves the engine and its config untouched.
     expect(denRequests.every((request) => request.path === "/v1/me/desktop-config")).toBe(true);
     expect((await readGlobalRuntimeOpencodeConfig(config)).managedPolicy).toBeUndefined();

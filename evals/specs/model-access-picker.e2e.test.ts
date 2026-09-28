@@ -1,10 +1,10 @@
 import { spec } from "@openwork/testkit";
 import { expect } from "vitest";
-import { modelPickerManagedOnly } from "../worlds/chat.ts";
+import { modelAccessPicker } from "../worlds/chat.ts";
 
-const test = spec.world(modelPickerManagedOnly, { timeout: 420_000 });
+const test = spec.world(modelAccessPicker, { timeout: 420_000 });
 
-test("with only managed providers, the member's picker lists the organization's model and not their own key", async ({ world, user, probe, step, evidence }) => {
+test("with \"Only models you provide\", the member's picker lists the organization's model and not their own key", async ({ world, user, probe, step, evidence }) => {
   const key = (model: { providerID: string; modelID: string }) => `${model.providerID}:${model.modelID}`;
   const count = async (selector: string) => (await probe.dom(selector)).elements.length;
 
@@ -22,8 +22,8 @@ test("with only managed providers, the member's picker lists the organization's 
     };
   };
 
-  await step("before: the organization's default desktop policy allows only managed providers, and no Zen", async () => {
-    evidence.recordAssertionEvidence("desktop policy", JSON.stringify({ allowCustomProviders: world.policy.allowCustomProviders, allowZenModel: world.policy.allowZenModel }), world.policy.allowCustomProviders === false);
+  await step("before: the AI Gateway's model access is \"Only models you provide\", with the free starter model off", async () => {
+    evidence.recordAssertionEvidence("model access", JSON.stringify({ allowCustomProviders: world.policy.allowCustomProviders, allowZenModel: world.policy.allowZenModel }), world.policy.allowCustomProviders === false);
     await user.see({ role: "button", label: "Change model" }, { timeoutMs: 120_000 });
   });
 
@@ -36,7 +36,7 @@ test("with only managed providers, the member's picker lists the organization's 
       return { list: await count('input[placeholder="Search models..."]') };
     }, { within: 60_000, label: "model list opens", until: (state) => state.list > 0 });
     const listed = await probe.eventually(rows, {
-      within: 90_000, label: "managed-only picker", until: (state) => state.open && state.organization > 0 && state.personal === 0 && state.zen === 0,
+      within: 90_000, label: "model access picker", until: (state) => state.open && state.organization > 0 && state.personal === 0 && state.zen === 0,
     });
     evidence.recordAssertionEvidence("picker rows", JSON.stringify(listed), listed.organization > 0 && listed.personal === 0);
     expect(listed.organization).toBeGreaterThan(0);

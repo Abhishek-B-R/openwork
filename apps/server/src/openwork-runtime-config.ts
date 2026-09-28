@@ -62,7 +62,7 @@ export function buildOpenworkRuntimeConfigObjectFromSnapshot(
   runtimeConfig: RuntimeOpencodeConfig,
 ): Record<string, unknown> {
   if (!DESKTOP_POLICY_ENFORCEMENT_ENABLED) {
-    // Only "only managed providers" is enforced: keep its two keys from the verified policy
+    // Only model access (the AI Gateway's "Who can use models") is enforced: keep its two keys from the verified policy
     // (cleared on sign-out) and drop execution rules and every other desktop policy.
     const { managedPolicy, ...localConfig } = runtimeConfig;
     runtimeConfig = managedPolicy ? { ...localConfig, managedPolicy: desktopCapabilityConfig(managedPolicy) } : localConfig;

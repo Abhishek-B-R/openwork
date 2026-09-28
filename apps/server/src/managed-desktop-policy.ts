@@ -89,7 +89,7 @@ class ManagedDesktopPolicy {
       this.installed = undefined;
     }
     this.session = session;
-    // Installing an identity never waits on Den while only "only managed providers" is enforced.
+    // Installing an identity never waits on Den while only model access is enforced.
     if (DESKTOP_POLICY_ENFORCEMENT_ENABLED) await this.current();
     else void this.current().catch(() => undefined);
   }
@@ -178,16 +178,16 @@ class ManagedDesktopPolicy {
       if (error instanceof ApiError && error.code === "policy_identity_changed") throw error;
       if (!DESKTOP_POLICY_ENFORCEMENT_ENABLED) {
         // Never block on Den: keep the last policy verified for this sign-in, or none.
-        console.warn("[openwork:managed-policy] Den unreachable; using the last known policy");
+        console.warn("[openwork:model-access] Den unreachable; using the last known model access");
         return this.lastKnown?.key === sessionKey(session) ? this.lastKnown.policy : null;
       }
       throw new ApiError(403, "policy_unavailable", "Your organization's policy could not be verified. Try again when connected.");
     }
     if (generation !== this.generation) throw new ApiError(409, "policy_identity_changed", "The signed-in account changed. Retry the action.");
-    // While only "only managed providers" is enforced, cache a policy only when it restricts providers, so
+    // While only model access is enforced, cache a policy only when it restricts models, so
     // organizations without it keep exactly the engine config and reload behaviour they had.
-    const restrictsProviders = policy.allowCustomProviders === false || policy.allowZenModel === false;
-    const result = DESKTOP_POLICY_ENFORCEMENT_ENABLED || restrictsProviders
+    const restrictsModelAccess = policy.allowCustomProviders === false || policy.allowZenModel === false;
+    const result = DESKTOP_POLICY_ENFORCEMENT_ENABLED || restrictsModelAccess
       ? await writeManagedDesktopPolicy(this.config, policy)
       : await clearManagedDesktopPolicy(this.config);
     if (generation !== this.generation) throw new ApiError(409, "policy_identity_changed", "The signed-in account changed. Retry the action.");
@@ -249,7 +249,7 @@ class ManagedDesktopPolicy {
     if ("providerID" in model) await assert("model", model);
   }
   /**
-   * While the rest of desktop policy is suspended, only "only managed providers" is enforced, on the two engine
+   * While the rest of desktop policy is suspended, only model access (the AI Gateway's "Who can use models") is enforced, on the two engine
    * requests that can reach a personal provider: signing in to one and sending with one of its models. Bodies that
    * are not JSON are left alone, and nothing here waits on Den.
    */
@@ -277,7 +277,7 @@ class ManagedDesktopPolicy {
     if (!this.fetching) void this.current().catch(() => undefined);
     return this.lastKnown?.key === sessionKey(session) ? this.lastKnown.policy : null;
   }
-  private assertManagedProviders(action: ManagedPolicyAction, input: Record<string, unknown>): void {
+  private assertModelAccess(action: ManagedPolicyAction, input: Record<string, unknown>): void {
     if (action !== "provider" && action !== "model") return;
     const policy = this.knownPolicy();
     if (!policy || (policy.allowCustomProviders !== false && policy.allowZenModel !== false)) return;
@@ -296,7 +296,7 @@ class ManagedDesktopPolicy {
     }
   }
   async assert(action: ManagedPolicyAction, input: Record<string, unknown> = {}): Promise<void> {
-    if (!DESKTOP_POLICY_ENFORCEMENT_ENABLED) return this.assertManagedProviders(action, input);
+    if (!DESKTOP_POLICY_ENFORCEMENT_ENABLED) return this.assertModelAccess(action, input);
     const generation = this.generation;
     const policy = await this.installedPolicy(generation);
     this.identityChanged(generation);

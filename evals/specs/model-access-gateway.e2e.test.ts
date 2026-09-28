@@ -1,15 +1,15 @@
 import { expect } from "vitest";
 import { resolveEvalEngine, spec } from "@openwork/testkit";
-import { engineGatewayManagedOnly } from "../worlds/engine-gateway-parity.ts";
+import { engineGatewayModelAccess } from "../worlds/engine-gateway-parity.ts";
 
-const test = spec.world(engineGatewayManagedOnly, {
+const test = spec.world(engineGatewayModelAccess, {
   timeout: 600_000, resources: { surfaces: ["appWeb"], services: ["den", "mock"] },
   needs: { placement: "local", env: ["OPENWORK_EVAL_ENGINE"] },
 });
 
-test(`GATEWAY-MANAGED-ONLY ${resolveEvalEngine()}: with only managed providers, a member still uses the organization's Gateway model`, async ({ world, user, probe, step, evidence }) => {
+test(`MODEL-ACCESS-GATEWAY ${resolveEvalEngine()}: with "Only models you provide", a member still uses the organization's Gateway model`, async ({ world, user, probe, step, evidence }) => {
   await user.see("composer", { editable: true });
-  const providerId = await step("An administrator publishes a Gateway provider for an organization that allows only managed providers", () => world.publish());
+  const providerId = await step("An administrator publishes a Gateway provider for an organization whose model access is \"Only models you provide\"", () => world.publish());
   if (world.engine === "v1") await step("Apply the legacy v1 engine reload and refresh the app", () => world.refreshLegacyCatalog());
   const model = (await world.inventory()).find((entry) => entry.upstreamModelId === world.models[0]);
   if (!model) throw new Error(`Missing assigned model ${world.models[0]}`);
@@ -41,6 +41,6 @@ test(`GATEWAY-MANAGED-ONLY ${resolveEvalEngine()}: with only managed providers, 
   const calls = await world.mock.agentRequests({ promptMarker: prompt });
   expect(calls.filter((call) => call.kind === "final")).toHaveLength(1);
   expect(calls.every((call) => call.model === model.upstreamModelId)).toBe(true);
-  evidence.recordAssertionEvidence("Managed-only Gateway send", `Provider ${providerId} stayed available under only managed providers, and the answer came back through the real Gateway.`, true);
+  evidence.recordAssertionEvidence("Gateway send under model access", `Provider ${providerId} stayed available under "Only models you provide", and the answer came back through the real Gateway.`, true);
   await user.screenshot();
 });

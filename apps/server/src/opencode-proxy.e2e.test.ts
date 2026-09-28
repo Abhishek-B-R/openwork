@@ -414,7 +414,7 @@ describe("workspace OpenCode proxy", () => {
     });
     expect(identity.status).toBe(204);
     // Identity installation does not wait on Den; the only Den call is the background policy read
-    // ("only managed providers" is enforced), which must settle before the prompts below.
+    // (model access is enforced), which must settle before the prompts below.
     const settle = Date.now() + 2_000;
     while (!denRequests.length && Date.now() < settle) await new Promise((resolve) => setTimeout(resolve, 20));
     await new Promise((resolve) => setTimeout(resolve, 50));

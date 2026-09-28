@@ -641,10 +641,10 @@ export async function modelPicker(seed: Seed) {
 
 /**
  * A member's desktop with one organization-managed provider (assigned in Den) and one personal provider added
- * on the device, after which the organization's default desktop policy switches to "only managed providers"
+ * on the device, after which an admin picks "Only models you provide" in the AI Gateway's "Who can use models"
  * (allowCustomProviders off, allowZenModel off).
  */
-export async function modelPickerManagedOnly(seed: Seed) {
+export async function modelAccessPicker(seed: Seed) {
   const mock = seed.mock({});
   const den = await seed.den({ mocks: { agent: mock } });
   const witness = den.mocks.agent;
@@ -664,8 +664,8 @@ export async function modelPickerManagedOnly(seed: Seed) {
   const provider = isRecord(created.body) && isRecord(created.body.llmProvider) ? created.body.llmProvider : null;
   const organizationProviderId = provider && typeof provider.id === "string" ? provider.id : null;
   if (created.response.status !== 201 || !organizationProviderId) throw new Error(`Organization provider setup failed: HTTP ${created.response.status}`);
-  const app = await seed.desktop({ name: "model-picker-managed-only", den, as: "admin" });
-  const workspace = await seed.workspace(app, seed.tmpPath("model-picker-managed-only"), { create: true });
+  const app = await seed.desktop({ name: "model-access-picker", den, as: "admin" });
+  const workspace = await seed.workspace(app, seed.tmpPath("model-access-picker"), { create: true });
   const personal = { providerID: "personal-byok", modelID: "byok-model" };
   // A key the member added on this device before the policy existed. The org's model stays the default.
   const added = await seed.evalIn(app, browserScript(async (workspaceId, opencodeJson) => {
@@ -683,14 +683,15 @@ export async function modelPickerManagedOnly(seed: Seed) {
       options: { baseURL: `${witness.url}/v1`, apiKey: "sk-personal" }, models: { [personal.modelID]: { name: "Personal witness" } } },
   } })]), { awaitPromise: true });
   if (added !== "ok") throw new Error(`Adding the personal provider failed: ${String(added)}`);
+  // Saved the way the AI Gateway dialog saves it: "Only models you provide", free starter model off.
   const stored = await readDefaultDesktopPolicy(seed, den.admin);
   const policy = { ...(isRecord(stored.policy) ? stored.policy : {}), allowCustomProviders: false, allowZenModel: false };
   const updated = await seed.api(den.admin, `/v1/desktop-policies/${String(stored.id)}`, {
     method: "PATCH", body: JSON.stringify({ policyName: stored.policyName, policy }), signal: AbortSignal.timeout(30_000),
   });
-  if (!updated.response.ok) throw new Error(`Setting the only-managed-providers policy failed: HTTP ${updated.response.status}`);
+  if (!updated.response.ok) throw new Error(`Saving model access failed: HTTP ${updated.response.status}`);
   await seed.evalIn(app, () => { location.reload(); return true; });
-  const session = await seedSessionRetry(seed, app, { title: "Only managed providers" });
+  const session = await seedSessionRetry(seed, app, { title: "Only models you provide" });
   return { app, den, workspace, session, policy, personal, organization: { providerID: organizationProviderId, modelID: "organization-model" } };
 }
 

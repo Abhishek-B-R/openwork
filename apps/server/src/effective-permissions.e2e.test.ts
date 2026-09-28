@@ -146,7 +146,7 @@ describe("effective permissions route", () => {
     });
     expect(allowedSettings.status).toBe(200);
     // Suspended keys (control settings, execution) never block, online or offline. The only Den call is the one
-    // background policy read that "only managed providers" enforcement makes.
+    // background policy read that model access enforcement makes.
     expect(policyReads).toBeLessThanOrEqual(1);
   });
 });
