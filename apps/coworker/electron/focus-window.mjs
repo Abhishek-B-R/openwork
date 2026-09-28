@@ -1,8 +1,9 @@
 /**
  * Focus mode on a desktop: the window becomes a small conversation window
  * docked at the right edge of its display, like a phone propped beside your
- * work. On macOS the close, minimize and zoom buttons step aside too (⌘W and
- * ⌘M still work). Leaving Focus mode puts the window and its buttons back.
+ * work. It stays above other windows and cannot be minimized or made full
+ * screen; on macOS the close, minimize and zoom buttons step aside too (⌘W
+ * still closes it). Leaving Focus mode puts the window and its buttons back.
  */
 
 const FOCUS_WIDTH = 420;
@@ -56,9 +57,16 @@ export function createFocusWindow(screen) {
         if (window.isMaximized()) window.unmaximize();
         if (mac) window.setWindowButtonVisibility(false);
         window.setBounds(focusWindowBounds(screen.getDisplayMatching(window.getBounds()).workArea), mac);
+        // Always in view beside your work: above other windows, never tucked into the Dock or a full-screen space.
+        window.setAlwaysOnTop(true, "floating");
+        window.setMinimizable(false);
+        window.setFullScreenable(false);
         return { docked: true, controlsHidden: mac };
       }
       if (mac) window.setWindowButtonVisibility(true);
+      window.setAlwaysOnTop(false);
+      window.setMinimizable(true);
+      window.setFullScreenable(true);
       if (!saved) return { docked: false, controlsHidden: false };
       const { bounds, maximized, fullScreen } = saved;
       saved = null;
