@@ -852,12 +852,13 @@ function GroupChatView({
                 <span className="sr-only">{stopAllLabel}</span>
               </IconButton>
             ) : null}
-            {documentsApi ? (
+            {/* Focus mode keeps the top to the way back and the way out; only Stop appears, while replies run. */}
+            {documentsApi && !layout.focus ? (
               <IconButton label="Shared documents" tooltipSide="bottom" onClick={() => sharedDocumentSuspended && sharedDocument ? setSharedDocumentSuspended(false) : openSharedDocument("")} data-testid="group-shared-documents">
                 <DocumentsIcon />
               </IconButton>
             ) : null}
-            {!event && !group.eventId ? <ActionMenu
+            {!event && !group.eventId && !layout.focus ? <ActionMenu
               label="Group chat options"
               items={[
                 { label: "Rename", onSelect: () => { setNameDraft(group.name); setRenaming(true); } },

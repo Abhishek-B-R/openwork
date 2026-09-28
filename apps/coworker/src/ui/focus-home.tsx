@@ -126,7 +126,7 @@ export function FocusHome({
       working: (groupActiveSlugs[group.id]?.length ?? 0) > 0,
       selected: group.id === selectedGroupId,
       search: `${group.name} ${members.map((member) => member.name).join(" ")} ${preview}`.toLowerCase(),
-      face: <GroupAvatars members={members} size={20} motion="navigation" activeSlugs={groupActiveSlugs[group.id]} />,
+      face: <GroupAvatars members={members} size={24} motion="navigation" activeSlugs={groupActiveSlugs[group.id]} />,
       open: () => onSelectGroup(group.id),
     });
   }

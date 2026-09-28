@@ -130,7 +130,7 @@ export function NewCoworker({
 
   return (
     <div className="window-shell flex h-full min-w-0 flex-1 flex-col" data-testid="new-coworker">
-      <header className="window-drag flex h-[52px] shrink-0 items-center px-4 pl-20">
+      <header className="window-controls-inset-sm window-drag flex h-[52px] shrink-0 items-center px-4">
         {onCancel ? (
           <button
             type="button"
