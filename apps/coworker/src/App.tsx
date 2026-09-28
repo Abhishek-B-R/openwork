@@ -900,7 +900,7 @@ export default function App() {
   /** In Focus mode the team is a list of conversations covering the window; otherwise, in a narrow window, a drawer. */
   const drawerOpen = layout.teamOpen && !layout.focus;
   /**
-   * The super key (⌘⇧): quick actions over the team and its conversations. It
+   * The super key (⌥⌘): quick actions over the team and its conversations. It
    * rests in settings, Customize and while a coworker or group is being made,
    * and steps aside for any open dialog. Focus mode is the shell's own; the
    * team list and the pace dial take their actions themselves.

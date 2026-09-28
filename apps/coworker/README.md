@@ -1169,10 +1169,10 @@ value the person picked (`lib/effort.ts`). The person turns a five-stop
 **effort dial** — Light · Steady · Balanced · Thorough · All in — from a pill at
 the foot of the conversation (`ui/effort-dial.tsx`: the stop's name and the
 slider at the popover's foot; *What this means* opens above them, easing the
-popover taller, so the slider never moves under the pointer). Holding ⌘⇧
-(Ctrl+Shift elsewhere) while writing peeks at the dial, ← → move it a stop per
-press, and letting go puts it away; a quick ⌘⇧← still selects text in the
-message. It is also in *How hard to work* in Coworker settings; the stop is kept in `coworker.md`
+popover taller, so the slider never moves under the pointer). Holding the
+super key, ⌥⌘ (Ctrl+Shift elsewhere), turns the pill into the slider in place;
+← → move it a stop per press, at once, even while writing, and letting go puts
+it away. It is also in *How hard to work* in Coworker settings; the stop is kept in `coworker.md`
 (`effortPreference`, Balanced when unsaid). Each kind of work has a baseline
 effort (a quick reply low · a reply medium · deep work, a Worker turn, and an
 assignment run high · a review medium · the facilitator minimal, always), the

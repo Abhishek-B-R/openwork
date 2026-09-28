@@ -1,10 +1,6 @@
 import { ChevronIcon, FocusIcon, IconButton, SidebarIcon } from "@/ui/kit";
 import { useLayout } from "@/ui/use-layout";
-import { SuperKeyCap, useSuperKey } from "@/ui/use-super-key";
-
-function shortcut(): string {
-  return typeof document !== "undefined" && document.documentElement.dataset.windowPlatform === "darwin" ? "⌘⇧F" : "Ctrl+Shift+F";
-}
+import { SuperKeyCap, superKeyLabel, superKeyShortcut, useSuperKey } from "@/ui/use-super-key";
 
 /**
  * While only the conversation shows, the way back to the team. In Focus mode it
@@ -45,7 +41,7 @@ export function FocusToggle() {
   const label = layout.focus ? "Leave Focus mode" : "Focus mode";
   return (
     <span className="relative inline-flex">
-      <IconButton label={label} tooltip={`${label} · ${shortcut()}`} tooltipSide="bottom" className="window-no-drag" aria-pressed={layout.focus} aria-keyshortcuts={shortcut() === "⌘⇧F" ? "Meta+Shift+F" : "Control+Shift+F"} onClick={layout.toggleFocus} data-testid="focus-mode-toggle">
+      <IconButton label={label} tooltip={`${label} · ${superKeyLabel()}F`} tooltipSide="bottom" className="window-no-drag" aria-pressed={layout.focus} aria-keyshortcuts={superKeyShortcut("F")} onClick={layout.toggleFocus} data-testid="focus-mode-toggle">
         <FocusIcon active={layout.focus} />
       </IconButton>
       {/* While the super key is down, the key that toggles it sits on the button itself. */}

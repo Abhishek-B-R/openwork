@@ -1,13 +1,18 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 
 /**
- * The super key: ⌘⇧ on a Mac, Ctrl+Shift elsewhere. Holding it shows what it
+ * The super key: ⌥⌘ on a Mac, Ctrl+Shift elsewhere. Holding it shows what it
  * can do, right where it happens: a number beside each coworker, a few keys in
  * the composer, the thinking pace in place of its pill. While it is held a key
  * acts at once: a number opens that coworker, ↑ ↓ step through the team, ← →
- * set the pace, F toggles Focus mode. A quick tap keeps it open for one plain
- * key instead, which also reaches the numbers macOS keeps for screenshots
- * (⌘⇧3, 4 and 5 never reach an app).
+ * set the pace, F toggles Focus mode.
+ *
+ * ⌥⌘ because nothing else wants those keys with it: macOS keeps ⇧⌘3, 4 and 5
+ * for screenshots, text fields select with ⇧⌘, ⌃⇧ and ⌥⇧ arrows, and window
+ * managers such as Magnet take ⌃⌥. With ⌥⌘ a text field binds only Space, so
+ * every number reaches the app and nothing needs to wait. macOS does keep a
+ * few ⌥⌘ keys (D, H, M, W, Esc, Space, F5; I opens the developer tools), so
+ * the layer never uses those.
  */
 
 export type SuperAction =
@@ -17,15 +22,13 @@ export type SuperAction =
   | { kind: "focus" };
 
 export type SuperKey = {
-  /** The layer shows: held past a moment, or kept open by a tap. */
+  /** The layer shows: the super key has been held past a moment, or has just acted. */
   active: boolean;
-  /** Kept open by a tap: plain keys act until one ends it, Escape, a click or another key. */
-  latched: boolean;
   /** The key that just acted, for a moment, so its hint can answer. */
   pressed: string | null;
 };
 
-const SuperKeyContext = createContext<SuperKey>({ active: false, latched: false, pressed: null });
+const SuperKeyContext = createContext<SuperKey>({ active: false, pressed: null });
 export const SuperKeyProvider = SuperKeyContext.Provider;
 
 export function useSuperKey(): SuperKey {
@@ -45,13 +48,9 @@ export function sendSuperAction(action: SuperAction): void {
   window.dispatchEvent(new CustomEvent<SuperAction>(SUPER_ACTION_EVENT, { detail: action }));
 }
 
-/** Long enough that a quick chord (⌘⇧Z, ⌘⇧← to select text) never flashes the layer or loses its keys. */
+/** Long enough that a quick chord of the same keys (⌥⌘I, ⌥⌘H) never flashes the layer. Its own keys act at once, without waiting. */
 const SHOW_AFTER_MS = 300;
-/** A press and release this quick, with no other key, is a tap: the layer stays open. */
-const TAP_MAX_MS = 320;
 const PRESSED_MS = 280;
-/** A layer kept open by a tap closes by itself after this long without a key, so an aborted shortcut never swallows typing for long. */
-const LATCH_MS = 3_000;
 const MODIFIER_KEYS = new Set(["Meta", "Shift", "Control", "Alt"]);
 
 export function onMac(): boolean {
@@ -60,23 +59,31 @@ export function onMac(): boolean {
 
 /** The chord as this platform spells it. */
 export function superKeyLabel(): string {
-  return onMac() ? "⌘⇧" : "Ctrl+Shift";
+  return onMac() ? "⌥⌘" : "Ctrl+Shift";
+}
+
+/** The chord for aria-keyshortcuts, followed by a key: "Alt+Meta+F". */
+export function superKeyShortcut(key: string): string {
+  return `${onMac() ? "Alt+Meta" : "Control+Shift"}+${key}`;
 }
 
 function isChord(event: KeyboardEvent): boolean {
   return onMac()
-    ? event.metaKey && event.shiftKey && !event.ctrlKey && !event.altKey
+    ? event.altKey && event.metaKey && !event.ctrlKey && !event.shiftKey
     : event.ctrlKey && event.shiftKey && !event.metaKey && !event.altKey;
 }
 
-/** Text fields select with ⌘⇧ and arrows; until the layer shows, a field that uses them keeps them. */
+/**
+ * Off a Mac, Ctrl+Shift with arrows selects text: until the layer shows, a
+ * field that uses arrows keeps them. On a Mac, ⌥⌘ arrows mean nothing to a field.
+ */
 function keepsArrows(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) return false;
+  if (onMac() || !(target instanceof HTMLElement)) return false;
   if (target.isContentEditable || target instanceof HTMLTextAreaElement || target.matches('[role="slider"], [role="separator"]')) return true;
   return target instanceof HTMLInputElement && !["checkbox", "radio", "button", "submit"].includes(target.type);
 }
 
-/** The action a key names, read from the physical key: with Shift held, "1" arrives as "!". */
+/** The action a key names, read from the physical key: with ⌥ held, "1" arrives as "¡" and F as "ƒ". */
 function actionFor(event: KeyboardEvent): { action: SuperAction; key: string } | null {
   const digit = /^(?:Digit|Numpad)([1-9])$/.exec(event.code)?.[1];
   if (digit) return { action: { kind: "coworker", index: Number(digit) - 1 }, key: digit };
@@ -97,7 +104,6 @@ function actionFor(event: KeyboardEvent): { action: SuperAction; key: string } |
  */
 export function useSuperKeyState({ enabled, onAction }: { enabled: boolean; onAction: (action: SuperAction) => void }): SuperKey {
   const [held, setHeld] = useState(false);
-  const [latched, setLatched] = useState(false);
   const [pressed, setPressed] = useState<string | null>(null);
   const act = useRef(onAction);
   act.current = onAction;
@@ -105,32 +111,19 @@ export function useSuperKeyState({ enabled, onAction }: { enabled: boolean; onAc
   useEffect(() => {
     if (!enabled) {
       setHeld(false);
-      setLatched(false);
       return;
     }
     let isHeld = false;
-    let isLatched = false;
-    let downAt = 0;
-    let otherKey = false;
     let showTimer: number | undefined;
     let pressedTimer: number | undefined;
-    let latchTimer: number | undefined;
     const hold = (value: boolean) => { isHeld = value; setHeld(value); };
-    const latch = (value: boolean) => {
-      isLatched = value;
-      setLatched(value);
-      if (latchTimer !== undefined) window.clearTimeout(latchTimer);
-      latchTimer = value ? window.setTimeout(() => latch(false), LATCH_MS) : undefined;
-    };
     const stopShowing = () => {
       if (showTimer !== undefined) window.clearTimeout(showTimer);
       showTimer = undefined;
     };
     const close = () => {
       stopShowing();
-      downAt = 0;
       hold(false);
-      latch(false);
     };
     const fire = (found: { action: SuperAction; key: string }, event: KeyboardEvent) => {
       event.preventDefault();
@@ -145,82 +138,48 @@ export function useSuperKeyState({ enabled, onAction }: { enabled: boolean; onAc
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.isComposing) return;
       if (dialogOpen()) {
-        if (isHeld || isLatched) close();
+        if (isHeld) close();
         return;
       }
       if (MODIFIER_KEYS.has(event.key)) {
-        if (event.repeat || !isChord(event)) return;
-        if (!downAt) {
-          downAt = Date.now();
-          otherKey = false;
-        }
-        stopShowing();
-        if (!isHeld) showTimer = window.setTimeout(() => { showTimer = undefined; hold(true); }, SHOW_AFTER_MS);
-        return;
-      }
-      otherKey = true;
-      if (isChord(event)) {
-        const found = actionFor(event);
-        // Before the layer shows, a text field keeps ⌘⇧ with arrows for selecting.
-        if (found && !(event.code.startsWith("Arrow") && !isHeld && !isLatched && keepsArrows(event.target))) {
-          stopShowing();
-          latch(false);
-          hold(true);
-          fire(found, event);
+        if (event.repeat) return;
+        // A modifier beyond the chord (⌃⌥⌘ is Magnet's) means another shortcut: step aside.
+        if (!isChord(event)) {
+          close();
           return;
         }
-        // Any other chord (⌘⇧Z, ⌘⇧4) is an ordinary shortcut; the layer steps aside for it.
-        close();
+        if (!isHeld && showTimer === undefined) showTimer = window.setTimeout(() => { showTimer = undefined; hold(true); }, SHOW_AFTER_MS);
         return;
       }
-      if (!isLatched) return;
-      if (event.key === "Escape") {
-        event.preventDefault();
-        close();
-        return;
-      }
-      const found = !event.metaKey && !event.ctrlKey && !event.altKey ? actionFor(event) : null;
-      if (found) {
+      if (!isChord(event)) return;
+      const found = actionFor(event);
+      if (found && !(event.code.startsWith("Arrow") && !isHeld && keepsArrows(event.target))) {
+        stopShowing();
+        hold(true);
         fire(found, event);
-        // The pace and the team can take a few steps (each one keeps it open a moment longer); a coworker or Focus mode ends it.
-        if (found.action.kind === "coworker" || found.action.kind === "focus") close();
-        else latch(true);
         return;
       }
-      // Anything else goes on as typed.
+      // Any other chord (⌥⌘I, ⌥⌘H) is an ordinary shortcut; the layer steps aside for it.
       close();
     };
 
     const onKeyUp = (event: KeyboardEvent) => {
-      if (!MODIFIER_KEYS.has(event.key) || !downAt) return;
-      const tapped = !otherKey && Date.now() - downAt < TAP_MAX_MS;
-      downAt = 0;
-      stopShowing();
-      hold(false);
-      // A tap opens the layer for one plain key; a second tap puts it away.
-      if (tapped) latch(!isLatched);
-    };
-
-    const onPointerDown = () => {
-      if (isLatched) close();
+      if (MODIFIER_KEYS.has(event.key)) close();
     };
 
     window.addEventListener("keydown", onKeyDown, true);
     window.addEventListener("keyup", onKeyUp, true);
     window.addEventListener("blur", close);
-    window.addEventListener("pointerdown", onPointerDown, true);
     return () => {
       close();
       if (pressedTimer !== undefined) window.clearTimeout(pressedTimer);
-      if (latchTimer !== undefined) window.clearTimeout(latchTimer);
       window.removeEventListener("keydown", onKeyDown, true);
       window.removeEventListener("keyup", onKeyUp, true);
       window.removeEventListener("blur", close);
-      window.removeEventListener("pointerdown", onPointerDown, true);
     };
   }, [enabled]);
 
-  return { active: held || latched, latched, pressed };
+  return { active: held, pressed };
 }
 
 /** A key, drawn like one: it rises in when the layer shows and presses down when it acts. */
@@ -263,7 +222,6 @@ export function SuperKeyStrip({ pace = true }: { pace?: boolean }) {
         <SuperHint keys={["1–9"]} label="Coworker" pressed={superKey.pressed} />
         {pace ? <SuperHint keys={["←", "→"]} label="Pace" pressed={superKey.pressed} /> : null}
         <SuperHint keys={["F"]} label="Focus" pressed={superKey.pressed} />
-        {superKey.latched ? <span className="text-[10px] text-mist">Esc to close</span> : null}
       </div>
     </div>
   );

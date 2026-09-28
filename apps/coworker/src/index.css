@@ -1149,7 +1149,7 @@ body.is-resizing-panel * {
   mask-image: linear-gradient(to bottom, transparent 24px, #000 54px);
 }
 
-/* The super key (⌘⇧): keys drawn like keys. They rise in when the layer shows,
+/* The super key (⌥⌘): keys drawn like keys. They rise in when the layer shows,
    one after another down the team, and press down when they act. */
 .super-keycap {
   background: linear-gradient(180deg, rgb(255 255 255 / 0.17), rgb(255 255 255 / 0.07));

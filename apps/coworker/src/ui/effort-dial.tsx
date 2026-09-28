@@ -2,7 +2,7 @@ import { CoworkerEffortSlider } from "@openwork/ui/coworker-effort";
 import { useEffect, useEffectEvent, useId, useRef, useState } from "react";
 import { DEFAULT_EFFORT_STOP, EFFORT_STOPS, describeEffortStop, effortLevelFor, effortStopLabel, laneWithPreference, replyKindForLane, type EffortKind, type EffortStop } from "@/lib/effort";
 import { HelpTip } from "@/ui/kit";
-import { onMac, onSuperAction, superKeyLabel, useSuperKey } from "@/ui/use-super-key";
+import { onSuperAction, superKeyLabel, superKeyShortcut, useSuperKey } from "@/ui/use-super-key";
 
 /** How long a chosen stop waits for the save to come back before the saved one shows again. */
 const CHOSEN_SETTLE_MS = 3000;
@@ -11,7 +11,7 @@ const CHOSEN_SETTLE_MS = 3000;
  * Dynamic effort sets the coworker's pace. The composer pill opens the
  * five-stop selector on top of itself, with the slider at the foot; what each
  * stop means opens above it, so the slider never moves under the pointer.
- * While the super key (⌘⇧, Ctrl+Shift elsewhere) is down, the pill becomes the
+ * While the super key (⌥⌘, Ctrl+Shift elsewhere) is down, the pill becomes the
  * slider in place and ← → move it. Each turn derives its effort from this
  * preference and the kind of work; a supported fixed effort in Customize › AI
  * model still takes priority.
@@ -188,7 +188,7 @@ export function EffortDial({
         className={`inline-flex min-h-8 items-center gap-2 rounded-xl px-2.5 py-1.5 text-[11px] text-mist transition-colors hover:bg-spark/10 hover:text-snow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-spark/50 ${inPlace ? "invisible" : ""}`}
         aria-haspopup="dialog"
         aria-expanded={Boolean(open)}
-        aria-keyshortcuts={onMac() ? "Meta+Shift+ArrowLeft Meta+Shift+ArrowRight" : "Control+Shift+ArrowLeft Control+Shift+ArrowRight"}
+        aria-keyshortcuts={`${superKeyShortcut("ArrowLeft")} ${superKeyShortcut("ArrowRight")}`}
         title={`${coworkerName}'s thinking pace: ${label}. Hold ${shortcut} and press ← → to change it.`}
         data-testid="effort-dial-pill"
         onClick={() => setOpen((was) => (was ? false : "click"))}
