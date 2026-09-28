@@ -410,11 +410,9 @@ async function accessibleAppPlugins(input: McpAppAccessInput): Promise<Map<strin
  * Apps the member may use, read without their compiled revisions: every
  * catalog, index, and search lookup would otherwise load each App's HTML.
  */
-export async function listAccessibleMcpApps(input: McpAppAccessInput): Promise<McpAppEntry[]> {
-  const apps = await accessibleAppPlugins(input)
-  if (apps.size === 0) return []
-  const organizationId = normalizeDenTypeId("organization", input.organizationId)
-  const ids = [...apps.keys()].map(appId)
+/** Each active authored App among these ids, with its latest revision. */
+async function latestAuthoredApps(organizationId: DenTypeId<"organization">, ids: DenTypeId<"configObject">[]) {
+  if (ids.length === 0) return []
   const rows = await db.select({ id: ConfigObjectTable.id, title: ConfigObjectTable.title, description: ConfigObjectTable.description })
     .from(ConfigObjectTable).where(and(
       eq(ConfigObjectTable.organizationId, organizationId),
@@ -434,13 +432,35 @@ export async function listAccessibleMcpApps(input: McpAppAccessInput): Promise<M
   )).orderBy(desc(ConfigObjectVersionTable.createdAt), desc(ConfigObjectVersionTable.id))
   const latest = new Map<string, (typeof versions)[number]>()
   for (const version of versions) if (!latest.has(version.configObjectId)) latest.set(version.configObjectId, version)
-  return rows.flatMap((row): McpAppEntry[] => {
+  return rows.flatMap((row) => {
     const version = latest.get(row.id)
-    const pluginId = apps.get(row.id)
     // URL-imported Apps share the object type; only authored revisions have their own server.
-    if (!pluginId || !version || version.isDeletedVersion || version.schemaVersion !== MCP_APP_CONFIG_SCHEMA_VERSION) return []
-    return [{ appId: row.id, pluginId, revisionId: version.id, title: row.title, description: row.description, serverPath: mcpAppServerPath(row.id) }]
+    if (!version || version.isDeletedVersion || version.schemaVersion !== MCP_APP_CONFIG_SCHEMA_VERSION) return []
+    return [{ ...row, revisionId: version.id }]
+  })
+}
+
+export async function listAccessibleMcpApps(input: McpAppAccessInput): Promise<McpAppEntry[]> {
+  const apps = await accessibleAppPlugins(input)
+  if (apps.size === 0) return []
+  const organizationId = normalizeDenTypeId("organization", input.organizationId)
+  return (await latestAuthoredApps(organizationId, [...apps.keys()].map(appId))).flatMap((row): McpAppEntry[] => {
+    const pluginId = apps.get(row.id)
+    return pluginId
+      ? [{ appId: row.id, pluginId, revisionId: row.revisionId, title: row.title, description: row.description, serverPath: mcpAppServerPath(row.id) }]
+      : []
   }).sort((left, right) => left.title.localeCompare(right.title) || left.appId.localeCompare(right.appId))
+}
+
+/**
+ * The current revision of each active authored App among these ids, by App id.
+ * Access is not checked: callers use it only to keep a stored reference to an
+ * App pointing at the revision the App's own server now serves.
+ */
+export async function currentMcpAppRevisionIds(input: { organizationId: string; appIds: string[] }): Promise<Map<string, string>> {
+  const ids = [...new Set(input.appIds)].flatMap((id) => mcpAppIdSchema.safeParse(id).success ? [appId(id)] : [])
+  const apps = await latestAuthoredApps(normalizeDenTypeId("organization", input.organizationId), ids)
+  return new Map(apps.map((app) => [app.id, app.revisionId]))
 }
 
 /** A cheap check before access-checked App work: is this config object an active App? */

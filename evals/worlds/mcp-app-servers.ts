@@ -369,6 +369,11 @@ export async function mcpAppServers(seed: Seed, context: { place: Place }) {
 
   const { procedure, capabilities, tools, created } = await composeOrderCalculator(seed, den.admin, connection.id, (name, args) => call("owner", name, args));
   appServerPath = created.serverPath;
+  // An empty organization dashboard, for the owner to add the App to from Den's picker.
+  const dashboardName = `Pricing board ${Date.now()}`;
+  const dashboard = await seed.api(den.admin, "/v1/dashboards", { method: "POST", body: JSON.stringify({ name: dashboardName, elements: [] }) });
+  if (dashboard.response.status !== 201) throw new Error(`Creating the dashboard failed: ${dashboard.response.status}`);
+  const dashboardId = field(record(dashboard.body).item, "id");
 
   const built = await buildStandardMcpAppHost();
   let origin = "";
@@ -416,10 +421,24 @@ export async function mcpAppServers(seed: Seed, context: { place: Place }) {
   if (context.place.kind !== "local") resources.use(await forwardLoopback(app, origin, created.toolName));
   await app.client.send("Emulation.setDeviceMetricsOverride", { width: 1100, height: 900, deviceScaleFactor: 1, mobile: false });
   const pluginWeb = await seed.web({ den, signedInAs: member, startPath: "/dashboard/library", headless: true, viewport: { width: 1280, height: 900 } });
+  const adminWeb = await seed.web({ den, signedInAs: den.admin, startPath: `/dashboard/dashboards/${dashboardId}`, headless: true, viewport: { width: 1280, height: 900 } });
   const url = (persona: Persona) => `${origin}/${persona}/?tool=${encodeURIComponent(created.toolName)}`;
   const retained = resources.move();
+  const elementsOf = (body: unknown) => rows(record(body).elements ?? []);
   return {
-    app, pluginWeb, den, created, capabilities, tools, url, requests, rpc, call,
+    app, pluginWeb, adminWeb, dashboardId, dashboardName, den, created, capabilities, tools, url, requests, rpc, call,
+    /** The dashboard's tiles as its admin sees them. */
+    async dashboardElements() {
+      const read = await seed.api(den.admin, `/v1/dashboards/${dashboardId}`);
+      return elementsOf(record(read.body).item);
+    },
+    /** Grants the dashboard to the teammate and returns their tiles as their desktop reads them. */
+    async teammateDashboardElements() {
+      const granted = await seed.api(den.admin, `/v1/dashboards/${dashboardId}/access`, { method: "POST", body: JSON.stringify({ orgMembershipId: memberId, role: "viewer" }) });
+      if (granted.response.status !== 201) throw new Error(`Granting the dashboard failed: ${granted.response.status}`);
+      const mine = rows(record((await seed.api(member, "/v1/me/dashboards")).body).items);
+      return elementsOf(mine.find(item => item.id === dashboardId) ?? {});
+    },
     inventoryCalls: (options: { sinceIso?: string; atLeast?: number } = {}) => den.mocks.inventory.toolCalls({ name: toolNames.connection, atLeast: 0, ...options }),
     reservations: (options: { sinceIso?: string; atLeast?: number } = {}) => den.mocks.inventory.toolCalls({ name: toolNames.reserve, atLeast: 0, ...options }),
     /** Shares only the App's own Plugin, which carries the Workflows its tools run. */

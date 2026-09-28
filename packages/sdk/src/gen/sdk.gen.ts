@@ -352,6 +352,8 @@ import type {
   GetV1MarketplacesByMarketplaceIdResponses,
   GetV1MarketplacesErrors,
   GetV1MarketplacesResponses,
+  GetV1McpAppsErrors,
+  GetV1McpAppsResponses,
   GetV1McpConnectionsByConnectionIdConnectCallbackErrors,
   GetV1McpConnectionsByConnectionIdConnectCallbackResponses,
   GetV1McpConnectionsByConnectionIdConnectStartErrors,
@@ -3634,7 +3636,7 @@ export class DenClient extends HeyApiClient {
   /**
    * Create dashboard
    *
-   * Creates an organization-owned dashboard: a named, ordered list of up to 50 MCP App elements, each pointing at a ui:// resource served by a connected MCP server. Nobody sees the dashboard until access is granted through POST /v1/dashboards/{dashboardId}/access.
+   * Creates an organization-owned dashboard: a named, ordered list of up to 50 MCP App elements, each pointing at a ui:// resource served by a connected MCP server or by an App built in OpenWork (from GET /v1/mcp-apps). An App's element always points at the App's current revision. Nobody sees the dashboard until access is granted through POST /v1/dashboards/{dashboardId}/access.
    */
   public postV1Dashboards<ThrowOnError extends boolean = false>(
     parameters: {
@@ -3863,6 +3865,18 @@ export class DenClient extends HeyApiClient {
   public getV1MeDashboards<ThrowOnError extends boolean = false>(options?: Options<never, ThrowOnError>) {
     return (options?.client ?? this.client).get<GetV1MeDashboardsResponses, GetV1MeDashboardsErrors, ThrowOnError>({
       url: "/v1/me/dashboards",
+      ...options,
+    });
+  }
+
+  /**
+   * List Apps built in OpenWork for dashboards
+   *
+   * Lists the Apps built in OpenWork that the calling admin can use, in the element shape organization Dashboards store. Each element opens the App through its own MCP server with open_app, and Dashboards keep it on the App's current revision. Members see a tile only when the App's Plugin is shared with them. Empty when Apps built in OpenWork are turned off. Admin-only.
+   */
+  public getV1McpApps<ThrowOnError extends boolean = false>(options?: Options<never, ThrowOnError>) {
+    return (options?.client ?? this.client).get<GetV1McpAppsResponses, GetV1McpAppsErrors, ThrowOnError>({
+      url: "/v1/mcp-apps",
       ...options,
     });
   }
