@@ -228,21 +228,21 @@ export function SuperKeyStrip({ pace = true }: { pace?: boolean }) {
 }
 
 /**
- * The super key at rest: one quiet line at the bottom center of the composer
- * saying how to call it up. It floats in the controls row, so it adds no
- * height; it fades while the layer shows, and stays out of a composer too
- * narrow to hold it beside its controls.
+ * The super key at rest: one faint line at the bottom center of the composer,
+ * in the padding under its controls, saying how to call it up. It floats, so
+ * it adds no height; it fades while the layer shows, and stays out of a
+ * composer too narrow to hold it beside its controls.
  */
 export function SuperKeyHint() {
   const superKey = useSuperKey();
   return (
     <div
       aria-hidden="true"
-      className={`pointer-events-none absolute bottom-5 left-1/2 hidden -translate-x-1/2 items-center gap-1.5 whitespace-nowrap text-[10px] text-mist/60 transition-opacity duration-200 motion-reduce:transition-none @2xl:flex ${superKey.active ? "opacity-0" : "opacity-100"}`}
+      className={`pointer-events-none absolute bottom-1.5 left-1/2 hidden -translate-x-1/2 items-center gap-1 whitespace-nowrap text-[10px] leading-none text-mist/40 transition-opacity duration-200 motion-reduce:transition-none @2xl:flex ${superKey.active ? "opacity-0" : "opacity-100"}`}
       data-testid="super-key-hint"
     >
       Hold
-      <kbd className="rounded border border-line bg-white/5 px-1 font-sans text-[10px] leading-4 text-mist">{superKeyLabel()}</kbd>
+      <kbd className="font-sans text-[10px] text-mist/60">{superKeyLabel()}</kbd>
       for shortcuts
     </div>
   );
