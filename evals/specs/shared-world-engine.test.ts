@@ -28,7 +28,6 @@ const worldImports: Record<string, () => Promise<unknown>> = {
 const colocatedWorldImports: Record<string, () => Promise<unknown>> = {
   "ee/packages/den-db/test/mysql-0097-native.world.ts": () => import("../../ee/packages/den-db/test/mysql-0097-native.world.ts"),
   "evals/docs-shots/world.ts": () => import("../docs-shots/world.ts"),
-  "evals/worlds/cross-workspace-split-view.world.ts": () => import("../worlds/cross-workspace-split-view.world.ts"),
   "evals/worlds/den-split-origin-kind.world.ts": () => import("../worlds/den-split-origin-kind.world.ts"),
   "evals/worlds/infra/cloud-model-infra-worker.ts": () => import("../worlds/infra/cloud-model-infra-worker.ts"),
   "evals/worlds/infra/cloud-model-infra.ts": () => import("../worlds/infra/cloud-model-infra.ts"),

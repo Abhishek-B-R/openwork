@@ -21,7 +21,6 @@ export const RENAMED_WORLDS: Readonly<Record<string, string>> = {
   "acme-docs": "./evals/docs-shots/world.ts",
   "litellm-per-member": "./examples/litellm-per-member-keys/world.ts",
   "mysql-0097-native": "./ee/packages/den-db/test/mysql-0097-native.world.ts",
-  "cross-workspace-split-view": "./evals/worlds/cross-workspace-split-view.world.ts",
   "den-split-origin-kind": "./evals/worlds/den-split-origin-kind.world.ts",
   "remote-session": "./evals/worlds/infra/remote-session.ts",
   "cloud-model-infra": "./evals/worlds/infra/cloud-model-infra.ts",
@@ -31,6 +30,7 @@ export const RENAMED_WORLDS: Readonly<Record<string, string>> = {
   "azure-byok": "preview-den",
   "gateway-local": "preview-den",
   "den-gateway-local": "preview-den",
+  "cross-workspace-split-view": "preview-full --seed workspace",
 };
 
 export function worldScriptName(path: string): string {
