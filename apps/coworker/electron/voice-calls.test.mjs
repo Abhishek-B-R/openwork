@@ -8,11 +8,13 @@ import { createVoiceCalls, createCallHistory } from "./voice-calls.mjs";
 test("call credentials stay main-only and failures never expose provider bodies", async () => {
   const directory = await mkdtemp(path.join(tmpdir(), "coworker-calls-"));
   const key = "sk-synthetic-call-key-never-real"; let status = 200; const requests = [];
-  const secure = { isAsyncEncryptionAvailable: async () => true, encryptStringAsync: async () => Buffer.from("sealed"), decryptStringAsync: async () => ({ result: key }) };
+  const secure = { isAsyncEncryptionAvailable: async () => true, getSelectedStorageBackend: () => "gnome_libsecret", encryptStringAsync: async () => Buffer.from("sealed"), decryptStringAsync: async () => ({ result: key }) };
   const calls = createVoiceCalls({ directory, safeStorage: secure, requestKey: async () => key, fetch: async (url, input) => { requests.push({ url, input }); return new Response(JSON.stringify(status === 200 ? { value: "ek_synthetic", expires_at: 123 } : { error: { message: key } }), { status }); } });
   let permissions = 0;
   const requestPermission = async () => { permissions++; return { granted: true }; };
   try {
+    const plaintext = createVoiceCalls({ directory, platform: "linux", safeStorage: { ...secure, getSelectedStorageBackend: () => "basic_text" }, requestKey: async () => assert.fail("Plaintext storage must not request a key") });
+    await assert.rejects(plaintext.editKey(), /Secure storage is unavailable/);
     assert.equal((await calls.settings()).keySet, false);
     await assert.rejects(calls.microphone(requestPermission), /Add an OpenAI key/);
     assert.equal(permissions, 0);

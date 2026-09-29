@@ -779,7 +779,7 @@ async function mainFixture(t, apiContract = "beta19271") {
     }),
     events: { stop: async () => { effects.stops.push("events"); } }, groupExecution: { stop: async () => { effects.stops.push("groups"); } },
     progressSummaries: { stop: () => { effects.stops.push("progress"); } }, conversationMemory: { stop: async () => { effects.stops.push("memory"); await state.memory; } },
-    voice: { reset: () => {} }, workerControls: { reset: async () => { effects.stops.push("workers"); return state.workerConfirmed; } },
+    endVoiceCall: () => {}, voice: { reset: () => {} }, workerControls: { reset: async () => { effects.stops.push("workers"); return state.workerConfirmed; } },
     computerControl: { reset: async () => { effects.stops.push("computer"); return { confirmed: true }; } }, browserControl: { shutdown: async () => { effects.stops.push("browser"); } },
     toolsServer: { stop: async () => { effects.stops.push("tools"); } },
     maintenance: { preview: async () => ({}), restoreDefaults: async () => {}, factoryReset: async () => { effects.resetWrites++; effects.backupWrites++; } },

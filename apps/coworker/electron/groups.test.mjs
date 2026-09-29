@@ -1957,7 +1957,7 @@ test("shutdown retains group participant ownership until a cancelled raw write s
     const release = Promise.withResolvers();
     const signal = new AbortController();
     let started = false;
-    const groups = createGroupExecution({ directory: home, setupTimeoutMs: 20,
+    const groups = createGroupExecution({ directory: home, setupTimeoutMs: 500,
       coworkerFor: fixtureCoworker,
       clientFor: async () => ({ createThread: async () => ({ id: "participant" }) }),
       collaboration: { registerOwner: async () => { started = true; await release.promise; await writeFile(path.join(home, "late-owner"), "last write"); } },
