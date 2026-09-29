@@ -28,9 +28,9 @@ export async function engineGatewayParity(seed: Seed, context: { place: Place },
     GATEWAY_EGRESS_ALLOWED_ORIGINS: new URL(mock.url).origin,
   }, org: { name: "Engine parity", members: { member: { name: "Parity Member" } } } });
   if (options.onlyProvidedModels) {
-    // Model access "Only models you provide", free starter model off, saved as the AI Gateway dialog does, before the member signs in.
+    // Model access "Only models you provide", saved as the AI Gateway dialog does, before the member signs in.
     const stored = await readDefaultDesktopPolicy(seed, den.admin);
-    const policy = { ...(parityRecord(stored.policy ?? {})), allowCustomProviders: false, allowZenModel: false };
+    const policy = { ...(parityRecord(stored.policy ?? {})), allowCustomProviders: false };
     const updated = await seed.api(den.admin, `/v1/desktop-policies/${String(stored.id)}`, {
       method: "PATCH", body: JSON.stringify({ policyName: stored.policyName, policy }),
     });

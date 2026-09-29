@@ -642,7 +642,7 @@ export async function modelPicker(seed: Seed) {
 /**
  * A member's desktop with one organization-managed provider (assigned in Den) and one personal provider added
  * on the device, after which an admin picks "Only models you provide" in the AI Gateway's "Who can use models"
- * (allowCustomProviders off, allowZenModel off).
+ * (allowCustomProviders off).
  */
 export async function modelAccessPicker(seed: Seed) {
   const mock = seed.mock({});
@@ -683,9 +683,9 @@ export async function modelAccessPicker(seed: Seed) {
       options: { baseURL: `${witness.url}/v1`, apiKey: "sk-personal" }, models: { [personal.modelID]: { name: "Personal witness" } } },
   } })]), { awaitPromise: true });
   if (added !== "ok") throw new Error(`Adding the personal provider failed: ${String(added)}`);
-  // Saved the way the AI Gateway dialog saves it: "Only models you provide", free starter model off.
+  // Saved the way the AI Gateway dialog saves "Only models you provide".
   const stored = await readDefaultDesktopPolicy(seed, den.admin);
-  const policy = { ...(isRecord(stored.policy) ? stored.policy : {}), allowCustomProviders: false, allowZenModel: false };
+  const policy = { ...(isRecord(stored.policy) ? stored.policy : {}), allowCustomProviders: false };
   const updated = await seed.api(den.admin, `/v1/desktop-policies/${String(stored.id)}`, {
     method: "PATCH", body: JSON.stringify({ policyName: stored.policyName, policy }), signal: AbortSignal.timeout(30_000),
   });

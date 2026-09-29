@@ -171,8 +171,7 @@ export function LlmProvidersScreen() {
     try {
       setAccessSaving(true);
       await runReauthableAction("save-model-access", async () => {
-        // The free starter switch only shows in managed mode here, so "Any model" keeps it on.
-        await saveModelAccess(accessState, { mode: accessMode, adminException: adminExceptionChecked, zenAllowed: accessMode === "managed" ? zenAllowed : true });
+        await saveModelAccess(accessState, { mode: accessMode, adminException: adminExceptionChecked, zenAllowed });
         await reloadPolicies();
       });
       setAccessSaved("Model access saved.");

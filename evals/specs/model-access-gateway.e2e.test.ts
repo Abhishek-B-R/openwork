@@ -21,7 +21,6 @@ test(`MODEL-ACCESS-GATEWAY ${resolveEvalEngine()}: with "Only models you provide
     const config = await world.engineConfig();
     evidence.recordJsonArtifact("Engine provider allow-list", { enabled_providers: config.enabled_providers });
     expect(config.enabled_providers).toContain(providerId);
-    expect(config.enabled_providers).not.toContain("opencode");
   }
   await world.selectModel(model.id);
   const prompt = "Give me a short answer using the organization's Gateway model.";

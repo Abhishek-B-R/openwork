@@ -1,5 +1,5 @@
 import { legacyExecutionPermissions } from "./managed-policy-rules.js";
-import { DESKTOP_POLICY_ENFORCEMENT_ENABLED, FREE_STARTER_PROVIDER_IDS, desktopCapabilityConfig } from "@openwork/types/den/desktop-policies-runtime";
+import { DESKTOP_POLICY_ENFORCEMENT_ENABLED, desktopCapabilityConfig } from "@openwork/types/den/desktop-policies-runtime";
 import { materializeLegacyFastProviders } from "@openwork/types/cloud-model-fast";
 import { isManagedPolicyPlugin } from "./managed-policy-plugin.js";
 /**
@@ -62,17 +62,12 @@ export function buildOpenworkRuntimeConfigObjectFromSnapshot(
   runtimeConfig: RuntimeOpencodeConfig,
 ): Record<string, unknown> {
   if (!DESKTOP_POLICY_ENFORCEMENT_ENABLED) {
-    // Only model access (the AI Gateway's "Who can use models") is enforced: keep its two keys from the verified policy
-    // (cleared on sign-out) and drop execution rules and every other desktop policy.
+    // Only model access (the AI Gateway's "Who can use models") is enforced: keep allowCustomProviders from the verified
+    // policy (cleared on sign-out) and drop execution rules and every other desktop policy.
     const { managedPolicy, ...localConfig } = runtimeConfig;
     runtimeConfig = managedPolicy ? { ...localConfig, managedPolicy: desktopCapabilityConfig(managedPolicy) } : localConfig;
   }
-  // The free starter model switch off blocks those providers whether or not personal providers are allowed.
-  const freeStarterAllowed = runtimeConfig.managedPolicy?.allowZenModel !== false;
-  const disabledProviders = [...new Set([
-    ...runtimeDisabledProviderList(runtimeConfig),
-    ...(freeStarterAllowed ? [] : FREE_STARTER_PROVIDER_IDS),
-  ])];
+  const disabledProviders = runtimeDisabledProviderList(runtimeConfig);
   const permissions = legacyExecutionPermissions(runtimeConfig.managedPolicy?.execution);
   const { managedPolicy: _managedPolicy, ...engineConfig } = runtimeConfig;
   const provider = materializeLegacyFastProviders(runtimeProviderMap(runtimeConfig));
@@ -80,7 +75,7 @@ export function buildOpenworkRuntimeConfigObjectFromSnapshot(
     ...engineConfig,
     ...(runtimeConfig.managedPolicy?.allowCustomProviders === false ? { enabled_providers: [
       ...Object.keys(provider).filter((id) => /^(?:lpr_|ipr_|openwork$)/i.test(id)),
-      ...(freeStarterAllowed ? FREE_STARTER_PROVIDER_IDS : []),
+      ...(runtimeConfig.managedPolicy.allowZenModel !== false ? ["opencode"] : []),
     ] } : {}),
     permission: { ...engineConfig.permission, ...permissions },
     default_agent: runtimeConfig.default_agent ?? "openwork",

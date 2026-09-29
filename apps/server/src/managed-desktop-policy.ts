@@ -1,6 +1,6 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
-import { DESKTOP_POLICY_ENFORCEMENT_ENABLED, desktopConfigSchema, isFreeStarterProvider, type DesktopConfig } from "@openwork/types/den/desktop-policies-runtime";
+import { DESKTOP_POLICY_ENFORCEMENT_ENABLED, desktopConfigSchema, type DesktopConfig } from "@openwork/types/den/desktop-policies-runtime";
 import type { CloudProviderDenSession } from "./cloud-provider-sync.js";
 import type { ServerConfig } from "./types.js";
 import { isRecord } from "./workspace-kv-store.js";
@@ -186,7 +186,7 @@ class ManagedDesktopPolicy {
     if (generation !== this.generation) throw new ApiError(409, "policy_identity_changed", "The signed-in account changed. Retry the action.");
     // While only model access is enforced, cache a policy only when it restricts models, so
     // organizations without it keep exactly the engine config and reload behaviour they had.
-    const restrictsModelAccess = policy.allowCustomProviders === false || policy.allowZenModel === false;
+    const restrictsModelAccess = policy.allowCustomProviders === false;
     const result = DESKTOP_POLICY_ENFORCEMENT_ENABLED || restrictsModelAccess
       ? await writeManagedDesktopPolicy(this.config, policy)
       : await clearManagedDesktopPolicy(this.config);
@@ -257,7 +257,7 @@ class ManagedDesktopPolicy {
     if (!engine || ["GET", "HEAD", "OPTIONS"].includes(request.method)) return;
     // Without a known restrictive policy there is nothing to check, so sends are never read or delayed.
     const policy = this.knownPolicy();
-    if (!policy || (policy.allowCustomProviders !== false && policy.allowZenModel !== false)) return;
+    if (policy?.allowCustomProviders !== false) return;
     const enginePath = decodeURIComponent(path).replace(/^\/opencode2?/, "").replace(/^\/api/, "");
     const providerID = enginePath.match(/^\/auth\/([^/]+)(?:\/|$)/)?.[1]
       ?? enginePath.match(/^\/provider\/([^/]+)\/oauth\/(?:authorize|callback)$/)?.[1];
@@ -280,15 +280,13 @@ class ManagedDesktopPolicy {
   private assertModelAccess(action: ManagedPolicyAction, input: Record<string, unknown>): void {
     if (action !== "provider" && action !== "model") return;
     const policy = this.knownPolicy();
-    if (!policy || (policy.allowCustomProviders !== false && policy.allowZenModel !== false)) return;
+    if (policy?.allowCustomProviders !== false) return;
     const ids = Array.isArray(input.providerIDs) ? input.providerIDs.filter((id): id is string => typeof id === "string")
       : typeof input.providerID === "string" ? [input.providerID] : [];
     for (const id of ids) {
-      if (isFreeStarterProvider(id)) {
-        if (policy.allowZenModel === false) throw new ApiError(403, "organization_policy_denied", "Your organization has disabled this AI provider.");
-        continue;
-      }
-      if (policy.allowCustomProviders === false && !MANAGED_PROVIDER.test(id)) {
+      // OpenCode Zen is not part of model access; it stays as it is today.
+      if (id.toLowerCase() === "opencode") continue;
+      if (!MANAGED_PROVIDER.test(id)) {
         throw action === "model"
           ? new ApiError(403, "organization_model_denied", "Choose an AI model assigned by your organization.")
           : new ApiError(403, "organization_policy_denied", "Your organization only allows its assigned AI providers.");

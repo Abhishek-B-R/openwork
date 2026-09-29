@@ -17,17 +17,16 @@ test("with \"Only models you provide\", the member's picker lists the organizati
       open: (await count('input[placeholder="Search models..."]')) > 0,
       organization: text.includes("Organization provider") || text.includes("Organization witness") || (await count(`[data-model-key="${key(world.organization)}"]`)) > 0 ? 1 : 0,
       personal: text.includes("Personal provider") || text.includes("Personal witness") || (await count(`[data-model-key="${key(world.personal)}"]`)) > 0 ? 1 : 0,
-      zen: /OpenCode Zen|Big Pickle/.test(text) ? 1 : 0,
       text: text.slice(0, 600),
     };
   };
 
-  await step("before: the AI Gateway's model access is \"Only models you provide\", with the free starter model off", async () => {
-    evidence.recordAssertionEvidence("model access", JSON.stringify({ allowCustomProviders: world.policy.allowCustomProviders, allowZenModel: world.policy.allowZenModel }), world.policy.allowCustomProviders === false);
+  await step("before: the AI Gateway's model access is \"Only models you provide\"", async () => {
+    evidence.recordAssertionEvidence("model access", JSON.stringify({ allowCustomProviders: world.policy.allowCustomProviders }), world.policy.allowCustomProviders === false);
     await user.see({ role: "button", label: "Change model" }, { timeoutMs: 120_000 });
   });
 
-  await step("after: the picker offers the organization's model and hides the member's personal provider and Zen", async () => {
+  await step("after: the picker offers the organization's model and hides the member's personal provider", async () => {
     // The composer can re-render while the engine settles, so reopen the menu until the model list shows.
     await probe.eventually(async () => {
       const list = await count('input[placeholder="Search models..."]');
@@ -36,12 +35,11 @@ test("with \"Only models you provide\", the member's picker lists the organizati
       return { list: await count('input[placeholder="Search models..."]') };
     }, { within: 60_000, label: "model list opens", until: (state) => state.list > 0 });
     const listed = await probe.eventually(rows, {
-      within: 90_000, label: "model access picker", until: (state) => state.open && state.organization > 0 && state.personal === 0 && state.zen === 0,
+      within: 90_000, label: "model access picker", until: (state) => state.open && state.organization > 0 && state.personal === 0,
     });
     evidence.recordAssertionEvidence("picker rows", JSON.stringify(listed), listed.organization > 0 && listed.personal === 0);
     expect(listed.organization).toBeGreaterThan(0);
     expect(listed.personal).toBe(0);
-    expect(listed.zen).toBe(0);
     await user.screenshot();
   });
 });

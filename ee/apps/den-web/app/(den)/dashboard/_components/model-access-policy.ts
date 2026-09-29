@@ -69,7 +69,7 @@ export async function saveModelAccess(
     policy: {
       ...defaultPolicy.policy,
       allowCustomProviders: !managed,
-      allowZenModel: next.zenAllowed,
+      allowZenModel: managed ? next.zenAllowed : true,
     },
     priority: 0,
     isEnabled: true,

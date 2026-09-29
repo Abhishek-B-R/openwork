@@ -16,29 +16,18 @@ export const DESKTOP_POLICY_ENFORCEMENT_ENABLED: boolean = false;
 
 /**
  * Model access: the AI Gateway's "Who can use models" setting. "Only models
- * you provide" is stored as `allowCustomProviders: false` and the "Free
- * starter model (Auto)" switch as `allowZenModel`, both in the organization's
- * default desktop policy, and "Admins may still add their own keys" as a
- * policy for the admin role. The desktop and web app enforce these two keys
- * on their own; every other desktop policy stays off with the flag above.
+ * you provide" is stored as `allowCustomProviders: false` in the
+ * organization's default desktop policy, and "Admins may still add their own
+ * keys" as a policy for the admin role. The desktop and web app enforce this
+ * key on its own; every other desktop policy, including `allowZenModel`,
+ * stays off with the flag above.
  * Enforcement never blocks startup, sign-in or chat: callers apply the last
  * known setting and allow when none is known (see #5131).
  */
-export const MODEL_ACCESS_POLICY_KEYS = ["allowCustomProviders", "allowZenModel"] as const;
+export const MODEL_ACCESS_POLICY_KEYS = ["allowCustomProviders"] as const;
 
 export function isModelAccessPolicyKey(key: string): boolean {
   return (MODEL_ACCESS_POLICY_KEYS as readonly string[]).includes(key);
-}
-
-/**
- * Providers behind Den's "Free starter model (Auto)" switch, stored as
- * `allowZenModel`: on allows them, off blocks them, whether or not members
- * may add their own providers. Today the free starter model is OpenCode Zen.
- */
-export const FREE_STARTER_PROVIDER_IDS = ["opencode"] as const;
-
-export function isFreeStarterProvider(providerId: string): boolean {
-  return (FREE_STARTER_PROVIDER_IDS as readonly string[]).includes(providerId.trim().toLowerCase());
 }
 
 export function desktopPolicyKeyEnforced(key: string): boolean {
