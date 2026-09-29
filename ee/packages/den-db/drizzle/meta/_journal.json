@@ -792,6 +792,13 @@
       "when": 1790454359250,
       "tag": "0113_setup_agent_member",
       "breakpoints": true
+    },
+    {
+      "idx": 114,
+      "version": "5",
+      "when": 1790605372888,
+      "tag": "0114_audit_operation_capture",
+      "breakpoints": true
     }
   ]
 }
