@@ -1437,35 +1437,63 @@ body.is-resizing-panel * {
   .bubble-countdown { transition: none; }
 }
 
-/* The bubble's easter egg: circled too fast, the head wobbles and stars orbit it. */
+/* The bubble's easter egg: circled too fast, the head tilts over with x's for eyes and its mouth open,
+   swaying a little, while a few stars circle its top-left corner (the unread dot keeps the other). */
 .bubble-dizzy {
-  animation: bubble-dizzy-wobble 1800ms ease-in-out 1;
+  animation: bubble-dizzy-tilt 2400ms ease-in-out 1;
 }
-@keyframes bubble-dizzy-wobble {
+@keyframes bubble-dizzy-tilt {
   0%, 100% { transform: rotate(0deg); }
-  15% { transform: rotate(-14deg) translateX(-2px); }
-  30% { transform: rotate(12deg) translateX(2px); }
-  45% { transform: rotate(-10deg) translateX(-1px); }
-  60% { transform: rotate(8deg); }
-  75% { transform: rotate(-5deg); }
-  90% { transform: rotate(3deg); }
+  14% { transform: rotate(17deg) translateX(1px); }
+  30% { transform: rotate(10deg); }
+  48% { transform: rotate(15deg); }
+  66% { transform: rotate(11deg); }
+  84% { transform: rotate(13deg); }
+}
+.bubble-dizzy .coworker-avatar .coworker-avatar__pupils .coworker-avatar__mood {
+  opacity: 0;
+}
+.bubble-dizzy .coworker-avatar .coworker-avatar__dizzy-eyes .coworker-avatar__mood {
+  opacity: 1;
+  animation: avatar-dizzy-x 2400ms ease-in-out both;
+}
+.bubble-dizzy .coworker-avatar .coworker-avatar__mouth .coworker-avatar__mouth-o {
+  opacity: 1;
+}
+.bubble-dizzy-stars {
+  position: absolute;
+  top: -3px;
+  left: 5px;
+  width: 0;
+  height: 0;
+  transform: rotate(-28deg);
 }
 .bubble-dizzy-stars span {
   position: absolute;
-  left: 50%;
-  top: -2px;
-  margin-left: -4px;
+  left: -4px;
+  top: -4px;
   font-size: 8px;
   line-height: 1;
   color: #ffd166;
-  transform-origin: 4px 27px;
-  animation: bubble-dizzy-orbit 1s linear infinite;
+  animation: bubble-dizzy-orbit 900ms linear infinite;
 }
 @keyframes bubble-dizzy-orbit {
-  from { transform: rotate(0deg) translateY(-3px); }
-  to { transform: rotate(360deg) translateY(-3px); }
+  0% { transform: translate(9.0px, 0.0px) scale(0.80); opacity: 0.70; }
+  8.33% { transform: translate(7.8px, 1.7px) scale(0.95); opacity: 0.85; }
+  16.67% { transform: translate(4.5px, 2.9px) scale(1.06); opacity: 0.96; }
+  25% { transform: translate(0.0px, 3.4px) scale(1.10); opacity: 1.00; }
+  33.33% { transform: translate(-4.5px, 2.9px) scale(1.06); opacity: 0.96; }
+  41.67% { transform: translate(-7.8px, 1.7px) scale(0.95); opacity: 0.85; }
+  50% { transform: translate(-9.0px, 0.0px) scale(0.80); opacity: 0.70; }
+  58.33% { transform: translate(-7.8px, -1.7px) scale(0.65); opacity: 0.55; }
+  66.67% { transform: translate(-4.5px, -2.9px) scale(0.54); opacity: 0.44; }
+  75% { transform: translate(-0.0px, -3.4px) scale(0.50); opacity: 0.40; }
+  83.33% { transform: translate(4.5px, -2.9px) scale(0.54); opacity: 0.44; }
+  91.67% { transform: translate(7.8px, -1.7px) scale(0.65); opacity: 0.55; }
+  100% { transform: translate(9.0px, -0.0px) scale(0.80); opacity: 0.70; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .bubble-dizzy { animation: none; }
+  .bubble-dizzy { animation: none; transform: rotate(12deg); }
+  .bubble-dizzy .coworker-avatar .coworker-avatar__dizzy-eyes .coworker-avatar__mood { animation: none; }
   .bubble-dizzy-stars span { animation-duration: 3s; }
 }

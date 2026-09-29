@@ -271,7 +271,7 @@
   transition: opacity 180ms ease-out, transform 280ms ease-out;
 }
 
-.coworker-avatar :is(.coworker-avatar__happy-eyes, .coworker-avatar__lids, .coworker-avatar__mouth, .coworker-avatar__cheeks, .coworker-avatar__sparkles) .coworker-avatar__mood {
+.coworker-avatar :is(.coworker-avatar__happy-eyes, .coworker-avatar__lids, .coworker-avatar__dizzy-eyes, .coworker-avatar__mouth, .coworker-avatar__cheeks, .coworker-avatar__sparkles) .coworker-avatar__mood {
   opacity: 0;
 }
 
@@ -420,8 +420,14 @@
   animation: avatar-dizzy 1500ms ease-in-out;
 }
 
+/* Dizzy: the eyes cross out into little x's that spin in and sway, and the mouth drops open. */
 .coworker-avatar[data-reaction="dizzy"] .coworker-avatar__pupils .coworker-avatar__mood {
-  animation: avatar-dizzy-eyes 500ms linear 3;
+  opacity: 0;
+}
+
+.coworker-avatar[data-reaction="dizzy"] .coworker-avatar__dizzy-eyes .coworker-avatar__mood {
+  opacity: 1;
+  animation: avatar-dizzy-x 1500ms ease-in-out both;
 }
 
 .coworker-avatar[data-reaction="dizzy"] .coworker-avatar__mouth-o {
@@ -576,12 +582,14 @@
   90% { transform: rotate(0.6deg); }
 }
 
-/* The pupils roll around in small circles. */
-@keyframes avatar-dizzy-eyes {
-  0%, 100% { transform: translate(2px, 0); }
-  25% { transform: translate(0, 2px); }
-  50% { transform: translate(-2px, 0); }
-  75% { transform: translate(0, -2px); }
+/* The x's spin in, overshoot, then sway a little. */
+@keyframes avatar-dizzy-x {
+  0% { transform: scale(0.2) rotate(-150deg); }
+  16% { transform: scale(1.18) rotate(12deg); }
+  28% { transform: scale(1) rotate(0deg); }
+  52% { transform: rotate(-14deg); }
+  76% { transform: rotate(12deg); }
+  100% { transform: rotate(0deg); }
 }
 
 @keyframes avatar-restyle {

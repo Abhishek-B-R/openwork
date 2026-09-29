@@ -33,7 +33,7 @@ const HINT_MS = 6_000;
 const DIZZY_RADIUS = 240;
 const DIZZY_TURNS = 2;
 const DIZZY_WINDOW_MS = 2_500;
-const DIZZY_MS = 1_800;
+const DIZZY_MS = 2_400;
 const DIZZY_REST_MS = 5_000;
 
 /**
@@ -47,7 +47,6 @@ export function Bubble() {
   const [state, setState] = useState<BubbleState | null>(null);
   const [regard, setRegard] = useState({ x: 0, y: 0 });
   const [dizzy, setDizzy] = useState(false);
-  const faceRef = useRef<HTMLSpanElement>(null);
   const circling = useRef<{ angle: number | null; turns: Array<{ at: number; by: number }>; restUntil: number }>({ angle: null, turns: [], restUntil: 0 });
   const drag = useRef<{ x: number; y: number; travelled: number } | null>(null);
   const tap = useRef<number | null>(null);
@@ -79,13 +78,7 @@ export function Bubble() {
       track.turns = [];
       track.restUntil = now + DIZZY_MS + DIZZY_REST_MS;
       setDizzy(true);
-      // The face's own dizzy eyes play too.
-      const avatar = faceRef.current?.querySelector<HTMLElement>(".coworker-avatar");
-      if (avatar) avatar.dataset.reaction = "dizzy";
-      window.setTimeout(() => {
-        setDizzy(false);
-        if (avatar?.dataset.reaction === "dizzy") avatar.dataset.reaction = "none";
-      }, DIZZY_MS);
+      window.setTimeout(() => setDizzy(false), DIZZY_MS);
     }
   }), [host]);
   useEffect(() => () => { if (tap.current !== null) window.clearTimeout(tap.current); }, []);
@@ -161,10 +154,10 @@ export function Bubble() {
         onPointerCancel={() => { drag.current = null; }}
         data-testid="coworker-bubble-face"
       >
-        <span ref={faceRef} className={`relative flex size-[50px] items-center justify-center rounded-full border border-white/12 bg-panel ${dizzy ? "bubble-dizzy" : ""}`} data-dizzy={dizzy ? "true" : "false"} data-testid="coworker-bubble-head">
+        <span className={`relative flex size-[50px] items-center justify-center rounded-full border border-white/12 bg-panel ${dizzy ? "bubble-dizzy" : ""}`} data-dizzy={dizzy ? "true" : "false"} data-testid="coworker-bubble-head">
           {dizzy ? (
-            <span aria-hidden="true" className="bubble-dizzy-stars pointer-events-none absolute inset-0">
-              {[0, 1, 2].map((star) => <span key={star} style={{ animationDelay: `${star * -0.33}s` }}>✦</span>)}
+            <span aria-hidden="true" className="bubble-dizzy-stars pointer-events-none">
+              {[0, 1, 2].map((star) => <span key={star} style={{ animationDelay: `${star * -0.3}s` }}>✦</span>)}
             </span>
           ) : null}
           <CoworkerAvatar identity={`${coworker.slug}:bubble`} name={coworker.name} color={coworker.avatarColor as AvatarColor} glasses={coworker.avatarGlasses as AvatarGlasses} size={38} motion="attentive" regard={regard} />

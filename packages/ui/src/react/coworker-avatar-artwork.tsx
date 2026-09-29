@@ -146,6 +146,11 @@ export function StaticCoworkerAvatar({
                     <path className="coworker-avatar__mood coworker-avatar__lid-sleep" d="M32 57.5q5.5 4.5 11 0" opacity="0" />
                     <path className="coworker-avatar__mood coworker-avatar__lid-sleep" d="M77 57.5q5.5 4.5 11 0" opacity="0" />
                   </g>
+                  {/* Little x's for a dizzy moment; hidden until one plays. */}
+                  <g className="coworker-avatar__dizzy-eyes" fill="none" stroke="#0b0e14" strokeLinecap="round" strokeWidth="3.6">
+                    <path className="coworker-avatar__mood" d="M33 52.5l9 9M42 52.5l-9 9" opacity="0" />
+                    <path className="coworker-avatar__mood" d="M78 52.5l9 9M87 52.5l-9 9" opacity="0" />
+                  </g>
                 </g>
               </g>
               {glasses === "round" || glasses === "star" ? (
