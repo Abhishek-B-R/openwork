@@ -65,7 +65,7 @@ import { carryVariant, chooseFallbackModel, describeModelChoice, markAutoPicked,
 import { usesAppConversationDefault, type ModelDefaults } from "@/lib/model-defaults";
 import { describeReview, parseWorkerReview, parseWorkerTurn, workerNameFromTitle, type WorkerReview, type WorkerSummary } from "@/lib/workers";
 import { WorkerDecisionCards } from "@/ui/worker-decision";
-import { WorkerTray, useWorkerFeed } from "@/ui/worker-tray";
+import { WorkerTray, recentlyEnded, useWorkerFeed } from "@/ui/worker-tray";
 import { WorkerLinksContext, useWorkerLinks } from "@/ui/worker-links";
 import { useFeatures } from "@/ui/use-features";
 import { coworkerToolName } from "@/lib/coworker-tools";
@@ -125,7 +125,7 @@ import { ChatReply } from "@/ui/chat-reply";
 import { MessageReactions, useMessageReactions } from "@/ui/message-reactions";
 import { ReplyReferences } from "@/ui/reply-references";
 import { linkDocumentMentions, type DocumentReference } from "@/lib/message-references";
-import { linkWorkerMentions } from "@/lib/workers";
+import { isLiveWorker, linkWorkerMentions } from "@/lib/workers";
 import { DocumentCard } from "@/ui/documents";
 import { documentCardsFromCalls, isDocumentTool, shouldFoldReply, splitReplyLead, type DocumentCardData } from "@/lib/documents";
 import { connectCardsFromCalls, type ConnectCardData } from "@/lib/connect-cards";
@@ -1239,6 +1239,7 @@ function ThreadView({
   const workerFeed = useWorkerFeed(coworker, threadId, { enabled: kind === "discussion" && browserEligible });
   const [openWorkerId, setOpenWorkerId] = useState("");
   const workerLinks = useMemo(() => ({ workers: workerFeed.workers ?? [], open: setOpenWorkerId }), [workerFeed.workers]);
+  const trayActive = browserEligible && (Boolean(openWorkerId) || (workerFeed.workers ?? []).some((worker) => isLiveWorker(worker) || recentlyEnded(worker, workerFeed.now)));
   // Entrances belong to what arrives after the conversation first paints: a message
   // already on screen when it loads, or handed over from a new discussion, stays still.
   const [settled, setSettled] = useState(false);
@@ -2765,7 +2766,7 @@ function ThreadView({
       ) : null}
       {kind === "discussion" ? (
         <DiscussionComposer
-          tray={browserEligible ? <WorkerTray coworker={coworker} feed={workerFeed} openWorkerId={openWorkerId} onOpenWorker={setOpenWorkerId} onCloseWorker={() => setOpenWorkerId("")} onOpenWorkersView={onOpenSummary ? () => { setOpenWorkerId(""); onOpenSummary("workers"); } : undefined} /> : null}
+          tray={trayActive ? <WorkerTray coworker={coworker} feed={workerFeed} openWorkerId={openWorkerId} onOpenWorker={setOpenWorkerId} onCloseWorker={() => setOpenWorkerId("")} onOpenWorkersView={onOpenSummary ? () => { setOpenWorkerId(""); onOpenSummary("workers"); } : undefined} onOpenComputer={computerUse ? () => setComputerOpenRequest((value) => value + 1) : undefined} onOpenBrowser={() => setBrowserOpenRequest((value) => value + 1)} /> : null}
           skills={draft.skills}
           onRemoveSkill={(index) => setDraft((draft) => ({ ...draft, skills: draft.skills.filter((_, position) => position !== index) }))}
           voice={voice}
@@ -3654,7 +3655,7 @@ function DiscussionComposer({
   onEffortChange?: (stop: EffortStop) => void;
   /** The conversation is scrolled to its end, where the quiet line under it may show. */
   atBottom?: boolean;
-  /** On the composer's top edge, in its column: the coworker's Workers in this discussion. */
+  /** The coworker's Workers in this discussion: in the quiet line over the composer, floating, in place of the hint. */
   tray?: ReactNode;
 }) {
   // Recurring work needs Calendar; without it the starting points stay with one-off work.
@@ -3678,7 +3679,6 @@ function DiscussionComposer({
             Something {coworkerName} should own, separate from this chat
           </p>
         ) : null}
-        {tray}
         <div className={`glass-sheen @container relative rounded-[24px] border bg-panel/55 p-3 shadow-[0_8px_32px_rgb(0_0_0/0.35)] backdrop-blur-xl backdrop-saturate-150 transition-colors focus-within:border-spark/50 ${assignmentMode ? "border-spark/35" : "border-line"}`} data-testid="coworker-input-surface" data-glint="surface" data-super={superKey.active ? "true" : "false"}>
           <SuperKeyStrip pace={Boolean(effortStop && onEffortChange)} />
           <SuperKeyHint />
@@ -3737,14 +3737,14 @@ function DiscussionComposer({
             )}
           </div>
         </div>
-        <ComposerFootnote visible={atBottom}>
-          <span className="hidden min-w-0 truncate sm:inline" data-testid="coworker-composer-hint">
+        <ComposerFootnote visible={atBottom || Boolean(tray)}>
+          {tray ?? <span className="hidden min-w-0 truncate sm:inline" data-testid="coworker-composer-hint">
             {waiting && !busy
               ? `${waiting}…`
               : working && !assignmentMode
                 ? "Enter sends it next · Shift Enter for a new line"
                 : `Enter to ${assignmentMode ? "create" : "send"} · Shift Enter for a new line`}
-          </span>
+          </span>}
           <SummaryLine summary={summary} onOpen={onOpenSummary} />
         </ComposerFootnote>
       </div>
@@ -3768,7 +3768,7 @@ export function ComposerFootnote({ visible, children }: { visible: boolean; chil
       data-testid="coworker-composer-footnote"
       data-visible={visible ? "true" : "false"}
     >
-      <div className="mx-auto flex max-w-3xl items-center justify-between gap-x-3 px-2 pb-1 text-[10px] text-mist/65 [&_button]:pointer-events-auto">
+      <div className="relative mx-auto flex max-w-3xl items-center justify-between gap-x-3 px-2 pb-1 text-[10px] text-mist/65 [&_button]:pointer-events-auto">
         {children}
       </div>
     </div>

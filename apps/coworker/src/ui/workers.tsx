@@ -3,18 +3,15 @@ import { coworkerBridge, type CoworkerSummary } from "@/lib/bridge";
 import { relativeTime } from "@/lib/activity-summary";
 import { workerTurnsFor } from "@/lib/effort";
 import {
-  describeLifespan,
-  describeWorkerStatus,
   isLiveWorker,
   lifespanFromChoice,
-  workerTone,
   type LifespanChoice,
   type WorkerSummary,
   type WorkerPurpose,
 } from "@/lib/workers";
 import { Button, ErrorNote, inputClass } from "@/ui/kit";
 import { WorkerDetail } from "@/ui/worker-detail";
-import { useWorkerFeed, type WorkerNote } from "@/ui/worker-tray";
+import { WorkerLine, useWorkerFeed } from "@/ui/worker-tray";
 
 type WorkersPanelProps = {
   coworker: CoworkerSummary;
@@ -64,16 +61,20 @@ function WorkerList({ coworker, threadId, onOpenThread, onOpenComputer, onOpenBr
           </p>
         ) : null}
         {items.length > 0 ? (
-          <ul className="space-y-1.5 pb-1.5" data-testid="worker-list">
+          <ul className="space-y-1" data-testid="worker-list">
             {items.map((worker) => {
               const expanded = expandedId === worker.id;
+              const alive = isLiveWorker(worker);
               return (
-                <li key={worker.id} className={`overflow-hidden rounded-xl border transition-colors ${expanded ? "border-white/12 bg-white/[0.04]" : "border-transparent"}`} data-testid="worker-row" data-status={worker.status} data-expanded={expanded ? "true" : "false"}>
-                  <WorkerRow worker={worker} note={feed.notes[worker.id] ?? null} now={feed.now} expanded={expanded} detailed onToggle={() => setExpandedId(expanded ? "" : worker.id)} />
+                <li key={worker.id} className={`rounded-xl border transition-colors ${expanded ? "border-line bg-white/[0.03]" : "border-transparent"}`} data-testid="worker-row" data-status={worker.status} data-expanded={expanded ? "true" : "false"}>
+                  <WorkerLine worker={worker} note={feed.notes[worker.id]} onOpen={() => setExpandedId(expanded ? "" : worker.id)} trailing={
+                    <span className="flex shrink-0 items-center gap-1.5 text-[10px] tabular-nums text-mist">
+                      {alive ? elapsed(worker.createdAt, feed.now) : worker.endedAt ? ago(worker.endedAt, feed.now) : ""}
+                      <span aria-hidden="true">{expanded ? "▾" : "›"}</span>
+                    </span>
+                  } />
                   {expanded ? (
-                    <div className="px-2 pb-2">
-                      <WorkerDetail key={worker.id} coworker={coworker} initialWorker={worker} onChanged={feed.changed} onOpenThread={onOpenThread} onOpenComputer={onOpenComputer} onOpenBrowser={onOpenBrowser} />
-                    </div>
+                    <WorkerDetail key={worker.id} coworker={coworker} initialWorker={worker} onChanged={feed.changed} onOpenThread={onOpenThread} onOpenComputer={onOpenComputer} onOpenBrowser={onOpenBrowser} />
                   ) : null}
                 </li>
               );
@@ -98,84 +99,6 @@ function elapsed(from: number, to: number): string {
   if (minutes < 60) return `${minutes} min`;
   const hours = Math.floor(minutes / 60);
   return `${hours} h ${minutes % 60} min`;
-}
-
-/** One Worker at a glance: what it is, what state it is in, what it last said, and how much of its budget is spent. */
-function WorkerRow({ worker, note, now, expanded, detailed, onToggle }: {
-  worker: WorkerSummary;
-  note: WorkerNote | null;
-  now: number;
-  expanded: boolean;
-  detailed: boolean;
-  onToggle: () => void;
-}) {
-  const alive = isLiveWorker(worker);
-  const tone = workerTone(worker);
-  const turns = worker.lifespan.kind === "turns" ? worker.lifespan : null;
-  const since = alive ? `for ${elapsed(worker.createdAt, now)}` : worker.endedAt ? ago(worker.endedAt, now) : "";
-  const noteText = note?.text ?? (alive ? (worker.status === "starting" ? "Getting started…" : worker.goal) : worker.error || worker.goal);
-  return (
-    <button
-      type="button"
-      className="flex w-full items-start gap-3 rounded-xl px-2 py-2.5 text-left transition-colors hover:bg-white/[0.04] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-spark/50"
-      onClick={onToggle}
-      aria-expanded={expanded}
-      data-testid="worker-toggle"
-    >
-      <span className="mt-0.5 shrink-0"><WorkerMark worker={worker} /></span>
-      <span className="min-w-0 flex-1">
-        <span className="flex min-w-0 items-baseline justify-between gap-2">
-          <span className="truncate text-xs font-semibold text-snow" data-testid="worker-name">{worker.name}</span>
-          <span className={`shrink-0 text-[10px] ${tone === "amber" ? "text-amber" : tone === "rose" ? "text-rose" : tone === "mint" ? "text-mint" : "text-mist"}`} data-testid="worker-line">
-            {describeWorkerStatus(worker)}{since ? ` · ${since}` : ""}
-          </span>
-        </span>
-        <span className={`mt-1 line-clamp-2 text-[11px] leading-snug ${note ? "text-snow/85" : "text-mist"}`} title={noteText} data-testid="worker-note" data-kind={note?.kind ?? "goal"}>
-          {note?.kind === "decision" ? <span className="font-medium text-amber">Needs a decision: </span> : null}
-          {noteText}
-          {note ? <span className="whitespace-nowrap text-mist"> · {ago(note.at, now)}</span> : null}
-        </span>
-        {alive && turns ? (
-          <span className="mt-1.5 flex items-center gap-2" data-testid="worker-budget">
-            <span className="h-1 w-20 overflow-hidden rounded-full bg-white/8" aria-hidden="true">
-              <span className="block h-full rounded-full bg-spark/70 transition-[width] duration-500" style={{ width: `${Math.min(100, Math.round((turns.used / Math.max(1, turns.max)) * 100))}%` }} />
-            </span>
-            <span className="text-[10px] text-mist">{describeLifespan(worker.lifespan, now)}</span>
-          </span>
-        ) : alive ? <span className="mt-1 block text-[10px] text-mist" data-testid="worker-budget">{describeLifespan(worker.lifespan, now)}</span> : null}
-        {worker.control ? <span className={`mt-1 block text-[11px] ${worker.control.state === "approved" ? "text-mist" : "text-amber"}`}>{worker.control.surface === "browser" ? "Discussion browser" : "This Mac"} · {worker.control.state === "approved" ? "Task access approved" : worker.control.state === "revoked" ? "Access revoked" : "Review access request"}</span> : null}
-        {detailed ? <span className="mt-0.5 block truncate text-[10px] text-mist" data-testid="worker-model">
-          {worker.purpose === "thinking" ? "Deep thinking" : "Delivery"} · {worker.modelSnapshot ? `${worker.modelSnapshot.providerId}/${worker.modelSnapshot.modelId} · ${worker.modelSnapshot.variant || "model default"} effort` : "Coworker model (legacy)"}
-        </span> : null}
-      </span>
-      <span className="mt-0.5 shrink-0 text-mist" aria-hidden="true">{expanded ? "▾" : "›"}</span>
-    </button>
-  );
-}
-
-/** A Worker's state as a small mark: a turning ring while it works, a check when done, amber when it needs the person. */
-function WorkerMark({ worker, size = "regular" }: { worker: WorkerSummary; size?: "regular" | "small" }) {
-  const tone = workerTone(worker);
-  const box = size === "small" ? "size-4" : "size-5";
-  const working = worker.status === "running" || worker.status === "starting";
-  const color = { spark: "text-spark", mint: "text-mint", amber: "text-amber", rose: "text-rose", mist: "text-mist" }[tone];
-  return (
-    <span className={`relative inline-flex ${box} shrink-0 items-center justify-center rounded-full bg-ink ring-1 ring-line ${color}`} data-testid="worker-mark" data-tone={tone}>
-      {working ? (
-        <svg viewBox="0 0 20 20" className="size-full motion-safe:animate-[loading-spin_1.1s_linear_infinite]" aria-hidden="true"><circle cx="10" cy="10" r="7" fill="none" stroke="currentColor" strokeOpacity="0.25" strokeWidth="2" /><path d="M10 3a7 7 0 0 1 7 7" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg>
-      ) : worker.status === "finished" ? (
-        <svg viewBox="0 0 20 20" className="size-3/5" aria-hidden="true"><path d="m5 10.5 3.2 3L15 6.5" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" /></svg>
-      ) : worker.status === "paused" ? (
-        <svg viewBox="0 0 20 20" className="size-1/2" aria-hidden="true"><path d="M7 5v10M13 5v10" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" /></svg>
-      ) : worker.status === "waiting" && worker.waitingFor !== "decision" && tone === "spark" ? (
-        <span className="size-1.5 rounded-full bg-current motion-safe:animate-pulse" aria-hidden="true" />
-      ) : tone === "amber" || tone === "rose" ? (
-        <span className="text-[10px] font-bold leading-none" aria-hidden="true">!</span>
-      ) : (
-        <span className="size-1.5 rounded-sm bg-current" aria-hidden="true" />
-      )}
-    </span>
-  );
 }
 
 /** A person can explicitly choose until stopped; defaults always have a turn limit. */
