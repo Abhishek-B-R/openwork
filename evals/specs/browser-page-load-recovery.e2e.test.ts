@@ -13,7 +13,7 @@ test("a person sees why a site cannot connect and reloads the same tab when it r
   const address = { placeholder: "Enter URL..." };
   const error = { text: "This site refused the connection. Check that it is running, then reload." };
 
-  await step("given a working browser tab and an unavailable local site", async () => {
+  await step("given an open browser tab and an unavailable local site", async () => {
     await user.see(address);
     const initial = await probe.eventually(() => probe.browserState(), {
       within: 15_000,
@@ -63,6 +63,8 @@ test("a person sees why a site cannot connect and reloads the same tab when it r
     expect(recovered.tabs).toHaveLength(1);
     expect(page.url).toBe(world.failedUrl);
     evidence.recordAssertionEvidence("Reload recovers the original address and tab", "1 tab remains; the original tab and target are retained; its URL matches the failed address; 0 connection errors remain.", recovered.activeTabId === world.tab.tabId && recovered.tabs.length === 1 && page.url === world.failedUrl);
-    await user.screenshot();
+    // App-renderer CDP captures omit native WebContentsView pixels. Capture
+    // the tab itself so the recovery frame shows the page the person sees.
+    await user.on(world.page).screenshot();
   });
 });
