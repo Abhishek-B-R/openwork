@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import type { ConnectionActionIntent } from "@openwork/types/connection-action-app";
+import { mcpAppResourceUri } from "@openwork/types/mcp-app";
 import { createCipheriv, randomBytes, randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -836,7 +837,8 @@ describe("MCP Apps host transport", () => {
   });
 
   test("a card from an earlier revision of an App built in OpenWork opens the revision advertised now", () => {
-    const revision = (appId: string, revisionId: string) => `ui://openwork/apps/${appId}/revisions/${revisionId}/index.html`;
+    // Built by Den's own writer, so the host's copy of the format cannot drift from it.
+    const revision = mcpAppResourceUri;
     const app = `cob_01mcpapp${"a".repeat(18)}`;
     const other = `cob_01mcpapp${"b".repeat(18)}`;
     const [first, second] = [`cov_01mcpapp${"1".repeat(18)}`, `cov_01mcpapp${"2".repeat(18)}`];

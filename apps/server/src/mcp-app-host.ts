@@ -5,7 +5,6 @@ import { StreamableHTTPClientTransport, StreamableHTTPError } from "@modelcontex
 import { UnauthorizedError } from "@modelcontextprotocol/sdk/client/auth.js";
 import { CallToolResultSchema, ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import { connectionActionAppResourceUri, connectionActionIntentSchema, type ConnectionActionIntent } from "@openwork/types/connection-action-app";
-import { parseMcpAppResourceUri } from "@openwork/types/mcp-app";
 import { trustedAppHostCloudEndpoint } from "./connect-mcp-server-catalog.js";
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
 import {
@@ -131,6 +130,11 @@ async function launchFingerprint(input: { serverConfig: ServerConfig; workspaceI
   return createHash("sha256").update(JSON.stringify({ config, managed, runtimeRevisions, privateRevision })).digest("hex");
 }
 
+// The revision URI of an App built in OpenWork, as mcpAppResourceUri in
+// @openwork/types/mcp-app writes it. That subpath ships as TypeScript, which the
+// packaged server cannot load, so the format is matched here.
+const BUILT_APP_REVISION_URI = /^ui:\/\/openwork\/apps\/(cob_[0-7][0-9a-hjkmnp-tv-z]{25})\/revisions\/cov_[0-7][0-9a-hjkmnp-tv-z]{25}\/index\.html$/u;
+
 /**
  * An App built in OpenWork publishes each update as a new revision of the same
  * App, so a card from an earlier revision opens the one its tool advertises now
@@ -138,9 +142,8 @@ async function launchFingerprint(input: { serverConfig: ServerConfig; workspaceI
  */
 export function advertisesLaunchedResource(launchedUri: string, advertisedUri: string): boolean {
   if (advertisedUri === launchedUri) return true;
-  const launched = parseMcpAppResourceUri(launchedUri);
-  const advertised = parseMcpAppResourceUri(advertisedUri);
-  return launched !== null && advertised !== null && launched.appId === advertised.appId;
+  const launched = BUILT_APP_REVISION_URI.exec(launchedUri)?.[1];
+  return launched !== undefined && launched === BUILT_APP_REVISION_URI.exec(advertisedUri)?.[1];
 }
 
 function bindLaunch(input: { serverConfig: ServerConfig; workspaceId: string; workspaceRoot: string; context?: McpAppLaunchContext; launch?: { arguments?: Record<string, unknown> } }, app: McpAppResource, fingerprint: string, tool: Tool): McpAppResource {
