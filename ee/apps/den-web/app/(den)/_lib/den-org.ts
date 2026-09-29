@@ -246,10 +246,13 @@ export type DenOrgEntitlements = {
   desktopPolicies: boolean;
   orgControls: boolean;
   analytics: boolean;
+  auditLogs: boolean;
 };
 
 /** Server-advertised and per-org capabilities; optional fields default to off. */
 export type DenOrgCapabilities = {
+  /** Effective organization rollout and deployment visibility, separate from capture entitlement. */
+  auditLogs: boolean;
   orgManagedDashboards: boolean;
   installLinks: boolean;
   mcpConnections: boolean;
@@ -530,6 +533,10 @@ export function getJoinOrgRoute(invitationId: string): string {
 
 export function getWorkspaceClaimRoute(token: string): string {
   return `/workspace-claim?token=${encodeURIComponent(token)}`;
+}
+
+export function getAuditLogsRoute(orgSlug?: string | null): string {
+  return `${getOrgDashboardRoute(orgSlug)}/audit-logs`;
 }
 
 export function getAnalyticsRoute(orgSlug?: string | null): string {
@@ -1073,10 +1080,11 @@ function parseOrgAuthMethods(value: unknown): DenOrgAuthMethods {
 
 function parseOrgCapabilities(value: unknown): DenOrgCapabilities {
   if (!isRecord(value)) {
-    return { orgManagedDashboards: false, installLinks: false, mcpConnections: false, appMcpServers: false, workflows: true, openworkWeb: false, cloud: false };
+    return { auditLogs: false, orgManagedDashboards: false, installLinks: false, mcpConnections: false, appMcpServers: false, workflows: true, openworkWeb: false, cloud: false };
   }
 
   return {
+    auditLogs: value.auditLogs === true,
     orgManagedDashboards: value.orgManagedDashboards === true,
     installLinks: value.installLinks === true,
     mcpConnections: value.mcpConnections === true,
@@ -1090,10 +1098,8 @@ function parseOrgCapabilities(value: unknown): DenOrgCapabilities {
 }
 
 function parseOrgEntitlements(value: unknown): DenOrgEntitlements {
-  // Older servers do not return entitlements; treat everything as available
-  // so gating only applies when the API explicitly reports it.
   if (!isRecord(value)) {
-    return { sso: true, desktopPolicies: true, orgControls: true, analytics: true };
+    return { sso: true, desktopPolicies: true, orgControls: true, analytics: true, auditLogs: false };
   }
 
   return {
@@ -1101,6 +1107,7 @@ function parseOrgEntitlements(value: unknown): DenOrgEntitlements {
     desktopPolicies: value.desktopPolicies !== false,
     orgControls: value.orgControls !== false,
     analytics: value.analytics !== false,
+    auditLogs: value.auditLogs === true,
   };
 }
 

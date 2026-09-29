@@ -9,11 +9,12 @@ import {
 } from "@openwork-ee/den-db/schema"
 import { createDenTypeId, normalizeDenTypeId } from "@openwork-ee/utils/typeid"
 import { MCP_APP_LAUNCH_TOOL_NAME, mcpAppIdSchema, mcpAppResourceUri } from "@openwork/types/mcp-app"
-import type { Hono } from "hono"
+import type { Hono, MiddlewareHandler } from "hono"
 import { describeRoute } from "hono-openapi"
 import { z } from "zod"
 import { db } from "../../db.js"
 import { currentMcpAppRevisionIds } from "../../mcp-apps.js"
+import { organizationManagedDashboardsEnabled } from "../../organization-capabilities.js"
 import {
   jsonValidator,
   orgMemberRoute,
@@ -246,6 +247,18 @@ async function grantTargetsInOrganization(
   return null
 }
 
+// Org-managed Dashboards are enabled per organization. When the capability is
+// off, admin routes answer 404 as if the feature did not exist; stored
+// dashboards and grants are kept so re-enabling restores them unchanged.
+const requireOrgManagedDashboards: MiddlewareHandler<{ Variables: OrgRouteVariables }> = async (c, next) => {
+  const payload = c.get("organizationContext")
+  if (!payload) return c.json({ error: "organization_not_found" }, 404)
+  if (!organizationManagedDashboardsEnabled(payload.organization.metadata)) {
+    return c.json({ error: "dashboards_not_enabled" }, 404)
+  }
+  await next()
+}
+
 export function registerOrgDashboardRoutes<T extends { Variables: OrgRouteVariables }>(app: Hono<T>) {
   app.get(
     "/v1/dashboards",
@@ -260,6 +273,7 @@ export function registerOrgDashboardRoutes<T extends { Variables: OrgRouteVariab
       },
     }),
     orgRoleRoute(["admin"]),
+    requireOrgManagedDashboards,
     async (c) => {
       const payload = c.get("organizationContext")
       const rows = await db
@@ -285,6 +299,7 @@ export function registerOrgDashboardRoutes<T extends { Variables: OrgRouteVariab
       },
     }),
     orgRoleRoute(["admin"]),
+    requireOrgManagedDashboards,
     jsonValidator(dashboardCreateSchema),
     async (c) => {
       const payload = c.get("organizationContext")
@@ -320,6 +335,7 @@ export function registerOrgDashboardRoutes<T extends { Variables: OrgRouteVariab
       },
     }),
     orgRoleRoute(["admin"]),
+    requireOrgManagedDashboards,
     paramValidator(dashboardParamsSchema),
     async (c) => {
       const payload = c.get("organizationContext")
@@ -348,6 +364,7 @@ export function registerOrgDashboardRoutes<T extends { Variables: OrgRouteVariab
       },
     }),
     orgRoleRoute(["admin"]),
+    requireOrgManagedDashboards,
     paramValidator(dashboardParamsSchema),
     jsonValidator(dashboardUpdateSchema),
     async (c) => {
@@ -388,6 +405,7 @@ export function registerOrgDashboardRoutes<T extends { Variables: OrgRouteVariab
       },
     }),
     orgRoleRoute(["admin"]),
+    requireOrgManagedDashboards,
     paramValidator(dashboardParamsSchema),
     async (c) => {
       const payload = c.get("organizationContext")
@@ -418,6 +436,7 @@ export function registerOrgDashboardRoutes<T extends { Variables: OrgRouteVariab
       },
     }),
     orgRoleRoute(["admin"]),
+    requireOrgManagedDashboards,
     paramValidator(dashboardParamsSchema),
     async (c) => {
       const payload = c.get("organizationContext")
@@ -453,6 +472,7 @@ export function registerOrgDashboardRoutes<T extends { Variables: OrgRouteVariab
       },
     }),
     orgRoleRoute(["admin"]),
+    requireOrgManagedDashboards,
     paramValidator(dashboardParamsSchema),
     jsonValidator(dashboardAccessGrantWriteSchema),
     async (c) => {
@@ -537,6 +557,7 @@ export function registerOrgDashboardRoutes<T extends { Variables: OrgRouteVariab
       },
     }),
     orgRoleRoute(["admin"]),
+    requireOrgManagedDashboards,
     paramValidator(dashboardGrantParamsSchema),
     async (c) => {
       const payload = c.get("organizationContext")
@@ -584,6 +605,10 @@ export function registerOrgDashboardRoutes<T extends { Variables: OrgRouteVariab
     resolveMemberTeamsMiddleware,
     async (c) => {
       const payload = c.get("organizationContext")
+      // Desktop polls this route; a disabled org sees no granted dashboards.
+      if (!organizationManagedDashboardsEnabled(payload.organization.metadata)) {
+        return c.json({ items: [] })
+      }
       const memberId = payload.currentMember.id
       const memberTeams: MemberTeamSummary[] = c.get("memberTeams") ?? []
       const teamIds = memberTeams.map((team) => team.id)

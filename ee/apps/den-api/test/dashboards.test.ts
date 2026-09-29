@@ -106,7 +106,7 @@ async function cleanup() {
 
 type Actor = "admin" | "casey" | "nova"
 
-function organizationContext(actor: Actor) {
+function organizationContext(actor: Actor, dashboardsEnabled: boolean) {
   const now = new Date()
   const member = actor === "admin"
     ? { id: adminMemberId, userId: adminUserId, role: "admin" }
@@ -120,7 +120,7 @@ function organizationContext(actor: Actor) {
       slug: `dashboards-${organizationId}`,
       logo: null,
       allowedEmailDomains: null,
-      metadata: null,
+      metadata: dashboardsEnabled ? { capabilities: { orgManagedDashboards: true } } : null,
       createdAt: now,
       updatedAt: now,
     },
@@ -145,10 +145,11 @@ function memberTeams(actor: Actor) {
   return [{ id: teamId, organizationId, name: "Product", createdAt: now, updatedAt: now }]
 }
 
-function request(path: string, init: RequestInit & { actor?: Actor } = {}) {
-  const { actor, ...rest } = init
+function request(path: string, init: RequestInit & { actor?: Actor; dashboardsEnabled?: boolean } = {}) {
+  const { actor, dashboardsEnabled, ...rest } = init
   const headers = new Headers(rest.headers)
   headers.set("x-test-actor", actor ?? "admin")
+  if (dashboardsEnabled === false) headers.set("x-test-dashboards", "off")
   if (rest.body) headers.set("content-type", "application/json")
   return app.request(path, { ...rest, headers })
 }
@@ -191,7 +192,7 @@ beforeAll(async () => {
   app.use("*", async (c, next) => {
     const header = c.req.header("x-test-actor")
     const actor: Actor = header === "casey" ? "casey" : header === "nova" ? "nova" : "admin"
-    c.set("organizationContext", organizationContext(actor))
+    c.set("organizationContext", organizationContext(actor, c.req.header("x-test-dashboards") !== "off"))
     c.set("memberTeams", memberTeams(actor))
     await next()
   })
@@ -449,4 +450,35 @@ test("admins list the Apps built in OpenWork they can use, in dashboard element 
   } finally {
     listed.mockRestore()
   }
+})
+
+test("organizations without the orgManagedDashboards capability cannot use dashboards", async () => {
+  const board = await createDashboard("Hidden when disabled")
+  await grantAccess(board.id, { orgWide: true, role: "viewer" })
+
+  const list = await request("/v1/dashboards", { dashboardsEnabled: false })
+  expect(list.status).toBe(404)
+  expect(await list.json()).toEqual({ error: "dashboards_not_enabled" })
+
+  const create = await request("/v1/dashboards", {
+    method: "POST",
+    dashboardsEnabled: false,
+    body: JSON.stringify({ name: "Blocked" }),
+  })
+  expect(create.status).toBe(404)
+
+  const detail = await request(`/v1/dashboards/${board.id}`, { dashboardsEnabled: false })
+  expect(detail.status).toBe(404)
+
+  const access = await request(`/v1/dashboards/${board.id}/access`, { dashboardsEnabled: false })
+  expect(access.status).toBe(404)
+
+  const granted = await request("/v1/me/dashboards", { actor: "nova", dashboardsEnabled: false })
+  expect(granted.status).toBe(200)
+  expect(await granted.json()).toEqual({ items: [] })
+
+  // Stored dashboards survive; re-enabling the capability restores them.
+  const restored = await request("/v1/me/dashboards", { actor: "nova" })
+  const restoredIds = (await restored.json() as { items: Array<{ id: string }> }).items.map((item) => item.id)
+  expect(restoredIds).toContain(board.id)
 })
