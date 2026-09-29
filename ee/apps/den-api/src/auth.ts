@@ -1,4 +1,5 @@
 import * as crypto from "node:crypto";
+import { provisionGatewayGovernance } from "@openwork-ee/den-db/gateway-governance";
 import { readOrganizationMetadata } from "@openwork/types/den/managed-models-policy";
 import { invalidateTeamInferenceOAuth, revokeMemberGatewayCredentials } from "./llm/inference-provider-lifecycle.js";
 import { ensureMemberGatewayKey } from "./gateway-keys.js";
@@ -1182,6 +1183,9 @@ export const auth = betterAuth({
           } catch {
             throw new APIError("BAD_REQUEST", { message: "Organization metadata must be a JSON object." });
           }
+          if ("plan" in metadata) {
+            throw new APIError("FORBIDDEN", { message: "Organization plans are reserved for trusted billing and platform administration." });
+          }
           if ("dpaSigned" in metadata) {
             throw new APIError("FORBIDDEN", { message: "dpaSigned is reserved for internal platform administration." });
           }
@@ -1230,6 +1234,7 @@ export const auth = betterAuth({
                 message: "Owner can only be assigned during organization creation or ownership transfer.",
               });
             }
+            await db.transaction((tx) => provisionGatewayGovernance(tx, normalizeDenTypeId("organization", member.organizationId)));
           }
         },
         beforeCreateInvitation: async ({ invitation, inviter }) => {

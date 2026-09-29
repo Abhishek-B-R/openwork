@@ -1,6 +1,6 @@
 "use client";
 
-import { LayoutDashboard, Plug, SlidersHorizontal, Sparkles, Users } from "lucide-react";
+import { LayoutDashboard, Plug, Shield, SlidersHorizontal, Sparkles, Users } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import type { ReactNode } from "react";
@@ -16,6 +16,7 @@ import { useGatewayDashboardAccess } from "./gateway-dashboard-capability-guard"
 import { GatewaySpendBreakdown } from "./gateway-spend-breakdown";
 import { getProviderIconSlug } from "./llm-provider-data";
 import { GatewayUsageSection } from "./gateway-usage-section";
+import { GatewayGovernanceLoading, GatewayGovernanceSection } from "./gateway-governance-section";
 import { GatewayUsageLimitsSection } from "./gateway-usage-limits-section";
 import { GatewayUsageResetRequests } from "./gateway-usage-reset-requests";
 import { GatewayUsersTeamsSection } from "./gateway-users-teams-section";
@@ -24,7 +25,7 @@ import { GatewayProvidersSection } from "./inference-providers-screen";
 import { LegacyProvidersSection } from "./llm-providers-screen";
 import { InferenceScreen } from "./inference-screen";
 
-export type AiGatewayTab = "overview" | "ai-providers" | "limits" | "users-and-teams" | "openwork-models";
+export type AiGatewayTab = "overview" | "ai-providers" | "limits" | "users-and-teams" | "openwork-models" | "governance";
 
 const AI_GATEWAY_TABS: readonly TabItem<AiGatewayTab>[] = [
   { value: "overview", label: "Overview", icon: LayoutDashboard },
@@ -32,6 +33,7 @@ const AI_GATEWAY_TABS: readonly TabItem<AiGatewayTab>[] = [
   { value: "limits", label: "Limits", icon: SlidersHorizontal },
   { value: "users-and-teams", label: "Users & Teams", icon: Users },
   { value: "openwork-models", label: "OpenWork Models", icon: Sparkles },
+  { value: "governance", label: "Governance", icon: Shield },
 ];
 
 function AiGatewayOverview({ orgId }: { orgId: string }) {
@@ -151,6 +153,14 @@ export function AiGatewayScreen({ providerContent, pageContent, pageTab }: { pro
                     : access === "unavailable"
                       ? "This feature is not part of your deployment system, please ask an instance admin to configure deployment"
                       : "AI Gateway requires workspace admin permissions. Ask a workspace owner to update your role."} />
+            ) : null}
+            {tab === "governance" ? (
+              orgError ? <DenNotice tone="error" message={orgError} />
+                : access === "checking" ? <GatewayGovernanceLoading />
+                  : access === "enabled" && orgId && orgContext ? <GatewayGovernanceSection key={orgId} orgId={orgId} />
+                    : <DenNotice tone="neutral" message={access === "unavailable"
+                      ? "AI Gateway is unavailable in this deployment. Ask your deployment administrator to configure it."
+                      : "Governance requires workspace admin permissions. Ask a workspace owner to update your role."} />
             ) : null}
             {tab === "openwork-models" ? <InferenceScreen embedded /> : null}
             {tab === "ai-providers" && orgId && !orgError ? (

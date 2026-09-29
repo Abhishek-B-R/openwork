@@ -9,7 +9,7 @@ import * as schema from "./schema"
 import type { Logger } from "drizzle-orm/logger"
 
 export type DenDbMode = "mysql" | "planetscale"
-type DenDb = ReturnType<typeof drizzlePlanetScale>
+export type DenDb = ReturnType<typeof drizzlePlanetScale>
 export type PlanetScaleCredentials = {
   host: string
   username: string

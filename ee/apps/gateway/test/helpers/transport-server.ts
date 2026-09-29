@@ -153,6 +153,8 @@ registerProxyRoutes(app, {
   },
   analytics: async () => () => ({ chunk() { if (config.observerFailure) throw new Error(marker) }, finish() { if (config.observerFailure) throw new Error(marker) } }),
   gateway: {
+    resolveGovernance: async () => ({ kind: "off", settingsRevision: 1 }),
+    evaluateGovernance: async () => { throw new Error("Unexpected evaluator call") },
     catalog: createProviderCatalog({ openai: { npm: "@ai-sdk/openai" }, anthropic: { npm: "@ai-sdk/anthropic" }, google: { npm: "@ai-sdk/google" }, azure: { npm: "@ai-sdk/azure" }, "google-vertex": { npm: "@ai-sdk/google-vertex" }, "amazon-bedrock": { npm: "@ai-sdk/amazon-bedrock" } }),
     async loadGatewayProvider({ inferenceProviderId, organizationId }) {
       return { id: inferenceProviderId, organization_id: organizationId, provider_id: typeof config.provider === "string" ? config.provider : "openai",

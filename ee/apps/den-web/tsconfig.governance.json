@@ -1,0 +1,13 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "incremental": false
+  },
+  "include": [
+    "next-env.d.ts",
+    "app/(den)/dashboard/_components/ai-gateway-screen.tsx",
+    "app/(den)/dashboard/_components/gateway-governance-data.ts",
+    "app/(den)/dashboard/_components/gateway-governance-section.tsx"
+  ],
+  "exclude": ["node_modules", "tests"]
+}

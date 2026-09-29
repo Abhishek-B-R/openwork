@@ -372,6 +372,19 @@ const runRollupsBodySchema = z.object({
 export type RollupRouteDependencies = {
   adminToken: string | undefined
   runRollups: (input: RunRollupsInput) => Promise<RollupRunSummary>
+  pruneGovernance?: (now: Date) => Promise<{ decisions: number; admissions: number }>
+}
+
+type GovernanceRetentionSummary = { decisions: number; admissions: number } | { error: "governance_retention_failed" }
+
+async function runGovernanceRetention(prune: NonNullable<RollupRouteDependencies["pruneGovernance"]>, now: Date): Promise<GovernanceRetentionSummary> {
+  try {
+    const result = await prune(now)
+    return { decisions: result.decisions, admissions: result.admissions }
+  } catch {
+    console.error("[gateway] governance retention failed")
+    return { error: "governance_retention_failed" }
+  }
 }
 
 // Same shape as keys.ts constantTimeEquals; kept local so this module (and its
@@ -408,11 +421,19 @@ export function registerRollupRoutes(app: Hono, dependencies: RollupRouteDepende
     const parsed = runRollupsBodySchema.safeParse(json)
     if (!parsed.success) return c.json({ error: "invalid_rollup_bounds" }, 400)
     const body = parsed.data
-    const summary = await dependencies.runRollups({
-      now: body.now ? new Date(body.now) : undefined,
-      maxBucketsPerRun: body.maxBucketsPerRun,
-      maxSourceRowsPerBucket: body.maxSourceRowsPerBucket,
-    })
-    return c.json(summary)
+    const now = body.now ? new Date(body.now) : undefined
+    let summary: RollupRunSummary
+    try {
+      summary = await dependencies.runRollups({
+        now,
+        maxBucketsPerRun: body.maxBucketsPerRun,
+        maxSourceRowsPerBucket: body.maxSourceRowsPerBucket,
+      })
+    } catch (error) {
+      if (dependencies.pruneGovernance) await runGovernanceRetention(dependencies.pruneGovernance, now ?? new Date())
+      throw error
+    }
+    if (!dependencies.pruneGovernance) return c.json(summary)
+    return c.json({ ...summary, governance: await runGovernanceRetention(dependencies.pruneGovernance, now ?? new Date()) })
   })
 }

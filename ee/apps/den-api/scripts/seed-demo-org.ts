@@ -1,4 +1,5 @@
 import { and, eq, inArray } from "@openwork-ee/den-db/drizzle"
+import { provisionGatewayGovernance } from "@openwork-ee/den-db/gateway-governance"
 import {
   AuthUserTable,
   ConfigObjectAccessGrantTable,
@@ -359,13 +360,16 @@ async function ensureOrganization(ownerUserId: UserId): Promise<OrganizationId> 
   }
 
   const id = createDenTypeId("organization")
-  await db.insert(OrganizationTable).values({
-    allowedEmailDomains: [DEMO_EMAIL_DOMAIN],
-    id,
-    logo: null,
-    metadata,
-    name: DEMO_ORG_NAME,
-    slug: DEMO_ORG_SLUG,
+  await db.transaction(async (tx) => {
+    await tx.insert(OrganizationTable).values({
+      allowedEmailDomains: [DEMO_EMAIL_DOMAIN],
+      id,
+      logo: null,
+      metadata,
+      name: DEMO_ORG_NAME,
+      slug: DEMO_ORG_SLUG,
+    })
+    await provisionGatewayGovernance(tx, id)
   })
   await seedDefaultOrganizationRoles(id)
   const ownerMemberId = await ensureMember(id, ownerUserId, "owner")

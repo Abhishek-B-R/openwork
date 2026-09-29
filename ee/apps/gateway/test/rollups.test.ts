@@ -431,3 +431,38 @@ test("POST /internal/rollups/run is guarded by the admin token", async () => {
   assert.equal(empty.status, 200)
   assert.equal(calls[1]?.now, undefined)
 })
+
+test("POST /internal/rollups/run also prunes governance records and isolates their failure", async () => {
+  const summary = { hourBuckets: 0, dayBuckets: 0, rawRowsDeleted: 0, hourRowsDeleted: 0, oauthStatesDeleted: 0 }
+  const pruned: Date[] = []
+  const headers = { authorization: "Bearer secret-admin-token", "content-type": "application/json" }
+  const body = JSON.stringify({ now: "2026-01-10T00:00:00.000Z" })
+  const ok = new Hono()
+  registerRollupRoutes(ok, { adminToken: "secret-admin-token", runRollups: async () => summary,
+    async pruneGovernance(now) { pruned.push(now); return { decisions: 3, admissions: 2 } } })
+  const okResponse = await ok.request("/internal/rollups/run", { method: "POST", headers, body })
+  assert.equal(okResponse.status, 200)
+  assert.deepEqual(await okResponse.json(), { ...summary, governance: { decisions: 3, admissions: 2 } })
+  assert.equal(pruned[0]?.toISOString(), "2026-01-10T00:00:00.000Z")
+
+  const errors: unknown[] = []
+  const original = console.error
+  console.error = (...args: unknown[]) => { errors.push(args) }
+  try {
+    const failing = new Hono()
+    registerRollupRoutes(failing, { adminToken: "secret-admin-token", runRollups: async () => summary,
+      async pruneGovernance() { throw new Error("PRIVATE_DATABASE_DETAIL") } })
+    const response = await failing.request("/internal/rollups/run", { method: "POST", headers, body })
+    assert.equal(response.status, 200)
+    assert.deepEqual(await response.json(), { ...summary, governance: { error: "governance_retention_failed" } })
+
+    let prunedAfterRollupFailure = 0
+    const rollupFailure = new Hono()
+    registerRollupRoutes(rollupFailure, { adminToken: "secret-admin-token", runRollups: async () => { throw new Error("rollup failure") },
+      async pruneGovernance() { prunedAfterRollupFailure++; return { decisions: 0, admissions: 0 } } })
+    rollupFailure.onError((_error, c) => c.json({ error: "internal_server_error" }, 500))
+    assert.equal((await rollupFailure.request("/internal/rollups/run", { method: "POST", headers, body })).status, 500)
+    assert.equal(prunedAfterRollupFailure, 1)
+  } finally { console.error = original }
+  assert.doesNotMatch(JSON.stringify(errors), /PRIVATE_DATABASE_DETAIL/)
+})

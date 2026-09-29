@@ -15,7 +15,10 @@ function string(value: unknown): string {
 }
 
 /** Real Den + Gateway + MySQL. Only the upstream model response is synthetic. */
-export async function engineGatewayParity(seed: Seed, context: { place: Place }) {
+export async function engineGatewayParity(seed: Seed, context: { place: Place }, options: {
+  governanceEnv?: Record<string, string>;
+  gatewayImports?: string[];
+} = {}) {
   await using setup = new AsyncDisposableStack();
   const port = await allocateFreePort();
   const gatewayUrl = `http://127.0.0.1:${port}`;
@@ -25,6 +28,7 @@ export async function engineGatewayParity(seed: Seed, context: { place: Place })
     NODE_ENV: "test", OPENWORK_DEV_MODE: "1", DB_MODE: "mysql", DEN_ORG_MODE: "multi_org",
     GATEWAY_ENABLED: "true", GATEWAY_PROXY_BASE_URL: gatewayUrl, GATEWAY_PUBLIC_BASE_URL: gatewayUrl,
     GATEWAY_EGRESS_ALLOWED_ORIGINS: new URL(mock.url).origin,
+    ...options.governanceEnv,
   }, org: { name: "Engine parity", members: { member: { name: "Parity Member" } } } });
   const base = setup.use(await engineParity(seed, context, { mock, env: {
     OPENWORK_DEV_HEADLESS_WEB_DEN_PROXY: "1", OPENWORK_DEV_DEN_PROXY_TARGET: den.ref.webUrl,
@@ -33,7 +37,7 @@ export async function engineGatewayParity(seed: Seed, context: { place: Place })
   } }));
   const databaseUrl = den.database?.url;
   if (!databaseUrl || !new URL(databaseUrl).pathname.startsWith("/openwork_eval_")) throw new Error("Expected disposable Den database");
-  const child = spawn(process.execPath, ["--conditions=development", "--import", "tsx", "src/server.ts"], {
+  const child = spawn(process.execPath, ["--conditions=development", "--import", "tsx", ...(options.gatewayImports ?? []).flatMap((path) => ["--import", path]), "src/server.ts"], {
     cwd: fileURLToPath(new URL("../../ee/apps/gateway", import.meta.url)), stdio: ["ignore", "pipe", "pipe"],
     env: {
       PATH: process.env.PATH, HOME: process.env.HOME, NODE_ENV: "test", OPENWORK_DEV_MODE: "1",
@@ -41,6 +45,7 @@ export async function engineGatewayParity(seed: Seed, context: { place: Place })
       DEN_DB_ENCRYPTION_KEY: "local-dev-db-encryption-key-please-change-1234567890",
       GATEWAY_PROXY_BASE_URL: gatewayUrl, GATEWAY_PUBLIC_BASE_URL: gatewayUrl, GATEWAY_EGRESS_ALLOWED_ORIGINS: new URL(base.mock.url).origin,
       OPENROUTER_UPSTREAM_URL: `${base.mock.url}/v1`, SENTRY_DSN: "", SENTRY_LOG_LEVEL: "off",
+      ...options.governanceEnv,
     },
   });
   let logs = "";

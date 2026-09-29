@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 
 import { randomUUID } from "node:crypto";
+import { governanceHost } from "./governance-recovery.js";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 
@@ -143,6 +144,7 @@ if (manageEngine) {
     ...(process.env.OPENWORK_UI_CONTROL_DISCOVERY ? { OPENWORK_UI_CONTROL_DISCOVERY: process.env.OPENWORK_UI_CONTROL_DISCOVERY } : {}),
     OPENWORK_SERVER_URL: serverUrl,
     OPENWORK_SERVER_TOKEN: config.token,
+    OPENWORK_GOVERNANCE_TOKEN: governanceHost(config).token,
     OPENCODE_CONFIG: runtimeConfigPath,
     OPENCODE_MODELS_URL: opencodeModelsUrl,
   };

@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs"
 import path from "node:path"
 import { denUrls } from "@openwork-ee/utils/den-urls"
 import { parseGatewayDeploymentEnv } from "@openwork-ee/utils/gateway-env"
+import { parseGatewayGovernanceConfig } from "@openwork-ee/utils/gateway-governance"
 import { DEN_WORKER_POLL_INTERVAL_MS } from "./CONSTS.js"
 import { normalizeConfiguredPublicApiBaseUrl } from "./request-url.js"
 import { resolveDenServiceVersion } from "./service-version.js"
@@ -835,6 +836,7 @@ export const env = {
   // Keep known public Models destinations even when Gateway management is off.
   modelsPublicBaseUrl: gatewayDeployment.modelsPublicBaseUrl ?? optionalString(parsed.GATEWAY_PROXY_BASE_URL) ?? "http://127.0.0.1:8791",
   gatewayEnabled: gatewayDeployment.enabled,
+  gatewayGovernance: parseGatewayGovernanceConfig(process.env),
   gatewayProxyBaseUrl: gatewayDeployment.proxyBaseUrl,
   // Existing member payloads retain their legacy destination until explicitly configured.
   gatewayPublicBaseUrl: gatewayDeployment.publicBaseUrl ?? optionalString(parsed.GATEWAY_PROXY_BASE_URL) ?? "http://127.0.0.1:8791",

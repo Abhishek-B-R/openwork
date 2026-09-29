@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { createTaskRecovery, RECOVERY_INTERVAL_MS } from "./task-recovery.js";
 import type { ServerConfig } from "./types.js";
 import { createWorkspaceKvStore } from "./workspace-kv-store.js";
+import { governanceHost, governanceScope } from "./governance-recovery.js";
 
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => {
@@ -114,6 +115,21 @@ async function fixture(engine: "v1" | "v2") {
     },
   };
 }
+
+test("durable pending governance prevents restart recovery even when native reports unfinished work", async () => {
+  const f = await fixture("v1");
+  await f.send("ses_work"); await f.tick();
+  await governanceHost(f.config).report(governanceScope("ws", "v1", "ses_work"), {
+    directory: f.config.workspaces[0].path, sessionID: "ses_work", messageID: "user-1", requestID: "request_test", phase: "begin", agent: "build",
+  }, {
+    snapshot: async () => ({ idle: false, reverted: false, title: "New session - test", messages: [
+      { id: "user-1", sessionID: "ses_work", role: "user", created: 1, parts: [{ type: "text", text: "Synthetic contribution" }] },
+    ] }),
+    deleteMessage: async () => { throw new Error("Never delete during task recovery"); },
+  });
+  await f.restart(true); await f.tick();
+  expect(f.resumes).toEqual([]);
+});
 
 for (const engine of ["v1", "v2"] as const) {
   test(`${engine}: a durable unfinished task resumes once on its original engine and survives a second restart`, async () => {

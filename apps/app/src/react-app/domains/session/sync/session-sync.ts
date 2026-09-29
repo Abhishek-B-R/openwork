@@ -6,6 +6,8 @@ import { getReactQueryClient } from "../../../infra/query-client";
 import { readGatewayUsageScope } from "@/app/lib/gateway-usage-scope";
 import { refreshGatewayUsageAfterCompletion } from "../../cloud/gateway-usage-refresh";
 import { gatewayUsageQueryPrefix } from "../../cloud/gateway-usage-state";
+import { governanceQueryPrefix } from "./governance-state";
+import { dispatchQueuedDrain } from "../surface/queued-drain-machine";
 import { closeSessionBrowserTabs } from "@/app/lib/desktop";
 import { captureAnalyticsEvent, takeTaskRunStart } from "@/app/lib/analytics";
 import { trackTaskCompleted, trackTaskFailed } from "@/app/lib/den-telemetry";
@@ -1037,6 +1039,7 @@ function applyEvent(entry: SyncEntry, workspaceId: string, event: OpencodeEvent)
     }
     queryClient.removeQueries({ queryKey: permissionKey(workspaceId, sessionId), exact: true });
     queryClient.removeQueries({ queryKey: questionKey(workspaceId, sessionId), exact: true });
+    queryClient.removeQueries({ queryKey: governanceQueryPrefix, predicate: (query) => query.queryKey[2] === input.baseUrl && query.queryKey[3] === sessionId });
     void closeSessionBrowserTabs(sessionId);
     entry.titleRecovery?.resolve(sessionId);
     useSessionActivityStore.getState().removeSession(workspaceId, sessionId);
@@ -1050,6 +1053,8 @@ function applyEvent(entry: SyncEntry, workspaceId: string, event: OpencodeEvent)
   if (event.type === "session.error") {
     const sessionId = sessionIdFromProperties(event.properties);
     if (sessionId) {
+      dispatchQueuedDrain(sessionId, { type: "session_failed" });
+      void queryClient.invalidateQueries({ queryKey: governanceQueryPrefix });
       const sessionError = sessionErrorFromProperties(event.properties);
       const errorPresentation = presentOpencodeSessionError(sessionError);
       if (errorPresentation.gatewayUsage) void queryClient.invalidateQueries({ queryKey: gatewayUsageQueryPrefix });

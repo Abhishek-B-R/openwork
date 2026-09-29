@@ -14,7 +14,7 @@ import {
   type OpencodeSessionErrorPresentation,
 } from "./session-error";
 
-function sessionErrorMessageId(turnKey: string) {
+export function sessionErrorMessageId(turnKey: string) {
   return `${SYNTHETIC_SESSION_ERROR_MESSAGE_PREFIX}${turnKey}`;
 }
 

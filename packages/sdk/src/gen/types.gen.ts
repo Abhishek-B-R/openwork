@@ -16251,6 +16251,437 @@ export type PostV1InferenceProvidersMigrateFromLlmProviderResponses = {
 export type PostV1InferenceProvidersMigrateFromLlmProviderResponse =
   PostV1InferenceProvidersMigrateFromLlmProviderResponses[keyof PostV1InferenceProvidersMigrateFromLlmProviderResponses];
 
+export type GetV1GatewayGovernanceData = {
+  body?: never;
+  path?: never;
+  query?: never;
+  url: "/v1/gateway-governance";
+};
+
+export type GetV1GatewayGovernanceErrors = {
+  /**
+   * Invalid request or missing disclosure acknowledgment
+   */
+  400: {
+    error: string;
+    message?: string;
+    reason?: string;
+  };
+  /**
+   * Sign-in required
+   */
+  401: {
+    error: string;
+    message?: string;
+    reason?: string;
+  };
+  /**
+   * Administrator permission, fresh authentication, or governance availability required
+   */
+  403: {
+    error: string;
+    message?: string;
+    reason?: string;
+  };
+  /**
+   * Organization policy not found
+   */
+  404: {
+    error: string;
+    message?: string;
+    reason?: string;
+  };
+  /**
+   * Revision conflict, active policy limit, or policy input budget exceeded
+   */
+  409: {
+    error: string;
+    message?: string;
+    reason?: string;
+  };
+  /**
+   * Governance state unavailable
+   */
+  503: {
+    error: string;
+    message?: string;
+    reason?: string;
+  };
+};
+
+export type GetV1GatewayGovernanceError = GetV1GatewayGovernanceErrors[keyof GetV1GatewayGovernanceErrors];
+
+export type GetV1GatewayGovernanceResponses = {
+  /**
+   * Read AI Gateway governance
+   */
+  200: {
+    settings: {
+      enabled: boolean;
+      revision: number;
+      policySetRevision: number;
+    };
+    policies: Array<{
+      name: string;
+      guidance: string;
+      id: string;
+      status: "draft" | "active" | "archived";
+      revision: number;
+      createdAt: string;
+      updatedAt: string;
+    }>;
+    availability: {
+      available: boolean;
+      mode: "disabled" | "hosted" | "self_hosted_module";
+      reason:
+        | "ready"
+        | "enterprise_required"
+        | "module_disabled"
+        | "evaluator_unavailable"
+        | "processing_approval_required"
+        | "thresholds_required";
+    };
+  };
+};
+
+export type GetV1GatewayGovernanceResponse = GetV1GatewayGovernanceResponses[keyof GetV1GatewayGovernanceResponses];
+
+export type GetV1GatewayGovernanceDecisionsData = {
+  body?: never;
+  path?: never;
+  query?: {
+    limit?: number;
+    cursor?: string;
+  };
+  url: "/v1/gateway-governance/decisions";
+};
+
+export type GetV1GatewayGovernanceDecisionsErrors = {
+  /**
+   * Invalid limit or cursor
+   */
+  400: {
+    error: string;
+    message?: string;
+    reason?: string;
+  };
+  /**
+   * Sign-in required
+   */
+  401: {
+    error: string;
+    message?: string;
+    reason?: string;
+  };
+  /**
+   * Administrator permission required
+   */
+  403: {
+    error: string;
+    message?: string;
+    reason?: string;
+  };
+  /**
+   * Governance decision history unavailable
+   */
+  503: {
+    error: string;
+    message?: string;
+    reason?: string;
+  };
+};
+
+export type GetV1GatewayGovernanceDecisionsError =
+  GetV1GatewayGovernanceDecisionsErrors[keyof GetV1GatewayGovernanceDecisionsErrors];
+
+export type GetV1GatewayGovernanceDecisionsResponses = {
+  /**
+   * Recent governance decisions
+   */
+  200: {
+    decisions: Array<{
+      decisionId: string;
+      createdAt: string;
+      route: "provider" | "managed";
+      outcome:
+        | "allowed"
+        | "receipt_reused"
+        | "blocked"
+        | "uncertain"
+        | "unsupported_input"
+        | "unavailable"
+        | "policy_changed";
+      memberId: string | null;
+      memberName: string | null;
+      policySetRevision: number | null;
+      failedPolicies: Array<{
+        id: string;
+        revision: number;
+        name: string;
+      }>;
+      latencyMs: number;
+      evaluatorModel: string | null;
+    }>;
+    nextCursor: string | null;
+  };
+};
+
+export type GetV1GatewayGovernanceDecisionsResponse =
+  GetV1GatewayGovernanceDecisionsResponses[keyof GetV1GatewayGovernanceDecisionsResponses];
+
+export type PatchV1GatewayGovernanceSettingsData = {
+  body: {
+    expectedRevision: number;
+    enabled: boolean;
+    processingAcknowledged?: boolean;
+  };
+  path?: never;
+  query?: never;
+  url: "/v1/gateway-governance/settings";
+};
+
+export type PatchV1GatewayGovernanceSettingsErrors = {
+  /**
+   * Invalid request or missing disclosure acknowledgment
+   */
+  400: {
+    error: string;
+    message?: string;
+    reason?: string;
+  };
+  /**
+   * Sign-in required
+   */
+  401: {
+    error: string;
+    message?: string;
+    reason?: string;
+  };
+  /**
+   * Administrator permission, fresh authentication, or governance availability required
+   */
+  403: {
+    error: string;
+    message?: string;
+    reason?: string;
+  };
+  /**
+   * Organization policy not found
+   */
+  404: {
+    error: string;
+    message?: string;
+    reason?: string;
+  };
+  /**
+   * Revision conflict, active policy limit, or policy input budget exceeded
+   */
+  409: {
+    error: string;
+    message?: string;
+    reason?: string;
+  };
+  /**
+   * Governance state unavailable
+   */
+  503: {
+    error: string;
+    message?: string;
+    reason?: string;
+  };
+};
+
+export type PatchV1GatewayGovernanceSettingsError =
+  PatchV1GatewayGovernanceSettingsErrors[keyof PatchV1GatewayGovernanceSettingsErrors];
+
+export type PatchV1GatewayGovernanceSettingsResponses = {
+  /**
+   * Update AI Gateway governance settings
+   */
+  200: {
+    settings: {
+      enabled: boolean;
+      revision: number;
+      policySetRevision: number;
+    };
+  };
+};
+
+export type PatchV1GatewayGovernanceSettingsResponse =
+  PatchV1GatewayGovernanceSettingsResponses[keyof PatchV1GatewayGovernanceSettingsResponses];
+
+export type PostV1GatewayGovernancePoliciesData = {
+  body: {
+    name: string;
+    guidance: string;
+  };
+  path?: never;
+  query?: never;
+  url: "/v1/gateway-governance/policies";
+};
+
+export type PostV1GatewayGovernancePoliciesErrors = {
+  /**
+   * Invalid request or missing disclosure acknowledgment
+   */
+  400: {
+    error: string;
+    message?: string;
+    reason?: string;
+  };
+  /**
+   * Sign-in required
+   */
+  401: {
+    error: string;
+    message?: string;
+    reason?: string;
+  };
+  /**
+   * Administrator permission, fresh authentication, or governance availability required
+   */
+  403: {
+    error: string;
+    message?: string;
+    reason?: string;
+  };
+  /**
+   * Organization policy not found
+   */
+  404: {
+    error: string;
+    message?: string;
+    reason?: string;
+  };
+  /**
+   * Revision conflict, active policy limit, or policy input budget exceeded
+   */
+  409: {
+    error: string;
+    message?: string;
+    reason?: string;
+  };
+  /**
+   * Governance state unavailable
+   */
+  503: {
+    error: string;
+    message?: string;
+    reason?: string;
+  };
+};
+
+export type PostV1GatewayGovernancePoliciesError =
+  PostV1GatewayGovernancePoliciesErrors[keyof PostV1GatewayGovernancePoliciesErrors];
+
+export type PostV1GatewayGovernancePoliciesResponses = {
+  /**
+   * Create a draft AI Gateway governance policy
+   */
+  201: {
+    policy: {
+      name: string;
+      guidance: string;
+      id: string;
+      status: "draft" | "active" | "archived";
+      revision: number;
+      createdAt: string;
+      updatedAt: string;
+    };
+  };
+};
+
+export type PostV1GatewayGovernancePoliciesResponse =
+  PostV1GatewayGovernancePoliciesResponses[keyof PostV1GatewayGovernancePoliciesResponses];
+
+export type PatchV1GatewayGovernancePoliciesByIdData = {
+  body: {
+    name?: string;
+    guidance?: string;
+    expectedRevision: number;
+    status?: "draft" | "active" | "archived";
+  };
+  path: {
+    id: string;
+  };
+  query?: never;
+  url: "/v1/gateway-governance/policies/{id}";
+};
+
+export type PatchV1GatewayGovernancePoliciesByIdErrors = {
+  /**
+   * Invalid request or missing disclosure acknowledgment
+   */
+  400: {
+    error: string;
+    message?: string;
+    reason?: string;
+  };
+  /**
+   * Sign-in required
+   */
+  401: {
+    error: string;
+    message?: string;
+    reason?: string;
+  };
+  /**
+   * Administrator permission, fresh authentication, or governance availability required
+   */
+  403: {
+    error: string;
+    message?: string;
+    reason?: string;
+  };
+  /**
+   * Organization policy not found
+   */
+  404: {
+    error: string;
+    message?: string;
+    reason?: string;
+  };
+  /**
+   * Revision conflict, active policy limit, or policy input budget exceeded
+   */
+  409: {
+    error: string;
+    message?: string;
+    reason?: string;
+  };
+  /**
+   * Governance state unavailable
+   */
+  503: {
+    error: string;
+    message?: string;
+    reason?: string;
+  };
+};
+
+export type PatchV1GatewayGovernancePoliciesByIdError =
+  PatchV1GatewayGovernancePoliciesByIdErrors[keyof PatchV1GatewayGovernancePoliciesByIdErrors];
+
+export type PatchV1GatewayGovernancePoliciesByIdResponses = {
+  /**
+   * Update or publish an AI Gateway governance policy
+   */
+  200: {
+    policy: {
+      name: string;
+      guidance: string;
+      id: string;
+      status: "draft" | "active" | "archived";
+      revision: number;
+      createdAt: string;
+      updatedAt: string;
+    };
+  };
+};
+
+export type PatchV1GatewayGovernancePoliciesByIdResponse =
+  PatchV1GatewayGovernancePoliciesByIdResponses[keyof PatchV1GatewayGovernancePoliciesByIdResponses];
+
 export type PostV1MembersByMemberIdRoleData = {
   body: {
     role: string;

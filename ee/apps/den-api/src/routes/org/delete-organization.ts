@@ -1,5 +1,6 @@
 import { eq, inArray } from "@openwork-ee/den-db/drizzle"
 import { deleteGatewayUsageForOrganization } from "@openwork-ee/den-db/gateway-usage-limits"
+import { deleteGatewayGovernanceForOrganization } from "@openwork-ee/den-db/gateway-governance"
 import {
   AuthApiKeyTable,
   AuthSessionTable,
@@ -376,6 +377,7 @@ export function registerDeleteOrganizationRoutes<T extends { Variables: OrgRoute
         await tx.select({ id: OrganizationTable.id }).from(OrganizationTable)
           .where(eq(OrganizationTable.id, organizationId)).for("update")
         await deleteGatewayUsageForOrganization(tx, organizationId)
+        await deleteGatewayGovernanceForOrganization(tx, organizationId)
         await deleteModelsAnalyticsForOrganization(tx, organizationId)
         const memberRows = await tx
           .select({ id: MemberTable.id, userId: MemberTable.userId })

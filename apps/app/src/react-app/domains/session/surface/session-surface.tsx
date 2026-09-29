@@ -89,7 +89,9 @@ import {
   resolveAdmissionOutcome,
 } from "./session-admission-outcome";
 import { describeOpencodeSessionError, interruptedTaskRecoveryPrompt, presentOpencodeSessionError, sessionErrorPresentationFromUIMessage, type OpencodeSessionErrorPresentation } from "@/react-app/domains/session/sync/session-error";
-import { createSessionErrorUIMessage } from "@/react-app/domains/session/sync/usechat-adapter";
+import { createSessionErrorUIMessage, sessionErrorMessageId } from "@/react-app/domains/session/sync/usechat-adapter";
+import { GovernanceDisplayProvider, useGovernanceDisplay } from "./governance-display";
+import { mergeGovernanceDisplay, type GovernanceDisplayEntry } from "../sync/governance-state";
 import { TaskRecovery } from "@/components/chat/task-recovery";
 import { useLocal } from "@/react-app/kernel/local-provider";
 import { useGatewayUsage, useGatewayUsageErrorHandled } from "../../cloud/use-gateway-usage";
@@ -1447,6 +1449,8 @@ export function SessionSurface(props: SessionSurfaceProps) {
   const revertMessageId = snapshot?.session.revert?.messageID ?? null;
   const revertedMessageCount = snapshot && revertMessageId ? hiddenMessageCount(snapshot, revertMessageId) : 0;
   const liveStatus = statusState ?? snapshot?.status ?? IDLE_STATUS;
+  const governance = useGovernanceDisplay({ baseUrl: props.opencodeBaseUrl, sessionID: props.sessionId,
+    token: props.openworkToken, owner: sessionOwner, idle: liveStatus.type === "idle" });
   const preparingCloudTools = props.cloudMcpSubmissionState.status === "checking" ||
     props.cloudMcpSubmissionState.status === "repairing";
   const needsStop = useSyncExternalStore(
@@ -1602,6 +1606,18 @@ export function SessionSurface(props: SessionSurfaceProps) {
       return !presentation || (presentation.kind !== "rate-limited" && !presentation.gatewayUsage);
     });
   }, [hideGatewayError, renderedMessages, usageError]);
+  const governedDisplayMessages = useMemo(() => {
+    const rejected = new Set(governance.entries.filter((entry) => entry.error).map((entry) => entry.messageID));
+    const hidden = new Set((snapshot?.messages ?? []).flatMap(({ info, parts }) => info.role === "assistant" && rejected.has(info.parentID) && info.error && parts.every((part) => part.type === "step-start")
+      ? [info.id, sessionErrorMessageId(info.id)] : []));
+    const sessionRejection = governance.entries.some((entry) => entry.correlation === "session" && entry.error);
+    const lastUser = visibleMessages.findLastIndex((message) => message.role === "user");
+    // Native v2 placeholders carry no parent link; the rejected newest message
+    // owns any error rows after it.
+    const tailRejection = sessionRejection || rejected.has(visibleMessages[lastUser]?.id ?? "");
+    return mergeGovernanceDisplay(visibleMessages.filter((message, index) => !hidden.has(message.id)
+      && !(tailRejection && index > lastUser && sessionErrorPresentationFromUIMessage(message))), governance.entries);
+  }, [governance.entries, snapshot, visibleMessages]);
   const renderedMessagesRef = useRef(renderedMessages);
   useEffect(() => {
     renderedMessagesRef.current = renderedMessages;
@@ -3046,6 +3062,36 @@ export function SessionSurface(props: SessionSurfaceProps) {
     void handleResumeInterrupted(interruptedTaskRecoveryPrompt);
   }, [handleResumeInterrupted]);
 
+  // A paused attempt that was not a policy violation is removed from model
+  // history by the host first; only then is its text sent again with a new
+  // message identity, or placed in the composer to edit.
+  const [governanceReattach, setGovernanceReattach] = useState(0);
+  useEffect(() => { setGovernanceReattach(0); }, [props.sessionId]);
+  useEffect(() => {
+    if (attachments.length > 0 || !draft.trim()) setGovernanceReattach(0);
+  }, [attachments.length, draft]);
+  const handleGovernanceRetry = useCallback(async (entry: GovernanceDisplayEntry, action: "resend" | "edit") => {
+    if (archived || !archiveStateKnown) return;
+    const next = await governance.retry(entry.messageID);
+    // Still present: the host reports the new state in place.
+    if (next.entries.some((item) => item.messageID === entry.messageID)) return;
+    await queryClient.invalidateQueries({ queryKey: snapshotQueryKey, exact: true });
+    if (action === "resend" && entry.files.length === 0 && !sessionWorkHeld(props.opencodeBaseUrl, props.sessionId)) {
+      const messageID = createPromptMessageID();
+      dispatchQueuedDrain(props.sessionId, { type: "user_retry" });
+      if (!claimQueuedSend(props.sessionId, messageID, true)) return;
+      try {
+        await sendDraft({ messageId: messageID, mode: "prompt", parts: [{ type: "text", text: entry.text }], attachments: [], text: entry.text }, messageID);
+      } catch {
+        // sendDraft already surfaced the failure on the session error state.
+      }
+      return;
+    }
+    clearComposerRevertTarget(props.sessionId);
+    await typeComposerText(entry.text);
+    setGovernanceReattach(entry.files.length);
+  }, [archived, archiveStateKnown, clearComposerRevertTarget, governance, props.opencodeBaseUrl, props.sessionId, queryClient, sendDraft, snapshotQueryKey, typeComposerText]);
+
   useEffect(() => {
     const refreshConnectionInventory = () => {
       clearCloudInventoryCache();
@@ -3380,11 +3426,11 @@ export function SessionSurface(props: SessionSurfaceProps) {
             ) : null}
             <SessionHistoryBoundary owner={sessionOwner} pending={pendingSessionLoad}
               failed={Boolean(openingHistory.openingError) || snapshotQuery.isError && !snapshotQuery.isFetching} saved={initialScroll}>
-            {renderedMessages.length === 0 && effectiveActivityStatus !== "idle" && !error ? (
+            {governedDisplayMessages.length === 0 && effectiveActivityStatus !== "idle" && !error ? (
               <div className="px-6 py-12">
                 <AssistantWaitingCard label={getSessionActivityStatusLabel(effectiveActivityStatus)} />
               </div>
-            ) : renderedMessages.length === 0 && snapshot && snapshot.messages.length === 0 && error && !hideDirectGatewayError ? (
+            ) : governedDisplayMessages.length === 0 && snapshot && snapshot.messages.length === 0 && error && !hideDirectGatewayError ? (
               <SessionErrorCard
                 developerMode={props.developerMode}
                 error={error}
@@ -3392,7 +3438,7 @@ export function SessionSurface(props: SessionSurfaceProps) {
                 onChangeModel={handleModelChange}
                 onOpenModelPicker={handleOpenModelPicker}
               />
-            ) : props.chatPane === "secondary" && snapshot && renderedMessages.length === 0 ? (
+            ) : props.chatPane === "secondary" && snapshot && governedDisplayMessages.length === 0 ? (
               null
             ) : (
               <DevProfiler id="MessageList">
@@ -3419,7 +3465,7 @@ export function SessionSurface(props: SessionSurfaceProps) {
                       showThinking={showThinking}
                       highlightQuery={findHighlightQuery}
                       developerMode={props.developerMode}
-                      displaySuggestions={!archived && shellConfig.starterCards && snapshot !== null && snapshot.messages.length === 0}
+                      displaySuggestions={!archived && shellConfig.starterCards && snapshot !== null && governedDisplayMessages.length === 0}
                       providerConnectedCount={props.providerConnectedCount ?? 0}
                       connectorIdentities={connectorIdentities}
                       syncDegraded={runSyncHealth.degraded}
@@ -3436,16 +3482,22 @@ export function SessionSurface(props: SessionSurfaceProps) {
                       getConnectionDecision={getConnectionDecision}
                       connectionQuestionToolCallId={nativeConnectionRequest?.questionToolCallId ?? null}
                     >
+                      <GovernanceDisplayProvider value={{ entries: governance.entries, readOnly: archived || !archiveStateKnown || liveStatus.type !== "idle",
+                        onEdit: (text) => { clearComposerRevertTarget(props.sessionId); void typeComposerText(text); },
+                        onCleanup: async () => { await governance.cleanup(); await queryClient.invalidateQueries({ queryKey: snapshotQueryKey, exact: true }); },
+                        onRetry: handleGovernanceRetry,
+                      }}>
                       <MessageList
                         messageIdReplacements={pendingReconciliation.messageIdReplacements}
                         viewport={messageViewport}
-                        messages={visibleMessages}
+                        messages={governedDisplayMessages}
                         sessionErrorHandled={hideGatewayError}
                         status={status}
                         activityStatus={effectiveActivityStatus}
                         retryStatus={liveStatus.type === "retry" ? liveStatus : null}
                         syncHealth={runSyncHealth}
                       />
+                      </GovernanceDisplayProvider>
                     </MessageListProvider>
                   </EnvironmentVariableProvider>
                 </OpenTargetProvider>
@@ -3479,6 +3531,10 @@ export function SessionSurface(props: SessionSurfaceProps) {
 
       <div ref={composerShellRef} className="shrink-0 px-0 pb-2 pt-2 max-lg:pb-0">
         <GatewayUsageApprovalNotice />
+        {governance.held && governance.entries.length === 0 ? <TaskRecovery state="paused" title="Waiting for the current message" /> : null}
+        {governanceReattach > 0 ? <TaskRecovery state="paused" title={governanceReattach === 1 ? "Reattach the file, then send" : `Reattach ${governanceReattach} files, then send`} /> : null}
+        {governance.query.isError && gatewaySelected ? <TaskRecovery state="paused" title="Couldn’t verify policy recovery" description="Check again before sending."
+          actions={<Button variant="ghost" size="xs" onClick={() => void governance.query.refetch()}>Check status</Button>} /> : null}
         {gatewayNotice && gatewayUsage.data ? <GatewayUsageNotice key={`${gatewayUsage.scopeKey}:${sessionOwner}`} state={gatewayNotice} status={gatewayUsage.data} stale={gatewayUsage.query.isError} /> : null}
         {(props.providerConnectedCount ?? 0) === 0 ? (
           <button

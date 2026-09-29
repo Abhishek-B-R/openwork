@@ -40,6 +40,10 @@ import { loadProviderCredentialFromDb, resolveUpstreamCredential } from "./provi
 import type { GatewayCredential, GatewayProvider, LoadProviderCredential, ResolvedUpstreamCredential } from "./provider-credentials.js"
 import { isEventStreamContentType, isJsonContentType, trackStream, readBoundedBody, RequestBodyLimitError, upstreamLifetime } from "./relay.js"
 import { env } from "./env.js"
+import { createGovernanceAdmission, GovernanceFailure, governanceFailureResponse, resolveGatewayGovernance, type ResolveGatewayGovernance } from "./governance.js"
+import { evaluateGatewayGovernance, type EvaluateGatewayGovernance } from "./governance-evaluator.js"
+import { sanitizeGovernanceResponseStream, stripUpstreamGovernanceMarkers } from "./governance-response.js"
+import { createDbGatewayGovernanceRecords, type GatewayGovernanceRecords } from "./governance-records.js"
 import { createRequestLogRecorder } from "./request-log.js"
 import { checkGatewayUsage, type CheckGatewayUsage } from "./usage-limits.js"
 import type { InsertRequestLog, RequestLogRecorder, RequestLogRecorderDependencies } from "./request-log.js"
@@ -69,6 +73,9 @@ export type LoadGatewayProvider = (input: {
 }) => Promise<GatewayProvider | null>
 
 export type GatewayDependencies = {
+  resolveGovernance: ResolveGatewayGovernance
+  evaluateGovernance: EvaluateGatewayGovernance
+  governanceRecords: GatewayGovernanceRecords
   checkUsage: CheckGatewayUsage
   fetch: typeof fetch
   insertRequestLog: InsertRequestLog
@@ -112,7 +119,7 @@ type UpstreamAuth =
 
 export const gatewayPathPrefix = "/api/v1/providers"
 
-const droppedResponseHeaders = new Set(["content-length", "transfer-encoding", "connection"])
+const droppedResponseHeaders = new Set(["content-length", "content-encoding", "transfer-encoding", "connection", "content-md5", "content-digest", "digest", "etag"])
 const vertexAnthropicVersion = "vertex-2023-10-16"
 
 export const loadGatewayProviderFromDb: LoadGatewayProvider = async (input) => {
@@ -436,18 +443,19 @@ async function relayErrorResponse(upstream: Response, protocol: GatewayRequestPr
     try { body = JSON.parse(new TextDecoder().decode(bytes)) } catch { body = null }
     const usage = parseJsonUsage(protocol, body)
     if (usage) recordUsage(recorder, usage, "json")
+    let changed = stripUpstreamGovernanceMarkers(body)
     const pending: unknown[] = [body]
     while (pending.length) {
       const value = pending.pop()
-      if (Array.isArray(value)) { pending.push(...value); continue }
+      if (Array.isArray(value)) { for (const child of value) pending.push(child); continue }
       if (!isJsonObject(value)) continue
-      if (value.source === "openwork_gateway") delete value.source
-      if (typeof value.code === "string" && value.code.startsWith("openwork_gateway_")) value.code = "upstream_error"
-      if (value.type === "usage_limit_error" || value.type === "accounting_unavailable_error") value.type = "upstream_error"
+      if (value.source === "openwork_gateway") { delete value.source; changed = true }
+      if (typeof value.code === "string" && value.code.startsWith("openwork_gateway_")) { value.code = "upstream_error"; changed = true }
+      if (value.type === "usage_limit_error" || value.type === "accounting_unavailable_error") { value.type = "upstream_error"; changed = true }
       for (const child of Object.values(value)) if (typeof child === "object" && child !== null) pending.push(child)
     }
     void recorder.finish({ status: upstream.status, outcome: "upstream_error", upstreamRequestId: upstreamRequestId(upstream.headers), responseBytes: bytes.length })
-    return new Response(body === null ? bytes : JSON.stringify(body), { status: upstream.status, headers })
+    return new Response(changed ? JSON.stringify(body) : bytes, { status: upstream.status, headers })
   } catch {
     void recorder.finish({ status: upstream.status, outcome: "upstream_error", errorCode: "upstream_error_body_unavailable" })
     return gatewayError(upstream.status, "upstream_error", "The provider rejected this request.")
@@ -562,7 +570,7 @@ function relayStreamResponse(upstream: Response, protocol: GatewayRequestProtoco
       finish(lifetime.signal.aborted && !lifetime.timedOut ? "client_aborted" : "upstream_error")
     },
   }, lifetime)
-  return new Response(body, { status: upstream.status, statusText: upstream.statusText, headers })
+  return new Response(sanitizeGovernanceResponseStream(body, upstream.headers.get("content-type")), { status: upstream.status, statusText: upstream.statusText, headers })
 }
 
 function refreshGoogleOauthTokenWithDb(): RefreshGoogleOauthToken {
@@ -580,6 +588,9 @@ function restOfPath(pathname: string, inferenceProviderId: string) {
 
 export function registerGatewayRoutes(api: Hono<GatewayEnv>, input: GatewayRouteDependencies) {
   const dependencies: GatewayDependencies = {
+    resolveGovernance: input.resolveGovernance ?? resolveGatewayGovernance,
+    evaluateGovernance: input.evaluateGovernance ?? evaluateGatewayGovernance,
+    governanceRecords: input.governanceRecords ?? createDbGatewayGovernanceRecords(() => env.dbEncryptionKey),
     checkUsage: input.checkUsage ?? checkGatewayUsage,
     fetch: input.fetch,
     insertRequestLog: input.insertRequestLog,
@@ -719,185 +730,207 @@ export function registerGatewayRoutes(api: Hono<GatewayEnv>, input: GatewayRoute
       return reject(gatewayError(403, selected.code, "No current grant authorizes this model and selection."), selected.code, "Gateway model access denied")
     }
     selection = selected.selection
-    rewriteSelectedModel(prepared, resolved, selection.upstreamModel)
-
-    const credential = await resolveUpstreamCredential({
-      provider,
-      scope,
-      selection,
-      envNames: catalog?.env ?? [],
-      loadProviderCredential: dependencies.loadProviderCredential,
-      refreshGoogleOauthToken: dependencies.refreshGoogleOauthToken,
-      mintGcpAccessToken: dependencies.mintGcpAccessToken,
-      clock: dependencies.now,
-    })
-    if (credential.kind !== "secret" && credential.kind !== "aws_keys") {
-      startRecorder({
-        protocol: resolved.protocol,
-        url: resolved.url,
-        requestedModel: prepared.requestedModel,
-        stream: prepared.stream,
-        credentialId: "credentialId" in credential ? credential.credentialId : null,
-      })
-      switch (credential.kind) {
-        case "retry": {
-          const response = gatewayError(503, "provider_credential_retry", "The provider credential is temporarily unavailable. Retry shortly.", { provider_id: provider.id })
-          response.headers.set("retry-after", "5")
-          return reject(response, credential.reason, "Provider credential retry required")
-        }
-        case "auth_required": {
-          const response = gatewayError(
-            401,
-            "openwork_auth_required",
-            `Connect your ${provider.provider_id} account in OpenWork to use this provider (${credential.reason === "missing" ? "no credential" : `credential ${credential.reason}`}).`,
-            { provider_id: provider.id, credential_set_id: selection.row.credentialSet.id },
-          )
-          response.headers.set("x-openwork-auth-required", "1")
-          return reject(response, "member_auth_required", "Member credential required")
-        }
-        case "configuration_required":
-          return reject(
-            gatewayError(502, "provider_misconfigured", "The Google OAuth client requires administrator repair. Contact your organization administrator.", { provider_id: provider.id }),
-            "provider_misconfigured",
-            "Google OAuth client configuration requires repair",
-          )
-        case "org_credential_missing":
-          return reject(
-            gatewayError(502, "provider_credential_missing", "No active credential is configured for this inference provider.", { provider_id: provider.id }),
-            "provider_credential_missing",
-            "Missing org credential",
-          )
-        case "org_credential_expired":
-          return reject(
-            gatewayError(502, "provider_credential_expired", "The organization credential for this inference provider has expired.", { provider_id: provider.id }),
-            "provider_credential_expired",
-            "Expired org credential",
-          )
-        case "invalid_secret":
-          return reject(
-            gatewayError(502, "provider_credential_invalid", `The credential for this inference provider is malformed: ${credential.message}`, { provider_id: provider.id }),
-            "provider_credential_invalid",
-            "Invalid org credential",
-          )
-        case "token_mint_failed":
-          return reject(
-            gatewayError(502, "provider_token_mint_failed", `Could not mint an upstream token for this inference provider: ${credential.message}`, { provider_id: provider.id }),
-            "provider_token_mint_failed",
-            "Upstream token minting failed",
-          )
-      }
-    }
-
-    const auth = materializeAuth(credential, provider, resolved.family, dependencies.now())
-    if ("error" in auth) {
-      startRecorder({ protocol: resolved.protocol, url: resolved.url, requestedModel: prepared.requestedModel, stream: prepared.stream, credentialId: credential.credentialId })
-      return reject(gatewayError(502, "provider_misconfigured", auth.error, { provider_id: provider.id }), "provider_misconfigured", "Misconfigured inference provider")
-    }
-
-    if (auth.kind === "signer") prepared.url.host = auth.host
-    const usageRejection = await dependencies.checkUsage({
+    const governance = createGovernanceAdmission({
       organizationId: identity.organizationId,
       memberId: identity.orgMembershipId,
       requestId: openworkRequestId,
-      startedAt,
-      onAdmission: (snapshot) => { gatewayUsage = snapshot },
+      route: "provider",
       protocol: resolved.protocol,
-      providerId: provider.provider_id,
-      modelId: selection.upstreamModel,
-      upstreamOrigin: prepared.url.origin,
-      upstreamPath: prepared.url.pathname,
-      deferred: prepared.json?.background === true || prepared.json?.async === true || prepared.json?.deferred === true,
+      body: prepared.json,
+      signal: c.req.raw.signal,
+      resolve: dependencies.resolveGovernance,
+      evaluate: dependencies.evaluateGovernance,
+      records: dependencies.governanceRecords,
     })
-    startRecorder({
-      protocol: resolved.protocol,
-      url: prepared.url,
-      requestedModel: prepared.requestedModel,
-      stream: prepared.stream,
-      credentialId: credential.credentialId,
-      requestBytes: prepared.body === null ? null : Buffer.byteLength(prepared.body),
-    })
-
-    const headers = buildUpstreamHeaders(c.req.raw, resolved.family, openworkRequestId)
-    if (auth.kind === "header") headers.set(auth.header.name, auth.header.value)
-    else auth.sign({ method, url: prepared.url, headers, body: prepared.body })
-
-    if (await recorder.whenStarted?.() === false) {
-      return reject(gatewayError(503, "request_log_unavailable", "Inference accounting is temporarily unavailable."), "request_log_unavailable", "Request log unavailable")
-    }
-
-    if (usageRejection) return reject(usageRejection, usageRejection.headers.get("x-openwork-error-code") ?? "openwork_gateway_accounting_unavailable", "Gateway usage admission rejected")
-
-    // Recheck after accounting awaits. Never reselect or materialize a fallback.
-    const currentSelection = selectGatewayGrant(await dependencies.loadGatewayAccess(scope), prepared.requestedModel, selection.row.grant.id)
-    if (currentSelection.kind !== "selected" || !sameGatewaySelection(selection, currentSelection.selection)) {
-      return reject(gatewayError(403, "gateway_selection_revoked", "The selected Gateway access is no longer available."), "gateway_selection_revoked", "Gateway selection revoked")
-    }
-    if (!await credential.isCurrent()) {
-      return reject(gatewayError(503, "provider_credential_retry", "The selected credential changed before dispatch. Retry the same selection."), "credential_changed", "Gateway credential changed")
-    }
-
-    const lifetime = upstreamLifetime(c.req.raw.signal, env.upstreamTimeoutMs)
-    let upstream: Response
     try {
-      validateInferenceUrl(prepared.url)
-      lifetime.signal.throwIfAborted()
-      upstream = await dependencies.fetch(prepared.url, { method, headers, body: prepared.body, signal: lifetime.signal, redirect: "error" })
-    } catch {
-      lifetime.dispose()
-      console.error("[gateway] Failed to reach provider upstream", {
-        openworkRequestId,
-        organizationId: identity.organizationId,
-        inferenceProviderId: provider.id,
-        upstreamUrl: `${prepared.url.origin}${prepared.url.pathname}`,
-      })
-      dependencies.reporter.handledError({
-        reason: "upstream_unreachable",
-        organizationId: identity.organizationId,
-        orgMembershipId: identity.orgMembershipId,
-        gatewayKeyId: identity.gatewayKeyId,
-        openworkRequestId,
-        route: c.req.path,
-        method,
-        headers: incomingHeaders,
-        incomingModel: prepared.requestedModel,
-        status: 502,
-        upstreamUrl: `${prepared.url.origin}${prepared.url.pathname}`,
-      })
-      void recorder.finish({ status: 502, outcome: lifetime.signal.aborted && !lifetime.timedOut ? "client_aborted" : "upstream_unreachable", errorCode: lifetime.timedOut ? "upstream_timeout" : "upstream_unreachable" })
-      const response = gatewayError(502, "upstream_unreachable", "Failed to reach the inference provider upstream.", { provider_id: provider.id })
-      response.headers.set("x-openwork-request-id", openworkRequestId)
-      return response
-    }
+      await governance.check()
+      rewriteSelectedModel(prepared, resolved, selection.upstreamModel)
 
-    if (!upstream.ok) {
-      console.error("[gateway] Upstream provider request failed", {
-        openworkRequestId,
-        organizationId: identity.organizationId,
-        inferenceProviderId: provider.id,
-        upstreamProviderId: provider.provider_id,
-        upstreamUrl: `${prepared.url.origin}${prepared.url.pathname}`,
-        status: upstream.status,
+      const credentialSelection = selection
+      const credential = await resolveUpstreamCredential({
+        provider,
+        scope,
+        selection: credentialSelection,
+        envNames: catalog?.env ?? [],
+        loadProviderCredential: dependencies.loadProviderCredential,
+        refreshGoogleOauthToken: dependencies.refreshGoogleOauthToken,
+        mintGcpAccessToken: dependencies.mintGcpAccessToken,
+        clock: dependencies.now,
       })
-    }
+      if (credential.kind !== "secret" && credential.kind !== "aws_keys") {
+        startRecorder({
+          protocol: resolved.protocol,
+          url: resolved.url,
+          requestedModel: prepared.requestedModel,
+          stream: prepared.stream,
+          credentialId: "credentialId" in credential ? credential.credentialId : null,
+        })
+        switch (credential.kind) {
+          case "retry": {
+            const response = gatewayError(503, "provider_credential_retry", "The provider credential is temporarily unavailable. Retry shortly.", { provider_id: provider.id })
+            response.headers.set("retry-after", "5")
+            return reject(response, credential.reason, "Provider credential retry required")
+          }
+          case "auth_required": {
+            const response = gatewayError(
+              401,
+              "openwork_auth_required",
+              `Connect your ${provider.provider_id} account in OpenWork to use this provider (${credential.reason === "missing" ? "no credential" : `credential ${credential.reason}`}).`,
+              { provider_id: provider.id, credential_set_id: selection.row.credentialSet.id },
+            )
+            response.headers.set("x-openwork-auth-required", "1")
+            return reject(response, "member_auth_required", "Member credential required")
+          }
+          case "configuration_required":
+            return reject(
+              gatewayError(502, "provider_misconfigured", "The Google OAuth client requires administrator repair. Contact your organization administrator.", { provider_id: provider.id }),
+              "provider_misconfigured",
+              "Google OAuth client configuration requires repair",
+            )
+          case "org_credential_missing":
+            return reject(
+              gatewayError(502, "provider_credential_missing", "No active credential is configured for this inference provider.", { provider_id: provider.id }),
+              "provider_credential_missing",
+              "Missing org credential",
+            )
+          case "org_credential_expired":
+            return reject(
+              gatewayError(502, "provider_credential_expired", "The organization credential for this inference provider has expired.", { provider_id: provider.id }),
+              "provider_credential_expired",
+              "Expired org credential",
+            )
+          case "invalid_secret":
+            return reject(
+              gatewayError(502, "provider_credential_invalid", `The credential for this inference provider is malformed: ${credential.message}`, { provider_id: provider.id }),
+              "provider_credential_invalid",
+              "Invalid org credential",
+            )
+          case "token_mint_failed":
+            return reject(
+              gatewayError(502, "provider_token_mint_failed", `Could not mint an upstream token for this inference provider: ${credential.message}`, { provider_id: provider.id }),
+              "provider_token_mint_failed",
+              "Upstream token minting failed",
+            )
+        }
+      }
 
-    if ((resolved.family === "google_vertex" || resolved.family === "google_vertex_anthropic") && (upstream.status === 401 || upstream.status === 403)) {
-      const errorCode = upstream.status === 401 ? "provider_authentication_failed" : "provider_permission_denied"
-      const message = upstream.status === 401
-        ? selection.row.credentialSet.credential_mode === "member"
-          ? "Google rejected the provider credential. Sign in again; if the problem persists, contact your organization administrator."
-          : "Google rejected the provider credential. Ask your organization administrator to check provider authentication."
-        : "Google Cloud denied access. Ask your administrator to check project IAM and model access."
-      const response = gatewayError(upstream.status, errorCode, message, { provider_id: provider.id })
-      response.headers.set("x-openwork-request-id", openworkRequestId)
-      void recorder.finish({ status: upstream.status, outcome: "upstream_error", errorCode })
-      lifetime.dispose()
-      await upstream.body?.cancel().catch(() => {})
-      return response
-    }
+      const auth = materializeAuth(credential, provider, resolved.family, dependencies.now())
+      if ("error" in auth) {
+        startRecorder({ protocol: resolved.protocol, url: resolved.url, requestedModel: prepared.requestedModel, stream: prepared.stream, credentialId: credential.credentialId })
+        return reject(gatewayError(502, "provider_misconfigured", auth.error, { provider_id: provider.id }), "provider_misconfigured", "Misconfigured inference provider")
+      }
 
-    const responseHeaders = relayHeaders(upstream, openworkRequestId)
-    if (!upstream.ok) return relayErrorResponse(upstream, resolved.protocol, responseHeaders, recorder, lifetime)
-    return relayStreamResponse(upstream, resolved.protocol, responseHeaders, recorder, lifetime)
+      if (auth.kind === "signer") prepared.url.host = auth.host
+      const usageRejection = await dependencies.checkUsage({
+        organizationId: identity.organizationId,
+        memberId: identity.orgMembershipId,
+        requestId: openworkRequestId,
+        startedAt,
+        onAdmission: (snapshot) => { gatewayUsage = snapshot },
+        protocol: resolved.protocol,
+        providerId: provider.provider_id,
+        modelId: credentialSelection.upstreamModel,
+        upstreamOrigin: prepared.url.origin,
+        upstreamPath: prepared.url.pathname,
+        deferred: prepared.json?.background === true || prepared.json?.async === true || prepared.json?.deferred === true,
+      })
+      startRecorder({
+        protocol: resolved.protocol,
+        url: prepared.url,
+        requestedModel: prepared.requestedModel,
+        stream: prepared.stream,
+        credentialId: credential.credentialId,
+        requestBytes: prepared.body === null ? null : Buffer.byteLength(prepared.body),
+      })
+
+      if (await recorder.whenStarted?.() === false) {
+        return reject(gatewayError(503, "request_log_unavailable", "Inference accounting is temporarily unavailable."), "request_log_unavailable", "Request log unavailable")
+      }
+
+      if (usageRejection) return reject(usageRejection, usageRejection.headers.get("x-openwork-error-code") ?? "openwork_gateway_accounting_unavailable", "Gateway usage admission rejected")
+
+      // Recheck after accounting awaits. Never reselect or materialize a fallback.
+      const currentSelection = selectGatewayGrant(await dependencies.loadGatewayAccess(scope), prepared.requestedModel, selection.row.grant.id)
+      if (currentSelection.kind !== "selected" || !sameGatewaySelection(selection, currentSelection.selection)) {
+        return reject(gatewayError(403, "gateway_selection_revoked", "The selected Gateway access is no longer available."), "gateway_selection_revoked", "Gateway selection revoked")
+      }
+      if (!await credential.isCurrent()) {
+        return reject(gatewayError(503, "provider_credential_retry", "The selected credential changed before dispatch. Retry the same selection."), "credential_changed", "Gateway credential changed")
+      }
+
+      await governance.recheck()
+      governance.dispose()
+      const headers = buildUpstreamHeaders(c.req.raw, resolved.family, openworkRequestId)
+      if (auth.kind === "header") headers.set(auth.header.name, auth.header.value)
+      else auth.sign({ method, url: prepared.url, headers, body: prepared.body })
+
+      const lifetime = upstreamLifetime(c.req.raw.signal, env.upstreamTimeoutMs)
+      let upstream: Response
+      try {
+        validateInferenceUrl(prepared.url)
+        lifetime.signal.throwIfAborted()
+        upstream = await dependencies.fetch(prepared.url, { method, headers, body: prepared.body, signal: lifetime.signal, redirect: "error" })
+      } catch {
+        lifetime.dispose()
+        console.error("[gateway] Failed to reach provider upstream", {
+          openworkRequestId,
+          organizationId: identity.organizationId,
+          inferenceProviderId: provider.id,
+          upstreamUrl: `${prepared.url.origin}${prepared.url.pathname}`,
+        })
+        dependencies.reporter.handledError({
+          reason: "upstream_unreachable",
+          organizationId: identity.organizationId,
+          orgMembershipId: identity.orgMembershipId,
+          gatewayKeyId: identity.gatewayKeyId,
+          openworkRequestId,
+          route: c.req.path,
+          method,
+          headers: incomingHeaders,
+          incomingModel: prepared.requestedModel,
+          status: 502,
+          upstreamUrl: `${prepared.url.origin}${prepared.url.pathname}`,
+        })
+        void recorder.finish({ status: 502, outcome: lifetime.signal.aborted && !lifetime.timedOut ? "client_aborted" : "upstream_unreachable", errorCode: lifetime.timedOut ? "upstream_timeout" : "upstream_unreachable" })
+        const response = gatewayError(502, "upstream_unreachable", "Failed to reach the inference provider upstream.", { provider_id: provider.id })
+        response.headers.set("x-openwork-request-id", openworkRequestId)
+        return response
+      }
+
+      if (!upstream.ok) {
+        console.error("[gateway] Upstream provider request failed", {
+          openworkRequestId,
+          organizationId: identity.organizationId,
+          inferenceProviderId: provider.id,
+          upstreamProviderId: provider.provider_id,
+          upstreamUrl: `${prepared.url.origin}${prepared.url.pathname}`,
+          status: upstream.status,
+        })
+      }
+
+      if ((resolved.family === "google_vertex" || resolved.family === "google_vertex_anthropic") && (upstream.status === 401 || upstream.status === 403)) {
+        const errorCode = upstream.status === 401 ? "provider_authentication_failed" : "provider_permission_denied"
+        const message = upstream.status === 401
+          ? selection.row.credentialSet.credential_mode === "member"
+            ? "Google rejected the provider credential. Sign in again; if the problem persists, contact your organization administrator."
+            : "Google rejected the provider credential. Ask your organization administrator to check provider authentication."
+          : "Google Cloud denied access. Ask your administrator to check project IAM and model access."
+        const response = gatewayError(upstream.status, errorCode, message, { provider_id: provider.id })
+        response.headers.set("x-openwork-request-id", openworkRequestId)
+        void recorder.finish({ status: upstream.status, outcome: "upstream_error", errorCode })
+        lifetime.dispose()
+        await upstream.body?.cancel().catch(() => {})
+        return response
+      }
+
+      const responseHeaders = relayHeaders(upstream, openworkRequestId)
+      if (!upstream.ok) return relayErrorResponse(upstream, resolved.protocol, responseHeaders, recorder, lifetime)
+      return relayStreamResponse(upstream, resolved.protocol, responseHeaders, recorder, lifetime)
+    } catch (error) {
+      if (!(error instanceof GovernanceFailure)) throw error
+      startRecorder({ protocol: resolved.protocol, url: prepared.url, requestedModel: prepared.requestedModel, stream: prepared.stream })
+      return reject(governanceFailureResponse(error, { requestId: openworkRequestId, decisionId: governance.decisionId, headers: c.req.raw.headers }), error.code, "Gateway governance admission rejected")
+    } finally { governance.dispose() }
   }
 
   api.all(`${gatewayPathPrefix}/:inferenceProviderId`, handleGatewayRequest)

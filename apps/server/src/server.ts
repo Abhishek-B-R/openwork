@@ -2,6 +2,8 @@ import { createV2SessionHomes, nativeSession, nativeSessionDirectory } from "./o
 import { createNativeCloudMcpResolver, createRoutedCloudMcpRegistrar } from "./cloud-mcp-v2.js";
 import { managedDesktopPolicy } from "./managed-desktop-policy.js";
 import { createTaskRecovery, setTaskRecovery } from "./task-recovery.js";
+import { createHash } from "node:crypto";
+import { governanceHost, governanceScope, governanceReportSchema, governanceV2ReportSchema, governanceCleanupRequestSchema, parseGovernanceScope, GovernanceAdmissionError, GovernanceCleanupRequestError, type GovernanceCleanupRequest, type GovernanceReportResult, type GovernanceNative, type GovernanceNativeV2, type GovernanceV2Message } from "./governance-recovery.js";
 import { managedPolicyActionSchema } from "./managed-policy-rules.js";
 import { readFile, realpath, writeFile, rm, stat } from "node:fs/promises";
 import { homedir, hostname } from "node:os";
@@ -915,7 +917,8 @@ export async function startServer(
           const send = () => proxyOpencodeRequest({ config, request, url, workspace, proxyPath: mount.restPath,
             recoverySignal: taskRecovery?.owns(request) ? request.signal : undefined });
           const response = await sendWithOwnershipProof(ownership,
-            () => taskRecovery ? taskRecovery.forward(workspace, "v1", mount.restPath, request, send) : send());
+            () => forwardWithGovernance(config, workspace, "v1", mount.restPath, request,
+              () => taskRecovery ? taskRecovery.forward(workspace, "v1", mount.restPath, request, send) : send()));
           if (response.ok && workspace.workspaceType !== "remote" && engineV2Preview.status().chatRouting
             && ["PUT", "DELETE"].includes(request.method)
             && /^\/opencode\/auth\/[^/]+$/.test(mount.restPath)) {
@@ -978,7 +981,8 @@ export async function startServer(
             actor,
             recoverySignal: taskRecovery?.owns(request) ? request.signal : undefined,
           });
-          const response = taskRecovery ? await taskRecovery.forward(workspace, "v2", mount.restPath, request, send) : await send();
+          const response = await forwardWithGovernance(config, workspace, "v2", mount.restPath, request,
+            () => taskRecovery ? taskRecovery.forward(workspace, "v2", mount.restPath, request, send) : send());
           return finalizeProxyResponse(response);
         } catch (error) {
           const requestCanceled = isExpectedRequestCancellation(error, request.signal);
@@ -1048,7 +1052,8 @@ export async function startServer(
             : Promise.resolve();
           const send = () => proxyOpencodeRequest({ config, request, url, workspace });
           const response = await sendWithOwnershipProof(ownership,
-            () => taskRecovery && workspace ? taskRecovery.forward(workspace, "v1", url.pathname, request, send) : send());
+            () => workspace ? forwardWithGovernance(config, workspace, "v1", url.pathname, request,
+              () => taskRecovery ? taskRecovery.forward(workspace, "v1", url.pathname, request, send) : send()) : send());
           return finalizeProxyResponse(response);
         } catch (error) {
           const requestCanceled = isExpectedRequestCancellation(error, request.signal);
@@ -1076,6 +1081,7 @@ export async function startServer(
 
       authMode = route.auth;
       try {
+        if (route.auth === "governance" && !governanceHost(config).authenticates(request)) throw new ApiError(401, "unauthorized", "Engine authorization required");
         const actor =
           route.auth === "host-token"
             ? requireHostToken(request, config)
@@ -1167,6 +1173,17 @@ export async function startServer(
   // Policy hooks must receive the listener that actually bound, including
   // ephemeral ports and retries after a port collision.
   engineV2Preview.start();
+  // A rejected contribution left awaiting automatic removal resumes after a
+  // restart. Scopes were only ever created under verified session ownership.
+  if (!config.readOnly) void governanceHost(config).resumeAll(async (scope, sessionID) => {
+    const parsed = parseGovernanceScope(scope);
+    const workspace = parsed?.sessionID === sessionID
+      ? config.workspaces.find((item) => item.id === parsed.workspaceID && item.workspaceType === "local") : undefined;
+    if (!parsed || !workspace) return null;
+    if (parsed.engine === "v1") return { native: governanceNative(config, workspace, sessionID), engine: "v1" };
+    const connection = engineV2Preview.connection();
+    return connection ? { native: governanceNativeV2(connection, workspace.path, sessionID), engine: "v2" } : null;
+  }).catch(() => undefined);
 
   // Deliver server-managed provider credentials to the engine on startup. The
   // engine process receives a fixed env allowlist, so credentials materialized
@@ -1306,6 +1323,19 @@ export async function proxyOpencodeV2Request(input: {
     }
     executionDirectory = nativeSessionDirectory(session) ?? input.workspace.path;
     target.searchParams.set("location[directory]", executionDirectory);
+  }
+
+  if (sessionId?.startsWith("ses_") && /^\/api\/session\/[^/]+\/governance(?:\/cleanup)?$/.test(forwardedPath)) {
+    if (method !== "GET" && method !== "POST") throw new ApiError(405, "method_not_allowed", "Unsupported recovery action");
+    const host = governanceHost(input.config);
+    const scope = governanceScope(input.workspace.id, "v2", sessionId);
+    const native = () => governanceNativeV2(input.connection, input.workspace.path, sessionId);
+    if (method === "POST" && forwardedPath.endsWith("/governance/cleanup")) {
+      await runGovernanceCleanup(host.cleanup(scope, sessionId, native(), "v2", await governanceCleanupRequest(input.request)));
+    } else if (method === "GET" && !input.config.readOnly) {
+      await host.resumeAutomatic(scope, sessionId, native, "v2");
+    }
+    return Response.json(await host.view(scope, sessionId), { headers: { "Cache-Control": "no-store" } });
   }
 
   if (method !== "GET" && method !== "HEAD"
@@ -1617,6 +1647,152 @@ function createOpencodeDirectoryFetch(directory: string, fetchImpl: typeof fetch
 type OpencodeClientResult<T, E> =
   | { data: T | undefined; error: undefined; response: Response }
   | { data: undefined; error: E; response?: Response };
+
+async function governanceReportResponse(operation: Promise<GovernanceReportResult>): Promise<Response> {
+  try { return jsonResponse(await operation); }
+  catch (error) {
+    if (error instanceof GovernanceAdmissionError) throw new ApiError(409, "governance_recovery_required", error.message);
+    throw error;
+  }
+}
+
+function governanceNative(config: ServerConfig, workspace: WorkspaceInfo, sessionID: string): GovernanceNative {
+  const client = createWorkspaceOpencodeClient(config, workspace, { sessionId: sessionID });
+  return {
+    snapshot: async () => {
+      const signal = AbortSignal.timeout(10_000);
+      const [session, status, messages] = await Promise.all([
+        client.session.get({ sessionID }, { signal }), client.session.status({}, { signal }), client.session.messages({ sessionID }, { signal }),
+      ]);
+      if (!session.data || !status.data || !messages.data || session.error || status.error || messages.error) throw new Error("Cannot verify native conversation");
+      return {
+        idle: !status.data[sessionID] || status.data[sessionID].type === "idle", reverted: Boolean(session.data.revert), title: session.data.title,
+        messages: messages.data.map(({ info, parts }) => ({ id: info.id, sessionID: info.sessionID, role: info.role,
+          created: info.time.created, parts,
+          ...(info.role === "assistant" ? { parentID: info.parentID, summary: info.summary, error: info.error } : {}),
+        })),
+      };
+    },
+    deleteMessage: async (messageID) => {
+      const result = await client.session.deleteMessage({ sessionID, messageID }, { signal: AbortSignal.timeout(10_000) });
+      if (result.error || !result.response.ok) throw new Error("Native message removal could not be confirmed");
+    },
+  };
+}
+
+function projectGovernanceV2Message(value: unknown): GovernanceV2Message | null {
+  if (!isRecord(value) || typeof value.id !== "string" || typeof value.type !== "string") return null;
+  const text = (item: unknown) => typeof item === "string" ? item : undefined;
+  return {
+    id: value.id, type: value.type, digest: createHash("sha256").update(JSON.stringify(value)).digest("hex"),
+    text: text(value.text) ?? "",
+    files: Array.isArray(value.files) ? value.files.flatMap((file) => isRecord(file)
+      ? [{ filename: text(file.name) ?? "Attachment", mime: text(file.mime) ?? "application/octet-stream" }] : []) : [],
+    contentCount: Array.isArray(value.content) ? value.content.length : 0,
+    changedFiles: isRecord(value.snapshot) && Array.isArray(value.snapshot.files) ? value.snapshot.files.length : 0,
+  };
+}
+
+/** Native v2 history-only cleanup. Revert is always staged with
+ * `files: false`; the renderer's file-restoring revert helper is never used. */
+function governanceNativeV2(connection: { url: string; username: string; password: string }, home: string, sessionID: string): GovernanceNativeV2 {
+  const authorization = `Basic ${Buffer.from(`${connection.username}:${connection.password}`).toString("base64")}`;
+  const session = `/api/session/${encodeURIComponent(sessionID)}`;
+  let directory = home;
+  const call = async (method: "GET" | "POST", path: string, body?: unknown, location = directory): Promise<unknown> => {
+    const url = new URL(path, connection.url);
+    url.searchParams.set("location[directory]", location);
+    const response = await loopbackFetch(url.toString(), {
+      method, headers: { authorization, ...(body === undefined ? {} : { "content-type": "application/json" }) },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }), signal: AbortSignal.timeout(10_000),
+    });
+    if (!response.ok) { await response.body?.cancel(); throw new Error("Native conversation could not be verified"); }
+    const text = await response.text();
+    return text ? JSON.parse(text) : null;
+  };
+  const data = (value: unknown) => isRecord(value) && "data" in value ? value.data : undefined;
+  return {
+    snapshot: async () => {
+      const info = data(await call("GET", session, undefined, home));
+      if (!isRecord(info)) throw new Error("Native conversation could not be verified");
+      directory = nativeSessionDirectory(info) ?? home;
+      const [active, inbox, page] = await Promise.all([
+        call("GET", "/api/session/active"), call("GET", `${session}/inbox`), call("GET", `${session}/message?order=desc&limit=200`),
+      ]);
+      const activeData = data(active);
+      const inboxData = data(inbox);
+      const messages = data(page);
+      if (!isRecord(activeData) || !Array.isArray(inboxData) || !Array.isArray(messages)) throw new Error("Native conversation could not be verified");
+      const projected = messages.map(projectGovernanceV2Message);
+      if (projected.some((message) => message === null)) throw new Error("Native conversation could not be verified");
+      const cursor = isRecord(page) && isRecord(page.cursor) ? page.cursor : {};
+      return {
+        idle: !(sessionID in activeData), inboxEmpty: inboxData.length === 0,
+        revert: isRecord(info.revert) && typeof info.revert.messageID === "string" ? info.revert.messageID : null,
+        title: typeof info.title === "string" ? info.title : "",
+        historyComplete: typeof cursor.next !== "string",
+        messages: projected.flatMap((message) => message ? [message] : []).reverse(),
+      };
+    },
+    stageRevert: async (messageID) => { await call("POST", `${session}/revert/stage`, { messageID, files: false }); },
+    commitRevert: async () => { await call("POST", `${session}/revert/commit`); },
+  };
+}
+
+async function governanceCleanupRequest(request: Request): Promise<GovernanceCleanupRequest> {
+  const body: unknown = await request.clone().json().catch(() => ({}));
+  const parsed = governanceCleanupRequestSchema.safeParse(body ?? {});
+  if (!parsed.success) throw new ApiError(400, "invalid_payload", "Invalid recovery request");
+  return parsed.data;
+}
+
+async function runGovernanceCleanup(operation: Promise<void>) {
+  try { await operation; }
+  catch (error) {
+    if (error instanceof GovernanceCleanupRequestError) throw new ApiError(400, "governance_retry_unavailable", error.message);
+    throw error;
+  }
+}
+
+async function forwardWithGovernance(config: ServerConfig, workspace: WorkspaceInfo, engine: "v1" | "v2", path: string, request: Request, send: () => Promise<Response>): Promise<Response> {
+  if (workspace.workspaceType !== "local") return send();
+  const match = path.replace(/^\/opencode2\/api|^\/opencode/, "").match(/^\/session\/([^/]+)(.*)$/);
+  if (!match) return send();
+  const sessionID = decodeURIComponent(match[1]);
+  const suffix = match[2];
+  const host = governanceHost(config);
+  const scope = governanceScope(workspace.id, engine, sessionID);
+  if (suffix === "/governance" && request.method === "GET" || suffix === "/governance/cleanup" && request.method === "POST") {
+    if (engine === "v2") return send();
+    await assertWorkspaceOwnsProxiedSessionRead(config, workspace, "GET", `/session/${encodeURIComponent(sessionID)}`, request.method === "POST");
+    const native = () => governanceNative(config, workspace, sessionID);
+    if (request.method === "POST") {
+      ensureWritable(config);
+      await runGovernanceCleanup(host.cleanup(scope, sessionID, native(), engine, await governanceCleanupRequest(request)));
+    } else if (!config.readOnly) {
+      await host.resumeAutomatic(scope, sessionID, native, engine);
+    }
+    return Response.json(await host.view(scope, sessionID), { headers: { "Cache-Control": "no-store" } });
+  }
+  if (["POST", "PUT", "PATCH", "DELETE"].includes(request.method) && suffix !== "/abort" && !(engine === "v2" && suffix === "/interrupt") && !(suffix === "" && request.method === "DELETE")) {
+    const body: unknown = request.method === "POST" ? await request.clone().json().catch(() => null) : null;
+    try { await host.assertAdmission(scope, sessionID, isRecord(body) && typeof body.messageID === "string" ? body.messageID : undefined); }
+    catch { throw new ApiError(409, "governance_recovery_required", "Review organization policy recovery before continuing this conversation."); }
+  }
+  const prompt = engine === "v2" && suffix === "/prompt" && request.method === "POST";
+  const settled = prompt ? host.trackV2Prompt(scope) : () => {};
+  try {
+    const response = await send();
+    if (response.ok && suffix === "" && request.method === "DELETE") await host.clear(scope);
+    if (response.ok && prompt) {
+      // The inbox ID the engine returns becomes the persisted user-message ID.
+      const payload: unknown = await response.clone().json().catch(() => null);
+      const admitted = isRecord(payload) && isRecord(payload.data) ? payload.data : null;
+      if (admitted && typeof admitted.id === "string" && admitted.type === "user") host.noteV2Prompt(scope, admitted.id);
+    }
+    return response;
+  } finally { settled(); }
+}
 
 export function createWorkspaceOpencodeClient(
   config: ServerConfig,
@@ -3205,6 +3381,51 @@ function createRoutes(
       throw new ApiError(400, "invalid_payload", "Only the active orgId and optional credentialSetId are accepted");
     }
     return jsonResponse(await cloudProviderSync.startProviderOAuth(ctx.params.id, body.orgId, body.credentialSetId));
+  });
+
+  addRoute(routes, "POST", "/gateway-governance/report-v2", "governance", async (ctx) => {
+    ensureWritable(config);
+    const parsed = governanceV2ReportSchema.safeParse(await readJsonBody(ctx.request));
+    if (!parsed.success) throw new ApiError(400, "invalid_payload", "Invalid governance report");
+    const connection = engineV2Preview.connection();
+    if (!connection) throw new ApiError(503, "engine_unavailable", "Runtime unavailable");
+    const read = async (path: string): Promise<unknown> => {
+      const url = new URL(path, connection.url);
+      url.searchParams.set("location[directory]", parsed.data.directory);
+      const response = await loopbackFetch(url.toString(), { headers: { authorization: `Basic ${Buffer.from(`${connection.username}:${connection.password}`).toString("base64")}` }, signal: AbortSignal.timeout(10_000) });
+      if (!response.ok) throw new ApiError(404, "session_not_found", "Session not found");
+      return response.json();
+    };
+    const homes = createV2SessionHomes(config, read);
+    const home = await homes.resolve(await read(`/api/session/${encodeURIComponent(parsed.data.sessionID)}`));
+    const candidates = await Promise.all(config.workspaces.filter((workspace) => workspace.workspaceType === "local").map(async (workspace) => ({ workspace, path: await homes.canonical(workspace.path) })));
+    const workspace = candidates.find((item) => item.path === home)?.workspace;
+    if (!workspace) throw new ApiError(404, "workspace_not_found", "Workspace not found");
+    return governanceReportResponse(governanceHost(config).reportV2(governanceScope(workspace.id, "v2", parsed.data.sessionID), parsed.data,
+      governanceNativeV2(connection, workspace.path, parsed.data.sessionID)));
+  });
+
+  addRoute(routes, "POST", "/gateway-governance/notice", "governance", async (ctx) => {
+    ensureWritable(config);
+    const parsed = governanceV2ReportSchema.safeParse(await readJsonBody(ctx.request));
+    if (!parsed.success || !["check", "reject"].includes(parsed.data.phase)) throw new ApiError(400, "invalid_payload", "Invalid governance notice");
+    const report = parsed.data;
+    const workspace = config.workspaces.find((item) => item.workspaceType === "local" && resolveOpencodeDirectory(item) === report.directory);
+    if (!workspace) throw new ApiError(404, "workspace_not_found", "Workspace not found");
+    await assertWorkspaceOwnsProxiedSessionRead(config, workspace, "GET", `/session/${report.sessionID}`, true);
+    return governanceReportResponse(governanceHost(config).reportV2(governanceScope(workspace.id, "v1", report.sessionID), report));
+  });
+
+  addRoute(routes, "POST", "/gateway-governance/report", "governance", async (ctx) => {
+    ensureWritable(config);
+    const parsed = governanceReportSchema.safeParse(await readJsonBody(ctx.request));
+    if (!parsed.success) throw new ApiError(400, "invalid_payload", "Invalid governance report");
+    const report = parsed.data;
+    const workspace = config.workspaces.find((item) => item.workspaceType === "local" && resolveOpencodeDirectory(item) === report.directory);
+    if (!workspace) throw new ApiError(404, "workspace_not_found", "Workspace not found");
+    await assertWorkspaceOwnsProxiedSessionRead(config, workspace, "GET", `/session/${report.sessionID}`, true);
+    return governanceReportResponse(governanceHost(config).report(governanceScope(workspace.id, "v1", report.sessionID), report,
+      governanceNative(config, workspace, report.sessionID)));
   });
 
   addRoute(routes, "GET", "/managed-policy", "client", async () =>

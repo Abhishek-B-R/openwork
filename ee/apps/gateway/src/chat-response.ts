@@ -1,3 +1,5 @@
+import { stripUpstreamGovernanceMarkers } from "./governance-response.js"
+
 type JsonRecord = Record<string, unknown>
 function record(value: unknown): value is JsonRecord {
   return typeof value === "object" && value !== null && !Array.isArray(value)
@@ -140,7 +142,8 @@ class ChatStream {
         this.finished.add(choice.index)
       }
     }
-    return `data: ${data}\n\n`
+    // Reserved Gateway governance markers are never provider-authored.
+    return `data: ${stripUpstreamGovernanceMarkers(value) ? JSON.stringify(value) : data}\n\n`
   }
 }
 

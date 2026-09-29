@@ -1,6 +1,7 @@
 import type { EnginePermissionRule } from "./managed-policy-rules.js";
 import { nativeModelVariants } from "@openwork/types/cloud-model-fast";
 import { gatewayBase } from "./gateway-quota.js";
+import { managedGatewayBase } from "./gateway-governance.js";
 import { openworkGatewayQuotaV2PluginPath, openworkProviderFiltersV2PluginPath } from "./openwork-extensions-plugin-path.js";
 import { pathToFileURL } from "node:url";
 // Parallel v2 lane prototype: provider injection is a watched-config write. This module
@@ -131,7 +132,7 @@ export function renderOpencodeV2Config(input: {
     };
   }
   const gatewayProviders = Object.fromEntries(input.providers.flatMap((provider) => {
-    const base = gatewayBase(provider.id, provider.baseUrl);
+    const base = gatewayBase(provider.id, provider.baseUrl) ?? managedGatewayBase(provider.id, provider.baseUrl);
     return base ? [[provider.id, base.href]] : [];
   }));
   const filters = Object.fromEntries(input.providers.filter(provider => provider.whitelist !== undefined || provider.blacklist !== undefined)
@@ -187,6 +188,8 @@ export async function createManagedOpencodeV2Server(
   // A caller may deliberately provide a config file; never inherit the server's
   // OPENCODE_CONFIG or OPENCODE_PURE settings implicitly.
   if (options.env?.OPENCODE_CONFIG) inherited.OPENCODE_CONFIG = options.env.OPENCODE_CONFIG;
+  if (options.env?.OPENWORK_SERVER_URL) inherited.OPENWORK_SERVER_URL = options.env.OPENWORK_SERVER_URL;
+  if (options.env?.OPENWORK_GOVERNANCE_TOKEN) inherited.OPENWORK_GOVERNANCE_TOKEN = options.env.OPENWORK_GOVERNANCE_TOKEN;
 
   await mkdir(options.rootDir, { recursive: true, mode: 0o700 });
   await chmod(options.rootDir, 0o700);

@@ -129,6 +129,8 @@ test(
       | undefined
     let telemetryTime: Date | undefined
     registerGatewayRoutes(app, {
+      resolveGovernance: async () => ({ kind: "off", settingsRevision: 1 }),
+      evaluateGovernance: async () => { throw new Error("Unexpected evaluator call") },
       now: () => telemetryTime ?? new Date(),
       fetch: async () => {
         dispatches++

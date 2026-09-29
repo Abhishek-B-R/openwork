@@ -1,4 +1,5 @@
 import { env } from "./env.js"
+import { hasGatewayGovernanceEnterprisePlan } from "@openwork-ee/utils/gateway-governance"
 
 export const PLAN_TIERS = ["free", "team", "enterprise"] as const
 export type PlanTier = (typeof PLAN_TIERS)[number]
@@ -12,7 +13,7 @@ export type OrganizationPlan = {
   grandfatheredAt?: string
 }
 
-export const ENTITLEMENT_KEYS = ["sso", "desktopPolicies", "orgControls", "analytics"] as const
+export const ENTITLEMENT_KEYS = ["sso", "desktopPolicies", "orgControls", "analytics", "aiGatewayGovernance"] as const
 export type EntitlementKey = (typeof ENTITLEMENT_KEYS)[number]
 
 export type OrganizationEntitlements = Record<EntitlementKey, boolean>
@@ -28,6 +29,7 @@ const ENTITLEMENT_FEATURE_LABELS: Record<EntitlementKey, string> = {
   desktopPolicies: "Desktop policies",
   orgControls: "Enforced SSO and desktop version controls",
   analytics: "Usage analytics",
+  aiGatewayGovernance: "AI Gateway governance",
 }
 
 type MetadataInput = Record<string, unknown> | string | null | undefined
@@ -88,6 +90,7 @@ export function getOrganizationEntitlements(
     desktopPolicies: entitled,
     orgControls: entitled,
     analytics: entitled,
+    aiGatewayGovernance: hasGatewayGovernanceEnterprisePlan(metadata),
   }
 }
 

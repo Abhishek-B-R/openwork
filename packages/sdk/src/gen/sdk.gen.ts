@@ -271,6 +271,10 @@ import type {
   GetV1DesktopPoliciesResponses,
   GetV1DiagnosticsEgressErrors,
   GetV1DiagnosticsEgressResponses,
+  GetV1GatewayGovernanceDecisionsErrors,
+  GetV1GatewayGovernanceDecisionsResponses,
+  GetV1GatewayGovernanceErrors,
+  GetV1GatewayGovernanceResponses,
   GetV1GatewayUsageLimitPoliciesByPolicyIdAssignmentsErrors,
   GetV1GatewayUsageLimitPoliciesByPolicyIdAssignmentsResponses,
   GetV1GatewayUsageLimitPoliciesErrors,
@@ -518,6 +522,10 @@ import type {
   PatchV1DashboardsByDashboardIdResponses,
   PatchV1DesktopPoliciesByDesktopPolicyIdErrors,
   PatchV1DesktopPoliciesByDesktopPolicyIdResponses,
+  PatchV1GatewayGovernancePoliciesByIdErrors,
+  PatchV1GatewayGovernancePoliciesByIdResponses,
+  PatchV1GatewayGovernanceSettingsErrors,
+  PatchV1GatewayGovernanceSettingsResponses,
   PatchV1GatewayUsageLimitPoliciesByPolicyIdErrors,
   PatchV1GatewayUsageLimitPoliciesByPolicyIdResponses,
   PatchV1InferenceAnalyticsSettingsResponses,
@@ -660,6 +668,8 @@ import type {
   PostV1DirectUploadsGoogleWorkspaceDriveFilesResponses,
   PostV1DirectUploadsGoogleWorkspaceGmailDraftsErrors,
   PostV1DirectUploadsGoogleWorkspaceGmailDraftsResponses,
+  PostV1GatewayGovernancePoliciesErrors,
+  PostV1GatewayGovernancePoliciesResponses,
   PostV1GatewayUsageLimitPoliciesByPolicyIdArchiveErrors,
   PostV1GatewayUsageLimitPoliciesByPolicyIdArchiveResponses,
   PostV1GatewayUsageLimitPoliciesByPolicyIdAssignmentsErrors,
@@ -7195,6 +7205,178 @@ export class DenClient extends HeyApiClient {
       ThrowOnError
     >({
       url: "/v1/inference-providers/migrate-from-llm-provider",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    });
+  }
+
+  /**
+   * Read AI Gateway governance
+   *
+   * Organization-wide new-user-contribution screening. Governance is explicitly off initially. Active policy edits publish immutable revisions; archiving never deletes policy history. Publication and enablement validate serialized UTF-8 question sizes against both Jev limits while reserving at least 4096 bytes for serialized new contributions. Reads remain available to admins when the feature is locked. Writes require a recently authenticated owner/admin session. Enabling requires deployment availability, strict hosted Enterprise eligibility (or the self-hosted module), approved evaluator processing, configured thresholds, and explicit acknowledgment that new contributions and policy guidance are sent to TypeSafe. Disabling remains available after entitlement or evaluator loss.
+   */
+  public getV1GatewayGovernance<ThrowOnError extends boolean = false>(options?: Options<never, ThrowOnError>) {
+    return (options?.client ?? this.client).get<
+      GetV1GatewayGovernanceResponses,
+      GetV1GatewayGovernanceErrors,
+      ThrowOnError
+    >({ url: "/v1/gateway-governance", ...options });
+  }
+
+  /**
+   * List recent AI Gateway governance decisions
+   *
+   * Newest-first, tenant-scoped decision metadata for the authenticated organization: time, route, outcome, member, published policy-set revision, failed policy names, latency and evaluator model. Contributions, policy guidance and evaluator probabilities are never recorded or returned. Pass the returned opaque nextCursor to read older decisions; null means there are no more. Readable by owners and admins, including when governance is locked or disabled.
+   */
+  public getV1GatewayGovernanceDecisions<ThrowOnError extends boolean = false>(
+    parameters?: {
+      limit?: number;
+      cursor?: string;
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "limit" },
+            { in: "query", key: "cursor" },
+          ],
+        },
+      ],
+    );
+    return (options?.client ?? this.client).get<
+      GetV1GatewayGovernanceDecisionsResponses,
+      GetV1GatewayGovernanceDecisionsErrors,
+      ThrowOnError
+    >({
+      url: "/v1/gateway-governance/decisions",
+      ...options,
+      ...params,
+    });
+  }
+
+  /**
+   * Update AI Gateway governance settings
+   *
+   * Organization-wide new-user-contribution screening. Governance is explicitly off initially. Active policy edits publish immutable revisions; archiving never deletes policy history. Publication and enablement validate serialized UTF-8 question sizes against both Jev limits while reserving at least 4096 bytes for serialized new contributions. Reads remain available to admins when the feature is locked. Writes require a recently authenticated owner/admin session. Enabling requires deployment availability, strict hosted Enterprise eligibility (or the self-hosted module), approved evaluator processing, configured thresholds, and explicit acknowledgment that new contributions and policy guidance are sent to TypeSafe. Disabling remains available after entitlement or evaluator loss.
+   */
+  public patchV1GatewayGovernanceSettings<ThrowOnError extends boolean = false>(
+    parameters: {
+      expectedRevision: number;
+      enabled: boolean;
+      processingAcknowledged?: boolean;
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "body", key: "expectedRevision" },
+            { in: "body", key: "enabled" },
+            { in: "body", key: "processingAcknowledged" },
+          ],
+        },
+      ],
+    );
+    return (options?.client ?? this.client).patch<
+      PatchV1GatewayGovernanceSettingsResponses,
+      PatchV1GatewayGovernanceSettingsErrors,
+      ThrowOnError
+    >({
+      url: "/v1/gateway-governance/settings",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    });
+  }
+
+  /**
+   * Create a draft AI Gateway governance policy
+   *
+   * Organization-wide new-user-contribution screening. Governance is explicitly off initially. Active policy edits publish immutable revisions; archiving never deletes policy history. Publication and enablement validate serialized UTF-8 question sizes against both Jev limits while reserving at least 4096 bytes for serialized new contributions. Reads remain available to admins when the feature is locked. Writes require a recently authenticated owner/admin session. Enabling requires deployment availability, strict hosted Enterprise eligibility (or the self-hosted module), approved evaluator processing, configured thresholds, and explicit acknowledgment that new contributions and policy guidance are sent to TypeSafe. Disabling remains available after entitlement or evaluator loss.
+   */
+  public postV1GatewayGovernancePolicies<ThrowOnError extends boolean = false>(
+    parameters: {
+      name: string;
+      guidance: string;
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "body", key: "name" },
+            { in: "body", key: "guidance" },
+          ],
+        },
+      ],
+    );
+    return (options?.client ?? this.client).post<
+      PostV1GatewayGovernancePoliciesResponses,
+      PostV1GatewayGovernancePoliciesErrors,
+      ThrowOnError
+    >({
+      url: "/v1/gateway-governance/policies",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    });
+  }
+
+  /**
+   * Update or publish an AI Gateway governance policy
+   *
+   * Organization-wide new-user-contribution screening. Governance is explicitly off initially. Active policy edits publish immutable revisions; archiving never deletes policy history. Publication and enablement validate serialized UTF-8 question sizes against both Jev limits while reserving at least 4096 bytes for serialized new contributions. Reads remain available to admins when the feature is locked. Writes require a recently authenticated owner/admin session. Enabling requires deployment availability, strict hosted Enterprise eligibility (or the self-hosted module), approved evaluator processing, configured thresholds, and explicit acknowledgment that new contributions and policy guidance are sent to TypeSafe. Disabling remains available after entitlement or evaluator loss.
+   */
+  public patchV1GatewayGovernancePoliciesById<ThrowOnError extends boolean = false>(
+    parameters: {
+      id: string;
+      name?: string;
+      guidance?: string;
+      expectedRevision: number;
+      status?: "draft" | "active" | "archived";
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "id" },
+            { in: "body", key: "name" },
+            { in: "body", key: "guidance" },
+            { in: "body", key: "expectedRevision" },
+            { in: "body", key: "status" },
+          ],
+        },
+      ],
+    );
+    return (options?.client ?? this.client).patch<
+      PatchV1GatewayGovernancePoliciesByIdResponses,
+      PatchV1GatewayGovernancePoliciesByIdErrors,
+      ThrowOnError
+    >({
+      url: "/v1/gateway-governance/policies/{id}",
       ...options,
       ...params,
       headers: {

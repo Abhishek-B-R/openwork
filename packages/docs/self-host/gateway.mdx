@@ -13,7 +13,7 @@ It is **not** `den-gateway`, the separate OpenWork Web proxy, and it is not the 
 
 ## Deployment configuration and admin access
 
-Gateway is generally available to admins and above in every organization when the deployment is configured. New organizations require no opt-in or platform-admin grant; there is no organization flag or API toggle.
+Gateway management is generally available to admins and above in every organization when the deployment is configured. New organizations require no opt-in or platform-admin grant for ordinary Gateway management. The optional governance module below has its own explicit organization activation; it does not change ordinary Gateway availability.
 
 | Control | Who changes it | Meaning |
 | --- | --- | --- |
@@ -22,6 +22,42 @@ Gateway is generally available to admins and above in every organization when th
 Neither organization mode, a running legacy inference service, nor the presence of billing/provider credentials opts a deployment in. With `GATEWAY_ENABLED` absent, the deployment capability is false and existing OpenWork Models behavior is preserved. Hosted operators explicitly set `GATEWAY_ENABLED=true` through their existing hosting environment mechanism on Den API and Gateway; hosted deployments are not assumed to use Helm. These remain installation configuration checks, not organization rollout controls.
 
 Do not create a replacement flag, put deployment capabilities in organization metadata, or use ordinary organization metadata updates to grant dashboard access. Management APIs still enforce organization-admin permissions and fresh authentication for privileged writes. Regular members do not gain shared credential administration.
+
+## Optional governance module
+
+Governance screens new user text against named organization policies before an organization-provider or managed OpenWork Models request reaches its target model. It is **off by default**. Hosted organizations require the Enterprise plan; self-hosted operators explicitly configure the module. An organization owner/admin must then separately enable it in **AI Gateway → Governance**, acknowledging that the new input and policy guidance will be sent to TypeSafe. Creating or publishing policies does not enable screening.
+
+<Warning>
+  Apply migrations `0111_gateway_governance` and `0112_gateway_governance_decisions` before starting governance-aware Den API and Gateway images, even if screening will remain disabled. It backfills explicit disabled settings and an empty policy snapshot for existing organizations. Missing state is unavailable, not an implicit opt-out. Coordinate organization creation and do not mix older writers that omit governance settings with the upgraded runtime. Do not roll an enabled organization back to a Gateway binary that lacks enforcement.
+</Warning>
+
+Configure the following on **both Den API and Gateway** using operator-controlled environment settings and secret injection. These are governance settings, not replacements for `GATEWAY_ENABLED` or ordinary Gateway deployment capabilities. Technical module configuration does not replace applicable EE licensing.
+
+| Variable | Meaning |
+| --- | --- |
+| `GATEWAY_GOVERNANCE_MODE` | `disabled` (default), `hosted` (strict Enterprise check), or `self_hosted_module` (explicit deployment module). |
+| `TYPESAFE_API_KEY` | Evaluator credential from server secret management. Never put its value in a browser, desktop configuration, or example values file. |
+| `GATEWAY_GOVERNANCE_PROCESSING_APPROVED` | Exact `true` only after the applicable TypeSafe processing, retention/ZDR, and region requirements have been approved. Default `false`; this records operator approval, not an automated legal or connectivity check. |
+| `GATEWAY_GOVERNANCE_PASS_MAX` | Calibrated maximum violation probability considered a pass. Required to enable; no production default. |
+| `GATEWAY_GOVERNANCE_BLOCK_MIN` | Calibrated minimum violation probability considered a block. Require `0 <= PASS_MAX < BLOCK_MIN <= 1`; intermediate results cannot be cleared and are not forwarded. |
+| `GATEWAY_GOVERNANCE_MODEL` | Currently only `jev-1.13.0`; the default is pinned to this version. |
+| `GATEWAY_GOVERNANCE_TIMEOUT_MS` | Evaluator attempt timeout, 100–5000 ms; default 5000. Governance operations share a five-second budget, with at most one transient evaluator retry inside it. Unrelated upstream work does not consume that budget. |
+
+Admins create draft policies with a name and evaluation guidance, publish/archive them, and explicitly enable/disable governance. Up to 20 active policies are supported, subject to a combined guidance-size budget. Hosted plan gating remains strict for this feature even if legacy `DEN_PLAN_GATING_ENABLED` is false. Reads and explicit disabling remain available to authorized admins after eligibility/readiness loss.
+
+Gateway derives the organization from the authenticated key, freshly reads settings and policy revisions from the shared database, and checks again before dispatch. An explicitly disabled organization makes no evaluator calls. Enabled-but-unavailable state, malformed responses, evaluator outages, and unverifiable settings fail closed rather than silently bypassing policy. Policy errors return the failed names, not private guidance or generated explanations. Routine diagnostics do not retain evaluator bodies or new input.
+
+### Current scope and recovery limits
+
+- Applies to organization-provider routes and the managed OpenWork Models chat route. Historical context, assistant output, tool results, and direct-provider traffic are not independently screened.
+- Evaluates supported new user text and directly attached plain text. Oversized, unsupported media, and ambiguous auxiliary inputs reject; no silent truncation or automatic chunking. Known first-turn native-v1 title requests are screened against the same user input.
+- Policies are batched as independent Jev Noul questions through `@typesafe-ai/sdk`. After a contribution is admitted, tool-call continuations of that same contribution reuse a 30-minute admission receipt bound to the member and a keyed digest of the text. A policy edit does not interrupt a turn already in progress. Disabling governance and every new contribution take effect immediately. The digest key is derived from `DEN_DB_ENCRYPTION_KEY`; rotating that key invalidates outstanding receipts, which only causes a re-check.
+- Each decision is recorded as metadata only: outcome, route, member, policy revisions, failed policy names, evaluator model, latency and token counts. No prompt text, guidance or evaluator responses are stored. Admins can review recent decisions under **AI Gateway → Governance**. Decisions are pruned after 30 days by the Gateway rollup job, so keep `/internal/rollups/run` scheduled.
+- On the desktop app (native v1), a blocked message stays visible to the person but is removed from model history automatically when it is safe. They then choose **Edit and resend**. **Remove from model history** appears only if automatic removal could not complete. Removal never reverts files, and later substantive work or uncertain correlation prevents deletion.
+- Evaluator outages and policy changes offer **Try again** in place; uncertain or unsupported input offers **Edit message**. Neither is presented as a policy violation.
+- Native v2 removes the blocked message only when it is the isolated newest turn with no file changes; otherwise it pauses without destructive history changes and offers a new-conversation fallback.
+- Governance errors are always terminal for the engine: they are never retried automatically, including evaluator outages.
+- Live evaluator accuracy and production threshold calibration are deployment prerequisites. The automated journeys use synthetic evaluator and target-model responses. Calibrate with `pnpm --dir ee/apps/gateway governance:calibrate --live` against a synthetic dataset before choosing `GATEWAY_GOVERNANCE_PASS_MAX` and `GATEWAY_GOVERNANCE_BLOCK_MIN`.
 
 ## Prepare the deployment
 

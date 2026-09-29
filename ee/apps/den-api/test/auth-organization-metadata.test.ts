@@ -1,9 +1,16 @@
 import { afterAll, beforeAll, expect, mock, test } from "bun:test"
+import { MemberTable } from "@openwork-ee/den-db/schema"
+import { createDenTypeId } from "@openwork-ee/utils/typeid"
 
 // Auth initializes OAuth resource seeds even when only its organization hooks are
 // used. Represent already-seeded resources without opening an ambient database.
 const rows = { from: () => rows, where: async () => [{ id: "fixture-resource" }] }
-mock.module("../src/db.js", () => ({ db: { select: () => rows } }))
+let existingMembers: { id: string }[] = []
+const governanceTransaction = mock(async () => { throw new Error("fixture_governance_initialization_failed") })
+mock.module("../src/db.js", () => ({ db: {
+  select: () => ({ from: (table: unknown) => table === MemberTable ? { where: () => ({ limit: async () => existingMembers }) } : rows }),
+  transaction: governanceTransaction,
+} }))
 
 let auth: typeof import("../src/auth.js")["auth"]
 
@@ -20,7 +27,7 @@ beforeAll(async () => {
 
 afterAll(() => mock.restore())
 
-async function beforeCreate(metadata: unknown) {
+async function beforeCreate(metadata: unknown): Promise<{ data: { metadata: unknown } } | undefined> {
   // Invoke the registered hook, not the DB-backed organization creation endpoint.
   for (const plugin of auth.options.plugins ?? []) {
     if (plugin.id === "organization") {
@@ -71,6 +78,37 @@ test("existing malformed metadata and dpaSigned denials are preserved", async ()
       status: "FORBIDDEN", body: { message: "dpaSigned is reserved for internal platform administration." },
     })
   }
+})
+
+test("public organization creation cannot self-grant a hosted governance plan", async () => {
+  for (const metadata of [{ plan: { tier: "enterprise" } }, JSON.stringify({ plan: { tier: "enterprise", source: "manual" } }), { plan: null }]) {
+    await expect(beforeCreate(metadata)).rejects.toMatchObject({ status: "FORBIDDEN" })
+  }
+})
+
+test("first-owner creation waits for governance provisioning and propagates its failure before membership creation", async () => {
+  const organizationId = createDenTypeId("organization")
+  const userId = createDenTypeId("user")
+  for (const plugin of auth.options.plugins ?? []) {
+    if (plugin.id !== "organization") continue
+    const input = {
+      member: { userId, organizationId, role: "owner" },
+      user: { id: userId, name: "Fixture", email: "fixture@example.test", emailVerified: true, createdAt: new Date(0), updatedAt: new Date(0) },
+      organization: { id: organizationId, name: "Fixture", slug: "fixture", createdAt: new Date(0) },
+    }
+    existingMembers = []
+    governanceTransaction.mockClear()
+    await expect(plugin.options.organizationHooks.beforeAddMember(input)).rejects.toThrow("fixture_governance_initialization_failed")
+    expect(governanceTransaction).toHaveBeenCalledTimes(1)
+    existingMembers = [{ id: createDenTypeId("member") }]
+    await expect(plugin.options.organizationHooks.beforeAddMember(input)).rejects.toMatchObject({ status: "FORBIDDEN" })
+    expect(governanceTransaction).toHaveBeenCalledTimes(1)
+    existingMembers = []
+    await expect(plugin.options.organizationHooks.beforeAddMember({ ...input, member: { ...input.member, role: "member" } })).resolves.toBeUndefined()
+    expect(governanceTransaction).toHaveBeenCalledTimes(1)
+    return
+  }
+  throw new Error("Organization hook not registered")
 })
 
 test("public organization updates cannot replace capability metadata", async () => {

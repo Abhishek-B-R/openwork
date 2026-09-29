@@ -400,6 +400,7 @@ const openApiOptions: Parameters<typeof generateSpecs>[1] = {
       { name: "Inference", description: "Organization inference settings." },
       { name: "Inference Providers", description: "Organization inference Gateway providers, model groups, credential sets, access grants, member connections, and usage." },
       { name: "Gateway Usage Limits", description: "Estimated-cost policies, independent member calendar buckets, assignments, and audited usage-extension requests." },
+      { name: "Gateway Governance", description: "Explicit organization activation and revisioned policies for screening new user contributions through AI Gateway." },
       { name: "Cloud", description: "Organization Cloud instance lifecycle and browser gateway resolution." },
       { name: "Workers", description: "Worker lifecycle, billing, and runtime routes." },
       { name: "Worker Runtime", description: "Worker runtime inspection and upgrade routes." },

@@ -1,0 +1,5 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "rootDir": "../../..", "noEmit": true, "allowImportingTsExtensions": true },
+  "include": ["src", "test/gateway-governance-db.test.ts", "test/gateway-governance-migration.test.ts"]
+}

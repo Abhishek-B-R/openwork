@@ -1,6 +1,7 @@
 import { migrateOpencodeV1History, opencodeV1DatabasePath, type EngineV2MigrationStatus } from "./opencode-v2-migration.js";
 import { waitForOpenWorkV2Skills } from "./opencode-v2-instructions.js";
 import { executionRules } from "./managed-policy-rules.js";
+import { governanceHost } from "./governance-recovery.js";
 import { execFile } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { mkdir, rm, writeFile } from "node:fs/promises";
@@ -529,7 +530,7 @@ export function createEngineV2Preview(options: { config: ServerConfig; env?: Pic
     const managed = await createManagedOpencodeV2Server({
       bin: resolved.bin,
       rootDir,
-      env: { OPENCODE_MODELS_URL: opencodeModelsUrl },
+      env: { OPENCODE_MODELS_URL: opencodeModelsUrl, OPENWORK_SERVER_URL: `http://127.0.0.1:${config.port}`, OPENWORK_GOVERNANCE_TOKEN: governanceHost(config).token },
       permissions: async () => {
         const runtime = await readGlobalRuntimeOpencodeConfig(config);
         return executionRules(runtime.managedPolicy?.execution);

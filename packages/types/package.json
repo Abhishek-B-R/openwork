@@ -93,6 +93,13 @@
       "development": "./src/den/gateway.ts",
       "default": "./dist/den/gateway.js"
     },
+    "./den/gateway-governance": {
+      "types": "./src/den/gateway-governance.ts",
+      "development": "./src/den/gateway-governance.ts",
+      "bun": "./src/den/gateway-governance.ts",
+      "browser": "./src/den/gateway-governance.ts",
+      "default": "./dist/den/gateway-governance.js"
+    },
     "./den/gateway-usage-limits": {
       "types": "./src/den/gateway-usage-limits.ts",
       "development": "./src/den/gateway-usage-limits.ts",
@@ -156,7 +163,8 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsup"
+    "build": "tsup",
+    "test:governance": "bun test tests/gateway-governance.test.ts"
   },
   "dependencies": {
     "zod": "^4.3.6"

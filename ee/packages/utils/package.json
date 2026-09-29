@@ -41,6 +41,11 @@
       "development": "./src/gateway-bearer-key.ts",
       "default": "./dist/gateway-bearer-key.js"
     },
+    "./gateway-governance": {
+      "types": "./src/gateway-governance.ts",
+      "development": "./src/gateway-governance.ts",
+      "default": "./dist/gateway-governance.js"
+    },
     "./gateway-env": {
       "types": "./src/gateway-env.ts",
       "development": "./src/gateway-env.ts",
@@ -64,9 +69,11 @@
   },
   "scripts": {
     "build": "tsup",
-    "test": "bun test src/observability.test.ts src/den-urls.test.ts src/inference-bearer-key.test.ts"
+    "test": "bun test src/observability.test.ts src/den-urls.test.ts src/inference-bearer-key.test.ts src/gateway-governance.test.ts",
+    "test:governance": "bun test src/gateway-governance.test.ts"
   },
   "dependencies": {
+    "@openwork/types": "workspace:*",
     "luxon": "^3.6.1",
     "typeid-js": "^1.2.0",
     "uuid": "^11.1.1",

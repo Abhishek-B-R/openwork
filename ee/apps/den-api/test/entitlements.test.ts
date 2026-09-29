@@ -1,4 +1,5 @@
 import { beforeAll, expect, test } from "bun:test"
+import type { OrganizationPlan } from "../src/entitlements.js"
 
 function seedRequiredEnv() {
   process.env.DATABASE_URL = process.env.DATABASE_URL ?? "mysql://root:password@127.0.0.1:3306/openwork_test"
@@ -23,17 +24,18 @@ test("parseOrganizationPlan defaults to the free tier", () => {
 })
 
 test("parseOrganizationPlan reads object and string metadata", () => {
-  const plan = { tier: "enterprise", source: "grandfathered", grandfatheredAt: "2026-06-12T00:00:00.000Z" }
+  const plan: OrganizationPlan = { tier: "enterprise", source: "grandfathered", grandfatheredAt: "2026-06-12T00:00:00.000Z" }
   expect(entitlements.parseOrganizationPlan({ plan })).toEqual(plan)
   expect(entitlements.parseOrganizationPlan(JSON.stringify({ plan }))).toEqual(plan)
 })
 
-test("entitlements are all granted when gating is disabled", () => {
+test("legacy entitlements are granted when gating is disabled but governance remains Enterprise-only", () => {
   expect(entitlements.getOrganizationEntitlements(null, { gatingEnabled: false })).toEqual({
     sso: true,
     desktopPolicies: true,
     orgControls: true,
     analytics: true,
+    aiGatewayGovernance: false,
   })
 })
 
@@ -43,18 +45,21 @@ test("entitlements require the enterprise tier when gating is enabled", () => {
     desktopPolicies: false,
     orgControls: false,
     analytics: false,
+    aiGatewayGovernance: false,
   })
   expect(entitlements.getOrganizationEntitlements({ plan: { tier: "team" } }, { gatingEnabled: true })).toEqual({
     sso: false,
     desktopPolicies: false,
     orgControls: false,
     analytics: false,
+    aiGatewayGovernance: false,
   })
   expect(entitlements.getOrganizationEntitlements({ plan: { tier: "enterprise", source: "manual" } }, { gatingEnabled: true })).toEqual({
     sso: true,
     desktopPolicies: true,
     orgControls: true,
     analytics: true,
+    aiGatewayGovernance: true,
   })
 })
 
@@ -65,6 +70,7 @@ test("grandfathered organizations keep full entitlements when gating is enabled"
     desktopPolicies: true,
     orgControls: true,
     analytics: true,
+    aiGatewayGovernance: true,
   })
 })
 
@@ -82,6 +88,13 @@ test("checkEntitlement returns a 402 payload with a human-readable message", () 
 test("checkEntitlement passes for entitled organizations", () => {
   expect(entitlements.checkEntitlement({ plan: { tier: "enterprise" } }, "desktopPolicies", { gatingEnabled: true })).toEqual({ ok: true })
   expect(entitlements.checkEntitlement(null, "desktopPolicies", { gatingEnabled: false })).toEqual({ ok: true })
+})
+
+test("governance never inherits the legacy entitlement bypass", () => {
+  for (const gatingEnabled of [false, true]) {
+    expect(entitlements.checkEntitlement({ plan: { tier: "team" } }, "aiGatewayGovernance", { gatingEnabled }).ok).toBe(false)
+    expect(entitlements.checkEntitlement({ plan: { tier: "enterprise" } }, "aiGatewayGovernance", { gatingEnabled }).ok).toBe(true)
+  }
 })
 
 test("usage analytics follows the same enterprise gate", () => {

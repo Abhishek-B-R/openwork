@@ -1,0 +1,5 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "rootDir": "../../..", "noEmit": true, "allowImportingTsExtensions": true, "types": ["node", "bun-types/test"] },
+  "include": ["src", "test/gateway-governance-routes.test.ts", "test/entitlements.test.ts", "test/auth-organization-metadata.test.ts"]
+}

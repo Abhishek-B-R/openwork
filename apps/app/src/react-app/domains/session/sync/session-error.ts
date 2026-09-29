@@ -1,10 +1,11 @@
 import type { UIMessage } from "ai";
+import { decodeGatewayGovernanceEngineBody, hasGatewayGovernanceHttpMarker, type GatewayGovernanceError } from "@openwork/types/den/gateway-governance";
 import { parseGatewayUsageError, gatewayUsageErrorEvidenceSchema, type GatewayUsageErrorEvidence } from "../../cloud/gateway-usage-state";
 
 import { safeStringify } from "../../../../app/utils";
 import { normalizeErrorText } from "../../../../lib/error-text";
 
-export type OpencodeSessionErrorKind = "aborted" | "provider-timeout" | "provider-incomplete" | "provider-unavailable" | "provider-access-denied" | "provider-credentials" | "rate-limited" | "conversation-too-long" | "output-invalid" | "output-limit" | "attachment-unsupported" | "network-unavailable" | "workspace-unavailable" | "free-model-limit" | "disk-full" | "database-error" | "gateway-auth-required" | "gateway-selection-required" | "session-group-assignment" | "generic";
+export type OpencodeSessionErrorKind = "gateway-governance" | "gateway-governance-pending" | "aborted" | "provider-timeout" | "provider-incomplete" | "provider-unavailable" | "provider-access-denied" | "provider-credentials" | "rate-limited" | "conversation-too-long" | "output-invalid" | "output-limit" | "attachment-unsupported" | "network-unavailable" | "workspace-unavailable" | "free-model-limit" | "disk-full" | "database-error" | "gateway-auth-required" | "gateway-selection-required" | "session-group-assignment" | "generic";
 
 export type OpencodeSessionErrorPresentation = {
   kind: OpencodeSessionErrorKind;
@@ -318,8 +319,37 @@ function technicalErrorDetails(error: unknown, fallback: string, fields: ReturnT
   return normalizeErrorText(serialized && serialized !== "{}" ? serialized : fallback, { cap: 1_500 }).display;
 }
 
-export function presentOpencodeSessionError(error: unknown, fallback = "Session failed"): OpencodeSessionErrorPresentation {
+function hasUnverifiedGovernanceTransport(error: unknown, fields: ReturnType<typeof sessionErrorFields>) {
+  if (fields.name !== "APIError" || !fields.responseBody || fields.responseBody.length > 65_536) return false;
+  const headers = new Headers();
+  const raw = recordValue(recordValue(error, "data"), "responseHeaders") ?? recordValue(error, "responseHeaders");
+  if (!raw || typeof raw !== "object") return false;
+  try {
+    for (const [key, value] of Object.entries(raw)) if (typeof value === "string") headers.set(key, value);
+    return hasGatewayGovernanceHttpMarker({ status: fields.status ?? 0, headers })
+      && decodeGatewayGovernanceEngineBody(fields.responseBody) !== null;
+  } catch { return false; }
+}
+
+export function presentOpencodeSessionError(error: unknown, fallback = "Session failed", trustedGovernance?: GatewayGovernanceError | null): OpencodeSessionErrorPresentation {
+  if (trustedGovernance) {
+    const titles = {
+      openwork_gateway_governance_blocked: "Blocked by organization policy",
+      openwork_gateway_governance_uncertain: "Organization policies couldn’t clear this message",
+      openwork_gateway_governance_unsupported_input: "This input couldn’t be checked",
+      openwork_gateway_governance_unavailable: "Organization policies couldn’t be checked",
+      openwork_gateway_governance_policy_changed: "Organization policies changed before sending",
+    };
+    return { kind: "gateway-governance", title: trustedGovernance.error.code === "openwork_gateway_governance_blocked" && !trustedGovernance.error.evaluation_complete
+      ? titles.openwork_gateway_governance_uncertain : titles[trustedGovernance.error.code],
+      description: trustedGovernance.error.violations.map((policy) => policy.policy_name).join("; ") || "This request wasn’t forwarded. Review this message before trying again.",
+      technicalDetails: `Decision: ${trustedGovernance.error.decision_id}`, recoveryPrompt: null };
+  }
   const fields = sessionErrorFields(error, fallback);
+  if (hasUnverifiedGovernanceTransport(error, fields)) return {
+    kind: "gateway-governance-pending", title: "Message wasn’t sent", description: "Recovery couldn’t be verified. Start a new conversation; this message has not been removed.",
+    technicalDetails: "Recovery status must be verified by OpenWork.", recoveryPrompt: null,
+  };
   const gatewayAuth = detectGatewayAuthRequired(error, fields);
   const gatewaySelection = safeStringify(error)?.includes("gateway_selection_required") === true;
   const gatewayUsage = parseGatewayUsageError(error);

@@ -33,6 +33,7 @@ import { useOpenTargets } from "@/lib/target-provider"
 import { openTargetFromUrl } from "@/react-app/domains/session/artifacts/open-target"
 import { presentOpencodeSessionError, sessionErrorPresentationFromUIMessage } from "@/react-app/domains/session/sync/session-error"
 import { TaskRecovery } from "./task-recovery"
+import { GovernedMessage } from "@/react-app/domains/session/surface/governance-display"
 import { openModelPickerEvent } from "@/react-app/shell/new-providers-listener"
 import { ApplyPatchTool } from "@/components/tools/apply-patch"
 import { BashTool } from "@/components/tools/bash"
@@ -961,6 +962,7 @@ const MessageComponent = React.memo(
           showDescriptionOnResume={presentation?.kind !== "aborted" && presentation?.kind !== "provider-timeout"}
           resumePrompt={presentation?.recoveryPrompt}
           canRetry={isLastMessage && !isStreaming}
+          paused={presentation?.kind === "gateway-governance-pending" || presentation?.kind === "gateway-governance"}
           technicalDetails={presentation?.technicalDetails}
           gatewayConnectUrl={presentation?.kind === "gateway-auth-required" || presentation?.kind === "provider-credentials" ? presentation.connectUrl ?? null : undefined}
           gatewaySelectionRequired={presentation?.kind === "gateway-selection-required"}
@@ -986,10 +988,9 @@ const MessageComponent = React.memo(
     }
 
     return (
-      <UserMessage
-        message={message}
-        isStreaming={isStreaming}
-      />
+      <GovernedMessage messageID={message.id}>
+        <UserMessage message={message} isStreaming={isStreaming} />
+      </GovernedMessage>
     )
   }
 )
@@ -1071,9 +1072,10 @@ interface ErrorMessageProps {
   gatewayConnectUrl?: string | null
   gatewaySelectionRequired?: boolean
   changeModel?: boolean
+  paused?: boolean
 }
 
-function ErrorMessage({ error, description, showDescriptionOnResume, resumePrompt, canRetry = true, technicalDetails, gatewayConnectUrl, gatewaySelectionRequired, changeModel }: ErrorMessageProps) {
+function ErrorMessage({ error, description, showDescriptionOnResume, resumePrompt, canRetry = true, technicalDetails, gatewayConnectUrl, gatewaySelectionRequired, changeModel, paused }: ErrorMessageProps) {
   const { onResumeInterrupted, developerMode, dispatchAction, sessionId } = useMessageList()
   const selection = error?.includes("gateway_selection_required") ? presentOpencodeSessionError(error) : null
   const displayError = selection?.title ?? error
@@ -1081,7 +1083,7 @@ function ErrorMessage({ error, description, showDescriptionOnResume, resumePromp
   const displayDetails = selection?.technicalDetails ?? technicalDetails
   const resumable = Boolean(resumePrompt && onResumeInterrupted)
   return (
-    <TaskRecovery title={displayError ?? "Task failed"} state={resumable ? "paused" : "failed"}
+    <TaskRecovery title={displayError ?? "Task failed"} state={resumable || paused ? "paused" : "failed"}
       testId={resumable ? "session-error-interrupted" : undefined}
       description={showDescriptionOnResume && displayDescription
         ? <span data-testid="session-error-interruption-warning">{displayDescription}</span>

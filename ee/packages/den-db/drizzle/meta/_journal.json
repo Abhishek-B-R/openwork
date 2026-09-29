@@ -771,6 +771,20 @@
       "when": 1790207299296,
       "tag": "0110_early_hiroim",
       "breakpoints": true
+    },
+    {
+      "idx": 111,
+      "version": "5",
+      "when": 1790365180692,
+      "tag": "0111_gateway_governance",
+      "breakpoints": true
+    },
+    {
+      "idx": 112,
+      "version": "5",
+      "when": 1790696580752,
+      "tag": "0112_gateway_governance_decisions",
+      "breakpoints": true
     }
   ]
 }

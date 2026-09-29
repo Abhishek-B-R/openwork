@@ -7,6 +7,7 @@
  */
 import { randomUUID } from "node:crypto";
 import { stopTaskRecovery } from "./task-recovery.js";
+import { governanceHost } from "./governance-recovery.js";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { resolveServerConfig, type CliArgs } from "./config.js";
@@ -222,6 +223,7 @@ export async function startEmbeddedServer(options: EmbeddedServerOptions): Promi
       ...(process.env.OPENWORK_UI_CONTROL_DISCOVERY ? { OPENWORK_UI_CONTROL_DISCOVERY: process.env.OPENWORK_UI_CONTROL_DISCOVERY } : {}),
       OPENWORK_SERVER_URL: serverUrl,
       OPENWORK_SERVER_TOKEN: config.token,
+      OPENWORK_GOVERNANCE_TOKEN: governanceHost(config).token,
       OPENCODE_CONFIG: runtimeConfigPath,
       OPENCODE_MODELS_URL: opencodeModelsUrl,
     };

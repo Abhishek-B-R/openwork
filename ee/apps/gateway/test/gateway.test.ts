@@ -7,6 +7,14 @@ import { GATEWAY_REQUEST_MODEL_HEADER } from "@openwork/types/den/gateway"
 import { createGatewayModelAlias } from "@openwork-ee/utils/gateway-routing"
 import type { GatewayCredential, GatewayProvider } from "../src/gateway.js"
 import type { CheckGatewayUsage } from "../src/usage-limits.js"
+import type { ResolveGatewayGovernance } from "../src/governance.js"
+import type { EvaluateGatewayGovernance } from "../src/governance-evaluator.js"
+import { governanceFixture, knownGovernanceOff, memoryGovernanceRecords, policyFixture, waitForDecisions } from "./helpers/governance-fixture.js"
+import type { GatewayGovernanceRecords } from "../src/governance-records.js"
+import { createGatewayGovernanceResolver } from "../src/governance.js"
+import { governanceModel } from "../src/governance-evaluator.js"
+import { governanceFirstTitleWrapper, governanceTitleInstruction } from "../src/governance-input.js"
+import { GATEWAY_GOVERNANCE_ERROR_HEADER, GATEWAY_GOVERNANCE_CONTRIBUTION_HEADER, gatewayGovernanceErrorSchema } from "@openwork/types/den/gateway-governance"
 import { gatewayUsageLimitResponse, gatewayAccountingUnavailableResponse, type GatewayUsageStatus } from "@openwork/types/den/gateway-usage-limits"
 import type { InferenceReporter } from "../src/inference-reporting.js"
 import type { MintGcpAccessToken } from "../src/credentials/gcp-service-account.js"
@@ -60,6 +68,9 @@ type UpstreamRequest = {
 }
 
 type TestServerOptions = {
+  resolveGovernance?: ResolveGatewayGovernance
+  evaluateGovernance?: EvaluateGatewayGovernance
+  governanceRecords?: GatewayGovernanceRecords
   checkUsage?: CheckGatewayUsage
   provider?: Partial<GatewayProvider> | null
   credentialSet?: Partial<GatewayAccessRow["credentialSet"]>
@@ -208,6 +219,9 @@ function createTestServer(options: TestServerOptions = {}) {
     },
     reporter,
     gateway: {
+      resolveGovernance: options.resolveGovernance ?? knownGovernanceOff,
+      evaluateGovernance: options.evaluateGovernance ?? (async () => { throw new Error("Unexpected evaluator call") }),
+      governanceRecords: options.governanceRecords ?? memoryGovernanceRecords().records,
       checkUsage: options.checkUsage ?? (async () => null),
       catalog,
       now: options.clock ?? (options.now ? () => options.now ?? new Date() : undefined),
@@ -1946,4 +1960,222 @@ test("upstream cannot forge OpenWork usage identity headers", async () => {
   assert.equal(response.headers.get("x-openwork-error-code"), null)
   assert.equal(response.headers.get("x-openwork-usage-state"), null)
   await response.text()
+})
+
+test("ordinary first title and primary requests share evaluation semantics and blocked-attempt correlation", async () => {
+  for (const noul of [0, 1]) {
+    const states: unknown[] = []
+    for (const title of [true, false]) {
+      const fixture = createTestServer({ resolveGovernance: governanceFixture().resolve, evaluateGovernance: async (request) => {
+        states.push({ state: request.state, questions: request.questions, model: request.model })
+        return { model: governanceModel, answers: { p0: { type: "noul", noul } } }
+      } })
+      const messages = [...(title ? [{ role: "system", content: governanceTitleInstruction }, { role: "user", content: governanceFirstTitleWrapper }] : []),
+        { role: "user", content: "synthetic new user text" }]
+      const response = await fixture.app.fetch(gatewayRequest({ path: "/chat/completions", body: { model: "gpt-4o", messages }, headers: {
+        [GATEWAY_GOVERNANCE_CONTRIBUTION_HEADER]: "msg_same_attempt", "x-openwork-governance-session-id": "session_same_attempt", "x-openwork-governance-already-checked": "true",
+      } }))
+      assert.equal(response.status, noul === 0 ? 200 : 403)
+      if (noul === 0) {
+        await response.text()
+        assert.equal(fixture.upstreamRequests.length, 1)
+        assert.deepEqual(parseJsonObject(fixture.upstreamRequests[0].body).messages, messages)
+      } else {
+        const result = gatewayGovernanceErrorSchema.parse(await response.json())
+        assert.equal(result.error.contribution_id, "msg_same_attempt")
+        assert.equal(result.error.code, "openwork_gateway_governance_blocked")
+        assert.equal(response.headers.get(GATEWAY_GOVERNANCE_CONTRIBUTION_HEADER), "msg_same_attempt")
+        assert.equal(response.headers.get("x-openwork-governance-session-id"), "session_same_attempt")
+        assert.equal(fixture.credentialLookups.length, 0)
+        assert.equal(fixture.upstreamRequests.length, 0)
+      }
+      await waitForRows(fixture.logRows)
+    }
+    assert.deepEqual(states[0], states[1])
+    assert.deepEqual(states.length, 2)
+  }
+})
+
+test("off slow credentials and enforced post-admission accounting pauses do not acquire a five-second request limit", async () => {
+  for (const enabled of [false, true]) {
+    const governance = governanceFixture()
+    governance.state.settings.enabled = enabled
+    let reads = 0
+    let evaluations = 0
+    let waited = false
+    const pause = async () => { waited = true; await new Promise((resolve) => setTimeout(resolve, 5100)) }
+    const fixture = createTestServer({
+      resolveGovernance: (id, signal) => { reads++; return governance.resolve(id, signal) },
+      evaluateGovernance: async () => { evaluations++; return { model: governanceModel, answers: { p0: { type: "noul", noul: 0 } } } },
+      loadProviderCredential: async () => { if (!enabled && !waited) await pause(); return credential() },
+      checkUsage: async () => { if (enabled) { assert.equal(evaluations, 1); await pause() } return null },
+    })
+    const response = await fixture.app.fetch(gatewayRequest({ path: "/chat/completions", body: { model: "gpt-4o", messages: [{ role: "user", content: "synthetic" }] } }))
+    assert.equal(response.status, 200)
+    await response.text()
+    assert.equal(waited, true)
+    assert.equal(reads, 2)
+    assert.equal(evaluations, enabled ? 1 : 0)
+    assert.equal(fixture.upstreamRequests.length, 1)
+    assert.equal((await waitForRows(fixture.logRows)).outcome, "ok")
+  }
+})
+
+test("governance blocks all named policies before provider credentials, token minting, signing, streaming and target dispatch", async () => {
+  const governance = governanceFixture([policyFixture(), policyFixture({ id: "policy_two", name: "Second stored name", revision: 2 })])
+  let calls = 0
+  const fixture = createTestServer({ provider: vertexProvider, resolveGovernance: governance.resolve, evaluateGovernance: async (request) => {
+    calls++
+    assert.deepEqual(request.state, { contributions: [{ text: ["NEW_PRIVATE_MARKER"] }] })
+    return { model: governanceModel, answers: { p0: { type: "noul", noul: 1 }, p1: { type: "noul", noul: 0.99 } } }
+  } })
+  const response = await fixture.app.fetch(gatewayRequest({ path: "/v1beta/models/gemini:streamGenerateContent", body: { contents: [
+    { role: "user", parts: [{ text: "OLD_PRIVATE_MARKER" }] }, { role: "model", parts: [{ text: "old response" }] },
+    { role: "user", parts: [{ text: "NEW_PRIVATE_MARKER" }] },
+  ] }, headers: { [GATEWAY_GOVERNANCE_CONTRIBUTION_HEADER]: "msg_synthetic", "x-openwork-governance-session-id": "session_synthetic" } }))
+  assert.equal(response.status, 403)
+  const result = gatewayGovernanceErrorSchema.parse(await response.json())
+  assert.deepEqual(result.error.violations, [
+    { policy_id: "policy_one", policy_revision: 1, policy_name: "Restricted content" },
+    { policy_id: "policy_two", policy_revision: 2, policy_name: "Second stored name" },
+  ])
+  assert.equal(result.error.contribution_id, "msg_synthetic")
+  assert.equal(result.error.evaluation_complete, true)
+  assert.equal(result.error.upstream_dispatched, false)
+  assert.equal(response.headers.get(GATEWAY_GOVERNANCE_CONTRIBUTION_HEADER), "msg_synthetic")
+  assert.equal(response.headers.get(GATEWAY_GOVERNANCE_ERROR_HEADER), "1")
+  assert.equal(response.headers.get("x-should-retry"), "false")
+  assert.equal(response.headers.get("cache-control"), "no-store")
+  assert.equal(fixture.credentialLookups.length, 0)
+  assert.deepEqual(fixture.tokenCalls, { mint: 0, refresh: 0 })
+  assert.equal(fixture.upstreamRequests.length, 0)
+  assert.equal(calls, 1)
+  const row = await waitForRows(fixture.logRows)
+  assert.equal(row.outcome, "rejected")
+  assert.equal(row.cost_micro_usd, null)
+  assert.equal(row.input_tokens, null)
+  assert.doesNotMatch(JSON.stringify([row, fixture.handledErrors, result]), /NEW_PRIVATE_MARKER|OLD_PRIVATE_MARKER|synthetic-evaluator-key|guidance|noul/)
+})
+
+test("governance allows a passing batch through existing grant rechecks and accounting once, not correlation authority", async () => {
+  const governance = governanceFixture()
+  let reads = 0
+  const fixture = createTestServer({
+    resolveGovernance: (id, signal) => { reads++; assert.equal(id, organizationId); return governance.resolve(id, signal) },
+    evaluateGovernance: async () => ({ model: governanceModel, answers: { p0: { type: "noul", noul: 0 } } }),
+    fetch: async () => Response.json({ usage: { prompt_tokens: 2, completion_tokens: 3, total_tokens: 5 } }),
+  })
+  const response = await fixture.app.fetch(gatewayRequest({ path: "/chat/completions", body: { model: "gpt-4o", messages: [{ role: "user", content: "synthetic" }], already_checked: true, organization_id: "forged_org" },
+    headers: { [GATEWAY_GOVERNANCE_CONTRIBUTION_HEADER]: "synthetic", "x-openwork-governance-enabled": "false" } }))
+  assert.equal(response.status, 200)
+  await response.text()
+  assert.equal(reads, 2)
+  assert.equal(fixture.upstreamRequests.length, 1)
+  assert.equal(fixture.upstreamRequests[0].headers.get(GATEWAY_GOVERNANCE_CONTRIBUTION_HEADER), null)
+  assert.equal(fixture.upstreamRequests[0].headers.get("x-openwork-governance-enabled"), null)
+  const row = await waitForRows(fixture.logRows)
+  assert.equal(row.outcome, "ok")
+  assert.equal(row.total_tokens, 5)
+  assert.ok(fixture.accessChecks.length >= 2)
+})
+
+test("governance non-pass paths preserve rejection recording and do not lookup upstream credentials", async () => {
+  const cases = [
+    { result: {}, status: 503, code: "unavailable" },
+    { result: { model: governanceModel, answers: { p0: { type: "noul", noul: 0.5 } } }, status: 422, code: "uncertain" },
+  ]
+  for (const input of cases) {
+    const fixture = createTestServer({ resolveGovernance: governanceFixture().resolve, evaluateGovernance: async () => input.result })
+    await assertRejectedBeforeCredentials(fixture, gatewayRequest({ path: "/responses", body: { model: "gpt-4o", input: "synthetic" } }), `openwork_gateway_governance_${input.code}`, input.status)
+  }
+  const unknown = createTestServer({ resolveGovernance: createGatewayGovernanceResolver({ loadState: async () => null, config: () => governanceFixture().config }) })
+  await assertRejectedBeforeCredentials(unknown, gatewayRequest({ path: "/chat/completions", body: { model: "gpt-4o", messages: [] } }), "openwork_gateway_governance_unavailable", 503)
+  const unsupported = createTestServer({ resolveGovernance: governanceFixture().resolve })
+  await assertRejectedBeforeCredentials(unsupported, gatewayRequest({ path: "/embeddings", body: { model: "gpt-4o", input: "synthetic" } }), "openwork_gateway_governance_unsupported_input", 422)
+})
+
+test("final fresh governance read catches off-to-on, policy edits and entitlement loss during accounting awaits", async () => {
+  for (const change of ["enable", "edit", "plan", "lookup"]) {
+    const governance = governanceFixture()
+    if (change === "enable") governance.state.settings.enabled = false
+    let lost = false
+    let evaluatorCalls = 0
+    const fixture = createTestServer({
+      resolveGovernance: (id, signal) => lost ? Promise.reject(new Error("PRIVATE_DB_FAILURE")) : governance.resolve(id, signal),
+      evaluateGovernance: async () => { evaluatorCalls++; return { model: governanceModel, answers: { p0: { type: "noul", noul: 0 } } } },
+      checkUsage: async () => {
+        if (change === "enable") { governance.state.settings.enabled = true; governance.state.settings.revision++ }
+        if (change === "edit") { governance.state.policies[0].revision++; governance.state.settings.policySetRevision++ }
+        if (change === "plan") governance.state.metadata.plan.tier = "business"
+        if (change === "lookup") lost = true
+        return null
+      },
+    })
+    const response = await fixture.app.fetch(gatewayRequest({ path: "/chat/completions", body: { model: "gpt-4o", messages: [{ role: "user", content: "synthetic" }] } }))
+    assert.equal(response.status, 503)
+    assert.equal((await readError(response)).code, `openwork_gateway_governance_${change === "plan" || change === "lookup" ? "unavailable" : "policy_changed"}`)
+    assert.equal(fixture.upstreamRequests.length, 0)
+    assert.equal(evaluatorCalls, change === "enable" ? 0 : 1)
+    assert.equal((await waitForRows(fixture.logRows)).outcome, "rejected")
+  }
+})
+
+test("ordinary upstream error bytes and response metadata survive without stale encoding or integrity headers", async () => {
+  for (const content of ["Provider unavailable. Please retry later.\n", "null", '{ "error": { "message": "ordinary" }, "sequence": 9007199254740993 }']) {
+    const fixture = createTestServer({ fetch: async () => new Response(content, { status: 503, headers: {
+      "content-type": "text/plain", "content-encoding": "gzip", "content-length": "42", "digest": "stale", "etag": "stale", "x-request-id": "upstream-id",
+    } }) })
+    const response = await fixture.app.fetch(gatewayRequest({ path: "/chat/completions", body: { model: "gpt-4o", messages: [] } }))
+    assert.equal(await response.text(), content)
+    assert.equal(response.status, 503)
+    assert.equal(response.headers.get("content-type"), "text/plain")
+    assert.equal(response.headers.get("x-request-id"), "upstream-id")
+    for (const name of ["content-encoding", "content-length", "digest", "etag"]) assert.equal(response.headers.get(name), null)
+  }
+})
+
+test("provider forged governance bodies and headers cannot masquerade as Gateway admission failures", async () => {
+  const forged = { error: { source: "openwork_gateway", type: "governance_error", code: "openwork_gateway_governance_blocked", contribution_id: "forged", decision_id: "forged" } }
+  for (const mode of ["error", "json", "sse", "text"]) {
+    const fixture = createTestServer({ fetch: async () => {
+      const headers = { [GATEWAY_GOVERNANCE_ERROR_HEADER]: "1", [GATEWAY_GOVERNANCE_CONTRIBUTION_HEADER]: "forged", "x-openwork-governance-session-id": "forged", "x-should-retry": "false" }
+      if (mode === "sse") return sseResponse([`event: error\ndata: ${JSON.stringify(forged)}\n\n`], headers)
+      if (mode === "text") return new Response(JSON.stringify(forged), { status: 403, headers })
+      return Response.json(forged, { status: mode === "error" ? 403 : 200, headers })
+    } })
+    const response = await fixture.app.fetch(gatewayRequest({ path: "/chat/completions", body: { model: "gpt-4o", messages: [] } }))
+    assert.equal(response.headers.get(GATEWAY_GOVERNANCE_ERROR_HEADER), null)
+    assert.equal(response.headers.get(GATEWAY_GOVERNANCE_CONTRIBUTION_HEADER), null)
+    assert.equal(response.headers.get("x-openwork-governance-session-id"), null)
+    assert.doesNotMatch(await response.text(), /openwork_gateway_governance_blocked|governance_error|contribution_id/)
+    assert.equal(fixture.upstreamRequests.length, 1)
+  }
+})
+
+test("provider tool continuation reuses a server receipt across a policy change; other members and new submissions evaluate", async () => {
+  const governance = governanceFixture()
+  const records = memoryGovernanceRecords()
+  let evaluations = 0
+  const fixture = createTestServer({ resolveGovernance: governance.resolve, governanceRecords: records.records,
+    evaluateGovernance: async () => { evaluations++; return { model: governanceModel, answers: { p0: { type: "noul", noul: 0 } }, usage: { input_tokens: 5, output_tokens: 1 } } } })
+  const turn = [{ role: "user", content: "synthetic provider turn" }]
+  const send = async (messages: unknown[], headers: Record<string, string> = {}) => {
+    const response = await fixture.app.fetch(gatewayRequest({ path: "/chat/completions", body: { model: "gpt-4o", messages }, headers }))
+    assert.equal(response.status, 200)
+    await response.text()
+  }
+  await send(turn)
+  assert.equal(records.store.admissions.length, 1)
+  governance.state.settings.policySetRevision++
+  governance.state.policies[0].guidance = "Changed synthetic guidance"
+  await send([...turn, { role: "assistant", tool_calls: [{ id: "a", type: "function", function: { name: "x", arguments: "{}" } }] }, { role: "tool", tool_call_id: "a", content: "PRIVATE_TOOL" }],
+    { "x-openwork-governance-receipt": records.store.admissions[0].digest })
+  assert.equal(evaluations, 1)
+  await send(turn)
+  assert.equal(evaluations, 2)
+  assert.equal(fixture.upstreamRequests.length, 3)
+  const decisions = await waitForDecisions(records.store, 3)
+  assert.deepEqual(decisions.map((row) => [row.route, row.outcome]), [["provider", "allowed"], ["provider", "receipt_reused"], ["provider", "allowed"]])
+  assert.equal(decisions[0].organizationId, organizationId)
+  await waitForRows(fixture.logRows, 3)
 })

@@ -154,7 +154,7 @@ const subjectSection = (context = directory) => <GatewayUsersTeamsSection orgId=
 test("root tabs navigate without losing query context and nested content keeps AI Providers active", async () => {
   const view = await mount(<AiGatewayScreen providerContent={<div>Nested provider editor</div>} />, reply, "limits");
   try {
-    expect([...view.container.querySelectorAll('[role="tab"]')].map((tab) => tab.textContent)).toEqual(["Overview", "AI Providers", "Limits", "Users & Teams", "OpenWork Models"]);
+    expect([...view.container.querySelectorAll('[role="tab"]')].map((tab) => tab.textContent)).toEqual(["Overview", "AI Providers", "Limits", "Users & Teams", "OpenWork Models", "Governance"]);
     expect(view.container.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toBe("AI Providers");
     expect(view.container.querySelector('[role="tabpanel"]')?.getAttribute("aria-label")).toBe("AI Providers");
     expect(view.container.textContent).toContain("Nested provider editor");
@@ -195,12 +195,25 @@ test.each(["checking", "denied", "unavailable"] satisfies ReturnType<typeof capa
     view.access.mockReturnValue(state);
     for (const tab of ["overview", "limits", "users-and-teams", "ai-providers"]) {
       await view.tab(tab);
-      expect(view.container.querySelectorAll('[role="tab"]')).toHaveLength(5);
+      expect(view.container.querySelectorAll('[role="tab"]')).toHaveLength(6);
       expect(view.container.querySelector('[data-testid="gateway-users-teams"]')).toBeNull();
       expect(view.container.querySelector('[aria-labelledby="gateway-usage-limits-heading"]')).toBeNull();
     }
     expect(view.calls).toEqual([]);
     expect(view.container.textContent).toContain(state === "checking" ? "Checking workspace access" : state === "unavailable" ? "ask an instance admin" : "AI Gateway requires workspace admin permissions. Ask a workspace owner to update your role.");
+  } finally { await view.close(); }
+});
+
+test.each(["checking", "denied", "unavailable"] satisfies ReturnType<typeof capability.useGatewayDashboardAccess>[])("Governance preserves the %s deployment and role gates without sending a governance query", async (state) => {
+  const view = await mount(<div />);
+  try {
+    view.access.mockReturnValue(state);
+    await view.tab("governance");
+    expect(view.container.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toBe("Governance");
+    expect(view.container.querySelector('[data-testid="gateway-governance"]')).toBeNull();
+    expect(view.calls).toEqual([]);
+    if (state === "checking") expect(view.container.querySelector('[aria-label="Loading governance"]')).not.toBeNull();
+    else expect(view.container.textContent).toContain(state === "denied" ? "workspace admin permissions" : "deployment administrator");
   } finally { await view.close(); }
 });
 

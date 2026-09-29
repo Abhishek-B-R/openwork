@@ -26,6 +26,7 @@ import {
 } from "../surface/queued-drain-machine";
 import { getSessionModelSelection, useSessionModelStore } from "../surface/session-model-store";
 import { draftToParts } from "./draft-parts";
+import { readGovernanceView } from "./governance-state";
 import { buildOpenworkSessionSystemContext } from "./env-context";
 import {
   clearQueuedSendContext,
@@ -97,6 +98,9 @@ async function performQueuedDraftSend(
   draft: ComposerDraft,
   generation: number,
 ): Promise<"sent" | "cancelled"> {
+  assertQueuedSendCurrent(sessionId, generation);
+  const governance = await readGovernanceView(context.opencodeBaseUrl, sessionId, context.openworkToken);
+  if (governance.held) throw new Error("Organization policy recovery is required before queued messages can continue.");
   assertQueuedSendCurrent(sessionId, generation);
   const text = draft.text.trim();
   if (!text && draft.attachments.length === 0 && !draft.command) return "cancelled";

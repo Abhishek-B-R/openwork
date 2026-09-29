@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { governanceHost, governanceScope } from "./governance-recovery.js";
 import { createWorkspaceKvStore, isRecord } from "./workspace-kv-store.js";
 import type { ServerConfig, WorkspaceInfo } from "./types.js";
 
@@ -140,6 +141,12 @@ export async function createTaskRecovery(
     // Wait for restored sign-in/policy before claiming work. The actual send
     // still traverses the authenticated policy-enforcing proxy.
     if (startup.has(key(record))) await beforeResume();
+    const governance = await governanceHost(config).view(governanceScope(record.workspaceId, record.engine, record.sessionId), record.sessionId);
+    if (governance.held) {
+      if (current(record)) { remove(record); await persist(); }
+      return;
+    }
+    if (governance.recoveryHeld) return;
     const snapshot = await observe(record);
     if (!current(record)) return;
     const pending = startup.has(key(record));

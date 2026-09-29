@@ -69,6 +69,7 @@ export type QueuedDrainState = {
 export type QueuedDrainEvent =
   | { type: "send_started"; itemId: string; steer?: boolean }
   | { type: "stop_confirmed" }
+  | { type: "session_failed" }
   | { type: "send_result"; itemId: string; outcome: "sent" | "accepted" | "blocked" | "cancelled"; at: number; deferredMessageID?: string; terminalObserved?: boolean }
   | { type: "send_error"; itemId: string }
   | { type: "send_unknown"; itemId: string; messageID: string; at: number; deferred?: boolean }
@@ -106,6 +107,8 @@ function resolved(
 export function reduceQueuedDrain(state: QueuedDrainState, event: QueuedDrainEvent): QueuedDrainState {
   const { phase } = state;
   switch (event.type) {
+    case "session_failed":
+      return { ...state, phase: { kind: "halted", itemId: "itemId" in phase ? phase.itemId : "session", reason: "terminal_failure" } };
     case "stop_confirmed":
       // A replacement may already hold the send slot while awaiting Stop.
       // Keep that claim, but discard activity belonging to its predecessor.

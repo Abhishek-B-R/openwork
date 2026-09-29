@@ -1,4 +1,5 @@
 import { and, eq, gt, isNotNull, isNull } from "@openwork-ee/den-db/drizzle"
+import { provisionGatewayGovernance } from "@openwork-ee/den-db/gateway-governance"
 import { readOrganizationMetadata } from "@openwork/types/den/managed-models-policy"
 import { ensureMemberGatewayKey } from "../../gateway-keys.js"
 import {
@@ -217,6 +218,7 @@ export function registerBootstrapRoutes<T extends { Variables: AuthContextVariab
           },
         })
 
+        await provisionGatewayGovernance(tx, organizationId)
         await tx.insert(MemberTable).values({
           id: setupMemberId,
           organizationId,
