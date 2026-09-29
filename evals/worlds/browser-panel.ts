@@ -712,6 +712,24 @@ export async function builtinBrowserWorld(seed: Seed, options: { workspacePath?:
   return { app, workspace, session, origin: info.baseUrl.replace(/\/+$/, "") };
 }
 
+/** A working native tab and a refused loopback destination on the same host. */
+export async function browserConnectionFailureWorld(seed: Seed) {
+  const world = await builtinBrowserWorld(seed);
+  const tab = await seedBrowserTab(seed, world.app, `${world.origin}/?connection-probe=working`, world.session.sessionId);
+  // Allocate and release a port on the desktop host so the navigation reaches
+  // a refused loopback connection, not DNS, an unsafe port, or a public site.
+  const port = await runBrowserHost(world.app, `
+    const { createServer } = await import('node:net');
+    const server = createServer();
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+    const port = server.address().port;
+    await new Promise(resolve => server.close(resolve));
+    return port;
+  `);
+  if (typeof port !== "number") throw new Error("The connection failure fixture returned no port.");
+  return { ...world, tab, failedUrl: `http://127.0.0.1:${port}/connection-probe` };
+}
+
 /** Real native tab and deterministic document, with no viewport emulation. */
 export async function browserGeometryWorld(seed: Seed) {
   const world = await createBuiltinBrowserWorld(seed);
