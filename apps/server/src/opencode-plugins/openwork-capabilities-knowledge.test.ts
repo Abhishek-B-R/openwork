@@ -29,6 +29,8 @@ describe("OpenWork capabilities knowledge plugin", () => {
     expect(knowledge).not.toContain("codex mcp login openwork");
     expect(knowledge).toContain("OpenWork documentation tools answer product questions. Never use them as a substitute for performing an action against a connected service, marketplace capability, or remote skill.");
     expect(knowledge).toContain("Settings > Library");
+    // An App opens above the reply, so a long reply pushes it out of view.
+    expect(knowledge).toContain("When a tool result opens an MCP App, the person sees it right above your reply");
     expect(knowledge).toContain("Settings > Debug");
     expect(knowledge).toContain("custom or local MCP server");
     expect(knowledge).not.toContain("Access tokens are opaque");
