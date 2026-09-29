@@ -77,7 +77,9 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible"
 import { ImageAttachmentBadge } from "@/components/chat/image-attachment-badge"
-import { ComposerPillChip } from "@/components/chat/composer-pill"
+import { AttachmentFileChip, ComposerBadgeChip, ComposerPillChip, PastedTextChip } from "@/components/chat/composer-pill"
+import { agentBadge, fileMentionBadge } from "@/react-app/domains/session/surface/composer/composer-chips"
+import { isChatAttachmentUrl } from "@/react-app/domains/session/sync/attachment-file-part"
 import { readComposerPill, splitComposerPillText } from "@/react-app/domains/session/surface/composer/composer-pills"
 import { Image } from "@/components/ui/image"
 import {
@@ -408,8 +410,59 @@ function FileMessage({ part, tone }: FileMessageProps) {
     </>
   )
 
-  if (isImage && tone === "user") {
+  const actions = downloadUrl || canReveal ? (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        render={
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            aria-label={`More actions for ${title}`}
+          >
+            <MoreHorizontal />
+          </Button>
+        }
+      />
+      <DropdownMenuContent align="end" className="min-w-44">
+        {downloadUrl ? (
+          <DropdownMenuItem onClick={handleDownload}>
+            <Download />
+            Download
+          </DropdownMenuItem>
+        ) : null}
+        {canReveal ? (
+          <DropdownMenuItem onClick={handleReveal}>
+            <FolderOpen />
+            Reveal in Finder
+          </DropdownMenuItem>
+        ) : null}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  ) : null
+
+  if (isImage && tone === "user" && !revealPath) {
     return <ImageAttachmentBadge src={part.url} alt={title} />
+  }
+
+  if (tone === "user" && revealPath && !isChatAttachmentUrl(part.url)) {
+    return (
+      <button type="button" className="inline rounded-lg align-middle" onClick={() => openArtifactPath(revealPath)} title={`Open ${title} in Artifacts`}>
+        <ComposerBadgeChip badge={fileMentionBadge(revealPath)} className="mx-0" />
+      </button>
+    )
+  }
+
+  if (tone === "user") {
+    return (
+      <AttachmentFileChip
+        filename={title}
+        mime={part.mediaType}
+        bytes={fileBytes(part)}
+        onOpen={revealPath ? () => openArtifactPath(revealPath) : undefined}
+        actions={actions}
+      />
+    )
   }
 
   if (isImage) {
@@ -440,36 +493,7 @@ function FileMessage({ part, tone }: FileMessageProps) {
       ) : (
         <div className="flex min-w-0 items-center gap-2 pe-2">{fileContent}</div>
       )}
-      {downloadUrl || canReveal ? (
-        <DropdownMenu>
-          <DropdownMenuTrigger
-            render={
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-xs"
-                aria-label={`More actions for ${title}`}
-              >
-                <MoreHorizontal />
-              </Button>
-            }
-          />
-          <DropdownMenuContent align="end" className="min-w-44">
-            {downloadUrl ? (
-              <DropdownMenuItem onClick={handleDownload}>
-                <Download />
-                Download
-              </DropdownMenuItem>
-            ) : null}
-            {canReveal ? (
-              <DropdownMenuItem onClick={handleReveal}>
-                <FolderOpen />
-                Reveal in Finder
-              </DropdownMenuItem>
-            ) : null}
-          </DropdownMenuContent>
-        </DropdownMenu>
-      ) : null}
+      {actions}
     </div>
   )
 }
@@ -601,6 +625,28 @@ AssistantMessage.displayName = "AssistantMessage"
 type UserMessageProps = {
   message: UIMessage
   isStreaming: boolean
+}
+
+function isPastedTextPart(part: UIMessage["parts"][number]) {
+  if (part.type !== "text") return false
+  const metadata = part.providerMetadata?.opencode
+  return Boolean(metadata && typeof metadata === "object" && "pastedText" in metadata && metadata.pastedText === true)
+}
+
+function fileBytes(part: FileUIPart) {
+  const metadata = part.providerMetadata?.opencode
+  const bytes = metadata && typeof metadata === "object" && "bytes" in metadata ? metadata.bytes : undefined
+  return typeof bytes === "number" ? bytes : undefined
+}
+
+/** Agent and file mentions keep their composer badge in the sent message. */
+function textPartMentionBadge(part: UIMessage["parts"][number]) {
+  if (part.type !== "text") return null
+  const metadata = part.providerMetadata?.opencode
+  if (!metadata || typeof metadata !== "object") return null
+  if ("agentMention" in metadata && typeof metadata.agentMention === "string") return agentBadge(metadata.agentMention)
+  if ("fileMention" in metadata && typeof metadata.fileMention === "string") return fileMentionBadge(metadata.fileMention)
+  return null
 }
 
 /** The pill a sent text part was tagged with in the composer, if any. */
@@ -739,7 +785,7 @@ function renderUserTextWithPills(text: string, highlightQuery: string | undefine
     const key = `${offset}`
     if (typeof segment !== "string") {
       offset += 1
-      return <ComposerPillChip key={`pill:${key}`} pill={segment} surface="muted" />
+      return <ComposerPillChip key={`pill:${key}`} pill={segment} />
     }
     offset += segment.length
     return <React.Fragment key={`text:${key}`}>{renderPlainTextWithLinks(segment, highlightQuery, key, references)}</React.Fragment>
@@ -862,7 +908,10 @@ const UserMessage = React.memo(
                   >
                     {inlineParts.map((part, index) => {
                       const pill = textPartComposerPill(part)
-                      if (pill) return <ComposerPillChip key={`pill-${index}`} pill={pill} surface="muted" />
+                      if (pill) return <ComposerPillChip key={`pill-${index}`} pill={pill} />
+                      if (part.type === "text" && isPastedTextPart(part)) return <PastedTextChip key={`pasted-${index}`} text={part.text} />
+                      const mention = textPartMentionBadge(part)
+                      if (mention) return <ComposerBadgeChip key={`mention-${index}`} badge={mention} />
                       if (part.type === "text") {
                         return (
                           <span key={`text-${index}`} className="whitespace-pre-wrap">

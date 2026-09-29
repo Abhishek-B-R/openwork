@@ -12,7 +12,7 @@ import { composerPillFromPart, composerPillText } from "./composer/composer-pill
  * Returns undefined when the draft has neither and plain text is enough.
  */
 export function pendingDraftTextParts(parts: readonly ComposerPart[]): UIMessage["parts"] | undefined {
-  const hasChip = parts.some((part) => part.type === "skill" || part.type === "connect-skill" || part.type === "connector" || part.type === "app" || part.type === "computer" || part.type === "paste");
+  const hasChip = parts.some((part) => part.type === "skill" || part.type === "connect-skill" || part.type === "connector" || part.type === "app" || part.type === "computer" || part.type === "paste" || part.type === "agent" || part.type === "file");
   if (!hasChip) return undefined;
   return parts.flatMap<UIMessage["parts"][number]>((part) => {
     switch (part.type) {
@@ -29,9 +29,9 @@ export function pendingDraftTextParts(parts: readonly ComposerPart[]): UIMessage
       case "paste":
         return part.text ? [{ type: "text", text: part.text, state: "done", providerMetadata: { opencode: { pastedText: true } } }] : [];
       case "agent":
-        return [{ type: "text", text: `@${part.name}`, state: "done" }];
+        return [{ type: "text", text: `@${part.name}`, state: "done", providerMetadata: { opencode: { agentMention: part.name } } }];
       case "file":
-        return [{ type: "text", text: `@${part.path}`, state: "done" }];
+        return [{ type: "text", text: `@${part.path}`, state: "done", providerMetadata: { opencode: { fileMention: part.path } } }];
     }
   });
 }

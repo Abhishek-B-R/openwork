@@ -2,7 +2,6 @@ import type { TextPartInput } from "@opencode-ai/sdk/v2/client";
 
 import type { ComposerPart } from "@/app/types";
 import { appMentionInstruction } from "./app-mentions";
-import { humanizeCapabilityName } from "./composer-plus-menu-model";
 import { computerMentionInstruction, isComputerTarget, type ComputerTarget } from "./computer-mentions";
 import { connectSkillPrompt, encodeConnectSkillToken, parseConnectSkillToken } from "./connect-skill-token";
 import { connectorPrompt, encodeConnectorToken, parseConnectorToken } from "./connector-token";
@@ -15,6 +14,7 @@ import { connectorPrompt, encodeConnectorToken, parseConnectorToken } from "./co
  * - its draft token (what the composer stores and re-renders as a chip),
  * - its visible text (what the user message holds, shown as the same chip),
  * - its model instruction (sent as a synthetic part, never shown).
+ * How the chip looks lives in composer-chips.
  *
  * Every send path, the user message bubble, the queued-message list and the
  * composer read from this module, so a pill in the composer stays a pill in the
@@ -34,16 +34,8 @@ export const COMPOSER_DRAFT_TOKEN_RE = /(\[attachment [^\]]+\]|\[pasted text [^\
 
 const SKILL_TOKEN_RE = /^\[skill (.+)\]$/;
 
-/** Neutral token chip used for skills and connectors (DESIGN.md V2). */
+/** Neutral chip for slash commands; pills and mentions use composer-chips badges. */
 export const COMPOSER_TOKEN_CLASS = "inline-flex items-center rounded-md bg-gray-3 px-1.5 py-0.5 text-xs font-medium text-gray-12";
-
-/** `@` mention chips, keyed by what the mention refers to. */
-export const COMPOSER_MENTION_CLASS = {
-  computer: "inline-flex items-center rounded-full border border-sky-6/35 bg-sky-3/20 px-2.5 py-1 text-xs font-medium text-sky-11",
-  file: "inline-flex items-center rounded-full border border-gray-6 bg-gray-3 px-2.5 py-1 text-xs font-medium text-gray-11",
-  agent: "inline-flex items-center rounded-full border border-sky-6/35 bg-sky-3/20 px-2.5 py-1 text-xs font-medium text-sky-11",
-  app: "inline-flex items-center rounded-full border border-cyan-6/35 bg-cyan-3/20 px-2.5 py-1 text-xs font-medium text-cyan-11",
-} as const;
 
 /** The pill a `[skill …]`, `[connect-skill …]` or `[connector …]` draft segment stands for. */
 export function parseComposerPillToken(segment: string): ComposerPill | null {
@@ -100,22 +92,6 @@ export function composerPillText(pill: ComposerPill): string {
   }
 }
 
-/** The chip label, identical in the composer and the transcript. */
-export function composerPillLabel(pill: ComposerPill): string {
-  switch (pill.kind) {
-    case "skill":
-      return humanizeCapabilityName(pill.name);
-    case "connect-skill":
-      return humanizeCapabilityName(pill.slug);
-    case "connector":
-      return pill.name;
-    case "app":
-      return `@${pill.name}`;
-    case "computer":
-      return `@${pill.target}`;
-  }
-}
-
 export function composerPillTitle(pill: ComposerPill): string {
   switch (pill.kind) {
     case "skill":
@@ -128,17 +104,6 @@ export function composerPillTitle(pill: ComposerPill): string {
       return `@${pill.name}`;
     case "computer":
       return `@${pill.target}`;
-  }
-}
-
-export function composerPillClassName(pill: ComposerPill): string {
-  switch (pill.kind) {
-    case "app":
-      return COMPOSER_MENTION_CLASS.app;
-    case "computer":
-      return COMPOSER_MENTION_CLASS.computer;
-    default:
-      return COMPOSER_TOKEN_CLASS;
   }
 }
 
