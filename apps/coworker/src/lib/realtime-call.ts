@@ -87,7 +87,8 @@ class CoworkerCall {
   }
   async start(person: CoworkerSummary, threadId: string, microphonePermission: Promise<{ granted: boolean }>): Promise<void> {
     if (this.isActive()) { this.show(); return; }
-    if (!(await coworkerBridge.calls.settings()).keySet) return;
+    const config = await coworkerBridge.calls.settings();
+    if (!config.keySet || !config.enabled) return;
     if (this.isActive()) { this.show(); return; }
     const target = { slug: person.slug, createdAt: person.createdAt, threadId };
     const serial = ++this.serial;

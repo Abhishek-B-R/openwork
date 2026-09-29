@@ -8,7 +8,7 @@ import nativeRuntime from "../native-runtime.json" with { type: "json" };
 export const NATIVE_PLUGIN_VERSION = nativeRuntime.opencodeV2Version;
 export const NATIVE_PLUGIN_DEPENDENCIES = Object.freeze({ "@opencode-ai/plugin": NATIVE_PLUGIN_VERSION, "@opencode-ai/schema": NATIVE_PLUGIN_VERSION, effect: "4.0.0-rc.112", zod: "4.1.8" });
 export const NATIVE_PLUGIN_FILES = Object.freeze(["coworker-collaboration.js", "coworker-browser.js", "coworker-computer.js",
-  "coworker-group-documents.js", "progress-summary.js", "auto-memory.js", "coworker-turn-roles.js", "coworker-events.js", "coworker-abilities.js"]);
+  "coworker-group-documents.js", "progress-summary.js", "auto-memory.js", "fast-decision.js", "coworker-turn-roles.js", "coworker-events.js", "coworker-abilities.js"]);
 
 export function validateNativePluginManifest(manifest, sourceBuild) {
   const exactKeys = (value, keys) => value !== null && typeof value === "object" && !Array.isArray(value)

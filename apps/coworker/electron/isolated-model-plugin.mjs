@@ -1,6 +1,6 @@
-// This function is embedded in the two installed plugins. Only the native
+// This function is embedded in the bounded-model plugins. Only the native
 // session hooks see input; no client, tool, history, or ambient instruction is reused.
-export function isolatedModelHooks(ctx, { agent, system, limits }, validate) {
+export function isolatedModelHooks(ctx, { agent, system, limits, kind }, validate) {
   return Effect.gen(function* () {
     // beta19086 AgentEditor.update creates a missing agent (core/src/agent.ts).
     // Register only here: an unloaded plugin must leave an unknown agent, not an
@@ -17,10 +17,10 @@ export function isolatedModelHooks(ctx, { agent, system, limits }, validate) {
     yield* ctx.session.hook("prompt", (event) => Effect.gen(function* () {
       const session = yield* ctx.session.get({ sessionID: event.sessionID }).pipe(Effect.orDie);
       if (session.agent !== agent) { if (sessions.has(event.sessionID)) refuse(); return; }
-      if (sessions.has(event.sessionID) || session.parentID || session.fork || !session.model || (session.model.variant && session.model.variant !== "default")
+      if (sessions.has(event.sessionID) || session.parentID || session.fork || !session.model || (session.model.variant && session.model.variant !== "default" && !(kind === "fast-decision" && session.model.variant === "none"))
         || Object.entries(event.prompt).some(([key, value]) => key !== "text" && value !== undefined)) refuse();
-      validate(event.prompt.text);
-      sessions.set(event.sessionID, { messageID: event.messageID, text: event.prompt.text, model: { ...session.model }, contexts: 0, requests: 0, http: 0 });
+      const input = validate(event.prompt.text);
+      sessions.set(event.sessionID, { messageID: event.messageID, text: event.prompt.text, ...(kind === "fast-decision" ? { choices: [...input.members.map((member) => member.choice), "defer"] } : {}), model: { ...session.model }, contexts: 0, requests: 0, http: 0 });
     }));
     yield* ctx.session.hook("context", (event) => Effect.gen(function* () {
       const session = sessions.get(event.sessionID);
@@ -32,8 +32,10 @@ export function isolatedModelHooks(ctx, { agent, system, limits }, validate) {
       if (!model || !model.enabled || model.status !== "active" || provider.data.activation === "disabled"
         || !["aisdk:@ai-sdk/openai", "aisdk:@ai-sdk/openai-compatible", "@opencode-ai/ai/providers/openai", "@opencode-ai/ai/providers/openai/chat", "@opencode-ai/ai/providers/openai/responses", "@opencode-ai/ai/providers/openai-compatible", "@opencode/ai/providers/openai", "@opencode/ai/providers/openai/chat", "@opencode/ai/providers/openai/responses", "@opencode/ai/providers/openai-compatible"].includes(model.package ?? provider.data.package)
         || !model.capabilities.input.includes("text") || !model.capabilities.output.includes("text")
-        || model.capabilities.output.some((type) => type !== "text") || model.compatibility?.requireReasoning || model.compatibility?.reasoningField
-        || model.variants.some((variant) => variant.id !== "default") || !model.cost.length || !model.cost.some((cost) => !cost.tier)
+        || (kind === "fast-decision"
+          ? (model.upstreamModelId ?? model.modelID) !== "gpt-6-luna" || model.capabilities.output.some((type) => !["text", "reasoning"].includes(type))
+          : model.capabilities.output.some((type) => type !== "text") || model.compatibility?.requireReasoning || model.compatibility?.reasoningField || model.variants.some((variant) => variant.id !== "default"))
+        || !model.cost.length || !model.cost.some((cost) => !cost.tier)
         || model.cost.some((cost) => !Number.isFinite(cost.input) || cost.input <= 0 || cost.input > limits.maxInputPrice
           || !Number.isFinite(cost.output) || cost.output <= 0 || cost.output > limits.maxOutputPrice)) refuse();
       session.wireModel = model.modelID;
@@ -43,7 +45,7 @@ export function isolatedModelHooks(ctx, { agent, system, limits }, validate) {
       event.messages.splice(0, event.messages.length, { role: "user", content: [{ type: "text", text: session.text }] });
       for (const key of Object.keys(event.tools)) delete event.tools[key];
       for (const key of Object.keys(event.generation)) delete event.generation[key];
-      Object.assign(event.generation, { maxTokens: session.maxTokens, temperature: 0, topP: 1 });
+      Object.assign(event.generation, { maxTokens: session.maxTokens, ...(kind === "fast-decision" ? {} : { temperature: 0, topP: 1 }) });
       for (const key of Object.keys(event.providerOptions)) delete event.providerOptions[key];
     }));
     yield* ctx.session.hook("model.request", (event) => Effect.sync(() => {
@@ -63,13 +65,19 @@ export function isolatedModelHooks(ctx, { agent, system, limits }, validate) {
         // Keep only the protocol fields whose bounds and parsing we verified.
         const cap = Object.hasOwn(body, "max_completion_tokens") ? "max_completion_tokens" : Object.hasOwn(body, "max_tokens") ? "max_tokens" : refuse();
         if (!Number.isInteger(body[cap]) || body[cap] <= 0) refuse();
-        bounded = { model: body.model, stream: true, stream_options: { include_usage: true }, n: 1, [cap]: Math.min(body[cap], session.maxTokens), temperature: 0, top_p: 1,
+        bounded = { model: body.model, stream: true, stream_options: { include_usage: true }, n: 1, [cap]: Math.min(body[cap], session.maxTokens), ...(kind === "fast-decision" ? {} : { temperature: 0, top_p: 1 }),
           messages: [{ role: "system", content: system }, { role: "user", content: session.text }] };
       } else if (url.pathname.endsWith("/responses") && Object.hasOwn(body, "max_output_tokens")) {
         if (!Number.isInteger(body.max_output_tokens) || body.max_output_tokens <= 0) refuse();
-        bounded = { model: body.model, stream: true, store: false, max_output_tokens: Math.min(body.max_output_tokens, session.maxTokens), temperature: 0, top_p: 1,
+        bounded = { model: body.model, stream: true, store: false, max_output_tokens: Math.min(body.max_output_tokens, session.maxTokens), ...(kind === "fast-decision" ? {} : { temperature: 0, top_p: 1 }),
           instructions: system, input: [{ role: "user", content: [{ type: "input_text", text: session.text }] }] };
       } else refuse();
+      if (kind === "fast-decision") {
+        const format = { type: "json_schema", name: "group_member_choice", strict: true,
+          schema: { type: "object", properties: { choice: { type: "string", enum: session.choices } }, required: ["choice"], additionalProperties: false } };
+        if (url.pathname.endsWith("/responses")) Object.assign(bounded, { service_tier: "default", reasoning: { effort: "none" }, text: { format } });
+        else Object.assign(bounded, { reasoning_effort: "none", response_format: { type: format.type, json_schema: { name: format.name, strict: format.strict, schema: format.schema } } });
+      }
       const headers = new Headers(event.request.headers);
       headers.delete("content-length");
       headers.set("content-type", "application/json");

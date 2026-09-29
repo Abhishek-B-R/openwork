@@ -200,6 +200,7 @@ test("synthetic release validation keeps the Coworker pin separate from packaged
   await verifyNativePluginBundles();
   for (const alter of [
     (value) => { delete value.entries["auto-memory.js"]; },
+    (value) => { delete value.entries["fast-decision.js"]; },
     (value) => { delete value.entries["coworker-events.js"]; },
     (value) => { delete value.entries["coworker-abilities.js"]; },
     (value) => { value.dependencies.unpinned = "*"; },

@@ -1,14 +1,15 @@
 import { chmod, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
+import { createOpenAICredential } from "./openai-credential.mjs";
 import { CALL_MODEL, CALL_TOOLS, CALL_VOICES, callInstructions } from "../src/lib/call.ts";
 
 const ERROR_MESSAGES = {
-  key: "Your OpenAI key was not accepted. Replace it in Voice calls settings.",
+  key: "Your OpenAI key was not accepted. Replace it in Settings › OpenAI.",
   quota: "Your OpenAI account has reached its quota or rate limit. Check billing and try again.",
   network: "The call could not connect. Check your connection and try again.",
   storage: "Secure storage is unavailable. Enable your system password store and try again.",
-  missing: "Add an OpenAI key in Settings › Voice calls to start a call.",
+  missing: "Add an OpenAI key in Settings › OpenAI to start a call.",
 };
 const failure = (code) => new Error(ERROR_MESSAGES[code]);
 async function atomic(file, data) {
@@ -17,70 +18,73 @@ async function atomic(file, data) {
   try { await writeFile(temporary, data, { mode: 0o600 }); await rename(temporary, file); await chmod(file, 0o600); }
   finally { await rm(temporary, { force: true }).catch(() => {}); }
 }
-/** Follow Electron's existing async safeStorage contract; fail closed on Linux basic_text. */
-export function createVoiceCalls({ directory, safeStorage, requestKey, fetch: request = fetch, platform = process.platform }) {
-  const keyFile = path.join(directory, "voice-call-key.bin");
+/** Calls use a main-owned encrypted credential; fast decisions use the native model connection. */
+export function createVoiceCalls({ directory, credential, safeStorage, requestKey, fetch: request = fetch, platform = process.platform }) {
+  credential ??= createOpenAICredential({ directory, safeStorage, requestKey, platform });
   const configFile = path.join(directory, "voice-call-settings.json");
-  let editing = false;
   let pending = null;
-  async function secure() {
-    if (!await safeStorage.isAsyncEncryptionAvailable() || (platform === "linux" && safeStorage.getSelectedStorageBackend() === "basic_text")) throw failure("storage");
-  }
+  let writes = Promise.resolve();
+  credential.onChange(() => pending?.abort());
   async function settings() {
-    let voice = "marin";
-    try { const value = JSON.parse(await readFile(configFile, "utf8")); if (CALL_VOICES.includes(value.voice)) voice = value.voice; } catch (error) { if (error.code !== "ENOENT") throw failure("storage"); }
-    let keySet = false;
-    try { keySet = (await readFile(keyFile)).length > 0; } catch (error) { if (error.code !== "ENOENT") throw failure("storage"); }
-    return { keySet, voice, model: CALL_MODEL };
+    await writes;
+    const { keySet } = await credential.settings();
+    let config = {};
+    try { config = JSON.parse(await readFile(configFile, "utf8")); } catch (error) { if (error.code !== "ENOENT") throw failure("storage"); }
+    return { keySet, voice: CALL_VOICES.includes(config.voice) ? config.voice : "marin", model: CALL_MODEL,
+      // Existing Call-only users retain their prior consent; fast decisions never inherit it.
+      enabled: typeof config.enabled === "boolean" ? config.enabled : keySet };
+  }
+  function save(patch) {
+    const result = writes.catch(() => {}).then(async () => {
+      let config = {};
+      try { config = JSON.parse(await readFile(configFile, "utf8")); } catch (error) { if (error.code !== "ENOENT") throw failure("storage"); }
+      await atomic(configFile, JSON.stringify({ ...config, ...patch }));
+    });
+    writes = result.then(() => undefined, () => undefined);
+    return result;
   }
   async function clientSecret(person) {
     if (pending) throw failure("network");
     const controller = new AbortController(); pending = controller;
     const timer = setTimeout(() => controller.abort(), 15_000);
     try {
-      await secure();
-      let sealed;
-      try { sealed = await readFile(keyFile); } catch { throw failure("missing"); }
-      let key;
-      try { const decrypted = await safeStorage.decryptStringAsync(sealed); key = decrypted.result; if (decrypted.shouldReEncrypt) await atomic(keyFile, await safeStorage.encryptStringAsync(key)); } catch { throw failure("storage"); }
       const config = await settings();
-      const response = await request("https://api.openai.com/v1/realtime/client_secrets", {
-        method: "POST", redirect: "error", signal: controller.signal,
-        headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ expires_after: { anchor: "created_at", seconds: 60 }, session: {
-          type: "realtime", model: CALL_MODEL, instructions: callInstructions(person), tools: CALL_TOOLS,
-          output_modalities: ["audio"], max_output_tokens: 512, tracing: null,
-          audio: { input: { transcription: { model: "gpt-4o-mini-transcribe" }, noise_reduction: { type: "near_field" }, turn_detection: { type: "semantic_vad", eagerness: "low", create_response: true, interrupt_response: true } }, output: { voice: config.voice } },
-        } }),
-      });
-      key = undefined;
-      if (!response.ok) { await response.body?.cancel(); throw failure(response.status === 401 || response.status === 403 ? "key" : response.status === 429 ? "quota" : "network"); }
-      const result = await response.json();
-      if (controller.signal.aborted || typeof result.value !== "string" || !result.value.startsWith("ek_")) throw failure("network");
-      return { value: result.value, expiresAt: result.expires_at };
+      if (!config.enabled) throw new Error("Enable Voice calls in Settings › OpenAI to start a call.");
+      return await credential.withKey(async (key) => {
+        const response = await request("https://api.openai.com/v1/realtime/client_secrets", {
+          method: "POST", redirect: "error", signal: controller.signal,
+          headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ expires_after: { anchor: "created_at", seconds: 60 }, session: {
+            type: "realtime", model: CALL_MODEL, instructions: callInstructions(person), tools: CALL_TOOLS,
+            output_modalities: ["audio"], max_output_tokens: 512, tracing: null,
+            audio: { input: { transcription: { model: "gpt-4o-mini-transcribe" }, noise_reduction: { type: "near_field" }, turn_detection: { type: "semantic_vad", eagerness: "low", create_response: true, interrupt_response: true } }, output: { voice: config.voice } },
+          } }),
+        });
+        if (!response.ok) { await response.body?.cancel(); throw failure(response.status === 401 || response.status === 403 ? "key" : response.status === 429 ? "quota" : "network"); }
+        const result = await response.json();
+        if (controller.signal.aborted || typeof result.value !== "string" || !result.value.startsWith("ek_")) throw failure("network");
+        return { value: result.value, expiresAt: result.expires_at };
+      }, controller.signal);
     } catch (error) {
       // No provider bodies, headers, secret values or transport errors reach IPC/logs.
-      if (Object.values(ERROR_MESSAGES).includes(error?.message)) throw error;
+      if (Object.values(ERROR_MESSAGES).includes(error?.message) || error?.message === "Enable Voice calls in Settings › OpenAI to start a call.") throw error;
       throw failure("network");
     } finally { clearTimeout(timer); if (pending === controller) pending = null; }
   }
   return {
     settings, clientSecret,
     async microphone(requestPermission) {
-      if (!(await settings()).keySet) throw failure("missing");
+      const config = await settings();
+      if (!config.keySet) throw failure("missing");
+      if (!config.enabled) throw new Error("Enable Voice calls in Settings › OpenAI to start a call.");
       return requestPermission();
     },
     cancel() { pending?.abort(); },
     async test() { await clientSecret({ name: "Coworker", role: "Call connection test", mission: "", personality: "warm" }); return { ok: true, message: "Connected. OpenAI accepted your key and created a short-lived call secret." }; },
-    async editKey() {
-      if (editing) return settings();
-      editing = true;
-      try { await secure(); const key = await requestKey(); if (key !== null) { if (!/^sk-[A-Za-z0-9_-]{16,512}$/.test(key)) throw failure("key"); await atomic(keyFile, await safeStorage.encryptStringAsync(key)); } return settings(); }
-      catch (error) { if (Object.values(ERROR_MESSAGES).includes(error?.message)) throw error; throw failure("storage"); }
-      finally { editing = false; }
-    },
-    async remove() { pending?.abort(); await rm(keyFile, { force: true }); return settings(); },
-    async voice(value) { if (!CALL_VOICES.includes(value)) throw new Error("Choose an available call voice."); await atomic(configFile, JSON.stringify({ voice: value })); return settings(); },
+    async editKey() { const before = await settings(); await save({ enabled: before.enabled }); await credential.editKey(); return settings(); },
+    async remove() { await credential.remove(); return settings(); },
+    async enabled(value) { if (typeof value !== "boolean") throw new Error("Choose whether Voice calls are enabled."); pending?.abort(); await save({ enabled: value }); return settings(); },
+    async voice(value) { if (!CALL_VOICES.includes(value)) throw new Error("Choose an available call voice."); await save({ voice: value }); return settings(); },
   };
 }
 

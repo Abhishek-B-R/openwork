@@ -18,6 +18,9 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { BrowserWindow, Menu, app, dialog, ipcMain, nativeTheme, screen, shell, systemPreferences, safeStorage, powerMonitor } from "electron";
 import { createVoice, installVoicePermissions } from "./voice.mjs";
+import { createOpenAICredential } from "./openai-credential.mjs";
+import { createFastDecisions } from "./fast-decisions.mjs";
+import { fastDecisionModel, installFastDecisionPlugin } from "./fast-decisions-native.mjs";
 import { createVoiceCalls, createCallHistory } from "./voice-calls.mjs";
 import { requestCallKey } from "./call-key-entry.mjs";
 import { bindWindowAppearance, windowMaterial } from "./window-appearance.mjs";
@@ -266,7 +269,10 @@ process.env.OPENWORK_RUNTIME_DB ||= path.join(path.dirname(serverConfigPath), "c
 process.env.OPENWORK_ENV_STORE ||= path.join(path.dirname(serverConfigPath), "coworker-env.json");
 const settingsPath = path.join(path.dirname(serverConfigPath), SETTINGS_FILE);
 if (process.env.OPENWORK_ELECTRON_USE_MOCK_KEYCHAIN === "1") app.commandLine.appendSwitch("use-mock-keychain");
-const voiceCalls = createVoiceCalls({ directory: userDataDir, safeStorage, requestKey: requestCallKey });
+const openaiCredential = createOpenAICredential({ directory: userDataDir, safeStorage, requestKey: requestCallKey });
+const voiceCalls = createVoiceCalls({ directory: userDataDir, credential: openaiCredential });
+const fastDecisions = createFastDecisions({ directory: userDataDir, ready: readyFastDecisionTransport });
+openaiCredential.onChange(endVoiceCall);
 const callHistory = createCallHistory(async (slug) => (await getCoworker(coworkersDir, slug)).path);
 function endVoiceCall() {
   voiceCalls.cancel();
@@ -1178,6 +1184,7 @@ async function resolveControlContext(slug, context, expected, surface) {
   return { ...trusted, assertActive };
 }
 const groupExecution = createGroupExecution({
+  fastDecisions,
   directory: coworkersDir,
   collaboration,
   settings: () => readSettings(settingsPath),
@@ -1586,6 +1593,7 @@ async function installNativeCoworkerPlugins(coworker, server) {
     await installAbilitiesPlugin(team, { ...context, coworkers });
     await installProgressPlugin(team);
     await installMemoryPlugin(team);
+    await installFastDecisionPlugin(team);
     installedTeamRevision = revision;
     warmedCoworkerWorkspaces.delete(team.workspaceId);
   });
@@ -1594,6 +1602,22 @@ async function installNativeCoworkerPlugins(coworker, server) {
 }
 
 let progressCoordinator = null;
+/** Reuse the connected native provider; fast routing never boots or repairs the engine. */
+async function readyFastDecisionTransport({ signal }) {
+  const handle = serverHandle;
+  const workspace = teamWorkspace();
+  if (!handle?.managedOpencodeV2?.isAlive() || !workspace?.workspaceId || !warmedCoworkerWorkspaces.has(workspace.workspaceId)
+    || pendingWorkspaceReadinessChanges(workspace).length) return null;
+  const scope = workspaceReadinessScope(workspace);
+  const options = { baseUrl: handle.url, workspaceId: workspace.workspaceId, apiContract: nativeRuntime.apiContract, token: ownerToken, requestTimeoutMs: 1000 };
+  const catalog = await createNativeV2Client(options).readCatalog(signal);
+  signal.throwIfAborted();
+  if (handle !== serverHandle || !handle.managedOpencodeV2.isAlive() || scope !== workspaceReadinessScope(teamWorkspace())
+    || !warmedCoworkerWorkspaces.has(workspace.workspaceId)) return null;
+  const model = fastDecisionModel(catalog);
+  return model ? { key: JSON.stringify([handle.url, workspace.workspaceId, scope]), model, client: createHeadlessThreadClient(options) } : null;
+}
+
 /** Only an already-warmed coordinator is usable. No setup or engine repair on this path. */
 async function readyProgressTransport() {
   const handle = serverHandle;
@@ -2431,6 +2455,7 @@ function assertExpectedReadiness(expected, owner) {
 }
 
 function invalidateWorkspaceReadiness(owner) {
+  fastDecisions.cancel();
   if (owner) {
     if (!owner.workspaceId) return;
     workspaceReadinessRevisions.set(owner.slug ? `coworker:${owner.slug}` : owner.workspaceId, workspaceRevision(owner.workspaceId, owner.slug) + 1);
@@ -2452,7 +2477,7 @@ async function runCoworkerWorkspaceWarmup(coworker, signal = AbortSignal.timeout
   if (!toolsRegistered.has(coworker.workspaceId)) await registerCoworkerTools(coworker, 120_000);
   signal.throwIfAborted();
   const plugins = await awaitNativePluginActivation((method, route) => nativeWorkspaceRequest(handle, coworker.workspaceId, method, route, undefined, { timeoutMs: 120_000, signal }), { apiContract: nativeRuntime.apiContract, signal });
-  const required = ["collaboration", "computer", "browser", "group-documents", "events", "abilities", "turn-roles", "progress-summary", "auto-memory"];
+  const required = ["collaboration", "computer", "browser", "group-documents", "events", "abilities", "turn-roles", "progress-summary", "auto-memory", "fast-decision"];
   if (!Array.isArray(plugins?.data)
     || plugins.data.some((plugin) => plugin.state?.status !== "active")
     || required.some((id) => !plugins.data.some((plugin) => plugin.id === `coworker.${id}` && plugin.state?.status === "active"))) {
@@ -3637,6 +3662,10 @@ const commands = {
   "calls.microphone": () => voiceCalls.microphone(() => voice.microphone()),
   "calls.editKey": () => voiceCalls.editKey(),
   "calls.removeKey": () => { endVoiceCall(); return voiceCalls.remove(); },
+  "calls.enabled": ({ enabled }) => { if (!enabled) endVoiceCall(); return voiceCalls.enabled(enabled); },
+  "fastDecisions.settings": () => fastDecisions.settings(),
+  "fastDecisions.configure": (value) => fastDecisions.configure(value),
+  "fastDecisions.test": () => fastDecisions.test(),
   "calls.voice": ({ voice }) => voiceCalls.voice(voice),
   "calls.test": () => voiceCalls.test(),
   "calls.secret": async ({ slug, createdAt }) => {
@@ -3746,6 +3775,7 @@ async function stopForMaintenance() {
     maintenanceSteps.run("Progress notes", () => progressSummaries.stop()),
     maintenanceSteps.run("Conversation memory", () => conversationMemory.stop()),
     maintenanceSteps.run("Voice", () => voice.reset()),
+    maintenanceSteps.run("Fast decisions", () => fastDecisions.cancel()),
     maintenanceSteps.run("Provider sign-ins", async () => {
       if (!nativeProviderGeneration || !signInAttempts.size) return;
       const { providers } = await nativeProviderGeneration.pending;
@@ -3909,7 +3939,7 @@ function registerIpc() {
       return { ok: false, error: "Open Coworker commands are only available to the main app frame." };
     }
     const command = typeof request?.command === "string" ? request.command : "";
-    if ((command === "coworkers.openFolder" || command.startsWith("events.") || command.startsWith("voice.") || command.startsWith("calls.") || command.startsWith("window.") || command.startsWith("computer.") || command.startsWith("browser.") || command.startsWith("workers.") || command.startsWith("groups.documents.")) && !trustedComputerSender(event, mainWindow?.webContents, rendererUrl())) {
+    if ((command === "coworkers.openFolder" || command.startsWith("events.") || command.startsWith("voice.") || command.startsWith("calls.") || command.startsWith("fastDecisions.") || command.startsWith("window.") || command.startsWith("computer.") || command.startsWith("browser.") || command.startsWith("workers.") || command.startsWith("groups.documents.")) && !trustedComputerSender(event, mainWindow?.webContents, rendererUrl())) {
       return { ok: false, error: "Native controls require the trusted Open Coworker window and renderer URL." };
     }
     if ((command === "voice.microphone" || command === "calls.microphone") && request?.userGesture !== true) {
@@ -4103,7 +4133,7 @@ if (!singleInstanceLock) {
     if (process.platform === "darwin" && existsSync(APP_ICON_PATH)) app.dock.setIcon(APP_ICON_PATH);
     installApplicationMenu();
     registerIpc();
-    powerMonitor.on("suspend", endVoiceCall);
+    powerMonitor.on("suspend", () => { endVoiceCall(); fastDecisions.cancel(); });
     if (maintenanceNotice && (maintenanceNotice.phase !== "completed" || maintenanceNotice.relaunchFailed)) {
       await dialog.showMessageBox({ type: maintenanceNotice.phase === "completed" ? "info" : "warning",
         title: maintenanceNotice.phase === "completed" ? "Fresh start complete" : "Fresh start did not finish",
@@ -4165,6 +4195,7 @@ if (!singleInstanceLock) {
         if (choice.response !== 1) return;
       }
       progressSummaries.stop();
+      fastDecisions.cancel();
       await conversationMemory.stop();
       await events.stop();
       browserControl.destroy();

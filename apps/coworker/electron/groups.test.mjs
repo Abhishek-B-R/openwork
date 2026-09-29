@@ -14,6 +14,7 @@ import { dispatchNativeTurn, nativeAdmissionRefusal } from "./native-recovery.mj
 import { HeadlessThreadError } from "@openwork/headless-threads/v2";
 import { createActivityInbox, mentionsYou, recordActivity, MAX_ACTIVITY_ITEMS, EVENT_REMINDER_LEAD_MS } from "./activity-inbox.mjs";
 import { createConversationMemory } from "./conversation-memory.mjs";
+import { createFastDecisions } from "./fast-decisions.mjs";
 import { createGroupExecution, repairGroupSelection } from "./group-execution.mjs";
 import { normalizeSettings, readSettings, updateSettings } from "./settings.mjs";
 import { createCoworker, getCoworker, updateCoworker } from "./coworkers.mjs";
@@ -4429,4 +4430,48 @@ test("Event update plugin and catalog require full replacement fields while crea
   assert.equal(fromCatalog.safeParse(args).success, true);
   assert.deepEqual(validate("coworker_event_update", args).value, args, "native schema validation preserves raw arguments for exact-call verification");
   assert.ok(JSON.stringify(catalog).length <= 10000);
+});
+
+
+test("fast group routing returns a validated choice to native execution and defers complex requests", async () => {
+  await withHome(async (home) => {
+    let decision = "member_1", attempts = 0;
+    const fastDecisions = createFastDecisions({ directory: home, ready: async () => ({ key: "native", model: { providerId: "existing", modelId: "luna" }, client: {} }), request: async (_client, model) => {
+      attempts++; assert.deepEqual(model, { providerId: "existing", modelId: "luna" });
+      return { text: JSON.stringify({ choice: decision }) };
+    } });
+    await fastDecisions.configure({ enabled: true, deadlineMs: 2500 });
+    const fixture = nativeFixture(async ({ slug, reply }) => {
+      reply.parts.push({ type: "text", text: slug === ".coordinator" ? JSON.stringify({ addressedSlugs: ["scout", "editor"], speakers: [{ slug: "scout" }, { slug: "editor" }], mode: "parallel" }) : `Reply from ${slug}.` });
+    });
+    const service = createCollaboration({ directory: home, clientFor: fixture.clientFor, pollMs: 5 });
+    const groups = createGroupExecution({ directory: home, collaboration: service, fastDecisions, clientFor: fixture.clientFor, pollMs: 5,
+      coworkerFor: async (slug) => ({ ...await fixtureCoworker(slug), role: slug === "editor" ? "Editor" : "Researcher", model: "test/model" }),
+      coordinator: async () => ({ workspaceId: "coordinator" }),
+      catalogFor: async () => ({ models: [{ id: "test/model", providerId: "test", modelId: "model", variants: ["minimal", "low"], source: "local", tier: "key", toolCall: true, status: "active", label: "Test" }] }),
+    });
+    try {
+      const group = await createGroup(home, { name: "Team", participantSlugs: ["scout", "editor"] });
+      await groups.start();
+      await groups.submit(group.id, { clientMessageId: "fast-one", text: "Can someone edit this draft?" });
+      await eventually(async () => !(await groups.status(group.id)).active);
+      let turn = (await getGroup(home, group.id)).turns.at(-1);
+      assert.equal(turn.routedBy, "fast"); assert.equal(turn.status, "succeeded");
+      assert.deepEqual(turn.speakers.map((member) => member.slug), ["editor"]);
+      assert.deepEqual(fixture.requests.map((item) => item.slug), ["editor"], "the helper never admits a second agent loop");
+      decision = "defer";
+      await groups.submit(group.id, { clientMessageId: "collective-two", text: "How are you all doing?" });
+      await eventually(async () => !(await groups.status(group.id)).active);
+      turn = (await getGroup(home, group.id)).turns.at(-1);
+      assert.equal(turn.routedBy, "facilitator"); assert.equal(turn.mode, "parallel");
+      assert.deepEqual(turn.speakers.map((member) => member.slug), ["scout", "editor"]);
+      assert.equal(attempts, 2);
+      await fastDecisions.configure({ enabled: false, deadlineMs: 2500 });
+      await groups.submit(group.id, { clientMessageId: "native-baseline", text: "How are you all doing?" });
+      await eventually(async () => !(await groups.status(group.id)).active);
+      const baseline = (await getGroup(home, group.id)).turns.at(-1);
+      assert.deepEqual(baseline.speakers.map((member) => member.slug), turn.speakers.map((member) => member.slug));
+      assert.equal(baseline.routedBy, "facilitator"); assert.equal(attempts, 2, "disabled decisions leave native routing in charge");
+    } finally { fastDecisions.cancel(); await groups.stop(); await service.stop(); }
+  });
 });

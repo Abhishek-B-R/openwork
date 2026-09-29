@@ -19,6 +19,9 @@ test("call credentials stay main-only and failures never expose provider bodies"
     await assert.rejects(calls.microphone(requestPermission), /Add an OpenAI key/);
     assert.equal(permissions, 0);
     const settings = await calls.editKey(); assert.equal(settings.keySet, true); assert.equal(JSON.stringify(settings).includes(key), false);
+    await assert.rejects(calls.microphone(requestPermission), /Enable Voice calls/);
+    assert.equal(permissions, 0);
+    await calls.enabled(true);
     assert.equal((await calls.microphone(requestPermission)).granted, true);
     assert.equal(permissions, 1);
     assert.equal((await readFile(path.join(directory, "voice-call-key.bin"))).includes(key), false);

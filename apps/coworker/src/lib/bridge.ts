@@ -121,7 +121,7 @@ export type CoworkerGroupTurn = {
   updatedAt: number;
   status: GroupTurnStatus;
   mode: "sequential" | "parallel";
-  routedBy: "facilitator" | "mentions" | "fallback";
+  routedBy: "facilitator" | "fast" | "mentions" | "fallback";
   speakers: GroupSpeakerRun[];
   dependsOn?: [string, string][];
 };
@@ -592,17 +592,23 @@ export const coworkerBridge = {
     restoreDefaults: () => invoke<CoworkerSettings>("maintenance.restoreDefaults"),
   },
   calls: {
-    settings: () => invoke<{ keySet: boolean; voice: string; model: string }>("calls.settings"),
     microphone: () => invoke<{ granted: boolean }>("calls.microphone"),
-    editKey: () => invoke<{ keySet: boolean; voice: string; model: string }>("calls.editKey"),
-    removeKey: () => invoke<{ keySet: boolean; voice: string; model: string }>("calls.removeKey"),
-    setVoice: (voice: string) => invoke<{ keySet: boolean; voice: string; model: string }>("calls.voice", { voice }),
+    settings: () => invoke<{ keySet: boolean; voice: string; model: string; enabled: boolean }>("calls.settings"),
+    editKey: () => invoke<{ keySet: boolean; voice: string; model: string; enabled: boolean }>("calls.editKey"),
+    removeKey: () => invoke<{ keySet: boolean; voice: string; model: string; enabled: boolean }>("calls.removeKey"),
+    setVoice: (voice: string) => invoke<{ keySet: boolean; voice: string; model: string; enabled: boolean }>("calls.voice", { voice }),
+    setEnabled: (enabled: boolean) => invoke<{ keySet: boolean; voice: string; model: string; enabled: boolean }>("calls.enabled", { enabled }),
     test: () => invoke<{ ok: boolean; message: string }>("calls.test"),
     secret: (slug: string, createdAt: string) => invoke<{ value: string; expiresAt: number }>("calls.secret", { slug, createdAt }),
     cancel: () => invoke<void>("calls.cancel"),
     history: (slug: string, threadId: string) => invoke<import("./call").CallHistory>("calls.history", { slug, threadId }),
     record: (slug: string, threadId: string, entry: { kind: "spoken"; id: string; text: string; at: number } | { kind: "call"; id: string; name: string; startedAt: number; endedAt: number }) => invoke<import("./call").CallHistory>("calls.record", { slug, threadId, entry }),
     onEnd: (listener: () => void) => { const host: BridgeWindow = window; return host.__COWORKER__?.onCallEnd?.(listener) ?? (() => undefined); },
+  },
+  fastDecisions: {
+    settings: () => invoke<FastDecisionSettings>("fastDecisions.settings"),
+    configure: (value: Pick<FastDecisionSettings, "enabled" | "deadlineMs">) => invoke<FastDecisionSettings>("fastDecisions.configure", value),
+    test: () => invoke<{ ok: boolean; message: string } & FastDecisionSettings>("fastDecisions.test"),
   },
   voice: {
     status: () => invoke<{ access: "ready" | "sign_in" | "membership_required" | "unavailable"; message?: string }>("voice.status"),
@@ -908,4 +914,13 @@ export const coworkerBridge = {
       .catch(() => undefined);
     return unsubscribe;
   },
+};
+
+export type FastDecisionSettings = {
+  available: boolean;
+  enabled: boolean;
+  deadlineMs: number;
+  model: string;
+  connection: "native";
+  last: { outcome: string; elapsedMs: number; inputTokens?: number; outputTokens?: number; costUsd?: number } | null;
 };

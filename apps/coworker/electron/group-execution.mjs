@@ -4,13 +4,14 @@ import { runGroupTurn, resumeGroupTurn, fallbackPlan, planSpeakers } from "../sr
 import { groupMessageKey } from "../src/lib/group-continuity.ts";
 import { eventRunFor } from "./event-execution.mjs";
 import { facilitatorPrompt, earlierSpeakerOrders, routeWithFacilitator, facilitatorModels } from "../src/lib/facilitator.ts";
+import { fastGroupObservation } from "./fast-decisions.mjs";
 import { DEFAULT_MODEL_DEFAULTS } from "../src/lib/model-defaults.ts";
 import { effortForTurn } from "../src/lib/effort.ts";
 import { NATIVE_COORDINATOR_AGENT } from "./native-turns.mjs";
 
 /** The window only submits requests and reads projections. All group execution
  * and cancellation remain alive when that window navigates or reloads. */
-export function createGroupExecution({ directory, collaboration, coworkerFor, coordinator, catalogFor, clientFor, settings = async () => ({ modelDefaults: DEFAULT_MODEL_DEFAULTS }), onPublished = async () => {}, eventContext = async () => { throw new Error("Event execution is unavailable."); }, conversationContext = async () => { throw new Error("Managed conversation context is unavailable."); }, setupTimeoutMs = 130_000, replyTimeoutMs = 180_000, pollMs = 750 }) {
+export function createGroupExecution({ directory, collaboration, coworkerFor, coordinator, catalogFor, clientFor, settings = async () => ({ modelDefaults: DEFAULT_MODEL_DEFAULTS }), fastDecisions = null, onPublished = async () => {}, eventContext = async () => { throw new Error("Event execution is unavailable."); }, conversationContext = async () => { throw new Error("Managed conversation context is unavailable."); }, setupTimeoutMs = 130_000, replyTimeoutMs = 180_000, pollMs = 750 }) {
   const active = new Map();
   let timer;
   let closed = false;
@@ -134,10 +135,34 @@ export function createGroupExecution({ directory, collaboration, coworkerFor, co
         route: async (input) => {
           const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(45_000)]);
           const conversation = request.conversationIdentity ? await withAbort(conversationContext(groupId, request.conversationIdentity), signal) : null;
-          const ready = await withAbort(coordinator(signal), signal);
           const current = await getGroup(directory, groupId);
-          const catalog = await withAbort(catalogFor(ready, signal), signal);
           const appDefault = (await withAbort(settings(), signal)).modelDefaults.facilitator;
+          // Only automatic, standalone human requests enter this bounded helper.
+          // The native workflow still records the plan and admits every reply.
+          const observation = !request.eventRunId && !request.legacyAllHands && !request.attempt && !request.context && !conversation?.context
+            && current.participantSlugs.length === participants.length && participants.every((member) => current.participantSlugs.includes(member.slug))
+            && !current.facilitatorModel.trim() && !appDefault.model.trim() ? fastGroupObservation(input) : null;
+          if (observation && fastDecisions) {
+            const fingerprint = JSON.stringify([current.participantSlugs, current.facilitatorModel, appDefault]);
+            const choice = await fastDecisions.decide(observation, { signal, isCurrent: async () => {
+              const [latest, prefs, members, queued] = await Promise.all([
+                getGroup(directory, groupId), settings(), Promise.all(participants.map((member) => coworkerFor(member.slug))),
+                collaboration.read((state) => state.groups[groupId]),
+              ]);
+              return !closed && !signal.aborted && latest.archivedAt === null
+                && active.get(groupId)?.requestId === request.id && queued.queue.some((entry) => entry.id === request.id)
+                && !queued.cancelledRequestIds?.includes(request.id)
+                && JSON.stringify([latest.participantSlugs, latest.facilitatorModel, prefs.modelDefaults.facilitator]) === fingerprint
+                && members.every((member, index) => member.createdAt === participants[index].createdAt && member.role === participants[index].role);
+            } });
+            signal.throwIfAborted();
+            if (choice) {
+              const member = participants[observation.choices.indexOf(choice)];
+              if (member) return { speakers: [{ slug: member.slug, brief: "" }], mode: "sequential", dependsOn: [], followUp: null, synthesizer: null, routedBy: "fast" };
+            }
+          }
+          const ready = await withAbort(coordinator(signal), signal);
+          const catalog = await withAbort(catalogFor(ready, signal), signal);
           const models = facilitatorModels(catalog, participants, current.facilitatorModel, appDefault);
           if (!models.primary) return null;
           const prompt = facilitatorPrompt({ group: current, members: participants.map((member) => ({ ...member, busy: false })), recent: input.recent, earlierOrders: earlierSpeakerOrders(current.turns), message: [conversation?.context, request.context, input.message].filter(Boolean).join("\n\n"), mentions: input.mentions, nameFor: (slug) => participants.find((member) => member.slug === slug)?.name ?? slug });

@@ -13,6 +13,7 @@ import { COMPUTER_PLUGIN } from "./computer-plugin.mjs";
 import { GROUP_DOCUMENT_PLUGIN } from "./group-document-plugin.mjs";
 import { PROGRESS_PLUGIN } from "./progress-plugin.mjs";
 import { MEMORY_PLUGIN } from "./memory-model.mjs";
+import { FAST_DECISION_PLUGIN } from "./fast-decisions-native.mjs";
 import { TURN_ROLES_PLUGIN } from "./turn-roles-plugin.mjs";
 import { EVENT_PLUGIN } from "./event-plugin.mjs";
 import { ABILITIES_PLUGIN } from "./abilities-plugin.mjs";
@@ -105,7 +106,7 @@ export async function prepareNativeSourcePluginBundles({ sourceDirectory, output
 
 export function nativePluginSources() {
   return { "coworker-collaboration.js": COLLABORATION_PLUGIN, "coworker-browser.js": BROWSER_PLUGIN, "coworker-computer.js": COMPUTER_PLUGIN,
-    "coworker-group-documents.js": GROUP_DOCUMENT_PLUGIN, "progress-summary.js": PROGRESS_PLUGIN, "auto-memory.js": MEMORY_PLUGIN, "coworker-turn-roles.js": TURN_ROLES_PLUGIN,
+    "coworker-group-documents.js": GROUP_DOCUMENT_PLUGIN, "progress-summary.js": PROGRESS_PLUGIN, "auto-memory.js": MEMORY_PLUGIN, "fast-decision.js": FAST_DECISION_PLUGIN, "coworker-turn-roles.js": TURN_ROLES_PLUGIN,
     "coworker-events.js": EVENT_PLUGIN, "coworker-abilities.js": ABILITIES_PLUGIN };
 }
 

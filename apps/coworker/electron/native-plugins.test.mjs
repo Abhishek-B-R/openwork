@@ -21,6 +21,7 @@ import { createAbilitiesRuntime, readAbilitiesCatalog } from "./abilities.mjs";
 import { cloudSkillAbilityId, localSkillAbilityId, mcpAbilityId, defaultCoworkerAbilities } from "../src/lib/abilities.ts";
 import { PROGRESS_PLUGIN, installProgressPlugin } from "./progress-plugin.mjs";
 import { MEMORY_PLUGIN, installMemoryPlugin } from "./memory-model.mjs";
+import { FAST_DECISION_PLUGIN } from "./fast-decisions-native.mjs";
 import { coordinatorConfig } from "./coordinator.mjs";
 import { nativeConfig, updateNativeConfig } from "./native-config.mjs";
 import { NATIVE_PLUGIN_DEPENDENCIES, NATIVE_PLUGIN_VERSION, configureNativePluginBundles, validateNativePluginManifest, verifyNativePluginBundles } from "./native-plugin.mjs";
@@ -112,7 +113,7 @@ test("native launch scripts finish prerequisite builds before loading plugin pre
     pendingWorkspaceReadinessChanges: () => [], coworkersDir: "/workspace", getCoworker: async () => coworker,
     nativeWorkspaceRequest: async (_handle, _workspaceId, method, route, body) => {
       calls.push({ method, route, body });
-      if (route === "/api/plugin") return { data: ["collaboration", "computer", "browser", "group-documents", "turn-roles", "events", "abilities", "progress-summary", "auto-memory"].map((id) => ({ id: `coworker.${id}`, state: { status: "active" } })) };
+      if (route === "/api/plugin") return { data: ["collaboration", "computer", "browser", "group-documents", "turn-roles", "events", "abilities", "progress-summary", "auto-memory", "fast-decision"].map((id) => ({ id: `coworker.${id}`, state: { status: "active" } })) };
       if (route === "/api/agent/build") return { data: { permissions: [] } };
       if (route === "/api/rpc/coworker.turn-roles/prepare") { reached.resolve(); return reply(); }
     },
@@ -846,9 +847,10 @@ test("native isolated hooks strip ambient input, bound wire tokens and block ret
   for (const [source, agent, text, maximum] of [
     [PROGRESS_PLUGIN, "progress-summary", '[{"id":"status","text":"Preparing a reply."}]', 80],
     [MEMORY_PLUGIN, "auto-memory", '{"recent":[{"id":"one","speaker":"user","text":"Budget is 42 EUR."}],"shortTerm":[],"longTerm":[]}', 1000],
+    [FAST_DECISION_PLUGIN, "fast-decision", '{"request":"Who can test this?","members":[{"choice":"member_0","role":"Tester"},{"choice":"member_1","role":"Designer"}]}', 64],
   ]) {
     for (const endpoint of ["chat/completions", "responses"]) {
-      const f = await fixture(t, source, { agent });
+      const f = await fixture(t, source, { agent, ...(agent === "fast-decision" ? { model: { upstreamModelId: "gpt-6-luna", variants: [{ id: "none" }, { id: "low" }], capabilities: { input: ["text"], output: ["text", "reasoning"] } } } : {}) });
       assert.deepEqual(f.agents.get(agent).permissions, [{ action: "*", resource: "*", effect: "deny" }]);
       assert.equal(f.agents.get(agent).hidden, true);
       const identity = { sessionID: "ses_summary", agent, model: { providerID: "fixture", id: "small" } };
@@ -870,7 +872,13 @@ test("native isolated hooks strip ambient input, bound wire tokens and block ret
       const bounded = await http.request.json();
       assert.equal(bounded[endpoint === "responses" ? "max_output_tokens" : "max_completion_tokens"], maximum);
       assert.equal(bounded.tools, undefined);
-      assert.equal(bounded.reasoning, undefined);
+      if (agent === "fast-decision") {
+        const format = endpoint === "responses" ? bounded.text.format : bounded.response_format.json_schema;
+        assert.equal(format.strict, true);
+        assert.deepEqual(format.schema.properties.choice.enum, ["member_0", "member_1", "defer"]);
+        assert.equal(endpoint === "responses" ? bounded.reasoning.effort : bounded.reasoning_effort, "none");
+        assert.equal(bounded.temperature, undefined);
+      } else assert.equal(bounded.reasoning, undefined);
       assert.doesNotMatch(JSON.stringify(bounded), /canary/);
       assert.equal(http.request.headers.get("authorization"), "fixture-only");
       await assert.rejects(f.run("session", "http.request", http), /refused/);

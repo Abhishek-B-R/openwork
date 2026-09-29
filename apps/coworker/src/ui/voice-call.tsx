@@ -14,7 +14,7 @@ export function CallButton({ person, threadId, prepare, active = true }: { perso
   const state = useCallState(); const superKey = useSuperKey(); const [error, setError] = useState(""); const [busy, setBusy] = useState(false);
   const action = useRef<() => void>(() => {});
   const [keySet, setKeySet] = useState<boolean | null>(null);
-  useEffect(() => { let current = true; const read = () => void coworkerBridge.calls.settings().then((settings) => { if (current) setKeySet(settings.keySet); }).catch(() => { if (current) setKeySet(false); }); read(); window.addEventListener("coworker:call-settings-changed", read); return () => { current = false; window.removeEventListener("coworker:call-settings-changed", read); }; }, []);
+  useEffect(() => { let current = true; const read = () => void coworkerBridge.calls.settings().then((settings) => { if (current) setKeySet(settings.keySet && settings.enabled); }).catch(() => { if (current) setKeySet(false); }); read(); window.addEventListener("coworker:call-settings-changed", read); return () => { current = false; window.removeEventListener("coworker:call-settings-changed", read); }; }, []);
   async function start() {
     if (!active || busy || !keySet) return;
     if (coworkerCall.isActive()) { coworkerCall.show(); return; }
@@ -22,7 +22,7 @@ export function CallButton({ person, threadId, prepare, active = true }: { perso
     // Main checks the saved key before reusing the existing microphone handler.
     // Send now so preload can stamp this click's transient user activation.
     const permission = coworkerBridge.calls.microphone().catch(() => ({ granted: false }));
-    try { const settings = await coworkerBridge.calls.settings(); setKeySet(settings.keySet); if (!settings.keySet) return; const id = threadId || await prepare?.(); if (id) await coworkerCall.start(person, id, permission); }
+    try { const settings = await coworkerBridge.calls.settings(); setKeySet(settings.keySet && settings.enabled); if (!settings.keySet || !settings.enabled) return; const id = threadId || await prepare?.(); if (id) await coworkerCall.start(person, id, permission); }
     catch (cause) { setError(cause instanceof Error ? cause.message : "The call could not start."); }
     finally { setBusy(false); }
   }
@@ -102,7 +102,7 @@ export function CallScreen() {
         {state.captions && state.phase !== "error" ? <div ref={subtitleScroll} className="call-subtitles" aria-label="Live subtitles" aria-live="off" data-testid="coworker-call-subtitles">
           {state.subtitles.length ? state.subtitles.slice(-1).map((line) => <div key={line.id} className="call-subtitle" data-speaker={line.speaker}><span className="call-speaker">{line.speaker === "you" ? "You" : person.name}</span><p>{line.text}</p></div>) : <p className="call-subtitle-placeholder">{state.phase === "calling" ? "A moment to connect." : "Talk naturally. You can interrupt anytime."}</p>}
         </div> : null}
-        {state.error || outputError ? <div role="alert" className="call-error"><p>{state.error || outputError}</p><button type="button" className="mt-2 underline" onClick={() => { coworkerCall.hide(); openCallSettings(); }}>Voice calls settings</button></div> : null}
+        {state.error || outputError ? <div role="alert" className="call-error"><p>{state.error || outputError}</p><button type="button" className="mt-2 underline" onClick={() => { coworkerCall.hide(); openCallSettings(); }}>OpenAI settings</button></div> : null}
       </section>
 
     </main>
