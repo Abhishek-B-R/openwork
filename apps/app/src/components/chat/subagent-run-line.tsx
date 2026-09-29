@@ -172,36 +172,35 @@ export function SubagentRunLine({ part, className, parentActive = true }: Subage
         data-subagent-session-id={childSessionId}
         data-subagent-activity={activity}
         data-subagent-permission={permissionPending ? "pending" : undefined}
-        className={cn("min-w-0 max-w-full", className)}
+        // The open button stays a direct child of the row: hover styling and
+        // row probes address it as `:scope > button.group`.
+        className={cn("flex min-w-0 max-w-full items-start gap-2", className)}
       >
-        <div className="flex min-w-0 max-w-full items-start gap-2">
+        <button
+          type="button"
+          className="group flex min-w-0 max-w-full cursor-pointer flex-col gap-0.5 text-start text-sm text-muted-foreground transition-colors hover:text-foreground"
+          aria-label={`${title}. Open sub-agent chat`}
+          onClick={() => onOpenSubagentSession(childSessionId)}
+        >
+          {lines}
+        </button>
+        {/* Stop just this helper; the turn's own Stop stays in the composer. */}
+        {childRunning && onStopSubagentSession ? (
           <button
             type="button"
-            className="group flex min-w-0 max-w-full cursor-pointer flex-col gap-0.5 text-start text-sm text-muted-foreground transition-colors hover:text-foreground"
-            aria-label={`${title}. Open sub-agent chat`}
-            onClick={() => onOpenSubagentSession(childSessionId)}
+            data-subagent-stop=""
+            disabled={stopping}
+            aria-label={stopping ? `${title}. Stopping sub-agent` : `${title}. Stop sub-agent`}
+            className="mt-0.5 flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground/70 transition-colors hover:bg-muted hover:text-foreground disabled:cursor-default disabled:opacity-50"
+            onClick={() => {
+              stoppedByPerson.current = true
+              setStopping(true)
+              void Promise.resolve(onStopSubagentSession(childSessionId)).finally(() => setStopping(false))
+            }}
           >
-            {lines}
+            <Square className="size-2.5 fill-current" aria-hidden="true" />
           </button>
-          {/* Stop just this helper; the turn's own Stop stays in the composer. */}
-          {childRunning && onStopSubagentSession ? (
-            <button
-              type="button"
-              data-subagent-stop=""
-              disabled={stopping}
-              aria-label={stopping ? `${title}. Stopping sub-agent` : `${title}. Stop sub-agent`}
-              title={stopping ? "Stopping…" : "Stop"}
-              className="mt-0.5 flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground/70 transition-colors hover:bg-muted hover:text-foreground disabled:cursor-default disabled:opacity-50"
-              onClick={() => {
-                stoppedByPerson.current = true
-                setStopping(true)
-                void Promise.resolve(onStopSubagentSession(childSessionId)).finally(() => setStopping(false))
-              }}
-            >
-              <Square className="size-2.5 fill-current" aria-hidden="true" />
-            </button>
-          ) : null}
-        </div>
+        ) : null}
       </div>
     )
   }
