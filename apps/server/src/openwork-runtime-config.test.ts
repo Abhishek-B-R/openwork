@@ -119,7 +119,6 @@ describe("openwork runtime config file", () => {
     await expect(post("/opencode/session/s1/prompt_async", { model: { providerID: "ollama", modelID: "local" } })).rejects.toMatchObject({ code: "organization_model_denied" });
     await expect(post("/opencode2/api/session/s1/message", { model: { providerID: "lpr_team", id: "team" } })).resolves.toBeUndefined();
     await expect(post("/opencode/session/s1/prompt_async", { model: { providerID: "opencode", modelID: "big-pickle" } })).resolves.toBeUndefined();
-    await expect(post("/opencode/session/s1/prompt_async", { model: { providerID: "openwork-free", modelID: "auto" } })).resolves.toBeUndefined();
     await expect(post("/opencode/session/s1/prompt_async", "not json")).resolves.toBeUndefined();
     await expect(policy.assertRequest(new Request("http://localhost/opencode/auth/ollama"), "/opencode/auth/ollama", true)).resolves.toBeUndefined();
     // Adding managed providers (cloud imports) and removing any provider stay allowed; adding a personal one does not.
@@ -147,14 +146,14 @@ describe("openwork runtime config file", () => {
     expect(read).toBe(false);
   });
 
-  for (const onlyProvidedModels of [true, false]) test(`the free starter model switch off refuses free Auto and Zen ${onlyProvidedModels ? "with" : "without"} \"Only models you provide\"`, async () => {
+  for (const onlyProvidedModels of [true, false]) test(`the free starter model switch off refuses Zen ${onlyProvidedModels ? "with" : "without"} \"Only models you provide\"`, async () => {
     const { config } = await setup();
     const den = Bun.serve({ port: 0, fetch: () => Response.json({ allowCustomProviders: !onlyProvidedModels, allowZenModel: false }) });
     cleanups.push(() => den.stop(true));
     const policy = managedDesktopPolicy(config);
     await policy.setSession({ baseUrl: `http://127.0.0.1:${den.port}`, token: "test-token", orgId: "test-org" });
     await policy.current();
-    for (const providerID of ["openwork-free", "opencode"]) {
+    for (const providerID of ["opencode"]) {
       await expect(policy.assert("model", { providerID })).rejects.toMatchObject({ code: "organization_policy_denied" });
     }
     await expect(policy.assert("model", { providerID: "ipr_gateway" })).resolves.toBeUndefined();
@@ -174,18 +173,18 @@ describe("openwork runtime config file", () => {
     await expect(policy.assert("model", { providerID: "ollama" })).resolves.toBeUndefined();
   });
 
-  test("\"Only models you provide\" lists the organization's providers for the engine, with free Auto and Zen only when the free starter model is on", () => {
+  test("\"Only models you provide\" lists the organization's providers for the engine, with Zen only when the free starter model is on", () => {
     const provider = { lpr_legacy: {}, ipr_gateway: {}, openwork: {}, personal: {}, opencode: {} };
     expect(buildOpenworkRuntimeConfigObjectFromSnapshot({
       managedPolicy: { allowCustomProviders: false, allowZenModel: false }, provider,
     }).enabled_providers).toEqual(["lpr_legacy", "ipr_gateway", "openwork"]);
     expect(buildOpenworkRuntimeConfigObjectFromSnapshot({
       managedPolicy: { allowCustomProviders: false }, provider,
-    }).enabled_providers).toEqual(["lpr_legacy", "ipr_gateway", "openwork", "openwork-free", "opencode"]);
-    // With personal providers allowed, the switch off still disables free Auto and Zen in the engine.
+    }).enabled_providers).toEqual(["lpr_legacy", "ipr_gateway", "openwork", "opencode"]);
+    // With personal providers allowed, the switch off still disables Zen in the engine.
     const starterOff = buildOpenworkRuntimeConfigObjectFromSnapshot({ managedPolicy: { allowZenModel: false }, provider, disabled_providers: ["anthropic"] });
     expect(starterOff.enabled_providers).toBeUndefined();
-    expect(starterOff.disabled_providers).toEqual(["anthropic", "openwork-free", "opencode"]);
+    expect(starterOff.disabled_providers).toEqual(["anthropic", "opencode"]);
     expect(buildOpenworkRuntimeConfigObjectFromSnapshot({ managedPolicy: { allowCustomProviders: false }, provider }).disabled_providers).toBeUndefined();
     expect(buildOpenworkRuntimeConfigObjectFromSnapshot({ managedPolicy: { allowCustomProviders: true }, provider }).enabled_providers).toBeUndefined();
     expect(buildOpenworkRuntimeConfigObjectFromSnapshot({ provider }).enabled_providers).toBeUndefined();

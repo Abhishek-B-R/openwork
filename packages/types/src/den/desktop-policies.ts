@@ -31,11 +31,11 @@ export function isModelAccessPolicyKey(key: string): boolean {
 }
 
 /**
- * Den's "Free starter model (Auto)" switch is stored as `allowZenModel`. It
- * covers OpenWork's free Auto and OpenCode Zen, which the free starter model
- * was before Auto: on allows both, off blocks both.
+ * Providers behind Den's "Free starter model (Auto)" switch, stored as
+ * `allowZenModel`: on allows them, off blocks them, whether or not members
+ * may add their own providers. Today the free starter model is OpenCode Zen.
  */
-export const FREE_STARTER_PROVIDER_IDS = ["openwork-free", "opencode"] as const;
+export const FREE_STARTER_PROVIDER_IDS = ["opencode"] as const;
 
 export function isFreeStarterProvider(providerId: string): boolean {
   return (FREE_STARTER_PROVIDER_IDS as readonly string[]).includes(providerId.trim().toLowerCase());

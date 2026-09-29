@@ -67,7 +67,7 @@ export function buildOpenworkRuntimeConfigObjectFromSnapshot(
     const { managedPolicy, ...localConfig } = runtimeConfig;
     runtimeConfig = managedPolicy ? { ...localConfig, managedPolicy: desktopCapabilityConfig(managedPolicy) } : localConfig;
   }
-  // "Free starter model (Auto)" off blocks free Auto and Zen whether or not personal providers are allowed.
+  // The free starter model switch off blocks those providers whether or not personal providers are allowed.
   const freeStarterAllowed = runtimeConfig.managedPolicy?.allowZenModel !== false;
   const disabledProviders = [...new Set([
     ...runtimeDisabledProviderList(runtimeConfig),
