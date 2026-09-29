@@ -7,6 +7,7 @@ import type { McpUiStyles, McpUiStyleVariableKey } from "@modelcontextprotocol/e
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js"
 
 import { connectionActionAppResourceUri, legacyConnectionActionAppResourceUri } from "@openwork/types/connection-action-app"
+import { parseMcpAppResourceUri } from "@openwork/types/mcp-app"
 import { isConnectionDiscoveryTool } from "@/components/tools/error-attribution"
 import { AppChatArtifact } from "@/react-app/domains/apps/app-chat-artifact"
 import { createConnectionActionController, hasHostConnectionActions, standardMcpToolResult } from "./mcp-connection-action"
@@ -137,6 +138,12 @@ function preservedResult(part: DynamicToolUIPart): PreservedMcpAppResult | null 
 
 export function hasPreservedMcpAppResult(part: DynamicToolUIPart): boolean {
   return preservedResult(part) !== null
+}
+
+/** The App built in OpenWork this card opens, read from its launch's revision URI. */
+export function builtMcpAppId(part: DynamicToolUIPart): string | null {
+  const launch = gatewayMcpAppLaunch(preservedResult(part)?._meta)
+  return launch ? parseMcpAppResourceUri(launch.resourceUri)?.appId ?? null : null
 }
 
 export function gatewayMcpAppLaunch(meta: unknown): OpenworkMcpAppLaunchReference | null {

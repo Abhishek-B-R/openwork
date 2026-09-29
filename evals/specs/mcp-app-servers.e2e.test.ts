@@ -1,6 +1,6 @@
 import { expect } from "vitest";
 import { spec } from "@openwork/testkit";
-import { appSource, appTitle, buildPrompt, buildReply, chatLeadIn, chatPrompt, chatReply, launchInput, mcpAppServers, mcpAppServersChat, payload, pricerTitle, record, reservationId, rows, toolNames } from "../worlds/mcp-app-servers.ts";
+import { appSource, appTitle, buildPrompt, buildReply, chatLeadIn, chatPrompt, chatReply, launchInput, mcpAppServers, mcpAppServersChat, payload, pricerTitle, record, reopenPrompt, reopenReply, reservationId, rows, toolNames } from "../worlds/mcp-app-servers.ts";
 
 const test = spec.world(mcpAppServers, {
   resources: { surfaces: ["web"], services: ["den", "mock"] },
@@ -372,5 +372,17 @@ chatTest("an owner prompts OpenWork's chat to build an App and to open one, and 
     await user.notSee({ text: "Allow App action?" });
     await user.screenshot();
     evidence.recordAssertionEvidence("Each trusted click runs its one tool", `Clicking Calculate total ran the ${toolNames.workflow} Workflow from the conversation, and ${appTitle} shows 42, with no extra approval prompt.`, true);
+  });
+
+  await step("asked for the calculator again, the chat keeps one live copy and the earlier card points to it", async () => {
+    await frame?.[Symbol.asyncDispose]();
+    frame = undefined;
+    const newerNote = "This App has a newer version below.";
+    await agent.send(reopenPrompt);
+    await user.see({ text: reopenReply }, { timeoutMs: 120_000 });
+    await user.see({ text: newerNote }, { timeoutMs: 30_000 });
+    expect((await probe.dom(`[data-mcp-app-resource="${world.created.resourceUri}"] iframe`)).elements).toHaveLength(1);
+    await user.screenshot();
+    evidence.recordAssertionEvidence("Only an App's newest card stays live", `For "${reopenPrompt}" the model opened ${appTitle} a second time. The conversation shows one live ${appTitle}, the new card, and the earlier card now reads "${newerNote}", so the App is not loaded twice.`, true);
   });
 });

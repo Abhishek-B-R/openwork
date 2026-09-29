@@ -10,22 +10,25 @@ import { createDefaultPlatform, PlatformProvider } from "../src/react-app/kernel
 // Without a live conversation origin the App frame renders this notice, which marks its place.
 const APP_MARKER = "This App is missing its conversation origin";
 
-function appPart(id: string): DynamicToolUIPart {
+function appPart(id: string, app = { connectionId: "cob_fixture", resourceUri: "ui://openwork/apps/cob_fixture/revisions/cov_fixture/index.html" }): DynamicToolUIPart {
   return {
     type: "dynamic-tool",
     toolName: "openwork-cloud_execute_capability",
     toolCallId: id,
     state: "output-available",
-    input: { name: "plugin:plg_fixture:cob_fixture" },
+    input: { name: `plugin:plg_fixture:${app.connectionId}` },
     output: "Opened Order calculator.",
     callProviderMetadata: { openwork: { mcpResult: {
       content: [{ type: "text", text: "Opened Order calculator." }],
-      _meta: { "openwork/mcpApp": {
-        connectionId: "cob_fixture", toolName: "open_app",
-        resourceUri: "ui://openwork/apps/cob_fixture/revisions/cov_fixture/index.html", arguments: { input: {} },
-      } },
+      _meta: { "openwork/mcpApp": { connectionId: app.connectionId, toolName: "open_app", resourceUri: app.resourceUri, arguments: { input: {} } } },
     } } },
   };
+}
+
+/** A card of a real App built in OpenWork, at one of its revisions. */
+function builtApp(app: string, revision: string) {
+  const appId = `cob_01mcpapp${app.repeat(18)}`;
+  return { connectionId: appId, resourceUri: `ui://openwork/apps/${appId}/revisions/cov_01mcpapp${revision.repeat(18)}/index.html` };
 }
 
 function bashPart(id: string): DynamicToolUIPart {
@@ -101,6 +104,22 @@ describe("an MCP App renders where its tool call happened", () => {
     expect(markup).toContain("Worked for");
     const [app, answer] = order(markup, [APP_MARKER, "Here is the calculator."]);
     expect(app).toBeLessThan(answer);
+  });
+
+  test("only the newest card of an App built in OpenWork stays live; earlier cards point to it", () => {
+    const newerNote = "This App has a newer version below.";
+    const markup = renderList([
+      user,
+      assistant("a-build", [appPart("open-a1", builtApp("a", "1")), { type: "text", text: "Built the calculator.", state: "done" }]),
+      { ...user, id: "user-2", parts: [{ type: "text", text: "Make the total bold", state: "done" }] },
+      assistant("a-update", [appPart("open-a2", builtApp("a", "2")), appPart("open-b1", builtApp("b", "1")), { type: "text", text: "Updated it.", state: "done" }]),
+    ]);
+    const count = (text: string) => markup.split(text).length - 1;
+    // The updated calculator and the other App are live; the first calculator card points below.
+    expect(count(APP_MARKER)).toBe(2);
+    expect(count(newerNote)).toBe(1);
+    const [note, answer] = order(markup, [newerNote, "Built the calculator."]);
+    expect(note).toBeLessThan(answer);
   });
 
   test("an App opened after the last prose shows after that prose", () => {
