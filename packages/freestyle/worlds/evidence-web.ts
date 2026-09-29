@@ -1,12 +1,12 @@
 export const supportedTargets = ["freestyle/linux"];
 
-import { ensureEvidenceSnapshot } from "../packages/freestyle/src/evidence-builder.ts";
-import { launchEvidenceWorld, deleteEvidenceVm } from "../packages/freestyle/src/checkpoints.ts";
-import { hold } from "../packages/world/src/hold.ts";
-import { secret } from "../packages/world/src/outputs.ts";
-import { sourceFor, sourcesFromEnv } from "../packages/world/src/source.ts";
-import { targetFromEnv } from "../packages/world/src/target.ts";
-import { trackResource } from "../packages/world/src/ledger.ts";
+import { ensureEvidenceSnapshot } from "../src/evidence-builder.ts";
+import { launchEvidenceWorld, deleteEvidenceVm } from "../src/checkpoints.ts";
+import { hold } from "../../world/src/hold.ts";
+import { secret } from "../../world/src/outputs.ts";
+import { sourceFor, sourcesFromEnv } from "../../world/src/source.ts";
+import { targetFromEnv } from "../../world/src/target.ts";
+import { trackResource } from "../../world/src/ledger.ts";
 
 export async function main() {
   const target = targetFromEnv();

@@ -2,11 +2,11 @@ export const supportedTargets = ["local/host"];
 
 import { mkdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
-import { hold } from "../packages/world/src/hold.ts";
-import { launchHeadlessWeb } from "../packages/world/src/headless-web.ts";
-import type { HeadlessWebHandle } from "../packages/world/src/headless-web.ts";
+import { hold } from "../../../packages/world/src/hold.ts";
+import { launchHeadlessWeb } from "../../../packages/world/src/headless-web.ts";
+import type { HeadlessWebHandle } from "../../../packages/world/src/headless-web.ts";
 
-const REPO_ROOT = fileURLToPath(new URL("..", import.meta.url));
+const REPO_ROOT = fileURLToPath(new URL("../../..", import.meta.url));
 const CLOUD_MODEL_INFRA_WORKER_NAME = "cloud-model-infra-worker";
 const CLOUD_MODEL_INFRA_WORKER_WORKSPACE = "/tmp/openwork-cloud-model-infra-worker";
 
@@ -26,7 +26,7 @@ export interface CloudModelInfraWorkerOptions {
  * materialization, and remote-session capabilities exercise a real worker
  * runtime end to end without a Daytona sandbox.
  *
- * Launch: `pnpm world up ./worlds/cloud-model-infra-worker.ts`
+ * Launch: `pnpm world up ./evals/worlds/infra/cloud-model-infra-worker.ts`
  * Proof:  `evals/specs/cloud-model-infra.e2e.test.ts`
  */
 export async function bootCloudModelInfraWorker(

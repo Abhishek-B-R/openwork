@@ -1,11 +1,11 @@
 export const supportedTargets = ["local/host"];
 
 import { fileURLToPath } from "node:url";
-import { hold } from "../packages/world/src/hold.ts";
-import { launchHeadlessWeb } from "../packages/world/src/headless-web.ts";
-import type { HeadlessWebHandle } from "../packages/world/src/headless-web.ts";
+import { hold } from "../../../packages/world/src/hold.ts";
+import { launchHeadlessWeb } from "../../../packages/world/src/headless-web.ts";
+import type { HeadlessWebHandle } from "../../../packages/world/src/headless-web.ts";
 
-const REPO_ROOT = fileURLToPath(new URL("..", import.meta.url));
+const REPO_ROOT = fileURLToPath(new URL("../../..", import.meta.url));
 const REMOTE_SESSION_NAME = "remote-session";
 const REMOTE_SESSION_WORKSPACE = "/tmp/openwork-remote-session-world";
 

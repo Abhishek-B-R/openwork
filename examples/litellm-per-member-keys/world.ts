@@ -1,15 +1,15 @@
 export const supportedTargets = ["local/host"];
 
-import { app } from "../evals/packages/env/src/desktop-app.ts";
-import type { App } from "../evals/packages/env/src/desktop-app.ts";
-import { denFetch } from "../evals/packages/behaviors/src/den.ts";
-import { createAdmin, createOrg, inviteMember, server } from "../evals/packages/env/src/den.ts";
-import type { Den, DenOrgHandle } from "../evals/packages/env/src/den.ts";
-import { liteLlmPerMemberProvider } from "../evals/packages/env/src/litellm-provider.ts";
-import { liteLlm } from "../evals/packages/env/src/litellm.ts";
-import type { LiteLlmHandle } from "../evals/packages/env/src/litellm.ts";
-import type { Place } from "../evals/packages/env/src/place.ts";
-import { recipe, runRecipe } from "../evals/packages/env/src/recipe.ts";
+import { app } from "../../evals/packages/env/src/desktop-app.ts";
+import type { App } from "../../evals/packages/env/src/desktop-app.ts";
+import { denFetch } from "../../evals/packages/behaviors/src/den.ts";
+import { createAdmin, createOrg, inviteMember, server } from "../../evals/packages/env/src/den.ts";
+import type { Den, DenOrgHandle } from "../../evals/packages/env/src/den.ts";
+import { liteLlmPerMemberProvider } from "../../evals/packages/env/src/litellm-provider.ts";
+import { liteLlm } from "../../evals/packages/env/src/litellm.ts";
+import type { LiteLlmHandle } from "../../evals/packages/env/src/litellm.ts";
+import type { Place } from "../../evals/packages/env/src/place.ts";
+import { recipe, runRecipe } from "../../evals/packages/env/src/recipe.ts";
 
 export const LITELLM_WORLD_ORG = "LiteLLM Per-Member World";
 export const LITELLM_WORLD_PROVIDER = "openwork-litellm-per-member";
@@ -41,7 +41,7 @@ export interface LiteLlmPerMemberWorld {
  * the complete per-member example. The LiteLLM gateway talks to a deterministic
  * local OpenAI-compatible witness; it never reads or requires OPENAI_API_KEY.
  *
- * Launch: `pnpm world up litellm-per-member [--stage <s>]`
+ * Launch: `pnpm world up ./examples/litellm-per-member-keys/world.ts [--stage <s>]`
  */
 export async function bootLiteLlmPerMember(
   stack: AsyncDisposableStack,

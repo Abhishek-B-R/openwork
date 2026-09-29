@@ -1,16 +1,16 @@
 export const supportedTargets = ["local/host"];
 
-import { allocateFreePort } from "../evals/packages/cdp/src/ports.ts";
-import { createOrgConnection, createPluginWithSkill, denFetch } from "../evals/packages/behaviors/src/index.ts";
-import type { DenSession } from "../evals/packages/behaviors/src/index.ts";
-import { app } from "../evals/packages/env/src/desktop-app.ts";
-import type { App } from "../evals/packages/env/src/desktop-app.ts";
-import { createAdmin, createOrg, inviteMember, server } from "../evals/packages/env/src/den.ts";
-import type { Den, DenOrgHandle } from "../evals/packages/env/src/den.ts";
-import { mcpMock } from "../evals/packages/env/src/mock.ts";
-import { resolvePlace } from "../evals/packages/env/src/place.ts";
-import type { Place } from "../evals/packages/env/src/place.ts";
-import { hold } from "../packages/world/src/hold.ts";
+import { allocateFreePort } from "../packages/cdp/src/ports.ts";
+import { createOrgConnection, createPluginWithSkill, denFetch } from "../packages/behaviors/src/index.ts";
+import type { DenSession } from "../packages/behaviors/src/index.ts";
+import { app } from "../packages/env/src/desktop-app.ts";
+import type { App } from "../packages/env/src/desktop-app.ts";
+import { createAdmin, createOrg, inviteMember, server } from "../packages/env/src/den.ts";
+import type { Den, DenOrgHandle } from "../packages/env/src/den.ts";
+import { mcpMock } from "../packages/env/src/mock.ts";
+import { resolvePlace } from "../packages/env/src/place.ts";
+import type { Place } from "../packages/env/src/place.ts";
+import { hold } from "../../packages/world/src/hold.ts";
 
 export const ACME_DOCS_ORGANIZATION_NAME = "Acme Robotics";
 export const ACME_DOCS_MEMBER = "jordan";

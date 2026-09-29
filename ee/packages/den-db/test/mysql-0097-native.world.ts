@@ -5,7 +5,7 @@ import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import { nativeMysql0097 } from "../evals/packages/env/src/mysql-0097-native.ts";
+import { nativeMysql0097 } from "../../../../evals/packages/env/src/mysql-0097-native.ts";
 
 export async function main() {
   const { values } = parseArgs({ options: {
@@ -13,7 +13,7 @@ export async function main() {
   } });
   if (process.env.OPENWORK_WORLD_PLACE !== "local") throw new Error("Use explicit --place local; this foreground-only world owns a disposable native MySQL instance.");
   if (!values.mysqld || !values.pnpm || !["package", "focused"].includes(values.suite)) throw new Error("Required: --mysqld <absolute binary> --pnpm <pnpm.cjs> [--suite package|focused]");
-  const repo = fileURLToPath(new URL("..", import.meta.url));
+  const repo = fileURLToPath(new URL("../../../..", import.meta.url));
   await using mysql = await nativeMysql0097({ mysqld: values.mysqld, pnpm: values.pnpm });
   const controller = new AbortController();
   const abort = () => controller.abort();
