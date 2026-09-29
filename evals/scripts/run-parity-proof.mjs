@@ -14,6 +14,7 @@ const specs = new Set([
   "evals/specs/opencode-v2-reads-during-mcp-startup.e2e.test.ts",
   "evals/specs/engine-provider-filters.e2e.test.ts",
   "evals/specs/engine-gateway-parity.e2e.test.ts",
+  "evals/specs/model-access-gateway.e2e.test.ts",
   "evals/specs/engine-connectors-parity.e2e.test.ts",
   "evals/specs/connector-tool-call-branding.e2e.test.ts",
   "evals/specs/engine-live-chat.e2e.test.ts",
