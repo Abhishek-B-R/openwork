@@ -23,6 +23,8 @@ export type Layout = {
   teamAttention?: boolean;
   /** How many of those are unread, beside Focus mode's back button. */
   teamUnread?: number;
+  /** In Focus mode with a coworker open: shrink to a floating bubble of its face. */
+  bubble?: () => void;
 };
 
 const FULL_LAYOUT: Layout = { compact: false, focus: false, chatOnly: false, width: 1280, toggleFocus: () => {}, teamOpen: false, openTeam: () => {}, closeTeam: () => {} };

@@ -34,6 +34,11 @@ if (process.isMainFrame) {
       ipcRenderer.on("coworker:deep-link", handler);
       return () => ipcRenderer.removeListener("coworker:deep-link", handler);
     },
+    onBubble: (listener) => {
+      const handler = (_event, change) => listener({ on: change?.on === true });
+      ipcRenderer.on("coworker:bubble", handler);
+      return () => ipcRenderer.removeListener("coworker:bubble", handler);
+    },
     onRuntimeChanged: (listener) => {
       const handler = (_event, info) => listener(info);
       ipcRenderer.on("coworker:runtime-changed", handler);

@@ -20,6 +20,7 @@ import { BrowserWindow, Menu, app, dialog, ipcMain, nativeTheme, screen, shell, 
 import { createVoice, installVoicePermissions } from "./voice.mjs";
 import { bindWindowAppearance, windowMaterial } from "./window-appearance.mjs";
 import { createFocusWindow } from "./focus-window.mjs";
+import { createBubbleWindow } from "./bubble-window.mjs";
 import { globalOpencodeConfigDir, openworkConfigDir } from "@openwork/paths";
 import { createHeadlessThreadClientV2 as createHeadlessThreadClient, createNativeV2Client, createNativeV2Id, nativeCatalogProviders, toTranscript } from "@openwork/headless-threads/v2";
 import { configureNativePluginBundles, verifyNativePluginBundles } from "./native-plugin.mjs";
@@ -311,6 +312,31 @@ function admitLocalRun(decide) {
 /** @type {BrowserWindow | null} */
 let mainWindow = null;
 const focusWindow = createFocusWindow(screen);
+// From Focus mode, the coworker can shrink to a floating bubble; the Focus window waits hidden, unchanged.
+const bubbleWindow = createBubbleWindow({ BrowserWindow, screen, ipcMain, preload: path.join(__dirname, "bubble-preload.mjs"), url: () => bubbleUrl(), onOpen: () => closeBubble() });
+
+function bubbleUrl() {
+  const url = new URL(rendererUrl());
+  url.searchParams.set("bubble", "1");
+  return url.href;
+}
+
+/** Only a name and a look cross into the bubble. */
+function bubbleCoworker(coworker) {
+  const text = (value, limit) => String(value ?? "").slice(0, limit);
+  return { slug: text(coworker?.slug, 80), name: text(coworker?.name, 80), avatarColor: text(coworker?.avatarColor, 40), avatarGlasses: text(coworker?.avatarGlasses, 40) };
+}
+
+/** The bubble gives way to the conversation, in the Focus window it stood in for. */
+function closeBubble() {
+  if (!bubbleWindow.active) return;
+  bubbleWindow.close();
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.show();
+    mainWindow.focus();
+    mainWindow.webContents.send("coworker:bubble", { on: false });
+  }
+}
 
 function parseExternalUrl(value) {
   const parsed = new URL(String(value ?? ""));
@@ -3604,6 +3630,23 @@ const commands = {
   "voice.microphone": () => voice.microphone(),
   /** Focus mode on a desktop docks the window as a small conversation beside your work; leaving it puts the window back. */
   "window.focusMode": ({ on } = {}) => focusWindow.set(mainWindow, on === true),
+  /** The coworker as a floating bubble (on), or back in its window (off). */
+  "window.bubble": async ({ on, coworker } = {}) => {
+    if (on !== true) {
+      closeBubble();
+      return { on: false };
+    }
+    if (!mainWindow || mainWindow.isDestroyed()) return { on: false };
+    await bubbleWindow.show({ coworker: bubbleCoworker(coworker), near: mainWindow.getBounds() });
+    mainWindow.hide();
+    return { on: true };
+  },
+  /** Something the coworker has for the person, as a speech bubble beside its face. */
+  "window.bubbleSay": ({ text, from } = {}) => {
+    const words = String(text ?? "").replace(/\s+/g, " ").trim().slice(0, 400);
+    if (words) bubbleWindow.say({ text: words, from: String(from ?? "").slice(0, 80) });
+    return { shown: Boolean(words) && bubbleWindow.active };
+  },
   /** The renderer drains deep links queued while it was loading. */
   "deepLinks.subscribe": async () => {
     deepLinkListenerReady = true;
@@ -3977,7 +4020,7 @@ async function createMainWindow() {
   window.webContents.on("destroyed", () => { voice.reset(); browserControl.hideWindow(); });
   window.on("unresponsive", () => browserControl.hideWindow());
   window.on("closed", () => {
-    if (mainWindow === window) mainWindow = null;
+    if (mainWindow === window) { mainWindow = null; bubbleWindow.close(); }
     deepLinkListenerReady = false;
     if (process.platform !== "darwin") app.quit();
   });
@@ -4017,7 +4060,8 @@ if (!singleInstanceLock) {
   // Register before startup awaits: Dock activation must also restore a hidden
   // or minimized window, including while startup is reporting a reset failure.
   app.on("activate", () => {
-    void app.whenReady().then(() => focusMainWindow());
+    // Choosing the app while it is a bubble brings the conversation back.
+    void app.whenReady().then(() => bubbleWindow.active ? closeBubble() : focusMainWindow());
   });
 
   app.on("open-url", (event, url) => {

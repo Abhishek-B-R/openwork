@@ -527,6 +527,7 @@ type BridgeWindow = Window & {
     invoke: (command: string, payload?: unknown) => Promise<BridgeResponse>;
     onDeepLink?: (listener: (urls: string[]) => void) => () => void;
     onRuntimeChanged?: (listener: (runtime: RuntimeInfo) => void) => () => void;
+    onBubble?: (listener: (change: { on: boolean }) => void) => () => void;
     onReactionsChanged?: (listener: (change: { scope: MessageReactionScope; revision: number }) => void) => () => void;
   };
 };
@@ -591,6 +592,10 @@ export const coworkerBridge = {
   appWindow: {
     /** Dock the window as a small conversation at the right of the screen (hiding the macOS window buttons), or put it back where it was. */
     focusMode: (on: boolean) => invoke<{ docked: boolean; controlsHidden: boolean }>("window.focusMode", { on }),
+    /** The coworker as a floating bubble (the window steps aside until the bubble is tapped), or back. */
+    bubble: (on: boolean, coworker?: Pick<CoworkerSummary, "slug" | "name" | "avatarColor" | "avatarGlasses">) => invoke<{ on: boolean }>("window.bubble", { on, coworker }),
+    /** A speech bubble beside the floating face: something the coworker has for the person. */
+    bubbleSay: (text: string, from: string) => invoke<{ shown: boolean }>("window.bubbleSay", { text, from }),
   },
   browser: {
     bind: (slug: string, threadId: string, viewId: string) => invoke<BrowserSnapshot>("browser.bind", { slug, threadId, viewId }),
@@ -629,6 +634,11 @@ export const coworkerBridge = {
     export: (slug: string) => invoke<{ saved: boolean }>("templates.export", { slug }),
   },
   runtimeInfo: () => invoke<RuntimeInfo>("runtime.info").then(configureSessionRuntime),
+  /** The floating bubble closed (it was tapped, or the app was chosen): the window is back. */
+  onBubble: (listener: (change: { on: boolean }) => void) => {
+    const host: BridgeWindow = window;
+    return host.__COWORKER__?.onBubble?.(listener) ?? (() => undefined);
+  },
   onRuntimeChanged: (listener: (runtime: RuntimeInfo) => void) => {
     const host: BridgeWindow = window;
     return host.__COWORKER__?.onRuntimeChanged?.((runtime) => listener(configureSessionRuntime(runtime))) ?? (() => undefined);

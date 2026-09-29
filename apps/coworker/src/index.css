@@ -1395,3 +1395,59 @@ body.is-resizing-panel * {
   .worker-shimmer { animation: none; color: var(--color-mist); background: none; }
   .coworker-markdown a[href^="worker:"]::before { animation: none !important; }
 }
+
+/* The floating bubble's window is transparent: only the face and its speech show. */
+:root[data-bubble],
+:root[data-bubble] body,
+:root[data-bubble] #root {
+  background: transparent !important;
+  overflow: hidden;
+}
+:root[data-bubble] .bubble-speech {
+  animation: popover-in 180ms ease-out 1;
+}
+.bubble-countdown {
+  animation-name: bubble-countdown;
+  animation-timing-function: linear;
+  animation-fill-mode: forwards;
+}
+@keyframes bubble-countdown {
+  from { transform: scaleX(1); }
+  to { transform: scaleX(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .bubble-countdown { transition: none; }
+}
+
+/* The bubble's easter egg: circled too fast, the head wobbles and stars orbit it. */
+.bubble-dizzy {
+  animation: bubble-dizzy-wobble 1800ms ease-in-out 1;
+}
+@keyframes bubble-dizzy-wobble {
+  0%, 100% { transform: rotate(0deg); }
+  15% { transform: rotate(-14deg) translateX(-2px); }
+  30% { transform: rotate(12deg) translateX(2px); }
+  45% { transform: rotate(-10deg) translateX(-1px); }
+  60% { transform: rotate(8deg); }
+  75% { transform: rotate(-5deg); }
+  90% { transform: rotate(3deg); }
+}
+.bubble-dizzy-stars span {
+  position: absolute;
+  left: 50%;
+  top: -2px;
+  margin-left: -4px;
+  font-size: 8px;
+  line-height: 1;
+  color: #ffd166;
+  transform-origin: 4px 27px;
+  animation: bubble-dizzy-orbit 1s linear infinite;
+}
+@keyframes bubble-dizzy-orbit {
+  from { transform: rotate(0deg) translateY(-3px); }
+  to { transform: rotate(360deg) translateY(-3px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .bubble-dizzy { animation: none; }
+  .bubble-dizzy-stars span { animation-duration: 3s; }
+}

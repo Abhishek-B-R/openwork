@@ -53,6 +53,7 @@ import { AppLoader, CoworkerMark } from "@/ui/brand";
 import type { SettingsSection } from "@/ui/openwork-settings";
 import { VoiceContext } from "@/ui/use-voice";
 import { useActivityInbox } from "@/ui/use-activity-inbox";
+import { useBubble } from "@/ui/use-bubble";
 import { useGlints } from "@/ui/glints";
 import { refreshFeatures, useFeatures } from "@/ui/use-features";
 import { CustomizeCoworker, type CustomizeFocus } from "@/ui/customize-coworker";
@@ -890,7 +891,9 @@ export default function App() {
     ? { ...rail, width: drawerWidth, collapsed: false, resizing: false, expand: () => {}, collapse: closeTeam, toggle: closeTeam, reset: () => {} }
     : rail, [chatOnly, closeTeam, drawerWidth, rail]);
   const unreadActivity = inbox.items.filter((item) => item.readAt === null && (features.calendar || item.kind !== "event-reminder")).length;
-  const layout = useMemo(() => ({ ...layoutState, teamAttention: features.notifications && unreadActivity > 0, teamUnread: features.notifications ? unreadActivity : 0 }), [features.notifications, layoutState, unreadActivity]);
+  // In Focus mode, the open coworker can shrink to a floating bubble.
+  const bubble = useBubble(layoutState.focus ? selected : null);
+  const layout = useMemo(() => ({ ...layoutState, teamAttention: features.notifications && unreadActivity > 0, teamUnread: features.notifications ? unreadActivity : 0, bubble: bubble.enter }), [bubble.enter, features.notifications, layoutState, unreadActivity]);
   /** A choice made in the team list closes it when it lies over the conversation. */
   const fromTeam = <Args extends unknown[]>(run: (...args: Args) => void) => (...args: Args) => {
     run(...args);
@@ -978,9 +981,10 @@ export default function App() {
     : item.target.kind === "private" && item.slug === readingSlug && item.coworkerCreatedAt === readingCreatedAt)).map((item) => item.id).join(",");
   const markOpenChatRead = inbox.markRead;
   useEffect(() => {
-    if (!chatOnScreen || !unreadInOpenChat || document.visibilityState !== "visible") return;
+    // While the coworker floats as a bubble its window is hidden: nothing there has been read yet.
+    if (!chatOnScreen || !unreadInOpenChat || document.visibilityState !== "visible" || bubble.active) return;
     void markOpenChatRead(unreadInOpenChat.split(","), true).catch(() => undefined);
-  }, [chatOnScreen, unreadInOpenChat, markOpenChatRead]);
+  }, [bubble.active, chatOnScreen, unreadInOpenChat, markOpenChatRead]);
 
   if (bootError) {
     return (

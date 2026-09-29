@@ -40,7 +40,12 @@ export function FocusToggle() {
   const superKey = useSuperKey();
   const label = layout.focus ? "Leave Focus mode" : "Focus mode";
   return (
-    <span className="relative inline-flex">
+    <span className="relative inline-flex items-center">
+      {layout.focus && layout.bubble ? (
+        <IconButton label="Shrink to a bubble" tooltip="Shrink to a floating bubble" tooltipSide="bottom" className="window-no-drag" onClick={layout.bubble} data-testid="bubble-mode-button">
+          <svg viewBox="0 0 20 20" className="size-4" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="13" cy="13" r="4" /><path d="M9.5 3.5H4.5a1 1 0 0 0-1 1v5M3.5 3.5 8 8" /></svg>
+        </IconButton>
+      ) : null}
       <IconButton label={label} tooltip={`${label} · ${superKeyLabel()}F`} tooltipSide="bottom" className="window-no-drag" aria-pressed={layout.focus} aria-keyshortcuts={superKeyShortcut("F")} onClick={layout.toggleFocus} data-testid="focus-mode-toggle">
         <FocusIcon active={layout.focus} />
       </IconButton>
