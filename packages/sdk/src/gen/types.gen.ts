@@ -11591,7 +11591,7 @@ export type PostV1SsoSamlErrors = {
    */
   401: SsoUnauthorizedError;
   /**
-   * SSO management requires an Enterprise plan.
+   * SSO management requires a Team or Enterprise plan.
    */
   402: EnterprisePlanRequiredError;
   /**
@@ -11632,7 +11632,7 @@ export type PostV1SsoOidcErrors = {
    */
   401: SsoUnauthorizedError;
   /**
-   * SSO management requires an Enterprise plan.
+   * SSO management requires a Team or Enterprise plan.
    */
   402: EnterprisePlanRequiredError;
   /**
@@ -11859,7 +11859,7 @@ export type PostV1SsoRequestDomainVerificationErrors = {
    */
   401: SsoUnauthorizedError;
   /**
-   * SSO management requires an Enterprise plan.
+   * SSO management requires a Team or Enterprise plan.
    */
   402: EnterprisePlanRequiredError;
   /**
@@ -11902,7 +11902,7 @@ export type PostV1SsoVerifyDomainErrors = {
    */
   401: SsoUnauthorizedError;
   /**
-   * SSO management requires an Enterprise plan.
+   * SSO management requires a Team or Enterprise plan.
    */
   402: EnterprisePlanRequiredError;
   /**
