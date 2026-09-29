@@ -169,7 +169,9 @@ test("OpenWork Models usage reports as its own family, labelled by its public mo
   const { usage } = await readGatewayUsage(org, { groupBy: "model", days: 31, filterIds: [] }, now)
   expect(usage.series).toEqual([{ id: hosted, label: alias.displayName }])
   expect(usage.filterOptions).toContainEqual({ id: "openwork", label: "OpenWork Models" })
-  // The organization's own providers and hosted OpenWork Models both feed the read.
+  // Managed providers, paid Models and free Auto feed the read and rollup with the same public family.
   expect(queries[0]).toContain("`route` in (")
-  expect(queries[0]).toContain("`route` in ('openwork_openrouter') then")
+  expect(parameters[0]).toContain("openwork_free")
+  expect(parameters[0]).toContain("openwork_openrouter")
+  expect(queries[0]).toContain("`route` in ('openwork_openrouter', 'openwork_free') then")
 })

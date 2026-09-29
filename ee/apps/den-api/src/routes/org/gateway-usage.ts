@@ -81,7 +81,7 @@ function checkCardinality(size: number, limit: number) {
 /** Hosted OpenWork Models usage reports alongside the organization's own Gateway providers (Paper: Gateway grid). */
 const OPENWORK_MODELS_OPTION_ID = "openwork"
 const OPENWORK_MODELS_LABEL = "OpenWork Models"
-const USAGE_ROUTES = ["org_provider", "openwork_openrouter"] as const
+const USAGE_ROUTES = ["org_provider", "openwork_openrouter", "openwork_free"] as const
 
 const labelOrder = (left: GatewayUsageOption, right: GatewayUsageOption) => left.label.localeCompare(right.label, "en") || left.id.localeCompare(right.id, "en")
 
@@ -166,12 +166,12 @@ export async function readGatewayUsage(organizationId: typeof GatewayProviderTab
   function dimensions(table: typeof raw | typeof rollup, timestamp: typeof raw.started_at | typeof rollup.bucket_start) {
     // Epoch arithmetic gives UTC calendar dates even if a DB session is not UTC.
     const date = sql<string>`date_format(timestampadd(day, floor(unix_timestamp(${timestamp}) / 86400), '1970-01-01'), '%Y-%m-%d')`.as("usage_date")
-    const filterId = (query.groupBy === "model" ? sql<string | null>`coalesce(${table.gateway_provider_id}, case when ${table.route} in ('openwork_openrouter') then ${OPENWORK_MODELS_OPTION_ID} end)`
+    const filterId = (query.groupBy === "model" ? sql<string | null>`coalesce(${table.gateway_provider_id}, case when ${table.route} in ('openwork_openrouter', 'openwork_free') then ${OPENWORK_MODELS_OPTION_ID} end)`
       : sql<string | null>`${table.org_membership_id}`).as("filter_id")
     // Hex encodes the exact family/model tuple, independent of DB collation,
     // configured instances, request aliases, model groups and credential sets.
     // OpenWork Models is its own family so it never merges with an organization's own providers.
-    const family = sql<string>`case when ${table.route} in ('openwork_openrouter') then ${OPENWORK_MODELS_OPTION_ID} else ${table.upstream_provider_id} end`
+    const family = sql<string>`case when ${table.route} in ('openwork_openrouter', 'openwork_free') then ${OPENWORK_MODELS_OPTION_ID} else ${table.upstream_provider_id} end`
     const seriesId = (query.groupBy === "model"
       ? sql<string>`concat('model:', hex(${family}), ':', coalesce(hex(${table.upstream_model}), '~'))`
       : sql<string>`${table.org_membership_id}`).as("series_id")
@@ -208,7 +208,7 @@ export async function readGatewayUsage(organizationId: typeof GatewayProviderTab
     totalCostMicroUsd: sql<string>`coalesce(sum(${raw.cost_micro_usd}), 0)`.as("total_cost_micro_usd"),
     unpricedRequests: sql<string | null>`count(*) - count(${raw.cost_micro_usd})`.as("unpriced_requests"),
   }).from(raw).where(and(
-    eq(raw.organization_id, organizationId), inArray(raw.route, [...USAGE_ROUTES]), isNotNull(raw.completed_at),
+    eq(raw.organization_id, organizationId), sql`${raw.route} in (${sql.join(USAGE_ROUTES.map((route) => sql`${route}`), sql`, `)})`, isNotNull(raw.completed_at),
     sql`${raw.started_at} >= from_unixtime(${fromSeconds}) and ${raw.started_at} < from_unixtime(${endSeconds})`,
     query.memberId === undefined ? undefined : sql`${raw.org_membership_id} = ${query.memberId}`,
   )).groupBy(rawDimensions.date, rawDimensions.seriesId, rawDimensions.filterId).unionAll(db.select({
@@ -224,7 +224,7 @@ export async function readGatewayUsage(organizationId: typeof GatewayProviderTab
     totalCostMicroUsd: sql<string>`coalesce(sum(${rollup.cost_micro_usd}), 0)`.as("total_cost_micro_usd"),
     unpricedRequests: sql<string | null>`case when count(${rollup.cost_count}) = count(*) then sum(${rollup.request_count}) - sum(${rollup.cost_count}) else null end`.as("unpriced_requests"),
   }).from(rollup).where(and(
-    eq(rollup.organization_id, organizationId), inArray(rollup.route, [...USAGE_ROUTES]), inArray(rollup.granularity, ["hour", "day"]),
+    eq(rollup.organization_id, organizationId), sql`${rollup.route} in (${sql.join(USAGE_ROUTES.map((route) => sql`${route}`), sql`, `)})`, inArray(rollup.granularity, ["hour", "day"]),
     sql`${rollup.bucket_start} >= from_unixtime(${fromSeconds}) and ${rollup.bucket_start} < from_unixtime(${endSeconds})`,
     query.memberId === undefined ? undefined : sql`${rollup.org_membership_id} = ${query.memberId}`,
   )).groupBy(rollupDimensions.date, rollupDimensions.seriesId, rollupDimensions.filterId)).as("usage_sources")
@@ -418,7 +418,7 @@ export async function readGatewayUsage(organizationId: typeof GatewayProviderTab
 export function registerOrgGatewayUsageRoutes<T extends { Variables: OrgRouteVariables }>(app: Hono<T>) {
   app.get("/v1/inference-providers/usage", describeRoute({
     tags: ["Inference Providers"], summary: "Read organization Gateway usage by UTC day",
-    description: "Defaults to model grouping and the last 31 UTC calendar days including today. Empty filters mean all. Counts only org_provider traffic. requestCount includes completed request records of all outcomes, including gateway rejections and interrupted requests; unreportedRequests counts records without total tokens, not just successful generations with missing usage. uncountableRequests breaks missing token totals down by outcome (ok, upstream_error, upstream_unreachable, client_aborted, rejected); individual counts are null when historical summaries cannot separate them. These diagnostic counts are separate from plotted usage. Team requestCount and uncountableRequests sum current team attributions like the other totals. Token values omit zero subtotals, and series with neither positive tokens nor positive cost are omitted. Returns tokens and stored approximate cost in integer micro-USD in the same snapshot, without repricing historical requests. totalTokens, unreportedRequests and daily values remain token-only. totalCostMicroUsd sums known stored costs; unpricedRequests counts missing cost observations, or is null when legacy rollup observation counts leave coverage unknown. Daily costValues use the same stable series IDs: zero subtotals with missing or unknown cost coverage are null, fully observed zero costs are 0, and positive recorded subtotals remain numeric even with incomplete coverage indicated by unpricedRequests. Team view attributes each active org member's usage to every distinct current team membership; members without a team are omitted. Team token, cost and missing-observation totals sum these attributions and may exceed model/person totals; cost coverage is evaluated per team/day. No teams returns emptyReason=no_teams, zero totals and missing counts, and empty daily maps without querying usage. Absent keys in a day's sparse values and costValues maps mean no usage and are zero. Limits: 100 filter IDs, 366 days, 10,000 series and 20,000 filter options; oversized results fail without truncation.",
+    description: "Defaults to model grouping and the last 31 UTC calendar days including today. Empty filters mean all. Counts org_provider, openwork_openrouter and openwork_free traffic. requestCount includes completed request records of all outcomes, including gateway rejections and interrupted requests; unreportedRequests counts records without total tokens, not just successful generations with missing usage. uncountableRequests breaks missing token totals down by outcome (ok, upstream_error, upstream_unreachable, client_aborted, rejected); individual counts are null when historical summaries cannot separate them. These diagnostic counts are separate from plotted usage. Team requestCount and uncountableRequests sum current team attributions like the other totals. Token values omit zero subtotals, and series with neither positive tokens nor positive cost are omitted. Returns tokens and stored approximate cost in integer micro-USD in the same snapshot, without repricing historical requests. totalTokens, unreportedRequests and daily values remain token-only. totalCostMicroUsd sums known stored costs; unpricedRequests counts missing cost observations, or is null when legacy rollup observation counts leave coverage unknown. Daily costValues use the same stable series IDs: zero subtotals with missing or unknown cost coverage are null, fully observed zero costs are 0, and positive recorded subtotals remain numeric even with incomplete coverage indicated by unpricedRequests. Team view attributes each active org member's usage to every distinct current team membership; members without a team are omitted. Team token, cost and missing-observation totals sum these attributions and may exceed model/person totals; cost coverage is evaluated per team/day. No teams returns emptyReason=no_teams, zero totals and missing counts, and empty daily maps without querying usage. Absent keys in a day's sparse values and costValues maps mean no usage and are zero. Limits: 100 filter IDs, 366 days, 10,000 series and 20,000 filter options; oversized results fail without truncation.",
     responses: {
       200: jsonResponse("Gateway usage", responseSchema),
       400: jsonResponse("Invalid query", invalidRequestSchema),
