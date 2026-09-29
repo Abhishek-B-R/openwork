@@ -1896,10 +1896,12 @@ export async function listConfigObjectPlugins(input: { context: PluginArchActorC
 
 export async function attachConfigObjectToPlugin(input: { context: PluginArchActorContext; configObjectId: ConfigObjectId; membershipSource?: PluginMembershipRow["membershipSource"]; pluginId: PluginId }) {
   const configObject = await ensureVisibleConfigObject(input.context, input.configObjectId)
-  if (configObject.objectType === "workflow" || configObject.objectType === "script" || configObject.objectType === "app") {
-    // Adding a Workflow to a Plugin can expand its audience through Plugin and
-    // Marketplace grants, so only a Workflow manager may make that sharing
-    // decision. Other config-object membership behavior stays compatible.
+  const authoredApp = configObject.objectType === "app"
+    && isAuthoredMcpAppVersion((await getLatestVersions([configObject.id])).get(configObject.id) ?? {})
+  if (configObject.objectType === "workflow" || configObject.objectType === "script" || authoredApp) {
+    // Adding a Workflow or authored App to a Plugin can expand its audience
+    // through Plugin and Marketplace grants, so its manager makes that sharing
+    // decision. Legacy imported Apps keep their existing membership behavior.
     await requirePluginArchResourceRole({
       context: input.context,
       resourceId: configObject.id,

@@ -404,6 +404,9 @@ test("a dashboard element that opens an App built in OpenWork follows the App to
   const patched = await request(`/v1/dashboards/${board.id}`, { method: "PATCH", body: JSON.stringify({ name: "Pricing board v2" }) })
   expect((await patched.json() as { item: { elements: unknown[] } }).item.elements).toEqual(current)
 
+  const disabled = await request(`/v1/dashboards/${board.id}`, { appsEnabled: false })
+  expect((await disabled.json() as { item: { elements: unknown[] } }).item.elements).toEqual([readOnlyElement, builtAppElement(firstRevisionId), notALaunch])
+
   // An archived App keeps its stored element, which the desktop then shows as unavailable.
   await db.update(ConfigObjectTable).set({ status: "archived" }).where(eq(ConfigObjectTable.id, builtAppId))
   const archived = await request(`/v1/dashboards/${board.id}`)

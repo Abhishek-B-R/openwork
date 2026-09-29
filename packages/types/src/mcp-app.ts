@@ -169,11 +169,12 @@ export function parseMcpAppResourceUri(uri: string): { appId: string; revisionId
 
 /**
  * The resource's identity across revisions: every revision of an App built in
- * OpenWork is the same App, so its revision is dropped. Other URIs are kept whole.
+ * OpenWork is the same App, so its revision is dropped only when the launch
+ * connection is that App. Connected-provider resources keep their exact URI.
  */
-export function mcpAppResourceIdentity(uri: string): string {
+export function mcpAppResourceIdentity(uri: string, connectionId?: string): string {
   const app = parseMcpAppResourceUri(uri)
-  return app ? `ui://openwork/apps/${app.appId}` : uri
+  return app && connectionId === app.appId ? `ui://openwork/apps/${app.appId}` : uri
 }
 
 export function isAuthoredMcpAppVersion(value: {

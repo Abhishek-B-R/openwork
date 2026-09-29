@@ -255,7 +255,7 @@ const appUrl = publicUrl(String(result.mcpUrl));
 const connectUrl = appUrl.replace(/\/connections\/[^/]+$/u, "");
 const denOrigin = isRecord(access?.origins) && typeof access.origins.den === "string" ? access.origins.den : denWeb;
 const cookie = typeof access?.token === "string" ? `__Host-openwork-preview=${access.token}` : null;
-const headers = [`Authorization: Bearer ${mcpToken}`, ...(cookie ? [`Cookie: ${cookie}`] : [])];
+const headers = ["Authorization: Bearer $OPENWORK_MCP_TOKEN", ...(cookie ? ["Cookie: __Host-openwork-preview=$OPENWORK_PREVIEW_TOKEN"] : [])];
 const headerFlags = headers.map((header) => `--header "${header}"`).join(" ");
 
 console.log(JSON.stringify({
@@ -263,7 +263,7 @@ console.log(JSON.stringify({
   appMcpUrl: appUrl,
   connectMcpUrl: connectUrl,
   pluginPage: `${denOrigin}/dashboard/library/plugins/${String(app.pluginId)}`,
-  signIn: { email, password },
+  signIn: { email },
   headers,
   claudeCode: {
     app: `claude mcp add --transport http order-calculator ${appUrl} ${headerFlags}`,

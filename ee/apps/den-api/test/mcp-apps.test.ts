@@ -312,6 +312,19 @@ describe.skipIf(!process.env.DEN_TEST_DATABASE_URL)("authored MCP Apps with isol
     await expect(apps.loadMcpAppResource({ ...access(viewer), ...ids(app) })).rejects.toThrow("not available")
   })
 
+  test("legacy imported Apps keep viewer attachment to an owned Plugin", async () => {
+    const context = await actor()
+    const viewer = await actor(access(context).organizationId)
+    const original = await store.createPlugin({ context, name: "Legacy App source" })
+    const legacy = await store.createConfigObject({ context, pluginId: original.id, objectType: "app", sourceMode: "import",
+      value: { title: "Legacy App", schemaVersion: "openwork.remote-mcp-app-installation/1", normalizedPayloadJson: { kind: "remote_mcp_app" }, rawSourceText: "legacy source" } })
+    await db.insert(PluginAccessGrantTable).values({ id: createDenTypeId("pluginAccessGrant"),
+      organizationId: access(context).organizationId, pluginId: original.id,
+      orgMembershipId: access(viewer).member.orgMembershipId, role: "viewer", createdByOrgMembershipId: access(context).member.orgMembershipId })
+    const owned = await store.createPlugin({ context: viewer, name: "Legacy App destination" })
+    await expect(store.attachConfigObjectToPlugin({ context: viewer, configObjectId: legacy.id, pluginId: owned.id })).resolves.toBeDefined()
+  })
+
   test("App managers can attach existing Apps without creating an ownership dependency or duplicate launch", async () => {
     const context = await actor()
     const viewer = await actor(access(context).organizationId)

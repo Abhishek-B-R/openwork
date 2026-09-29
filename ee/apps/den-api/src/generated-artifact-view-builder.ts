@@ -134,8 +134,10 @@ async function sourcePolicyDiagnostic(reactSource: string, cssSource: string, ru
     mcpApp
       ? { pattern: AUTHORED_MODULE_PATTERN, label: "module imports or reexports" }
       : { pattern: ARTIFACT_MODULE_PATTERN, label: "module imports" },
-    { pattern: /@jsx(?:Runtime|ImportSource|Frag)?\b/u, label: "JSX compiler directives" },
-    { pattern: /\b__openworkSafeReact\b/u, label: "reserved compiler bindings" },
+    ...(mcpApp ? [
+      { pattern: /@jsx(?:Runtime|ImportSource|Frag)?\b/u, label: "JSX compiler directives" },
+      { pattern: /\b__openworkSafeReact\b/u, label: "reserved compiler bindings" },
+    ] : []),
     ...(mcpApp ? [] : [{ pattern: /\b(?:fetch|XMLHttpRequest|WebSocket|EventSource|Worker)\b/u, label: "network APIs" }]),
     { pattern: /\b(?:eval|Function|setTimeout|setInterval)\s*\(/u, label: "dynamic code or timers" },
     { pattern: /dangerouslySetInnerHTML/u, label: "dangerous HTML injection" },
@@ -173,7 +175,7 @@ async function sourcePolicyDiagnostic(reactSource: string, cssSource: string, ru
   if (mcpApp && AUTHORED_MODULE_PATTERN.test(scopeAnalyzedSource)) {
     return diagnostic(`Generated ${subject} cannot use module imports or reexports.`)
   }
-  if (scopeAnalyzedSource.includes(SAFE_REACT_FACTORY)) {
+  if (mcpApp && scopeAnalyzedSource.includes(SAFE_REACT_FACTORY)) {
     return diagnostic(`Generated ${subject} cannot use reserved compiler bindings.`)
   }
   const hostGlobal = HOST_GLOBAL_NAMES.find((_, index) =>
@@ -200,7 +202,8 @@ async function sourcePolicyDiagnostic(reactSource: string, cssSource: string, ru
   return null
 }
 
-const SAFE_REACT_PREAMBLE = `
+function safeReactPreamble(mcpApp: boolean): string {
+  return `
 const blockedArtifactElementNames = new Set(["script", "iframe", "object", "embed", "form", "base", "link", "meta", "style", "svg", "math"]);
 const blockedArtifactPropNames = new Set(["dangerouslysetinnerhtml", "href", "src", "srcset", "action", "formaction", "poster", "ping", "cite", "data", "xlinkhref"]);
 function assertSafeArtifactElement(type, props) {
@@ -215,33 +218,39 @@ function assertSafeArtifactElement(type, props) {
   }
 }
 function createSafeArtifactReact(baseReact) {
-  return Object.freeze(Object.assign({}, baseReact, {
+  const safeReact = Object.assign({}, baseReact, {
     createElement(type, props, ...children) {
       assertSafeArtifactElement(type, props);
       return baseReact.createElement(type, props, ...children);
     },
-  }));
+  });
+  return ${mcpApp ? "Object.freeze(safeReact)" : "safeReact"};
 }
 `
+}
 
-function generatedArtifactPlugin(reactSource: string): Plugin {
+function generatedArtifactPlugin(reactSource: string, runtime: "artifact" | "mcp-app"): Plugin {
+  const mcpApp = runtime === "mcp-app"
   return {
     name: "generated-artifact-view",
     setup(pluginBuild) {
-      pluginBuild.onResolve({ filter: /.*/, namespace: "generated-artifact" }, (args) => {
+      if (mcpApp) pluginBuild.onResolve({ filter: /.*/, namespace: "generated-artifact" }, (args) => {
         if (args.path === "artifact:safe-react" && args.kind === "import-statement") {
           return { path: args.path, namespace: "generated-artifact-runtime" }
         }
         return { errors: [{ text: "Generated source cannot use module imports or reexports." }] }
       })
+      if (!mcpApp) pluginBuild.onResolve({ filter: /^artifact:safe-react$/ }, () => ({ path: "artifact:safe-react", namespace: "generated-artifact-runtime" }))
       pluginBuild.onResolve({ filter: /^artifact:view$/ }, () => ({ path: "artifact:view", namespace: "generated-artifact" }))
       pluginBuild.onLoad({ filter: /.*/, namespace: "generated-artifact" }, () => ({
-        contents: `import ${SAFE_REACT_FACTORY} from "artifact:safe-react";\nconst React = ${SAFE_REACT_FACTORY};\n${reactSource}`,
+        contents: mcpApp
+          ? `import ${SAFE_REACT_FACTORY} from "artifact:safe-react";\nconst React = ${SAFE_REACT_FACTORY};\n${reactSource}`
+          : `import React from "artifact:safe-react";\n${reactSource}`,
         loader: "tsx",
         resolveDir: process.cwd(),
       }))
       pluginBuild.onLoad({ filter: /.*/, namespace: "generated-artifact-runtime" }, () => ({
-        contents: `import BaseReact from "react";\n${SAFE_REACT_PREAMBLE}\nexport default createSafeArtifactReact(BaseReact);`,
+        contents: `import BaseReact from "react";\n${safeReactPreamble(mcpApp)}\nexport default createSafeArtifactReact(BaseReact);`,
         loader: "js",
         resolveDir: process.cwd(),
       }))
@@ -328,10 +337,10 @@ async function buildClientBundle(reactSource: string, runtime: "artifact" | "mcp
     format: "iife",
     platform: "browser",
     target: ["es2022"],
-    jsx: "transform",
-    jsxFactory: `${SAFE_REACT_FACTORY}.createElement`,
-    jsxFragment: `${SAFE_REACT_FACTORY}.Fragment`,
-    tsconfigRaw: { compilerOptions: { jsx: "react" } },
+    jsx: runtime === "mcp-app" ? "transform" : undefined,
+    jsxFactory: runtime === "mcp-app" ? `${SAFE_REACT_FACTORY}.createElement` : undefined,
+    jsxFragment: runtime === "mcp-app" ? `${SAFE_REACT_FACTORY}.Fragment` : undefined,
+    tsconfigRaw: runtime === "mcp-app" ? { compilerOptions: { jsx: "react" } } : undefined,
     minify: true,
     legalComments: "none",
     define: { "process.env.NODE_ENV": '"production"' },
@@ -340,7 +349,7 @@ async function buildClientBundle(reactSource: string, runtime: "artifact" | "mcp
       react: reactPackageRoot,
       "react-dom": reactDomPackageRoot,
     },
-    plugins: [generatedArtifactPlugin(reactSource)],
+    plugins: [generatedArtifactPlugin(reactSource, runtime)],
   })
   const javascript = result.outputFiles[0]?.text
   if (!javascript) throw new Error("The React client bundle was empty.")

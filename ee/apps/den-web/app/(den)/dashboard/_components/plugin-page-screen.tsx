@@ -46,7 +46,7 @@ function thingsLabel(count: number): string {
   return count === 1 ? "1 thing" : `${count} things`;
 }
 
-export function WhatsInside({ plugin }: { plugin: DenPlugin }) {
+export function WhatsInside({ plugin, appMcpServersEnabled = false }: { plugin: DenPlugin; appMcpServersEnabled?: boolean }) {
   const rows = [
     ...plugin.authoredApps.map((app) => ({
       key: `app:${app.id}`,
@@ -54,7 +54,7 @@ export function WhatsInside({ plugin }: { plugin: DenPlugin }) {
       title: app.name,
       description: "",
       kind: "App",
-      href: pluginChatDeepLink({ name: `the ${app.name} app from ${plugin.name}` }),
+      href: appMcpServersEnabled ? pluginChatDeepLink({ name: `the ${app.name} app from ${plugin.name}` }) : undefined,
     })),
     ...plugin.skills.map((skill) => ({
       key: `skill:${skill.id}`,
@@ -256,7 +256,7 @@ function PluginPage({ pluginId, mode, libraryItems }: { pluginId: string; mode: 
         </section>
       ) : null}
 
-      <WhatsInside plugin={data} />
+      <WhatsInside plugin={data} appMcpServersEnabled={orgContext?.capabilities.appMcpServers === true} />
       <AppMcpServers plugin={data} />
 
       {mode === "member" ? (

@@ -124,7 +124,7 @@ function launchArgumentsSignature(argumentsValue: Record<string, unknown>) {
 // A new revision of an App built in OpenWork keeps the tile mounted at its size;
 // the launch effect then opens the new revision in place.
 function dashboardEntryIdentity(entry: DashboardMcpAppEntry, signature: string) {
-  return JSON.stringify([entry.id, entry.connectionId, entry.serverName, entry.toolName, mcpAppResourceIdentity(entry.resourceUri), entry.projectedToolName, signature]);
+  return JSON.stringify([entry.id, entry.connectionId, entry.serverName, entry.toolName, mcpAppResourceIdentity(entry.resourceUri, entry.connectionId), entry.projectedToolName, signature]);
 }
 
 /** The same workspace on the same server keeps its live view when the route rebuilds its client object. */

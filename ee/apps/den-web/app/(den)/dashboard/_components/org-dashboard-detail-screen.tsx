@@ -295,7 +295,7 @@ function AddDashboardAppDialog({
   );
   const appsQuery = useConnectionMcpAppCatalog(connections);
   const builtAppsQuery = useBuiltMcpAppCatalog();
-  const builtApps = builtAppsQuery.data ?? [];
+  const builtApps = builtAppsOffered ? builtAppsQuery.data ?? [] : [];
   const appConnections = useMemo(
     () => filterConnectionsWithMcpApps(connections, appsQuery.data),
     [appsQuery.data, connections],

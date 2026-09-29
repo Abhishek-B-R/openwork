@@ -1294,6 +1294,7 @@ function MessageGroup({
 
   const renderableItems = getRenderableMessages(items)
   const lastTextMessage = getLastTextPart(lastItem.message)
+  const mcpAppParts = collectMcpAppParts(items)
 
   // Leading messages without prose (tool/reasoning steps) render inline and
   // rely on the transcript's one scroll container. Tool activity must never
@@ -1315,11 +1316,6 @@ function MessageGroup({
       proseItems = [{ index: firstProse.index, message: split.answer }, ...proseItems.slice(1)]
     }
   }
-  // An App opened during the leading steps shows right after them, so it stays
-  // visible when they fold. One opened after the answer began shows right after
-  // the message that opened it, never above prose written before it.
-  const stepAppParts = collectMcpAppParts(stepItems)
-  const placedApps = new Set(stepAppParts.map((part) => part.toolCallId))
   const appFrame = (part: DynamicToolUIPart) => (
     <Message
       key={`mcp-app-${part.toolCallId}`}
@@ -1330,12 +1326,6 @@ function MessageGroup({
         : <McpAppFrame part={part} />}
     </Message>
   )
-  const appFramesAfter = (item: UIMessageWithIndex) => collectMcpAppParts([item]).flatMap((part) => {
-    if (placedApps.has(part.toolCallId)) return []
-    placedApps.add(part.toolCallId)
-    return [appFrame(part)]
-  })
-
   // How long the turn spent working, from the first step to when the answer
   // finished (or started, for older history without a completed timestamp).
   // Server timestamps, so this survives a reload.
@@ -1406,7 +1396,7 @@ function MessageGroup({
   // Consecutive step messages that contain nothing but command/edit/read/
   // search tool calls merge into one aggregate line (Paper "Recurring
   // actions"); any prose, reasoning, or other tool breaks the run.
-  const renderItems = (slice: UIMessageWithIndex[], offset: number, hideReasoning?: boolean, withApps?: boolean) => {
+  const renderItems = (slice: UIMessageWithIndex[], offset: number, hideReasoning?: boolean) => {
     const nodes: React.ReactNode[] = []
     let run: { parts: AnyToolPart[]; key: string } | null = null
     const flush = () => {
@@ -1432,8 +1422,6 @@ function MessageGroup({
       }
       flush()
       nodes.push(renderItem(item, offset + sliceIndex, hideReasoning))
-      // App tool calls never aggregate, so their frames follow their own message.
-      if (withApps) nodes.push(...appFramesAfter(item))
     })
     flush()
     return nodes
@@ -1460,9 +1448,8 @@ function MessageGroup({
           </LiveSteps>
         )
       ) : null}
-      {/* One keyed list, so a frame keeps its node when streaming moves the
-          step/answer boundary past it; moving an iframe would reload the App. */}
-      {[...stepAppParts.map(appFrame), ...renderItems(proseItems, stepItems.length, collapseSteps, true)]}
+      {mcpAppParts.map(appFrame)}
+      {renderItems(proseItems, stepItems.length, collapseSteps)}
       {lastTextMessage && !isStreaming && (
         <div className={cn("mx-auto flex w-full max-w-3xl flex-wrap items-center gap-2 px-2 transition-opacity duration-150 group-hover/message-group:opacity-100 max-lg:opacity-100 pointer-coarse:opacity-100 md:px-8", forkingMessageId && forkingMessageId === lastRealItem?.message.id ? "opacity-100" : "opacity-0")}>
           <MessageActions className="flex gap-0">

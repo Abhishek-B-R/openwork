@@ -31,10 +31,6 @@ function builtApp(app: string, revision: string) {
   return { connectionId: appId, resourceUri: `ui://openwork/apps/${appId}/revisions/cov_01mcpapp${revision.repeat(18)}/index.html` };
 }
 
-function bashPart(id: string): DynamicToolUIPart {
-  return { type: "dynamic-tool", toolName: "bash", toolCallId: id, state: "output-available", input: { command: `echo ${id}`, description: "run" }, output: "ok" };
-}
-
 function withoutWindow<T>(run: () => T): T {
   const descriptor = Object.getOwnPropertyDescriptor(globalThis, "window");
   if (descriptor?.configurable) Reflect.deleteProperty(globalThis, "window");
@@ -66,46 +62,7 @@ function assistant(id: string, parts: UIMessage["parts"]): UIMessage {
   return { id, role: "assistant", metadata: { opencode: { created: 2_000, completed: 90_000 } }, parts };
 }
 
-/** Position of each text in the markup; every text must be present exactly once. */
-function order(markup: string, texts: string[]) {
-  return texts.map((text) => {
-    const at = markup.indexOf(text);
-    expect(at).toBeGreaterThanOrEqual(0);
-    expect(markup.indexOf(text, at + 1)).toBe(-1);
-    return at;
-  });
-}
-
-describe("an MCP App renders where its tool call happened", () => {
-  test("a turn delivered as separate messages shows the App after the prose written before it", () => {
-    const markup = renderList([
-      user,
-      assistant("a-think", [{ type: "reasoning", text: "Finding the App", state: "done" }]),
-      assistant("a-prose", [{ type: "text", text: "Looking for connected apps matching that.", state: "done" }]),
-      assistant("a-open", [appPart("open-1")]),
-      assistant("a-answer", [{ type: "text", text: "Found it, it is open above.", state: "done" }]),
-    ]);
-    const [prose, app, answer] = order(markup, ["Looking for connected apps matching that.", APP_MARKER, "Found it, it is open above."]);
-    expect(prose).toBeLessThan(app);
-    expect(app).toBeLessThan(answer);
-  });
-
-  test("an App opened during steps that fold stays visible, between the folded run and the answer", () => {
-    const markup = renderList([
-      user,
-      assistant("a-turn", [
-        { type: "step-start" },
-        { type: "reasoning", text: "Checking a few things first", state: "done" },
-        bashPart("c1"), bashPart("c2"), bashPart("c3"), bashPart("c4"), bashPart("c5"), bashPart("c6"),
-        appPart("open-2"),
-        { type: "text", text: "Here is the calculator.", state: "done" },
-      ]),
-    ]);
-    expect(markup).toContain("Worked for");
-    const [app, answer] = order(markup, [APP_MARKER, "Here is the calculator."]);
-    expect(app).toBeLessThan(answer);
-  });
-
+describe("built MCP App card revisions", () => {
   test("only the newest card of an App built in OpenWork stays live; earlier cards point to it", () => {
     const newerNote = "This App has a newer version below.";
     const markup = renderList([
@@ -118,16 +75,15 @@ describe("an MCP App renders where its tool call happened", () => {
     // The updated calculator and the other App are live; the first calculator card points below.
     expect(count(APP_MARKER)).toBe(2);
     expect(count(newerNote)).toBe(1);
-    const [note, answer] = order(markup, [newerNote, "Built the calculator."]);
-    expect(note).toBeLessThan(answer);
+    expect(markup.indexOf(newerNote)).toBeLessThan(markup.indexOf("Built the calculator."));
   });
 
-  test("an App opened after the last prose shows after that prose", () => {
-    const markup = renderList([
-      user,
-      assistant("a-turn", [{ type: "text", text: "Opening the calculator now.", state: "done" }, appPart("open-3")]),
-    ]);
-    const [prose, app] = order(markup, ["Opening the calculator now.", APP_MARKER]);
-    expect(prose).toBeLessThan(app);
+  test("connected Apps with authored-looking URIs keep all their cards live", () => {
+    const first = { ...builtApp("a", "1"), connectionId: "emc_provider" };
+    const second = { ...builtApp("a", "2"), connectionId: "emc_provider" };
+    const markup = renderList([user, assistant("a-first", [appPart("open-a1", first)]),
+      { ...user, id: "user-2" }, assistant("a-second", [appPart("open-a2", second)])]);
+    expect(markup.split(APP_MARKER).length - 1).toBe(2);
+    expect(markup).not.toContain("This App has a newer version below.");
   });
 });

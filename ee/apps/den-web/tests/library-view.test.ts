@@ -181,12 +181,15 @@ describe("authored Apps inside Plugins", () => {
 
   test("renders an App title and badge with the existing chat handoff, never source or a renderer", () => {
     const plugin = pluginWith(contents({ ...app, reactSource: "private-react-source", cssSource: "private-css-source", html: "private-compiled-html", sourceUrl: "https://example.test/private-source" }, "app", "private-raw-source"));
-    const html = renderToStaticMarkup(createElement(WhatsInside, { plugin }));
+    const html = renderToStaticMarkup(createElement(WhatsInside, { plugin, appMcpServersEnabled: true }));
     expect(html).toContain("Planning board");
     expect(html).toContain(">App</span>");
     expect(html).toContain("1 thing");
     expect(html).not.toContain("Nothing inside yet");
     expect(html).toContain(pluginChatDeepLink({ name: "the Planning board app from Planning kit" }));
+    const disabled = renderToStaticMarkup(createElement(WhatsInside, { plugin, appMcpServersEnabled: false }));
+    expect(disabled).toContain("Planning board");
+    expect(disabled).not.toContain(pluginChatDeepLink({ name: "the Planning board app from Planning kit" }));
     for (const hidden of ["private-", app.resourceUri, app.toolName, "iframe", "Install", "Grant access"]) {
       expect(html).not.toContain(hidden);
       expect(JSON.stringify(plugin.authoredApps)).not.toContain(hidden);

@@ -842,8 +842,10 @@ describe("MCP Apps host transport", () => {
     const app = `cob_01mcpapp${"a".repeat(18)}`;
     const other = `cob_01mcpapp${"b".repeat(18)}`;
     const [first, second] = [`cov_01mcpapp${"1".repeat(18)}`, `cov_01mcpapp${"2".repeat(18)}`];
-    expect(advertisesLaunchedResource(revision(app, first), revision(app, second))).toBe(true);
-    expect(advertisesLaunchedResource(revision(app, first), revision(other, second))).toBe(false);
+    expect(advertisesLaunchedResource(revision(app, first), revision(app, second), app)).toBe(true);
+    expect(advertisesLaunchedResource(revision(app, first), revision(app, second), "emc_provider")).toBe(false);
+    expect(advertisesLaunchedResource(revision(app, first), revision(app, second))).toBe(false);
+    expect(advertisesLaunchedResource(revision(app, first), revision(other, second), app)).toBe(false);
     // Every other MCP App still has to match exactly.
     expect(advertisesLaunchedResource(RESOURCE_URI, UPDATED_RESOURCE_URI)).toBe(false);
     expect(advertisesLaunchedResource(RESOURCE_URI, RESOURCE_URI)).toBe(true);

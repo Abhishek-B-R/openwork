@@ -52,6 +52,8 @@ describe("grantedEntryId", () => {
     };
     const updated = { ...built, resourceUri: revision(app, `cov_01mcpapp${"2".repeat(18)}`) };
     expect(grantedEntryId("dsb_1", updated)).toBe(grantedEntryId("dsb_1", built));
+    // A provider using the same URI shape keeps exact resource consent.
+    expect(grantedEntryId("dsb_1", { ...updated, connectionId: "emc_provider" })).not.toBe(grantedEntryId("dsb_1", { ...built, connectionId: "emc_provider" }));
     const other = `cob_01mcpapp${"b".repeat(18)}`;
     expect(grantedEntryId("dsb_1", { ...built, resourceUri: revision(other, `cov_01mcpapp${"2".repeat(18)}`) })).not.toBe(grantedEntryId("dsb_1", built));
     expect(grantedEntryId("dsb_1", { ...updated, connectionId: other })).not.toBe(grantedEntryId("dsb_1", built));

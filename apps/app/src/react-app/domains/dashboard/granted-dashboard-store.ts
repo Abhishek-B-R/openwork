@@ -72,7 +72,7 @@ export function grantedEntryId(dashboardId: string, element: DenDashboardElement
     connectionId: element.connectionId ?? null,
     toolName: element.toolName,
     projectedToolName: element.projectedToolName,
-    resourceUri: mcpAppResourceIdentity(element.resourceUri),
+    resourceUri: mcpAppResourceIdentity(element.resourceUri, element.connectionId),
     launchArguments: element.launchArguments ?? null,
     requiresApproval: element.requiresApproval === true,
     organizationAutoLaunch: element.organizationAutoLaunch === true,

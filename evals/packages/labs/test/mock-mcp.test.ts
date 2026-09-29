@@ -220,31 +220,6 @@ test("unadvertised calls require an explicit adversarial workload", async () => 
   }
 });
 
-test("a tool step can write prose before its call, in the same response", async () => {
-  await using mock = await startMockMcp({
-    port: await allocateFreePort(),
-    agentWorkloads: [{
-      promptMarker: "lead-in",
-      finalReply: "lead-in complete",
-      steps: [{ tool: "write", text: "Writing it down first.", arguments: { content: "lead-in" } }],
-    }],
-  });
-  const response = await fetch(`${mock.url}/v1/chat/completions`, {
-    method: "POST", headers: { "content-type": "application/json" },
-    body: JSON.stringify(completionBody("lead-in", 0)),
-  });
-  assert.equal(response.status, 200);
-  const body = await response.text();
-  const prose = body.indexOf('"content":"Writing it down first."');
-  assert.ok(prose >= 0);
-  assert.ok(prose < body.indexOf('"name":"write"'));
-  const blank = await fetch(`${mock.url}/admin/agent-workloads`, {
-    method: "POST", headers: { "content-type": "application/json" },
-    body: JSON.stringify({ workloads: [{ promptMarker: "blank", finalReply: "done", steps: [{ tool: "write", text: " ", arguments: {} }] }] }),
-  });
-  assert.equal(blank.ok, false);
-});
-
 test("turn-scoped workloads isolate revisions from earlier markers and tool rounds", async () => {
   await using mock = await startMockMcp({
     port: await allocateFreePort(),

@@ -158,7 +158,6 @@ beforeAll(async () => {
   registry = await import("../src/mcp/capability-registry.js")
   spyOn(registry, "searchCapabilityRegistry").mockImplementation(async () => ({
     matches: [
-      ...(current ? [{ name: `plugin:${pluginId}:${appId}`, method: "MCP", path: "", score: 10, summary: source.title, pathParams: [], queryParams: [], hasBody: false, kind: "app" }] : []),
       { name: `plugin:${pluginId}:${otherAppId}`, method: "MCP", path: "", score: 1, summary: "Project workflow", pathParams: [], queryParams: [], hasBody: true, kind: "workflow" },
     ],
   }))
@@ -269,6 +268,10 @@ test("create_app builds an App that opens in OpenWork and names its own MCP serv
     // The authoring rules reach the model once, in create_app, not again in update_app or the instructions.
     const description = (name: string) => tools.find((tool) => tool.name === name)?.description ?? ""
     expect(description("create_app")).toContain("app.callServerTool")
+    expect(client.getInstructions()).toContain("call create_app directly")
+    expect(client.getInstructions()).toContain("no saved Workflow, output schema, or Automation is required")
+    expect(client.getInstructions()).toContain("a local calculator can have no tools")
+    expect(client.getInstructions()).toContain("call read_app with its appId")
     expect(description("update_app")).toContain("following create_app's rules")
     for (const text of [description("update_app"), client.getInstructions() ?? ""]) expect(text).not.toContain("app.callServerTool")
 
@@ -534,8 +537,13 @@ test("with building Apps off for the deployment or the organization, Connect kee
   }
   for (const off of Object.values(turnOff)) {
     off()
-    useMarketplaceFixture = false
+    useMarketplaceFixture = true
     try {
+      expect(await marketplace.searchMarketplaceCapabilities({ organizationId, member, query: "project", enabled: true })).toEqual([])
+      const authoredVersion = version
+      version = { schemaVersion: "openwork.remote-mcp-app-installation/1", normalizedPayloadJson: { kind: "remote_mcp_app" }, rawSourceText: "legacy-definition" }
+      expect(await marketplace.searchMarketplaceCapabilities({ organizationId, member, query: "project", enabled: true })).toEqual([expect.objectContaining({ name: `plugin:${pluginId}:${appId}`, kind: "app" })])
+      version = authoredVersion
       await withClient("/mcp/agent", async (client) => {
         const names = (await client.listTools()).tools.map((tool) => tool.name)
         for (const builder of ["create_app", "update_app", "read_app"]) expect(names).not.toContain(builder)
@@ -550,6 +558,7 @@ test("with building Apps off for the deployment or the organization, Connect kee
         const text = index.contents[0] && "text" in index.contents[0] ? index.contents[0].text : "{}"
         expect(JSON.parse(text).servers).toEqual([])
         const search = await client.callTool({ name: "search_capabilities", arguments: { query: "project" } })
+        expect(JSON.stringify(search.structuredContent)).not.toContain(appId)
         expect(JSON.stringify(search.structuredContent)).not.toContain('"kind":"mcp_app"')
       })
       await expect(withClient(appSummary.serverPath, async () => undefined)).rejects.toThrow()

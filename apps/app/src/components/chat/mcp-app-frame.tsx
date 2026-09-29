@@ -140,10 +140,11 @@ export function hasPreservedMcpAppResult(part: DynamicToolUIPart): boolean {
   return preservedResult(part) !== null
 }
 
-/** The App built in OpenWork this card opens, read from its launch's revision URI. */
+/** An authored App launch must identify the App as both its connection and resource. */
 export function builtMcpAppId(part: DynamicToolUIPart): string | null {
   const launch = gatewayMcpAppLaunch(preservedResult(part)?._meta)
-  return launch ? parseMcpAppResourceUri(launch.resourceUri)?.appId ?? null : null
+  const app = launch ? parseMcpAppResourceUri(launch.resourceUri) : null
+  return app && launch?.connectionId === app.appId && launch.toolName === "open_app" ? app.appId : null
 }
 
 export function gatewayMcpAppLaunch(meta: unknown): OpenworkMcpAppLaunchReference | null {

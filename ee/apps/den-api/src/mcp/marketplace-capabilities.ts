@@ -779,7 +779,6 @@ async function exactVersion(configObjectId: ConfigObjectId, organizationId: Orga
     eq(ConfigObjectVersionTable.id, normalizedVersionId),
     eq(ConfigObjectVersionTable.configObjectId, configObjectId),
     eq(ConfigObjectVersionTable.organizationId, organizationId),
-    eq(ConfigObjectVersionTable.isDeletedVersion, false),
   )).limit(1)
   return rows[0] ?? null
 }
@@ -1468,6 +1467,12 @@ export async function searchMarketplaceCapabilities(input: {
     if (input.objectTypes && !input.objectTypes.includes(objectType)) continue
     const score = scoreMarketplaceRow(row, queryTokens)
     if (score <= 0) continue
+    // Authored Apps are exposed only by the rollout-gated App search, never
+    // as generic Plugin capabilities (including after the rollout is disabled).
+    if (objectType === "app") {
+      const version = await latestVersion(row.configObject.id, organizationId)
+      if (version && isAuthoredMcpAppVersion(version)) continue
+    }
     const name = buildMarketplaceCapabilityName(row.plugin.id, row.configObject.id)
     if (matchesByName.has(name)) continue
     const match: MarketplaceCapabilityMatch = {

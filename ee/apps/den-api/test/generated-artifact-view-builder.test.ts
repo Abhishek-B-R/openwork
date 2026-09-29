@@ -167,6 +167,9 @@ test("keeps building Workflow-bound view sources that built before Apps had stri
     [view("const summary = 'This step is important, so review it. 12 rows imported from Gmail.';"), ""],
     [view(""), "/* Styles need no @import here. */ p { color: navy; }"],
     [view(""), "p { background: URL(local.png); }"],
+    ["/** @jsx React.createElement */\n" + view(""), ""],
+    [view("const __openworkSafeReact = 1;"), ""],
+    [view("React.legacyMarker = true;"), ""],
   ]) {
     const result = await buildGeneratedArtifactView({ title: "Legacy view", description: null, outputSchema: schema, reactSource, cssSource })
     expect(result.diagnostics).toEqual([])
