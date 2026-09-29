@@ -961,6 +961,24 @@ body.is-resizing-panel * {
   background: var(--color-spark);
   color: #fff;
 }
+/* The person's own words, rendered: links, code and quotes stay readable on the blue bubble. */
+.bubble-user .coworker-markdown {
+  color: #fff;
+}
+.bubble-user .coworker-markdown a {
+  color: #fff;
+  text-decoration: underline;
+  text-decoration-color: rgb(255 255 255 / 0.6);
+  text-underline-offset: 2px;
+}
+.bubble-user .coworker-markdown :is(code, pre) {
+  background: rgb(0 0 0 / 0.18);
+  color: #fff;
+}
+.bubble-user .coworker-markdown blockquote {
+  border-color: rgb(255 255 255 / 0.45);
+  color: rgb(255 255 255 / 0.9);
+}
 .bubble-coworker {
   background: var(--color-panel-2);
   color: var(--color-snow);

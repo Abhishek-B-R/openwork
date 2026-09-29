@@ -126,6 +126,7 @@ import { MessageReactions, useMessageReactions } from "@/ui/message-reactions";
 import { ReplyReferences } from "@/ui/reply-references";
 import { linkDocumentMentions, type DocumentReference } from "@/lib/message-references";
 import { isLiveWorker, linkWorkerMentions } from "@/lib/workers";
+import { Markdown } from "@/ui/markdown";
 import { DocumentCard } from "@/ui/documents";
 import { documentCardsFromCalls, isDocumentTool, shouldFoldReply, splitReplyLead, type DocumentCardData } from "@/lib/documents";
 import { connectCardsFromCalls, type ConnectCardData } from "@/lib/connect-cards";
@@ -975,7 +976,7 @@ function DiscussionWelcome({
       <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-8 pt-[calc(var(--conversation-top,0px)+2rem)]">
         {problem ? <WorkspaceProblemNote problem={problem} onRetry={onRetry} /> : null}
         {startingMessage ? <div className="space-y-3">
-          <article className="flex flex-col items-end" data-message-role="user"><div className="bubble bubble-user max-w-[min(72%,30rem)] whitespace-pre-wrap bubble-tail-right">{startingMessage.value.text}</div></article>
+          <article className="flex flex-col items-end" data-message-role="user"><div className="bubble bubble-user max-w-[min(72%,30rem)] bubble-tail-right"><Markdown text={startingMessage.value.text} /></div></article>
           <LiveRow coworker={coworker} phase="sending" />
         </div> : !problem ? <QuietEmptyConversation coworker={coworker} warmingUp={warmingUp} proposerName={proposerName} /> : null}
       </div>
@@ -3065,8 +3066,8 @@ const MessageBubble = memo(function MessageBubble({
         <article className={`flex flex-col items-end ${continued ? "-mt-1.5" : ""}`} data-message-role="user" data-message-id={message.id} data-passed-from={passed.from}>
           <p className="mb-0.5 pr-1 text-[10.5px] font-semibold uppercase tracking-[0.12em] text-mist/80" data-testid="coworker-passed-from">Passed from {passed.from}</p>
           <div className={`relative max-w-[min(72%,30rem)] ${reactions?.length ? "mt-5" : ""}`}>
-            <div className={`bubble bubble-user whitespace-pre-wrap ${tail ? "bubble-tail-right" : ""}`} title={message.createdAt ? new Date(message.createdAt).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }) : undefined}>
-              {passed.message}
+            <div className={`bubble bubble-user ${tail ? "bubble-tail-right" : ""}`} title={message.createdAt ? new Date(message.createdAt).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }) : undefined}>
+              <Markdown text={passed.message} />
             </div>
             <MessageReactions messageId={message.id} reactions={reactions} side="left" />
           </div>
@@ -3115,8 +3116,9 @@ const MessageBubble = memo(function MessageBubble({
     return (
       <article className={`flex flex-col items-end ${continued ? "-mt-1.5" : ""} ${entering ? "message-enter" : ""}`} data-message-role="user" data-message-id={message.id} data-continued={continued ? "true" : "false"}>
         <div className={`relative max-w-[min(72%,30rem)] ${reactions?.length ? "mt-5" : ""}`}>
-          <div className={`bubble bubble-user whitespace-pre-wrap ${tail ? "bubble-tail-right" : ""}`} title={message.createdAt ? new Date(message.createdAt).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }) : undefined}>
-            {message.text || "…"}
+          <div className={`bubble bubble-user ${tail ? "bubble-tail-right" : ""}`} title={message.createdAt ? new Date(message.createdAt).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }) : undefined}>
+            {/* The person's words render like the coworker's: bold, lists, code and links. */}
+            {message.text ? <Markdown text={message.text} /> : "…"}
           </div>
           <MessageReactions messageId={message.id} reactions={reactions} side="left" />
         </div>

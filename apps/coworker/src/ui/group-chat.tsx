@@ -30,6 +30,7 @@ import { describeGroupPresentation } from "@/lib/group-presentation";
 import { changeGroupSends, groupConversationRows, groupMessageKey, groupReplyParts, groupSends, mergeGroupReplyParts, reconcileGroupActivity, runGroupAction, submitGroupSend, subscribeGroupSends, waitForGroup, type GroupActionAttempt, type GroupReplyPart, type GroupSend } from "@/lib/group-continuity";
 import { PROGRESS_LIMITS } from "@/lib/progress-config";
 import { safeLiveMarkdown } from "@/lib/live-phase";
+import { Markdown } from "@/ui/markdown";
 import { LiveRow } from "@/ui/live-row";
 import { ChatReply } from "@/ui/chat-reply";
 import { MessageReactions, useMessageReactions } from "@/ui/message-reactions";
@@ -793,8 +794,8 @@ function GroupChatView({
                   {label ? <p className="pb-1 pt-2 text-center text-[11px] font-medium text-mist/80" data-testid="group-time-label">{label}</p> : null}
                   <div className={`flex justify-end ${continued ? "-mt-1.5" : ""}`} data-message-role="user" data-continued={continued ? "true" : "false"}>
                     <div className={`relative max-w-[min(72%,30rem)] ${persistedEventId && messageReactions.get(persistedEventId)?.length ? "mt-5" : ""}`}>
-                      <div className={`bubble bubble-user whitespace-pre-wrap ${tail ? "bubble-tail-right" : ""}`} title={timeLabel(event.at)}>
-                        {event.text}
+                      <div className={`bubble bubble-user ${tail ? "bubble-tail-right" : ""}`} title={timeLabel(event.at)}>
+                        <Markdown text={event.text} />
                       </div>
                       {persistedEventId ? <MessageReactions messageId={persistedEventId} reactions={messageReactions.get(persistedEventId)} side="left" /> : null}
                     </div>
