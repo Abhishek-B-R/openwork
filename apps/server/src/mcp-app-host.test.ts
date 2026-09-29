@@ -28,6 +28,7 @@ import {
 } from "./connect-mcp-server-catalog.js";
 import { ENGINE_GLOBAL_RUNTIME_CONFIG_ID, readRuntimeOpencodeConfig, runtimeMcpMap, writeRuntimeOpencodeConfig, writeGlobalRuntimeOpencodeConfig } from "./runtime-opencode-config-store.js";
 import {
+  advertisesLaunchedResource,
   callMcpAppTool,
   listMcpAppCatalog,
   McpAppHostError,
@@ -832,6 +833,18 @@ describe("MCP Apps host transport", () => {
         resourceUri: RESOURCE_URI,
       },
     })).rejects.toMatchObject({ code: "tool_resource_mismatch" });
+  });
+
+  test("a card from an earlier revision of an App built in OpenWork opens the revision advertised now", () => {
+    const revision = (appId: string, revisionId: string) => `ui://openwork/apps/${appId}/revisions/${revisionId}/index.html`;
+    const app = `cob_01mcpapp${"a".repeat(18)}`;
+    const other = `cob_01mcpapp${"b".repeat(18)}`;
+    const [first, second] = [`cov_01mcpapp${"1".repeat(18)}`, `cov_01mcpapp${"2".repeat(18)}`];
+    expect(advertisesLaunchedResource(revision(app, first), revision(app, second))).toBe(true);
+    expect(advertisesLaunchedResource(revision(app, first), revision(other, second))).toBe(false);
+    // Every other MCP App still has to match exactly.
+    expect(advertisesLaunchedResource(RESOURCE_URI, UPDATED_RESOURCE_URI)).toBe(false);
+    expect(advertisesLaunchedResource(RESOURCE_URI, RESOURCE_URI)).toBe(true);
   });
 
   test("treats a management tool without a UI resource as a normal result", async () => {

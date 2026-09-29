@@ -507,6 +507,29 @@ test("still rejects URL-bearing attributes on DOM elements", async () => {
   expect(result.diagnostics[0]?.message).toContain("URL-bearing attributes")
 })
 
+test("builds comparisons on a data value and components named like blocked elements", async () => {
+  const result = await buildGeneratedMcpApp({
+    ...input,
+    reactSource: `function Link({ children }) { return <span>{children}</span> }
+      function Form({ children }) { return <section>{children}</section> }
+      export default function View({ result }) {
+        const data = result?.structuredContent?.status
+        return <Form><p className={data === "ready" ? "on" : "off"}>{data == null ? "Waiting" : data}</p><Link>Open</Link></Form>
+      }`,
+  })
+  expect(result.diagnostics).toEqual([])
+  expect(result.ok).toBe(true)
+})
+
+test("refuses source that would build and then fail when the App renders", async () => {
+  const bare = await buildGeneratedMcpApp({ ...input, reactSource: `export default function View() { const [n] = useState(0); return <p>{n}</p> }` })
+  expect(bare.ok).toBe(false)
+  expect(bare.diagnostics[0]?.message).toContain("React is injected: use React.useState")
+  const named = await buildGeneratedMcpApp({ ...input, reactSource: `export function View() { return <p /> }` })
+  expect(named.ok).toBe(false)
+  expect(named.diagnostics[0]?.message).toContain("default-exported React component")
+})
+
 test("a render failure before launch data arrives recovers on the next input or result without remounting healthy trees", async () => {
   const runtime = await runtimeHarness()
   try {

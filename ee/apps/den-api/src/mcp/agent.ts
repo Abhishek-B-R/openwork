@@ -99,7 +99,6 @@ import {
 } from "./connection-action.js"
 import { needsGeneratedArtifactCatalog } from "./generated-artifact-catalog-request.js"
 import { AppBuilderError, mcpAppLaunchResult, registerAppBuilderTools, searchMcpApps } from "./app-builder-tools.js"
-import { withMcpAppShownNote } from "./mcp-app-reply.js"
 import { resolveMcpAppTools } from "./app-tools.js"
 import { createMcpApp, isActiveMcpApp, listAccessibleMcpApps, loadMcpAppServerDefinition, McpAppError, readMcpApp, updateMcpApp, type McpAppEntry } from "../mcp-apps.js"
 import {
@@ -535,7 +534,10 @@ export function registerAgentMcpRoutes<T extends { Variables: RequestIdVariables
     // them in its server index, finds them in search, and builds them.
     const appAccess = { organizationId: principal.organizationId, member: memberIdentity, enabled: externalMcpConnectionsEnabled }
     let mcpAppsPromise: Promise<McpAppEntry[]> | null = null
-    const loadMcpApps = () => mcpAppsPromise ??= listAccessibleMcpApps(appAccess).catch(() => [])
+    const loadMcpApps = () => mcpAppsPromise ??= listAccessibleMcpApps(appAccess).catch((error: unknown) => {
+      console.error("mcp_app_listing_failed", { organizationId: principal.organizationId, error: error instanceof Error ? error.message : String(error) })
+      return []
+    })
     // OpenWork opens an App only through the server index, where Apps fill the
     // room connections leave. Every usable connection may be listed, so only
     // Apps that fit beside all of them are offered to open.
@@ -547,8 +549,12 @@ export function registerAgentMcpRoutes<T extends { Variables: RequestIdVariables
         organizationId,
         orgMembershipId: memberIdentity.orgMembershipId,
         teamIds: memberIdentity.teamIds,
-      }).catch(() => null)
-      return connections ? apps.slice(0, connectMcpServerIndexAppCapacity(connections.length)) : []
+      }).catch((error: unknown) => {
+        console.error("mcp_app_capacity_check_failed", { organizationId: principal.organizationId, error: error instanceof Error ? error.message : String(error) })
+        return null
+      })
+      // Without the connection count, offer every App rather than call them all past the limit.
+      return connections ? apps.slice(0, connectMcpServerIndexAppCapacity(connections.length)) : apps
     })()
     const server = createAgentMcpServer({ appServers: appServersEnabled })
     registerAgentConnectionActionApp(server, { organizationId: principal.organizationId, member: memberIdentity })
@@ -742,8 +748,7 @@ export function registerAgentMcpRoutes<T extends { Variables: RequestIdVariables
             }
           }
         }
-        // A connection App opens in OpenWork above the reply; keep the reply short.
-        return appServersEnabled ? withMcpAppShownNote(result) : result
+        return result
       },
     )
 

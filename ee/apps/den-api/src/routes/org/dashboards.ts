@@ -167,7 +167,11 @@ async function withCurrentAppRevisions<Row extends { elementsJson: DashboardElem
 ): Promise<Row[]> {
   const appIds = rows.flatMap((row) => row.elementsJson.flatMap((element) => builtAppId(element) ?? []))
   if (appIds.length === 0) return rows
-  const revisions = await currentMcpAppRevisionIds({ organizationId, appIds })
+  const revisions = await currentMcpAppRevisionIds({ organizationId, appIds }).catch((error: unknown) => {
+    // The dashboards still load; their App tiles keep the revision they stored.
+    console.error("dashboard_app_revision_lookup_failed", { organizationId, error: error instanceof Error ? error.message : String(error) })
+    return new Map<string, string>()
+  })
   return rows.map((row) => ({
     ...row,
     elementsJson: row.elementsJson.map((element) => {

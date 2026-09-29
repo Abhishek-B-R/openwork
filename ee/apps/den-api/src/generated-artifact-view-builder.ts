@@ -95,6 +95,20 @@ const HOST_GLOBAL_DEFINES = Object.fromEntries(HOST_GLOBAL_NAMES.map((name, inde
   `__openwork_forbidden_host_global_${index}__`,
 ]))
 
+// React reaches MCP App source as one binding, so a bare useState would build
+// and then fail only when the App renders.
+const REACT_API_NAMES = [
+  "useState", "useEffect", "useLayoutEffect", "useMemo", "useCallback", "useRef", "useReducer",
+  "useContext", "useId", "useTransition", "useDeferredValue", "useSyncExternalStore",
+  "useImperativeHandle", "useOptimistic", "useActionState", "createContext", "forwardRef", "memo",
+  "startTransition",
+] as const
+
+const REACT_API_DEFINES = Object.fromEntries(REACT_API_NAMES.map((name, index) => [
+  name,
+  `__openwork_bare_react_api_${index}__`,
+]))
+
 // The bundler rejects real imports anyway; these patterns only explain the
 // refusal early. Artifact views keep the check they have always had.
 const ARTIFACT_MODULE_PATTERN = /\b(?:import|require)\s*(?:\(|["'{])/u
@@ -126,10 +140,12 @@ async function sourcePolicyDiagnostic(reactSource: string, cssSource: string, ru
     { pattern: /\b(?:eval|Function|setTimeout|setInterval)\s*\(/u, label: "dynamic code or timers" },
     { pattern: /dangerouslySetInnerHTML/u, label: "dangerous HTML injection" },
     { pattern: mcpApp
-      ? /<[a-z][^<>]*\b(?:href|src|srcSet|action|formAction|poster|ping|cite|xlinkHref|data)\s*=/u
+      ? /<[a-z][^<>]*\b(?:href|src|srcSet|action|formAction|poster|ping|cite|xlinkHref|data)\s*=(?!=)/u
       : /<[A-Za-z][^<>]*\b(?:href|src|srcSet|action|formAction|poster|ping|cite|xlinkHref|data)\s*=/u, label: "URL-bearing attributes" },
     { pattern: /<[A-Za-z][^<>]*\bstyle\s*=\s*\{\{[^<>]*?(?:url\s*\(|@import)/u, label: "styles that reference external resources" },
-    { pattern: /<\/?(?:script|iframe|object|embed|form|base|link|meta|style|svg|math)\b/iu, label: "unsafe HTML elements" },
+    { pattern: mcpApp
+      ? /<\/?(?:script|iframe|object|embed|form|base|link|meta|style|svg|math)\b/u
+      : /<\/?(?:script|iframe|object|embed|form|base|link|meta|style|svg|math)\b/iu, label: "unsafe HTML elements" },
   ]
   const blocked = forbidden.find(({ pattern }) => pattern.test(reactSource))
   if (blocked) {
@@ -149,7 +165,7 @@ async function sourcePolicyDiagnostic(reactSource: string, cssSource: string, ru
       legalComments: "none",
       jsx: "preserve",
       tsconfigRaw: { compilerOptions: { verbatimModuleSyntax: true } },
-      define: HOST_GLOBAL_DEFINES,
+      define: mcpApp ? { ...HOST_GLOBAL_DEFINES, ...REACT_API_DEFINES } : HOST_GLOBAL_DEFINES,
     })).code
   } catch (error) {
     return diagnosticsFrom(error)[0] ?? diagnostic("React view build failed.")
@@ -165,6 +181,15 @@ async function sourcePolicyDiagnostic(reactSource: string, cssSource: string, ru
     && scopeAnalyzedSource.includes(`__openwork_forbidden_host_global_${index}__`))
   if (hostGlobal) {
     return diagnostic(`Generated ${subject} cannot use the browser host global "${hostGlobal}". Use component props and React rendering only.`)
+  }
+  const bareReactApi = mcpApp
+    ? REACT_API_NAMES.find((_, index) => scopeAnalyzedSource.includes(`__openwork_bare_react_api_${index}__`))
+    : undefined
+  if (bareReactApi) {
+    return diagnostic(`Generated ${subject} cannot use ${bareReactApi} on its own. React is injected: use React.${bareReactApi}.`)
+  }
+  if (mcpApp && !/^export\s+default\b|^export\s*\{[^}]*\bas\s+default\b/mu.test(scopeAnalyzedSource)) {
+    return diagnostic(`Generated ${subject} cannot publish without a default-exported React component.`)
   }
   const cssSubject = mcpApp ? "Generated CSS" : "Generated Artifact CSS"
   const externalCss = mcpApp

@@ -15,9 +15,16 @@ import {
 import { z } from "zod"
 import type { McpAppEntry } from "../mcp-apps.js"
 import { buildMarketplaceCapabilityName } from "./marketplace-capabilities.js"
-import { MCP_APP_SHOWN_NOTE } from "./mcp-app-reply.js"
 import { DEN_MCP_READ_SCOPE, DEN_MCP_WRITE_SCOPE } from "./scopes.js"
 import { scoreText, tokenize, type CapabilityMatch } from "./search.js"
+
+/**
+ * Model-facing note in the launch result of an App built in OpenWork. OpenWork
+ * shows the App right above the model's reply, so a long reply pushes it out of
+ * view. Other clients cannot be told apart here, so the note is conditional and
+ * never hides the App's MCP URL, which is how those clients use the App.
+ */
+export const MCP_APP_SHOWN_NOTE = "If you are in OpenWork, the person now sees this App right above your reply: answer in one or two sentences and do not repeat what it shows."
 
 const appResultSchema = z.object({
   app: mcpAppSummarySchema,
@@ -90,7 +97,7 @@ export function searchMcpApps(apps: McpAppEntry[], query: string, publicOrigin: 
     method: "MCP",
     path: app.serverPath,
     score: scoreText(tokenize(app.title), tokenize(app.description ?? ""), tokens, ["app", "apps", "dashboard"]),
-    summary: `${app.description || app.title} Execute this exact name to open the App; an optional body object becomes its launch input. It is also its own MCP server at ${mcpUrl(publicOrigin, app.serverPath)}.`,
+    summary: `${app.description || app.title} Execute this exact name to open the App; an optional body object becomes its launch input. It is also its own MCP server at ${mcpUrl(publicOrigin, app.serverPath)}. Its appId for read_app and update_app is ${app.appId}.`,
     pathParams: [],
     queryParams: [],
     hasBody: true,
@@ -122,9 +129,9 @@ export function registerAppBuilderTools(input: {
     description: [
       "Create an App, which is its own MCP server, from complete React/CSS source, a readable textFallback, and the tools it needs. It needs no Workflow, output schema, or Automation.",
       "Each tool has a snake_case name, a description, and one exact capability from search_capabilities: a saved Workflow, a connection tool, or an OpenWork action that reads (GET). To change data, bind a saved Workflow that makes the change. Use mode live for a Workflow that reads input.runtime. Tools run as the person using the App.",
-      "reactSource default-exports a component receiving { app, input, result, hostContext }: input is the launch input, and result is the launch CallToolResult (read result?.structuredContent), undefined until delivered. React is injected; use its APIs without imports. Do not use fetch, browser or host globals, timers, dynamic code, external resources, URL-bearing elements, or <form>; use labeled inputs and type=button controls.",
+      "reactSource default-exports a component receiving { app, input, result, hostContext }: input is the launch input, and result is the launch CallToolResult (read result?.structuredContent), undefined until delivered. React is injected: use React.useState and other React APIs without imports. Do not use fetch, browser or host globals, timers, dynamic code, external resources, URL-bearing elements, or <form>, <svg>, <style>, or <math> elements; use labeled inputs and type=button controls.",
       "Call only declared tools, with app.callServerTool({ name, arguments }): a Workflow or connection tool takes the capability's arguments, an OpenWork action { path, query, body }, and a live Workflow only an optional { timeZone }. Show a blocked state if app.getHostCapabilities()?.serverTools is absent.",
-      "Call read-only tools (OpenWork action reads, live Workflows, and connection tools whose match says readOnly: true) when the App opens or its inputs change; if the host refuses one because it needs approval, offer a button that makes that call. Give every other tool its own button that makes only that call: OpenWork allows one call per click. Show other errors as a readable blocked state.",
+      "Call read-only tools (OpenWork action reads, live Workflows, and connection tools whose match says readOnly: true) when the App opens or its inputs change; if the host refuses one because it needs approval (its error mentions approval), offer a button that makes that call. Give every other tool its own button that makes only that call: OpenWork allows one call per click. Show other errors with what happened and what to do next.",
       "Keep it compact: one focal action, explicit loading, empty, error, and blocked states, and no internal scrolling or automatic navigation.",
       "It goes in a new private Plugin named after it unless the user names an existing pluginId; the Workflows its tools run join that Plugin, and sharing the Plugin shares the App.",
     ].join(" "),

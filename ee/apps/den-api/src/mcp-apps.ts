@@ -440,10 +440,22 @@ async function latestAuthoredApps(organizationId: DenTypeId<"organization">, ids
   })
 }
 
+/** A one-row indexed lookup: an org without Apps skips the access scan every search would otherwise pay. */
+async function organizationHasApps(organizationId: DenTypeId<"organization">): Promise<boolean> {
+  const [row] = await db.select({ id: ConfigObjectTable.id }).from(ConfigObjectTable).where(and(
+    eq(ConfigObjectTable.organizationId, organizationId),
+    eq(ConfigObjectTable.objectType, "app"),
+    eq(ConfigObjectTable.status, "active"),
+    isNull(ConfigObjectTable.deletedAt),
+  )).limit(1)
+  return row !== undefined
+}
+
 export async function listAccessibleMcpApps(input: McpAppAccessInput): Promise<McpAppEntry[]> {
+  const organizationId = normalizeDenTypeId("organization", input.organizationId)
+  if (!await organizationHasApps(organizationId)) return []
   const apps = await accessibleAppPlugins(input)
   if (apps.size === 0) return []
-  const organizationId = normalizeDenTypeId("organization", input.organizationId)
   return (await latestAuthoredApps(organizationId, [...apps.keys()].map(appId))).flatMap((row): McpAppEntry[] => {
     const pluginId = apps.get(row.id)
     return pluginId
