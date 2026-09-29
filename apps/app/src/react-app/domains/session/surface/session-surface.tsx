@@ -12,7 +12,7 @@ import { captureAnalyticsEvent } from "@/app/lib/analytics";
 import { abortSession } from "@/app/lib/opencode-session";
 import { hasTerminalSessionReply, interruptSessionTurn, sessionHasPendingSubmission, sessionNeedsStop, sessionWorkHeld, submitAfterInterruption, submitImmediateSessionTurn, subscribeSessionInterruption } from "@/app/lib/opencode-interruption";
 import { createClient, createPromptMessageID, isPromptAdmissionUnknown, promptAdmissionFailure, readPromptAdmission, unwrap } from "@/app/lib/opencode";
-import { createClientV2, isOpencodeV2BaseUrl, v2PromptText } from "@/app/lib/opencode-v2-adapter";
+import { createClientV2, isOpencodeV2BaseUrl, v2AcknowledgementText } from "@/app/lib/opencode-v2-adapter";
 import * as opencodeSessionNative from "@/app/lib/opencode-session-native";
 import type { NativeSessionSnapshotTarget } from "@/app/lib/opencode-session-native";
 import { isDesktopRuntime } from "@/app/lib/runtime-env";
@@ -1508,7 +1508,7 @@ export function SessionSurface(props: SessionSurfaceProps) {
       const match = baseRenderedMessages.find((message) => message.role === "user"
         && !matchedIds.has(message.id)
         && (message.id === (item.serverMessageId ?? pending.messageId) || (!item.serverMessageId && isOpencodeV2BaseUrl(props.opencodeBaseUrl) && !previousMessageIds.includes(message.id)
-          && Boolean(acknowledgementText?.trim()) && v2PromptText(message.parts) === acknowledgementText)));
+          && Boolean(acknowledgementText?.trim()) && v2AcknowledgementText(message.parts) === acknowledgementText)));
       const { parts, attachmentsReady } = pendingMessageParts(text, pending.attachments, match?.parts, pendingDraftTextParts(pending.parts));
       if (!match) {
         const submissionIds = new Set(item.submissionMessageIds);

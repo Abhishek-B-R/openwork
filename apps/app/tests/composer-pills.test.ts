@@ -41,6 +41,21 @@ describe("composer pills", () => {
     expect(parts.some((part) => part.type === "text" && part.synthetic && part.text === connectorPrompt("GitHub"))).toBe(true);
   });
 
+  test("pasted text reaches the model in full and stays collapsed in the transcript", async () => {
+    const pasted = Array.from({ length: 42 }, (_, index) => `row ${index + 1}`).join("\n");
+    const parts = await draftToParts(
+      { mode: "prompt", text: "Compare [pasted text Pasted #1]", parts: [{ type: "text", text: "Compare " }, { type: "paste", id: "p1", label: "Pasted #1", text: pasted, lines: 42 }], attachments: [] },
+      "/workspace",
+      "ses_1",
+      null,
+    );
+    const sent = parts.find((part) => part.type === "text" && part.text === pasted);
+    expect(sent).toMatchObject({ metadata: { openworkPastedText: true } });
+    expect(sent && "synthetic" in sent ? sent.synthetic : undefined).toBeUndefined();
+    const mapped = textPartToUIPart({ id: "prt_2", sessionID: "ses_1", messageID: "msg_1", type: "text", text: pasted, metadata: { openworkPastedText: true } });
+    expect(mapped?.type === "text" ? mapped.providerMetadata?.opencode?.pastedText : null).toBe(true);
+  });
+
   test("the transcript keeps the pill identity of a sent text part", () => {
     const [visible] = composerPillPromptParts(connector);
     const mapped = textPartToUIPart({ id: "prt_1", sessionID: "ses_1", messageID: "msg_1", type: "text", text: visible.text, metadata: visible.metadata });

@@ -132,12 +132,13 @@ export function attachmentNoteToUIParts(part: TextPart): UIMessage["parts"] {
       || !("mime" in attachment) || typeof attachment.mime !== "string"
       || !("url" in attachment) || typeof attachment.url !== "string"
       || !attachment.url.startsWith("file://")) return [];
+    const bytes = "bytes" in attachment && typeof attachment.bytes === "number" ? attachment.bytes : undefined;
     return [{
       type: "file",
       filename: attachment.filename,
       mediaType: attachment.mime,
       url: attachment.url,
-      providerMetadata: { opencode: { partId: `${part.id}:attachment:${index}` } },
+      providerMetadata: { opencode: { partId: `${part.id}:attachment:${index}`, ...(bytes === undefined ? {} : { bytes }) } },
     }];
   });
 }
@@ -154,6 +155,7 @@ export function textPartToUIPart(part: TextPart): UIMessage["parts"][number] | n
       partId: part.id,
       ...(typeof composerToken === "string" ? { composerToken } : {}),
       ...(composerPill ? { composerPill } : {}),
+      ...(part.metadata?.openworkPastedText === true ? { pastedText: true } : {}),
     } },
   };
 }

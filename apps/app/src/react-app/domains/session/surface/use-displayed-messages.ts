@@ -8,12 +8,12 @@ import { composerPillFromPart, composerPillText } from "./composer/composer-pill
 
 /**
  * Text parts for a pending user turn, built from the draft's parts so composer
- * pills render as pills before the server echoes the message. Returns
- * undefined when the draft has no pills and plain text is enough.
+ * pills and pasted text render as chips before the server echoes the message.
+ * Returns undefined when the draft has neither and plain text is enough.
  */
 export function pendingDraftTextParts(parts: readonly ComposerPart[]): UIMessage["parts"] | undefined {
-  const hasPill = parts.some((part) => part.type === "skill" || part.type === "connect-skill" || part.type === "connector" || part.type === "app" || part.type === "computer");
-  if (!hasPill) return undefined;
+  const hasChip = parts.some((part) => part.type === "skill" || part.type === "connect-skill" || part.type === "connector" || part.type === "app" || part.type === "computer" || part.type === "paste");
+  if (!hasChip) return undefined;
   return parts.flatMap<UIMessage["parts"][number]>((part) => {
     switch (part.type) {
       case "skill":
@@ -25,8 +25,9 @@ export function pendingDraftTextParts(parts: readonly ComposerPart[]): UIMessage
         return [{ type: "text", text: composerPillText(pill), state: "done", providerMetadata: { opencode: { composerPill: pill } } }];
       }
       case "text":
-      case "paste":
         return part.text ? [{ type: "text", text: part.text, state: "done" }] : [];
+      case "paste":
+        return part.text ? [{ type: "text", text: part.text, state: "done", providerMetadata: { opencode: { pastedText: true } } }] : [];
       case "agent":
         return [{ type: "text", text: `@${part.name}`, state: "done" }];
       case "file":

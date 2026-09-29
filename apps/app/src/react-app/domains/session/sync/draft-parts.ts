@@ -23,6 +23,11 @@ import {
 } from "../surface/composer/composer-pills";
 import { decodeComposerMentionValue } from "../surface/composer/mention-encoding";
 
+/** Pasted text reaches the model as the user's words and stays collapsed in the transcript. */
+function pastedTextPart(text: string): TextPartInput {
+  return { type: "text", text, metadata: { openworkPastedText: true } };
+}
+
 // All workspace-scoped server URLs/clients/tokens come from
 // `resolveWorkspaceEndpoint` in apps/app/src/app/lib/workspace-endpoint.ts.
 // Don't compose `<baseUrl>/workspace/<id>` here.
@@ -99,7 +104,7 @@ export async function draftToParts(
       const pasteMatch = segment.match(/^\[pasted text (.+)\]$/);
       if (pasteMatch?.[1]) {
         const pasted = pasteByLabel.get(pasteMatch[1]);
-        if (pasted) parts.push({ type: "text", text: pasted });
+        if (pasted) parts.push(pastedTextPart(pasted));
         continue;
       }
       if (segment.startsWith("@")) {
@@ -147,7 +152,7 @@ export async function draftToParts(
         continue;
       }
       if (part.type === "paste") {
-        parts.push({ type: "text", text: part.text });
+        parts.push(pastedTextPart(part.text));
         continue;
       }
       if (part.type === "agent") {
