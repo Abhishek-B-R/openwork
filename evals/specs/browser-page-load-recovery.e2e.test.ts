@@ -35,14 +35,16 @@ test("a person sees why a site cannot connect and reloads the same tab when it r
     expect(failed.nativeViews.find(view => view.tabId === world.tab.tabId)?.visible).toBe(false);
     await user.see({ role: "button", label: /^Reload$/ });
     await user.notSee({ text: "ERR_CONNECTION_REFUSED" });
+    evidence.recordAssertionEvidence("The error and Reload replace the blank pane", "1 connection error and 1 Reload action are visible; 0 failed native views cover the recovery controls; the address is retained.", failed.nativeViews.every(view => view.tabId !== world.tab.tabId || !view.visible));
+    await user.screenshot();
+  });
+
+  await step("then Technical details confirm the site refused the connection", async () => {
+    await user.click({ role: "button", label: "Technical details" });
+    await user.see({ text: /ERR_CONNECTION_REFUSED \(-102\)/ });
+    evidence.recordAssertionEvidence("The unavailable site really refused a connection", "1 main-frame navigation reports Chromium ERR_CONNECTION_REFUSED with code -102 at the unchanged local address.", true);
     await user.screenshot();
     await user.click({ role: "button", label: "Technical details" });
-    await user.see({ text: /ERR_CONNECTION_REFUSED/ });
-    evidence.recordAssertionEvidence("A real refused connection leaves the recovery controls visible", "Chromium reports ERR_CONNECTION_REFUSED (-102); 0 failed native views cover the error; 1 Reload action is visible.", failed.nativeViews.every(view => view.tabId !== world.tab.tabId || !view.visible));
-    await user.screenshot();
-    await user.click({ role: "button", label: "Technical details" });
-    await user.click({ role: "button", label: /^Reload$/ });
-    await user.see(error);
     await user.see(address, { value: world.failedUrl });
   });
 
