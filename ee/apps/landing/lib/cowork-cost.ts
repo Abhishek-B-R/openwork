@@ -7,7 +7,6 @@ export const pricingSources = [
   { label: "Claude plans", href: "https://claude.com/pricing" },
   { label: "Claude Team plan", href: "https://support.claude.com/en/articles/9266767-what-is-the-team-plan" },
   { label: "Claude Enterprise pricing", href: "https://claude.com/pricing/enterprise" },
-  { label: "Claude Desktop on third-party platforms", href: "https://claude.com/docs/third-party/claude-desktop/overview" },
   { label: "OpenWork pricing", href: "/pricing" },
   { label: "Model prices from models.dev", href: "https://models.dev" }
 ];
