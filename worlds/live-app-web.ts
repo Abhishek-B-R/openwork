@@ -6,7 +6,7 @@ import { launchHeadlessWeb } from "../packages/world/src/headless-web.ts";
 import type { HeadlessWebHandle } from "../packages/world/src/headless-web.ts";
 
 const REPO_ROOT = fileURLToPath(new URL("..", import.meta.url));
-const HEADLESS_PROD_LIVE_NAME = "headless-prod-live";
+const HEADLESS_PROD_LIVE_NAME = "live-app-web";
 
 export interface HeadlessProdLiveOptions {
   allowSharedState: true;
@@ -31,7 +31,7 @@ export async function bootHeadlessProdLive(
 
 function parseArgs(argv: readonly string[]): HeadlessProdLiveOptions {
   if (argv.length !== 1 || argv[0] !== "--allow-shared-state") {
-    throw new Error("Launch headless-prod-live with exactly --allow-shared-state.");
+    throw new Error("Launch live-app-web with exactly --allow-shared-state.");
   }
   return { allowSharedState: true };
 }

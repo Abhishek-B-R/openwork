@@ -57,7 +57,7 @@ export async function bootAppWebWorld(
     && selectedEnv.OPENWORK_DEV_DEN_PROXY_TARGET !== "https://app.openworklabs.com") {
     throw new Error("Remote app-web supports only https://app.openworklabs.com as its Den proxy target.");
   }
-  const runtimeName = `${receiptName("app-web", resolveStage(env))}-${randomUUID().slice(0, 8)}`;
+  const runtimeName = `${receiptName("preview-app-web", resolveStage(env))}-${randomUUID().slice(0, 8)}`;
   if (options.place === "freestyle") {
     if (!options.ref) throw new Error("Freestyle requires a full pushed source SHA.");
     if (Object.keys(selectedEnv).length) throw new Error("Freestyle snapshots use isolated state and do not accept Den proxy overrides.");
@@ -124,7 +124,7 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
   const lifetimeMs = (options.lifetimeMinutes ?? 120) * 60_000;
   outputs.expires = new Date(Date.now() + lifetimeMs).toISOString();
   const timer = setTimeout(() => process.kill(process.pid, "SIGTERM"), lifetimeMs);
-  try { await hold({ name: "app-web", outputs }); }
+  try { await hold({ name: "preview-app-web", outputs }); }
   finally { clearTimeout(timer); }
 }
 

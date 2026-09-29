@@ -47,11 +47,11 @@ test("app-web CLI exposes a private human browser URL and down deletes only its 
       throw new Error("app-web CLI failed; raw private output withheld.");
     }
   };
-  const up = (value: string) => cli(["up", "app-web", "--stage", value, "--place", "daytona", "--detach", "--timeout", "600000",
+  const up = (value: string) => cli(["up", "preview-app-web", "--stage", value, "--place", "daytona", "--detach", "--timeout", "600000",
     "--env", "OPENWORK_DEV_HEADLESS_WEB_DEN_PROXY", "--", "--ref", ref]);
-  const down = (value: string) => cli(["down", "app-web", "--stage", value]);
+  const down = (value: string) => cli(["down", "preview-app-web", "--stage", value]);
   const snapshot = async (value: string) => {
-    const receipt = await readScriptWorldSnapshot(join(snapshots, `app-web--${value}.json`));
+    const receipt = await readScriptWorldSnapshot(join(snapshots, `preview-app-web--${value}.json`));
     if (!receipt) throw new Error("app-web did not publish a private readiness receipt.");
     return receipt;
   };
@@ -113,7 +113,7 @@ test("app-web CLI exposes a private human browser URL and down deletes only its 
         return !response.ok || !(await response.text()).includes("/@vite/client");
       } catch { return true; }
     }, { within: 60000, intervalMs: 1000, label: "deleted app-web human URL no longer serves the app" });
-    assert.equal(await readScriptWorldSnapshot(join(snapshots, `app-web--${stage}.json`)), undefined);
+    assert.equal(await readScriptWorldSnapshot(join(snapshots, `preview-app-web--${stage}.json`)), undefined);
     assert.equal((await snapshot(controlStage)).pid, control.pid);
     assert.equal((await daytonaSandboxIdentities()).includes(control.outputs.sandboxId), true);
     {
@@ -129,8 +129,8 @@ test("app-web CLI exposes a private human browser URL and down deletes only its 
   } finally {
     for (const value of [stage, controlStage]) {
       try {
-        const receipt = await readScriptWorldSnapshot(join(snapshots, `app-web--${value}.json`));
-        const ledger = await readLedger(join(snapshots, `app-web--${value}.ledger.jsonl`));
+        const receipt = await readScriptWorldSnapshot(join(snapshots, `preview-app-web--${value}.json`));
+        const ledger = await readLedger(join(snapshots, `preview-app-web--${value}.ledger.jsonl`));
         if ((receipt || ledger.length > 0) && await down(value) !== 0) cleanupFailed = true;
       } catch { cleanupFailed = true; }
     }
@@ -262,8 +262,8 @@ test("preview worlds expose Den and real Electron, preserve progress on frontend
     assert.equal((await snapshot("preview-den")).pid, den.pid);
     evidence.recordAssertionEvidence("Fresh Den is reachable and reopening preserves ownership", "The signup URL returns 200, protected identity returns 401, no account password is seeded, and a repeated launch adopts the same process.", true);
 
-    assert.equal(await up("preview-desktop", "restricted"), 0);
-    const desktop = await snapshot("preview-desktop");
+    assert.equal(await up("preview-full", "restricted"), 0);
+    const desktop = await snapshot("preview-full");
     assert.equal(desktop.outputs.ref, pinnedRef);
     assert.equal(desktop.outputs.denRef, pinnedRef);
     assert.notEqual(desktop.outputs.denSandbox, den.outputs.denSandbox);
@@ -301,7 +301,7 @@ test("preview worlds expose Den and real Electron, preserve progress on frontend
     const previousBuild = await buildId();
     assert.ok((await (await fetch(desktop.outputs.denWeb)).text()).includes(previousBuild));
     assert.ok(process.env.OPENWORK_EVAL_REF);
-    await exec("python3", [join(root, ".opencode/skills/preview-my-work/scripts/update-preview.py"), "preview-desktop", "--stage", stage, "--ref", process.env.OPENWORK_EVAL_REF], { cwd: root, timeout: 300000, maxBuffer: 2_000_000 });
+    await exec("python3", [join(root, ".opencode/skills/preview-my-work/scripts/update-preview.py"), "preview-full", "--stage", stage, "--ref", process.env.OPENWORK_EVAL_REF], { cwd: root, timeout: 300000, maxBuffer: 2_000_000 });
     await eventually(async () => (await fetch(desktop.outputs.denWeb)).status === 200, { within: 60000, intervalMs: 1000, label: "updated Den web responds" });
     const nextBuild = await buildId();
     assert.notEqual(nextBuild, previousBuild);
@@ -310,7 +310,7 @@ test("preview worlds expose Den and real Electron, preserve progress on frontend
     assert.ok(record(after.body) && Array.isArray(after.body.connections));
     assert.deepEqual(after.body.connections, savedConnections);
     assert.equal(await evaluateOnSurface(surface, () => (localStorage.getItem('preview-proof'))), "preserved");
-    assert.equal((await snapshot("preview-desktop")).pid, desktop.pid);
+    assert.equal((await snapshot("preview-full")).pid, desktop.pid);
     evidence.recordAssertionEvidence("Frontend update preserves the preview", "The live HTTP response contains the new Next build ID, which differs from the previous build; the existing session still reads the same connectors, Electron retains its localStorage marker, and world ownership stays unchanged.", true);
     await surface[Symbol.asyncDispose]();
     assert.equal(await down("preview-den"), 0);
@@ -318,8 +318,8 @@ test("preview worlds expose Den and real Electron, preserve progress on frontend
     const reset = await snapshot("preview-den");
     assert.notEqual(reset.outputs.denSandbox, den.outputs.denSandbox);
     assert.equal((await fetch(reset.outputs.preview)).status, 200);
-    assert.equal(await down("preview-desktop"), 0);
-    assert.equal(await readScriptWorldSnapshot(join(snapshots, `preview-desktop--${stage}.json`)), undefined);
+    assert.equal(await down("preview-full"), 0);
+    assert.equal(await readScriptWorldSnapshot(join(snapshots, `preview-full--${stage}.json`)), undefined);
     assert.equal((await fetch(reset.outputs.preview)).status, 200);
     assert.equal((await snapshot("preview-den")).pid, reset.pid);
     evidence.recordAssertionEvidence("Reset and stop are scoped to their stage", "Reset creates a new Den sandbox. Desktop teardown removes its receipt while the reset Den preview still responds and retains its owner process.", true);
@@ -327,7 +327,7 @@ test("preview worlds expose Den and real Electron, preserve progress on frontend
     await eventually(() => !isProcessAlive(reset.pid), { within: 60000, intervalMs: 1000, label: "expired preview finishes disposal" });
     evidence.recordAssertionEvidence("Session lifetime ends the preview", "A one-minute preview removes its live receipt and its owning process finishes disposal automatically without another down command.", true);
   } finally {
-    for (const name of ["preview-desktop", "preview-den"]) {
+    for (const name of ["preview-full", "preview-den"]) {
       if (await readScriptWorldSnapshot(join(snapshots, `${name}--${stage}.json`))) await down(name);
     }
     if (previous === undefined) delete process.env.OPENWORK_WORLD_SNAPSHOT_DIR;
@@ -337,7 +337,7 @@ test("preview worlds expose Den and real Electron, preserve progress on frontend
   }
 });
 
-test("preview-desktop retains an exact blank published release and tears down its two owned sandboxes", { timeout: 1_500_000 }, async ({ evidence }) => {
+test("preview-desktop retains an exact blank published release with no Den and tears down its owned sandbox", { timeout: 1_500_000 }, async ({ evidence }) => {
   needs({ placement: "daytona" });
   const snapshots = await mkdtemp(join(tmpdir(), "openwork-release-preview-proof-"));
   const previous = process.env.OPENWORK_WORLD_SNAPSHOT_DIR;
@@ -370,16 +370,15 @@ test("preview-desktop retains an exact blank published release and tears down it
     assert.equal(release.outputs.distribution, "enterprise");
     assert.equal(release.outputs.platform, "linux");
     assert.equal(release.outputs.architecture, "x64");
-    assert.equal(release.outputs.denRef, process.env.OPENWORK_EVAL_REF);
+    assert.equal(release.outputs.ref, process.env.OPENWORK_EVAL_REF);
+    assert.equal(release.outputs.denSandbox, undefined, "the app-only preview creates no Den");
     assert.equal(release.outputs.startup, "cdp-responsive");
     assert.ok(release.outputs.cdp);
-    assert.notEqual(release.outputs.denSandbox, release.outputs.desktopSandbox);
-    assert.notEqual(release.outputs.denSandbox, control.outputs.denSandbox);
     assert.notEqual(release.outputs.desktopSandbox, control.outputs.denSandbox);
-    for (const sandbox of [control.outputs.denSandbox, release.outputs.denSandbox, release.outputs.desktopSandbox]) {
+    for (const sandbox of [control.outputs.denSandbox, release.outputs.desktopSandbox]) {
       assert.equal(await daytonaSandboxAutoStopInterval(sandbox), 0);
     }
-    evidence.recordAssertionEvidence("Preview lifetime owns both sandbox lifecycles", "Daytona reports autoStopInterval 0 for the control Den and for the release world's Den and desktop; expiry/down remains the only configured stop timer.", true);
+    evidence.recordAssertionEvidence("Preview lifetime owns both sandbox lifecycles", "Daytona reports autoStopInterval 0 for the control Den and for the release world's desktop; expiry/down remains the only configured stop timer.", true);
     assert.equal((await fetch(release.outputs.preview)).status, 200);
     assert.match(await rfbHandshake(release.outputs.preview), /^RFB 003\./);
     await assert.rejects(
@@ -462,7 +461,7 @@ test("preview-desktop retains an exact blank published release and tears down it
     assert.equal(afterCrash.primaryProcessAlive, true);
     evidence.recordAssertionEvidence("An app crash retains a real viewer without a healthy label", "A real /bin/false launch is observed as crashed while the same HTTP/noVNC endpoint continues to answer and complete an RFB handshake.", true);
 
-    const owned = [release.outputs.denSandbox, release.outputs.desktopSandbox];
+    const owned = [release.outputs.desktopSandbox];
     assert.equal(await down("preview-desktop", stage), 0);
     await eventually(async () => {
       const identities = await daytonaSandboxIdentities();
@@ -470,7 +469,7 @@ test("preview-desktop retains an exact blank published release and tears down it
     }, { within: 120000, intervalMs: 2000, label: "release preview owned sandboxes deleted" });
     assert.equal((await fetch(control.outputs.preview)).status, 200);
     assert.ok((await daytonaSandboxIdentities()).includes(control.outputs.denSandbox));
-    evidence.recordAssertionEvidence("Down deletes exactly the release world's Den and desktop", "Both recorded owned sandbox identities disappear while the separately staged control Den remains listed and HTTP-reachable.", true);
+    evidence.recordAssertionEvidence("Down deletes exactly the release world's desktop", "The recorded owned desktop sandbox disappears while the separately staged control Den remains listed and HTTP-reachable.", true);
     assert.equal(await down("preview-den", controlStage), 0);
   } finally {
     for (const [name, selectedStage] of [["preview-desktop", stage], ["preview-desktop", invalidStage], ["preview-den", controlStage]]) {

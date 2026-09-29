@@ -28,7 +28,7 @@ export async function desktopProductionLive(options: DesktopProductionLiveOption
 
 function parseArgs(argv: readonly string[]): DesktopProductionLiveOptions {
   if (argv.length !== 1 || argv[0] !== "--allow-shared-state") {
-    throw new Error("Launch desktop-prod-live with exactly --allow-shared-state.");
+    throw new Error("Launch live-desktop with exactly --allow-shared-state.");
   }
   return { allowSharedState: true };
 }

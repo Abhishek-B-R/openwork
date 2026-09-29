@@ -1,12 +1,12 @@
 export const supportedTargets = ["local/host"];
 
-import { denFetch } from "../evals/packages/behaviors/src/den.ts";
-import type { DenSession } from "../evals/packages/behaviors/src/den.ts";
-import { createAdmin, createOrg, server } from "../evals/packages/env/src/den.ts";
-import type { Den, DenOrgHandle } from "../evals/packages/env/src/den.ts";
-import { resolvePlace } from "../evals/packages/env/src/place.ts";
-import type { Place } from "../evals/packages/env/src/place.ts";
-import { hold } from "../packages/world/src/hold.ts";
+import { denFetch } from "../../packages/behaviors/src/den.ts";
+import type { DenSession } from "../../packages/behaviors/src/den.ts";
+import { createAdmin, createOrg, server } from "../../packages/env/src/den.ts";
+import type { Den, DenOrgHandle } from "../../packages/env/src/den.ts";
+import { resolvePlace } from "../../packages/env/src/place.ts";
+import type { Place } from "../../packages/env/src/place.ts";
+import { hold } from "../../../packages/world/src/hold.ts";
 
 export const CLOUD_MODEL_INFRA_ORG = "Cloud Model Infra";
 export const CLOUD_MODEL_INFRA_ADMIN_EMAIL = "infra-admin@cloud-model-infra.test";
@@ -54,7 +54,7 @@ async function grantOpenWorkWebAccess(admin: DenSession, organizationId: string)
  * source-first openwork-server launched from `cloud-model-infra-worker.ts`,
  * so Den talks to a genuine worker runtime over plain HTTP.
  *
- * Launch: `pnpm world up ./worlds/cloud-model-infra.ts`
+ * Launch: `pnpm world up ./evals/worlds/infra/cloud-model-infra.ts`
  * Proof:  `evals/specs/cloud-model-infra.e2e.test.ts`
  */
 export async function bootCloudModelInfra(

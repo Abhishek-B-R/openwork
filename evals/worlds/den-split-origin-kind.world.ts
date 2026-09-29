@@ -1,7 +1,7 @@
 export const supportedTargets = ["local/host"];
 
-import { kindServer } from "../evals/packages/env/src/kind-server.ts";
-import { hold } from "../packages/world/src/hold.ts";
+import { kindServer } from "../packages/env/src/kind-server.ts";
+import { hold } from "../../packages/world/src/hold.ts";
 
 /**
  * The Kind Helm fixture has separate browser-facing web/API origins while

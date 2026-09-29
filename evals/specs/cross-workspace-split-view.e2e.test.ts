@@ -5,7 +5,7 @@ import type { Surface } from "@openwork/cdp";
 import { screenshot } from "@openwork/test-evidence";
 import { spec } from "@openwork/testkit";
 import type { User } from "@openwork/testkit";
-import { bootCrossWorkspaceSplitView } from "../../worlds/cross-workspace-split-view.ts";
+import { bootCrossWorkspaceSplitView } from "../worlds/cross-workspace-split-view.world.ts";
 
 const test = spec.world(async (seed, { place }) => {
   const stack = new AsyncDisposableStack();

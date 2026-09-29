@@ -1,13 +1,13 @@
 export const supportedTargets = ["local/host", "daytona/linux"];
 
-import { seedSessions } from "../evals/packages/behaviors/src/sessions.ts";
-import { app } from "../evals/packages/env/src/desktop-app.ts";
-import type { App } from "../evals/packages/env/src/desktop-app.ts";
-import { createAdmin, createOrg, server } from "../evals/packages/env/src/den.ts";
-import type { Den, DenOrgHandle } from "../evals/packages/env/src/den.ts";
-import { resolvePlace } from "../evals/packages/env/src/place.ts";
-import type { Place } from "../evals/packages/env/src/place.ts";
-import { hold } from "../packages/world/src/hold.ts";
+import { seedSessions } from "../packages/behaviors/src/sessions.ts";
+import { app } from "../packages/env/src/desktop-app.ts";
+import type { App } from "../packages/env/src/desktop-app.ts";
+import { createAdmin, createOrg, server } from "../packages/env/src/den.ts";
+import type { Den, DenOrgHandle } from "../packages/env/src/den.ts";
+import { resolvePlace } from "../packages/env/src/place.ts";
+import type { Place } from "../packages/env/src/place.ts";
+import { hold } from "../../packages/world/src/hold.ts";
 
 export const CROSS_WORKSPACE_SPLIT_VIEW_ORG = "Cross Workspace Split View";
 
