@@ -1119,7 +1119,7 @@ body.is-resizing-panel * {
 }
 
 /* Now and then a soft light drifts across every glass surface at once, left to
-   right at one slow speed, so it reads as one light passing through the app
+   right at one brisk speed, so it reads as one light passing through the app
    (ui/glints.ts sets the timing). Wide and faint: a glow, never a streak. */
 .glass-sheen::after {
   content: "";

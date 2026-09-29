@@ -6,8 +6,12 @@ import { useEffect } from "react";
  */
 const GAPS_MS = [30_000, 30_000, 60_000, 60_000, 60_000];
 const LATER_GAP_MS = 120_000;
-/** How fast the light crosses the window, and how wide its soft glow is: slow and wide, so it reads as light, not a shine. */
-const PX_PER_MS = 0.45;
+/**
+ * How fast the light crosses the window, and how wide its soft glow is. Brisk
+ * (about 1.3 s across a 1280 px window) so it reads as a light passing, and
+ * wide and faint so it stays a glow, not a shine.
+ */
+const PX_PER_MS = 1.4;
 const BAND_PX = 560;
 
 /**
