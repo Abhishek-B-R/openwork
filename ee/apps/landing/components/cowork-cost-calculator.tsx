@@ -7,6 +7,7 @@ import {
   anthropicPricingCheckedAt,
   cumulativeCosts,
   defaultMixShare,
+  describeEnterpriseVolumeTiers,
   mixShares,
   perPersonMonthly,
   planPrices,
@@ -894,8 +895,8 @@ export function CoworkCostCalculator({
             </li>
             <li>
               OpenWork Team on OpenWork Cloud: first {planPrices.openworkFreeSeats} seats free, then $
-              {planPrices.openworkTeamSeat}/seat. OpenWork Enterprise: ${planPrices.openworkEnterpriseSeat}/person a month
-              for the first 250, $16 for seats 251–1,000, $13 above, billed annually. Tokens billed by your own provider or gateway.
+              {planPrices.openworkTeamSeat}/seat. OpenWork Enterprise: {describeEnterpriseVolumeTiers()}, billed annually.
+              Tokens billed by your own provider or gateway.
             </li>
             <li>
               Costs accrue monthly. List prices from models.dev ({modelPricesFetchedAt}); Anthropic plans checked{" "}
