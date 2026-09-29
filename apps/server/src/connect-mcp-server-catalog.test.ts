@@ -22,7 +22,7 @@ import {
   writeOpenWorkConnectMcpAppHostCatalog,
 } from "./connect-mcp-server-catalog.js";
 import { runtimeDbPath } from "./runtime-db.js";
-import { readRuntimeOpencodeConfig, writeRuntimeOpencodeConfig } from "./runtime-opencode-config-store.js";
+import { onRuntimeOpencodeConfigWrite, readRuntimeOpencodeConfig, writeRuntimeOpencodeConfig } from "./runtime-opencode-config-store.js";
 import type { ServerConfig } from "./types.js";
 import { createWorkspaceKvStore } from "./workspace-kv-store.js";
 
@@ -215,6 +215,7 @@ describe("OpenWork Connect MCP server catalog", () => {
       appHostNames: [connectMcpAppHostName(connectionId)],
       directNames: [],
       removedNames: ["openwork-connect-stale"],
+      changed: true,
     });
     expect(runtime.mcp?.["openwork-cloud"]).toEqual({ type: "remote", url: "https://api.openworklabs.com/mcp/agent" });
     expect(runtime.mcp?.["user-server"]).toEqual({ type: "remote", url: "https://user.example/mcp" });
@@ -269,6 +270,7 @@ describe("OpenWork Connect MCP server catalog", () => {
       appHostNames: [connectMcpAppHostName(boundedId), connectMcpAppHostName(directId)].sort(),
       directNames: [directName],
       removedNames: ["openwork-direct-revoked-abc123"],
+      changed: true,
     });
     const runtime = await readRuntimeOpencodeConfig(config, "ws_1");
     expect(runtime.mcp?.[directName]).toEqual({
@@ -332,6 +334,7 @@ describe("OpenWork Connect MCP server catalog", () => {
       appHostNames: [],
       directNames: [],
       removedNames: ["openwork-direct-linear-abc123"],
+      changed: true,
     });
     expect((await readRuntimeOpencodeConfig(config, "ws_1")).mcp?.["openwork-direct-linear-abc123"]).toBeUndefined();
   });
@@ -411,6 +414,7 @@ describe("OpenWork Connect MCP server catalog", () => {
       appHostNames: [],
       directNames: [],
       removedNames: ["openwork-connect-existing"],
+      changed: true,
     });
     expect((await readRuntimeOpencodeConfig(config, "ws_1")).mcp?.["openwork-connect-existing"]).toBeUndefined();
     expect((await readOpenWorkConnectMcpAppHostCatalog(config, "ws_1")).servers).toEqual([]);
@@ -438,6 +442,7 @@ describe("OpenWork Connect MCP server catalog", () => {
       appHostNames: [],
       directNames: [],
       removedNames: ["openwork-connect-existing"],
+      changed: true,
     });
     const runtime = await readRuntimeOpencodeConfig(config, "ws_1");
     expect(runtime.mcp?.["openwork-connect-existing"]).toBeUndefined();
@@ -488,7 +493,7 @@ describe("OpenWork Connect MCP server catalog", () => {
       }]),
     });
 
-    expect(result).toEqual({ status: "unavailable", diagnostic: "invalid_proxy_descriptor", appHostNames: [], directNames: [], removedNames: [] });
+    expect(result).toEqual({ status: "unavailable", diagnostic: "invalid_proxy_descriptor", appHostNames: [], directNames: [], removedNames: [], changed: true });
     expect((await readOpenWorkConnectMcpAppHostCatalog(config, "ws_1")).servers).toEqual([]);
   });
 
@@ -507,7 +512,7 @@ describe("OpenWork Connect MCP server catalog", () => {
       }]),
     });
 
-    expect(result).toEqual({ status: "unavailable", diagnostic: "invalid_proxy_descriptor", appHostNames: [], directNames: [], removedNames: [] });
+    expect(result).toEqual({ status: "unavailable", diagnostic: "invalid_proxy_descriptor", appHostNames: [], directNames: [], removedNames: [], changed: true });
     expect((await readOpenWorkConnectMcpAppHostCatalog(config, "ws_1")).servers).toEqual([]);
   });
   test("attributes malformed JSON and invalid index schemas without returning provider data", async () => {
@@ -533,6 +538,69 @@ describe("OpenWork Connect MCP server catalog", () => {
         async () => new Response(null, { status }),
       );
       expect(result).toEqual({ index: null, diagnostic: "discovery_unavailable" });
+    }
+  });
+
+  test("an unchanged catalog writes nothing; a new token, organization or catalog writes again", async () => {
+    const config = await fixtureConfig();
+    const catalogUpdatedAt = () => {
+      const sqlite = new Database(runtimeDbPath(config), { readonly: true });
+      try {
+        const row: unknown = sqlite.query("SELECT updated_at AS updatedAt FROM connect_mcp_app_host_catalogs WHERE workspace_id = ?").get("ws_1");
+        return typeof row === "object" && row !== null && "updatedAt" in row ? row.updatedAt : null;
+      } finally {
+        sqlite.close();
+      }
+    };
+    const writes: string[] = [];
+    const stop = onRuntimeOpencodeConfigWrite((_config, workspaceId) => writes.push(workspaceId));
+    const directId = "emc_01direct";
+    const server = (id: string) => ({ connectionId: id, name: `Service ${id}`, description: null,
+      url: `https://api.openworklabs.com/mcp/agent/connections/${id}`, exposeDirectly: true });
+    const cloudMcp = (token: string, url = "https://api.openworklabs.com/mcp/agent") => ({
+      type: "remote", url, enabled: true, headers: { Authorization: `Bearer ${token}` } });
+    const reconcile = (cloud: Record<string, unknown>, servers: Array<ReturnType<typeof server>>) => reconcileOpenWorkConnectMcpServers({
+      config, workspace: config.workspaces[0]!, cloudMcp: cloud,
+      appHostAuthorization: "Bearer private-app-host-token", fetcher: indexFetcher([], servers),
+    });
+    try {
+      expect((await reconcile(cloudMcp("member-one"), [server(directId)])).changed).toBe(true);
+      expect(writes).toEqual(["ws_1"]);
+      const writtenAt = catalogUpdatedAt();
+      await Bun.sleep(2);
+
+      // Same catalog, same member credential: no row is touched, so nothing
+      // downstream (config listeners, engine registration) wakes up.
+      const unchanged = await reconcile(cloudMcp("member-one"), [server(directId)]);
+      expect(unchanged.changed).toBe(false);
+      expect(unchanged.directNames).toEqual([connectDirectMcpRuntimeName(server(directId))]);
+      expect(writes).toEqual(["ws_1"]);
+      expect(catalogUpdatedAt()).toBe(writtenAt);
+
+      // A rotated member token reaches the direct entries.
+      expect((await reconcile(cloudMcp("member-two"), [server(directId)])).changed).toBe(true);
+      expect((await readRuntimeOpencodeConfig(config, "ws_1")).mcp?.[connectDirectMcpRuntimeName(server(directId))]?.headers)
+        .toEqual({ Authorization: "Bearer member-two" });
+      expect(writes).toHaveLength(2);
+
+      // A catalog change (a connection added) is written even with the same token.
+      const added = await reconcile(cloudMcp("member-two"), [server(directId), server("emc_01added")]);
+      expect(added.changed).toBe(true);
+      expect(writes).toHaveLength(3);
+
+      // Another organization: different credential and catalog.
+      const switched = await reconcile(cloudMcp("other-org"), [server("emc_01otherorg")]);
+      expect(switched.changed).toBe(true);
+      expect(switched.removedNames.sort()).toEqual([server(directId), server("emc_01added")].map(connectDirectMcpRuntimeName).sort());
+      expect((await readOpenWorkConnectMcpAppHostCatalog(config, "ws_1")).servers.map((entry) => entry.connectionId)).toEqual(["emc_01otherorg"]);
+      expect(writes).toHaveLength(4);
+
+      // A catalog-only change (no directly exposed entries change) still updates the private catalog.
+      const privateOnly = await reconcile(cloudMcp("other-org"), [server("emc_01otherorg"), { ...server("emc_01private"), exposeDirectly: false }]);
+      expect(privateOnly.changed).toBe(true);
+      expect(writes).toHaveLength(4);
+    } finally {
+      stop();
     }
   });
 });

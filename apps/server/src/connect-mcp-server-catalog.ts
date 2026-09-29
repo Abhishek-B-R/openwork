@@ -240,13 +240,20 @@ export async function readOpenWorkConnectMcpAppHostCatalog(
   return await appHostCatalogStore.get(config, workspaceId) ?? emptyIndex();
 }
 
+/**
+ * Stores the private App-host catalog. Returns whether it changed: a refresh
+ * that fetched the same catalog writes nothing.
+ */
 export async function writeOpenWorkConnectMcpAppHostCatalog(
   config: ServerConfig,
   workspaceId: string,
   catalog: OpenWorkConnectMcpServerIndexInput,
-): Promise<void> {
+): Promise<boolean> {
   const parsed = indexSchema.safeParse(catalog);
-  await appHostCatalogStore.set(config, workspaceId, parsed.success ? parsed.data : emptyIndex());
+  const serialized = appHostCatalogStore.serialize(parsed.success ? parsed.data : emptyIndex());
+  if ((await appHostCatalogStore.getRow(config, workspaceId))?.valueJson === serialized) return false;
+  await appHostCatalogStore.setSerialized(config, workspaceId, serialized, Date.now());
+  return true;
 }
 
 export async function readOpenWorkConnectMcpAppHostAuthorization(
@@ -403,7 +410,15 @@ export async function reconcileOpenWorkConnectMcpServers(input: {
   cloudMcp: Record<string, unknown>;
   appHostAuthorization?: string;
   fetcher?: McpFetch;
-}): Promise<{ status: "synced" | "unavailable"; appHostNames: string[]; directNames: string[]; removedNames: string[]; diagnostic: ConnectMcpCatalogDiagnostic }> {
+}): Promise<{
+  status: "synced" | "unavailable";
+  appHostNames: string[];
+  directNames: string[];
+  removedNames: string[];
+  diagnostic: ConnectMcpCatalogDiagnostic;
+  /** False when the fetched catalog matched what is stored: nothing was written. */
+  changed: boolean;
+}> {
   const trustedCloudEndpoint = await trustedAppHostCloudEndpoint(input.cloudMcp);
   if (trustedCloudEndpoint && input.appHostAuthorization !== undefined) {
     await writeOpenWorkConnectMcpAppHostAuthorization(
@@ -422,13 +437,15 @@ export async function reconcileOpenWorkConnectMcpServers(input: {
     : null;
   const { index, diagnostic } = await readOpenWorkConnectMcpServerIndexWithDiagnostics(input.cloudMcp, appHostAuthorization, input.fetcher);
   const privateCatalog = index ?? emptyIndex();
-  await writeOpenWorkConnectMcpAppHostCatalog(input.config, input.workspace.id, privateCatalog);
+  const catalogChanged = await writeOpenWorkConnectMcpAppHostCatalog(input.config, input.workspace.id, privateCatalog);
 
   // Without a fresh index, fail closed: a connection whose direct exposure was
   // revoked must not linger in the model-facing runtime on a stale catalog.
   const directEntries = directConnectMcpRuntimeEntries(input.cloudMcp, privateCatalog);
   let removedNames: string[] = [];
-  await writeRuntimeOpencodeConfig(input.config, input.workspace.id, (current) => {
+  // Unchanged bytes are not written, so an unchanged catalog does not wake
+  // the runtime config listeners that re-register connections.
+  const runtime = await writeRuntimeOpencodeConfig(input.config, input.workspace.id, (current) => {
     const currentMcp = runtimeMcpMap(current);
     removedNames = Object.keys(currentMcp)
       .filter((name) => name.startsWith(CONNECT_MCP_SERVER_NAME_PREFIX)
@@ -450,5 +467,6 @@ export async function reconcileOpenWorkConnectMcpServers(input: {
     appHostNames: privateCatalog.servers.map((server) => connectMcpAppHostName(server.connectionId)).sort(),
     directNames: Object.keys(directEntries).sort(),
     removedNames,
+    changed: catalogChanged || runtime.changed,
   };
 }

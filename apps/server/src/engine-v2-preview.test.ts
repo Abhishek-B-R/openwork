@@ -250,11 +250,19 @@ async function withFakeSidecar(
 ) {
   const root = await mkdtemp(join(tmpdir(), "openwork-v2-upkeep-"));
   const calls: string[] = [];
+  let lastProviders: string | undefined;
   const fake = {
     url: "http://127.0.0.1:1", username: "opencode", password: "fixture", childPid: 1, exitCode: null, stdout: "", stderr: "",
     health: async () => ({ healthy: true, version: "fixture", pid: 1 }),
     injectProvider: async () => {},
-    setProviders: async (specs: managedV2.OpencodeV2ProviderSpec[], disabled?: string[]) => { input.onSetProviders?.(specs, disabled); },
+    // Like the managed engine, an identical provider config is not rewritten.
+    setProviders: async (specs: managedV2.OpencodeV2ProviderSpec[], disabled?: string[]) => {
+      input.onSetProviders?.(specs, disabled);
+      const rendered = JSON.stringify({ specs, disabled });
+      const changed = rendered !== lastProviders;
+      lastProviders = rendered;
+      return changed;
+    },
     setSkills: async () => {}, close: async () => {},
     async fetchJson(path: string, init: { method?: string; body?: unknown } = {}) {
       const method = init.method ?? "GET";
@@ -550,5 +558,87 @@ test("warming a folder starts its upkeep in the background without waiting", asy
     releaseRegistration();
     await preview.syncWorkspaceMcp("ws_1", root);
     expect(calls.filter((call) => call === "PUT /api/mcp/good")).toHaveLength(1);
+  });
+});
+
+test("readers of a folder's live MCP status within the window share one engine request", async () => {
+  const engine = fakeMcpEngine();
+  await withFakeSidecar({ mcp: { good: { type: "remote", url: "https://good.example/mcp" } }, reply: engine.reply, waits: { mcpStatusTtlMs: 200 } }, async (preview, root, calls) => {
+    await preview.syncWorkspaceMcp("ws_1", root);
+    const reads = () => calls.filter((call) => call === "GET /api/mcp").length;
+    const afterSync = reads();
+    // Health checks and the reconciler read together: one request.
+    await Promise.all([preview.readMcpStatus(root), preview.readMcpStatus(root), preview.syncWorkspaceMcp("ws_1", root)]);
+    expect(reads()).toBe(afterSync + 1);
+    // The window expires: the next reader asks the engine again.
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    await preview.readMcpStatus(root);
+    expect(reads()).toBe(afterSync + 2);
+    // Another folder has its own status.
+    await preview.readMcpStatus(`${root}/other`);
+    expect(reads()).toBe(afterSync + 3);
+  });
+});
+
+test("a change OpenWork makes to a folder's connections discards its shared status", async () => {
+  const engine = fakeMcpEngine();
+  const mcp: Record<string, Record<string, unknown>> = { good: { type: "remote", url: "https://good.example/mcp" } };
+  await withFakeSidecar({ mcp, reply: engine.reply, waits: { mcpStatusTtlMs: 60_000 } }, async (preview, root) => {
+    expect(await preview.readMcpStatus(root)).toEqual({ data: [] });
+    // Registration happens after that read; the next reader sees it at once.
+    await preview.syncWorkspaceMcp("ws_1", root);
+    expect(await preview.readMcpStatus(root)).toEqual({ data: [{ name: "good", status: { status: "connected" } }] });
+    delete mcp.good;
+    await preview.syncWorkspaceMcp("ws_1", root);
+    expect(await preview.readMcpStatus(root)).toEqual({ data: [] });
+    // A change made outside the reconciler (e.g. a repair's disconnect) is announced explicitly.
+    engine.servers.set("external", { config: "{}", status: "connected" });
+    expect(await preview.readMcpStatus(root)).toEqual({ data: [] });
+    preview.invalidateMcpStatus(root);
+    expect(await preview.readMcpStatus(root)).toEqual({ data: [{ name: "external", status: { status: "connected" } }] });
+  });
+});
+
+test("a failed live status read is not shared", async () => {
+  let fail = true;
+  const engine = fakeMcpEngine();
+  await withFakeSidecar({
+    waits: { mcpStatusTtlMs: 60_000 },
+    reply: (path, method, body) => path === "/api/mcp" && fail ? { status: 503, json: { message: "starting" } } : engine.reply(path, method, body),
+  }, async (preview, root) => {
+    await expect(preview.readMcpStatus(root)).rejects.toThrow("503");
+    fail = false;
+    expect(await preview.readMcpStatus(root)).toEqual({ data: [] });
+  });
+});
+
+test("folder readiness holds across provider pushes that change nothing and is re-checked when providers change", async () => {
+  const providers: Record<string, unknown> = { ...orgProvider };
+  const keys: Record<string, string> = { orga: "fixture-key" };
+  await withFakeSidecar({
+    providers,
+    reply: (path) => {
+      if (path === "/api/provider") {
+        return { status: 200, json: { data: Object.entries(keys).map(([id, apiKey]) => ({ id, settings: { apiKey } })) } };
+      }
+      if (path === "/api/model") return { status: 200, json: { data: [{ id: "m1", providerID: "orga" }, { id: "m2", providerID: "orgb" }] } };
+      return { status: 200, json: { data: [] } };
+    },
+  }, async (preview, root, calls) => {
+    preview.warmWorkspace("ws_1", root);
+    await preview.ensureWorkspaceReady(root);
+    const checks = () => calls.filter((call) => call === "GET /api/provider").length;
+    const settled = checks();
+    // An env or token change triggers a push with the same providers: no re-check.
+    await preview.refreshProviders();
+    await preview.refreshProviders();
+    await preview.ensureWorkspaceReady(root);
+    expect(checks()).toBe(settled);
+    // A new provider is a real change: the folder is checked again.
+    providers.orgb = { name: "Org B", options: { baseURL: "https://b.example.test/v1", apiKey: "fixture-key-b" }, models: { m2: {} } };
+    keys.orgb = "fixture-key-b";
+    await preview.refreshProviders();
+    await preview.ensureWorkspaceReady(root);
+    expect(checks()).toBeGreaterThan(settled);
   });
 });

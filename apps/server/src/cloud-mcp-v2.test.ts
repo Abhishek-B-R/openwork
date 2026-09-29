@@ -42,6 +42,7 @@ test("a v2 refresh hands the requested names to the folder's reconciler and neve
   const register = createRoutedCloudMcpRegistrar({
     status: () => status(chatRouting), connection: () => ({ url: `http://127.0.0.1:${server.port}`, username: "fixture", password: "fixture" }),
     syncWorkspaceMcp: async (id, directory, options) => { operations.push(`sync ${id} ${directory} ${options?.reconnect?.join(",")}`); },
+    warmWorkspace: (id, directory) => { operations.push(`warm ${id} ${directory}`); },
   }, async () => { operations.push("v1-or-remote"); return { status: "ok", syncedNames: [], failures: [] }; });
   expect((await register(config, workspace, ["openwork-direct-a", "openwork-direct-b"])).status).toBe("ok");
   expect((await register(config, workspace)).syncedNames).toEqual(["openwork-cloud"]);
@@ -51,4 +52,38 @@ test("a v2 refresh hands the requested names to the folder's reconciler and neve
   chatRouting = false;
   await register(config, workspace);
   expect(operations.slice(2)).toEqual(["v1-or-remote", "v1-or-remote"]);
+});
+
+test("a periodic refresh restarts nothing on v2; an explicit request still names its reconnects", async () => {
+  const operations: string[] = [];
+  const register = createRoutedCloudMcpRegistrar({
+    status: () => status(true), connection: () => ({ url: "http://127.0.0.1:1", username: "fixture", password: "fixture" }),
+    syncWorkspaceMcp: async (_id, _directory, options) => { operations.push(`sync ${options?.reconnect?.join(",") ?? ""}`); },
+    warmWorkspace: () => { operations.push("warm"); },
+  }, async () => { operations.push("v1"); return { status: "ok", syncedNames: [], failures: [] }; });
+  expect(await register(config, workspace, ["openwork-direct-a"], { throwOnFailure: false, background: true }))
+    .toEqual({ status: "ok", syncedNames: ["openwork-direct-a"], failures: [] });
+  // Only starts upkeep for a folder the engine has not seen; no reconnect names.
+  expect(operations).toEqual(["warm"]);
+  await register(config, workspace, ["openwork-direct-a"]);
+  expect(operations).toEqual(["warm", "sync openwork-direct-a"]);
+});
+
+test("health reads share the folder's live MCP status and engine changes discard it", async () => {
+  const requests: string[] = [];
+  const server = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch(request) {
+    requests.push(`${request.method} ${new URL(request.url).pathname}`);
+    return request.method === "POST" ? new Response(null, { status: 204 }) : Response.json({ data: [] });
+  } });
+  stops.push(() => server.stop(true));
+  const events: string[] = [];
+  const resolve = createNativeCloudMcpResolver({
+    status: () => status(true), connection: () => ({ url: `http://127.0.0.1:${server.port}`, username: "fixture", password: "fixture" }),
+    readMcpStatus: async (directory) => { events.push(`shared ${directory}`); return { data: [{ name: "openwork-cloud", status: { status: "connected" } }] }; },
+    invalidateMcpStatus: (directory) => { events.push(`invalidate ${directory}`); },
+  });
+  expect(await resolve(workspace)?.request("/api/mcp", workspace.path)).toEqual({ data: [{ name: "openwork-cloud", status: { status: "connected" } }] });
+  await resolve(workspace)?.request("/api/mcp/openwork-cloud/disconnect", workspace.path, "POST");
+  expect(requests).toEqual(["POST /api/mcp/openwork-cloud/disconnect"]);
+  expect(events).toEqual([`shared ${workspace.path}`, `invalidate ${workspace.path}`, `invalidate ${workspace.path}`]);
 });

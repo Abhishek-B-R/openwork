@@ -1,4 +1,4 @@
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test } from "bun:test";
@@ -188,6 +188,27 @@ describe("managed OpenCode startup", () => {
       } } } });
       expect(JSON.stringify(config)).not.toContain('"hidden"');
       expect(JSON.stringify(config)).not.toContain('"disabled"');
+    } finally { await managed.close(); }
+  });
+
+  test("an identical provider config is not rewritten, so the engine has nothing to reload", async () => {
+    const root = await createRoot();
+    const bin = await writeExecutable(root, "provider-rewrite.mjs", [
+      "const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => Response.json({ healthy: true, version: 'test', pid: process.pid }) });",
+      "console.log(`opencode server listening on http://127.0.0.1:${server.port}`);",
+      "process.on('SIGTERM', () => { server.stop(true); process.exit(0); });",
+    ]);
+    const managed = await createManagedOpencodeV2Server({ bin, rootDir: root });
+    try {
+      const target = join(root, "config", "opencode.json");
+      const spec = { id: "witness", name: "Witness", apiKey: "synthetic-key", models: [{ id: "m1", name: "M1" }] };
+      expect(await managed.setProviders([spec], ["opencode"])).toBe(true);
+      const written = (await stat(target)).mtimeMs;
+      await Bun.sleep(20);
+      expect(await managed.setProviders([{ ...spec }], ["opencode"])).toBe(false);
+      expect((await stat(target)).mtimeMs).toBe(written);
+      expect(await managed.setProviders([{ ...spec, apiKey: "rotated-key" }], ["opencode"])).toBe(true);
+      expect(await readFile(target, "utf8")).toContain("rotated-key");
     } finally { await managed.close(); }
   });
 

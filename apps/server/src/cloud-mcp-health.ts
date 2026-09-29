@@ -152,7 +152,14 @@ export type CloudMcpRuntimeRegistrar = (
   config: ServerConfig,
   workspace: WorkspaceInfo,
   onlyNames?: string[],
-  options?: { throwOnFailure?: boolean },
+  options?: {
+    throwOnFailure?: boolean;
+    /**
+     * A periodic refresh rather than a user's request: on v2 the names are
+     * not restarted now, and failed ones wait for the reconciler's back-off.
+     */
+    background?: boolean;
+  },
 ) => Promise<CloudMcpRuntimeRegistrationResult>;
 
 export type CloudMcpLiveStatusObserver = (
@@ -2505,8 +2512,8 @@ async function reconcileConnectMcpCatalog(input: {
 }) {
   const { reconcileOpenWorkConnectMcpServers } = await import("./connect-mcp-server-catalog.js");
   const servers = await reconcileOpenWorkConnectMcpServers(input).catch((): {
-    diagnostic: ConnectMcpCatalogDiagnostic; directNames: string[]; removedNames: string[];
-  } => ({ diagnostic: "discovery_unavailable", directNames: [], removedNames: [] }));
+    diagnostic: ConnectMcpCatalogDiagnostic; directNames: string[]; removedNames: string[]; changed: boolean;
+  } => ({ diagnostic: "discovery_unavailable", directNames: [], removedNames: [], changed: false }));
   const opencode = input.createWorkspaceOpencodeClient(input.config, input.workspace);
   for (const name of servers.removedNames) {
     await opencode.mcp.disconnect({ name, ...locationParams(input.directory) }).catch(() => undefined);
@@ -2523,8 +2530,11 @@ export async function refreshOpenworkCloudMcpCatalog(input: ReadOpenworkCloudMcp
   if (!cloudMcp || cloudMcp.enabled === false) return health;
   const servers = await reconcileConnectMcpCatalog({ ...input, directory: input.directory, cloudMcp });
   if (servers.directNames.length > 0) {
-    // Direct registration results and latency do not determine central Cloud health.
-    void input.registerRuntimeMcp(input.config, input.workspace, servers.directNames, { throwOnFailure: false })
+    // Direct registration results and latency do not determine central Cloud
+    // health. A periodic refresh is not a reconnect request: on v2 an
+    // unchanged catalog leaves the engine alone (changes already reached the
+    // folder's reconciler through the config write).
+    void input.registerRuntimeMcp(input.config, input.workspace, servers.directNames, { throwOnFailure: false, background: true })
       .catch(() => undefined);
   }
   return { ...health, connectCatalogDiagnostic: servers.diagnostic };

@@ -65,9 +65,10 @@ export interface ManagedOpencodeV2Server {
   /**
    * Replace the mirrored providers. `disabledProviderIds` hides those
    * providers (including built-ins such as OpenCode Zen) from the native
-   * catalog, matching v1 `disabled_providers`.
+   * catalog, matching v1 `disabled_providers`. Resolves to whether the
+   * engine config changed; an identical config is not rewritten.
    */
-  setProviders(specs: OpencodeV2ProviderSpec[], disabledProviderIds?: string[]): Promise<void>;
+  setProviders(specs: OpencodeV2ProviderSpec[], disabledProviderIds?: string[]): Promise<boolean>;
   /** Extra absolute skill directories registered through native config `skills`. */
   setSkills(directories: string[]): Promise<void>;
   close(): Promise<void>;
@@ -190,7 +191,8 @@ export async function createManagedOpencodeV2Server(
   const providers = new Map<string, OpencodeV2ProviderSpec>();
   let skills: string[] = [];
   let disabledProviderIds: string[] = [];
-  let writes: Promise<void> = Promise.resolve();
+  let writes: Promise<boolean> = Promise.resolve(false);
+  let lastWrittenConfig: string | undefined;
   const opencodeModelsUrl = (options.env?.OPENCODE_MODELS_URL ?? process.env.OPENCODE_MODELS_URL)?.replace(/\/+$/, "");
   // The engine needs OS paths and locale settings, not the server's provider,
   // cloud, database, or control-plane credentials. Unknown keys stay private.
@@ -316,16 +318,17 @@ export async function createManagedOpencodeV2Server(
 
   // Every rewrite (providers, permissions, skills) serializes through one
   // queue and emits the whole current state, so no writer drops another's keys.
-  function writeConfig(): Promise<void> {
-    const next = writes.catch(() => undefined).then(writeConfigNow);
+  // An identical config is not rewritten, so the engine has nothing to reload.
+  function writeConfig(): Promise<boolean> {
+    const next = writes.catch(() => false).then(writeConfigNow);
     writes = next;
     return next;
   }
 
-  async function writeConfigNow(): Promise<void> {
+  async function writeConfigNow(): Promise<boolean> {
     const target = join(configDir, "opencode.json");
     const temporary = `${target}.tmp-${randomBytes(8).toString("hex")}`;
-    await writeFile(temporary, `${JSON.stringify(renderOpencodeV2Config({
+    const rendered = `${JSON.stringify(renderOpencodeV2Config({
       providers: [...providers.values()],
       disabledProviderIds,
       gatewayQuotaPluginDirectory,
@@ -334,8 +337,12 @@ export async function createManagedOpencodeV2Server(
       contextTools: options.contextTools,
       ...(options.permissions ? { permissions: await options.permissions() } : {}),
       skills,
-    }), null, 2)}\n`, { mode: 0o600 });
+    }), null, 2)}\n`;
+    if (rendered === lastWrittenConfig) return false;
+    await writeFile(temporary, rendered, { mode: 0o600 });
     await rename(temporary, target);
+    lastWrittenConfig = rendered;
+    return true;
   }
 
   async function close(): Promise<void> {
@@ -380,7 +387,7 @@ export async function createManagedOpencodeV2Server(
         providers.set(spec.id, spec);
       }
       disabledProviderIds = [...new Set(disabled)].sort();
-      await writeConfig();
+      return await writeConfig();
     },
     async setSkills(directories) {
       skills = [...directories];

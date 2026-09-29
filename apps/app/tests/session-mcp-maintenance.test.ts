@@ -11,6 +11,8 @@ import { cleanupOpenworkCloudMcpAfterSignOut } from "../src/react-app/domains/co
 import {
   getSessionMcpMaintenanceTargetKey,
   runCloudMcpMaintenanceWithRetry,
+  SESSION_MCP_FOCUS_REFRESH_MIN_INTERVAL_MS,
+  shouldRefreshSessionMcpOnFocus,
   runSessionMcpMaintenanceTask,
   syncCloudControlMcpInBackground,
   waitForCloudMcpRetry,
@@ -765,4 +767,16 @@ describe("session MCP maintenance", () => {
     expect(targetARuns).toBe(1);
     expect(targetBRuns).toBe(1);
   });
+});
+
+test("refocusing the window right after a successful check does not refresh connections again", () => {
+  // Never checked, or the last check failed: refresh on focus.
+  expect(shouldRefreshSessionMcpOnFocus(null, NOW)).toBe(true);
+  // Succeeded moments ago: skip.
+  expect(shouldRefreshSessionMcpOnFocus(NOW - 5_000, NOW)).toBe(false);
+  expect(shouldRefreshSessionMcpOnFocus(NOW - SESSION_MCP_FOCUS_REFRESH_MIN_INTERVAL_MS + 1, NOW)).toBe(false);
+  // A minute later the throttle expires.
+  expect(shouldRefreshSessionMcpOnFocus(NOW - SESSION_MCP_FOCUS_REFRESH_MIN_INTERVAL_MS, NOW)).toBe(true);
+  // A clock that moved backwards never suppresses a refresh.
+  expect(shouldRefreshSessionMcpOnFocus(NOW + 60_000, NOW)).toBe(true);
 });

@@ -37,6 +37,19 @@ export const CLOUD_MCP_REFRESH_MARGIN_MS = 24 * 60 * 60 * 1000;
 // Keep the quick warmup retries, then cover a short startup outage without
 // waiting for navigation or the ordinary five-minute maintenance interval.
 export const CLOUD_MCP_MAINTENANCE_RETRY_DELAYS_MS = [1_000, 3_000, 10_000, 30_000, 60_000];
+// Switching back to the window is frequent; a check that succeeded this
+// recently is not repeated for it.
+export const SESSION_MCP_FOCUS_REFRESH_MIN_INTERVAL_MS = 60 * 1000;
+
+/**
+ * Whether regaining window focus should refresh connections: only when no
+ * check has succeeded in the last minute. A failed check, or a clock that
+ * moved backwards, never suppresses it.
+ */
+export function shouldRefreshSessionMcpOnFocus(lastSucceededAt: number | null, now: number): boolean {
+  if (lastSucceededAt === null || now < lastSucceededAt) return true;
+  return now - lastSucceededAt >= SESSION_MCP_FOCUS_REFRESH_MIN_INTERVAL_MS;
+}
 
 type CloudMcpMaintenanceClient = CloudMcpClient & Pick<OpenworkServerClient, "listMcp">;
 
@@ -466,6 +479,7 @@ export function useSessionMcpMaintenance(input: {
     };
     let busyRetryTimer: number | null = null;
     let rerunRequested = false;
+    let lastSucceededAt: number | null = null;
     setCloudMcpState(input.cloudSignedIn
       ? { ...IDLE_CLOUD_MCP_MAINTENANCE_STATE, status: "checking" }
       : IDLE_CLOUD_MCP_MAINTENANCE_STATE);
@@ -520,8 +534,10 @@ export function useSessionMcpMaintenance(input: {
         // Backoff time must not consume the existing work watchdog budget.
         timeoutMs: SESSION_MCP_MAINTENANCE_TIMEOUT_MS + CLOUD_MCP_MAINTENANCE_RETRY_DELAYS_MS.reduce((sum, delay) => sum + delay, 0),
         task: async (signal) => {
+          lastSucceededAt = null;
+          let cloudFailed = false;
           if (input.cloudSignedIn) {
-            await runCloudMcpMaintenanceWithRetry({
+            const result = await runCloudMcpMaintenanceWithRetry({
               signal,
               wait: (delay) => waitForCloudMcpRetry(delay, signal, window),
               attempt: () => syncCloudControlMcpInBackground({
@@ -533,6 +549,7 @@ export function useSessionMcpMaintenance(input: {
               }),
               onAttempt: recordCloudAttempt,
             });
+            cloudFailed = result.outcome === "failed";
           }
           if (signal.aborted || !isCurrent()) return;
           await healWorkspaceMcpInBackground({
@@ -544,6 +561,7 @@ export function useSessionMcpMaintenance(input: {
             recordInspectorEvent("mcp.session_reauth_failed", { workspaceId });
             return false;
           });
+          if (!cloudFailed && !signal.aborted) lastSucceededAt = Date.now();
         },
       });
       running = false;
@@ -556,7 +574,10 @@ export function useSessionMcpMaintenance(input: {
     void tick();
     const handleOnline = () => void tick();
     const handleFocus = () => {
-      if (document.visibilityState === "visible") void tick();
+      if (document.visibilityState !== "visible") return;
+      // The five-minute interval, online, and inventory changes still run;
+      // only a refocus right after a successful check is skipped.
+      if (shouldRefreshSessionMcpOnFocus(lastSucceededAt, Date.now())) void tick();
     };
     // Archiving, restoring or creating a Library plugin changes which org
     // connections this member gets; refresh the direct MCP catalog right away.
