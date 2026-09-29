@@ -63,24 +63,35 @@ export function lastDocumentsOpened(slug: string): number {
 }
 
 /** The coworker's documents, kept fresh by a light poll plus explicit refreshes. */
-export function useDocuments(slug: string, refreshKey = 0): { documents: CoworkerDocumentSummary[] | null; refresh: () => Promise<void>; error: string } {
+export function useDocuments(slug: string, refreshKey = 0, active = true): { documents: CoworkerDocumentSummary[] | null; refresh: () => Promise<void>; error: string } {
   const [documents, setDocuments] = useState<CoworkerDocumentSummary[] | null>(null);
   const [error, setError] = useState("");
+  const scope = useMemo(() => ({ active, revision: 0, reading: false, again: false }), [slug]);
   const refresh = useCallback(async () => {
+    if (!scope.active || document.hidden) return;
+    if (scope.reading) { scope.again = true; return; }
+    scope.reading = true;
+    const revision = scope.revision;
     try {
       const next = await coworkerBridge.documents.list(slug);
+      if (!scope.active || revision !== scope.revision) return;
       setDocuments((current) => (current && JSON.stringify(current) === JSON.stringify(next) ? current : next));
       setError("");
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
+      if (scope.active && revision === scope.revision) setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      scope.reading = false;
+      if (scope.again) { scope.again = false; void refresh(); }
     }
-  }, [slug]);
+  }, [scope, slug]);
+  useEffect(() => { setDocuments(null); setError(""); }, [slug]);
   useEffect(() => {
-    setDocuments(null);
+    scope.active = active;
+    if (!active) return;
     void refresh();
     const timer = window.setInterval(() => void refresh(), DOCUMENTS_POLL_MS);
-    return () => window.clearInterval(timer);
-  }, [refresh, refreshKey]);
+    return () => { scope.active = false; scope.revision++; window.clearInterval(timer); };
+  }, [active, refresh, refreshKey, scope]);
   return { documents, refresh, error };
 }
 
@@ -290,7 +301,7 @@ export function DocumentReader({
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState("");
   const [error, setError] = useState("");
-  const scope = useMemo(() => ({ active: true, revision: 0 }), [coworker.slug, coworker.createdAt, documentId]);
+  const scope = useMemo(() => ({ active: true, revision: 0, changing: false }), [coworker.slug, coworker.createdAt, documentId]);
   const navigationMessage = () => mode === "edit" ? "Save or cancel the document draft before opening another source." : busy ? "Wait for the document request to finish before opening another source." : null;
   useDocumentNavigationGuard(navigationGuard, navigationMessage);
   function navigate(action: () => void) {
@@ -300,12 +311,14 @@ export function DocumentReader({
   }
 
   const load = useCallback(async () => {
+    if (scope.changing) return;
     const revision = ++scope.revision;
     try {
       const next = await coworkerBridge.documents.read(coworker.slug, documentId);
       if (!scope.active || scope.revision !== revision) return;
       if (next.id !== documentId) throw new Error("The requested document was not returned.");
-      setDocument(next);
+      setDocument((current) => current && current.id === next.id
+        && (current.revision > next.revision || (current.revision === next.revision && current.updatedAt > next.updatedAt)) ? current : next);
       setError("");
     } catch (cause) {
       if (scope.active && scope.revision === revision) setError(messageOf(cause));
@@ -329,6 +342,8 @@ export function DocumentReader({
   }, [load, mode]);
 
   async function run(action: () => Promise<string>): Promise<void> {
+    if (scope.changing) return;
+    scope.changing = true;
     scope.revision++;
     setBusy(true);
     setError("");
@@ -336,11 +351,15 @@ export function DocumentReader({
       const result = await action();
       if (!scope.active) return;
       setNote(result);
+      scope.changing = false;
       await load();
-      if (scope.active) await onChanged();
+      if (scope.active) await onChanged().catch(() => {
+        if (scope.active) setError("The request succeeded, but the document list could not be refreshed. Your result is kept.");
+      });
     } catch (cause) {
       if (scope.active) setError(messageOf(cause));
     } finally {
+      scope.changing = false;
       if (scope.active) setBusy(false);
     }
   }
@@ -386,7 +405,8 @@ export function DocumentReader({
             disabled={busy}
             data-testid="document-status-toggle"
             onClick={() => void run(async () => {
-              await coworkerBridge.documents.setStatus(coworker.slug, document.id, statusAction.status);
+              const saved = await coworkerBridge.documents.setStatus(coworker.slug, document.id, statusAction.status);
+              if (scope.active) setDocument(saved);
               return statusAction.status === "aside" ? "Put aside." : "In play again.";
             })}
           >
@@ -418,7 +438,8 @@ export function DocumentReader({
               disabled={busy}
               data-testid="document-archive"
               onClick={() => void run(async () => {
-                await coworkerBridge.documents.setStatus(coworker.slug, document.id, "archived");
+                const saved = await coworkerBridge.documents.setStatus(coworker.slug, document.id, "archived");
+                if (scope.active) setDocument(saved);
                 return "Archived. It stays behind the Archived link.";
               })}
             >
@@ -445,6 +466,8 @@ export function DocumentReader({
           onCancel={() => { setMode("read"); setNote(""); }}
           onSave={() => void run(async () => {
             const saved = await coworkerBridge.documents.save(coworker.slug, document.id, { body: draft });
+            if (!scope.active) return "";
+            setDocument(saved);
             setMode("read");
             return saved.changed ? `Saved as revision ${saved.revision}. ${coworker.name} will see your edit next turn.` : "Nothing changed.";
           })}
@@ -457,6 +480,8 @@ export function DocumentReader({
           onClose={() => setMode("read")}
           onRestored={(revision) => void run(async () => {
             const restored = await coworkerBridge.documents.restore(coworker.slug, document.id, revision);
+            if (!scope.active) return "";
+            setDocument(restored);
             setMode("read");
             return `Restored revision ${revision} as revision ${restored.revision}.`;
           })}

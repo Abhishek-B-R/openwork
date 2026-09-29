@@ -28,8 +28,16 @@ function GroupDocumentPanel({ api, groupId, openId = "", openRequestId, onClose,
   const [discard, setDiscard] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
   const request = useRef(0);
+  // A newly saved document already has a durable identity and contents. Opening
+  // its reader must not discard that confirmation behind another read.
+  const confirmed = useRef<GroupDocument | null>(null);
+  const changing = useRef(false);
   const navigationMessage = () => editing ? "Save or cancel the shared document draft before opening another source." : busy ? "Wait for the shared document request to finish before opening another source." : null;
   useDocumentNavigationGuard(navigationGuard, navigationMessage);
+  function acceptDocument(next: GroupDocument) {
+    setDocument((current) => current && current.id === next.id
+      && (current.revision > next.revision || (current.revision === next.revision && current.updatedAt > next.updatedAt)) ? current : next);
+  }
 
   useEffect(() => () => { request.current++; }, []);
   useEffect(() => {
@@ -58,11 +66,13 @@ function GroupDocumentPanel({ api, groupId, openId = "", openRequestId, onClose,
   }, [openId, openRequestId]);
   useEffect(() => {
     const version = ++request.current;
-    setDocument(null); setHistory(null); setPreview(null); setError("");
-    if (!selectedId) return;
+    const saved = confirmed.current?.id === selectedId ? confirmed.current : null;
+    confirmed.current = null;
+    setDocument(saved); setHistory(null); setPreview(null); setError("");
+    if (!selectedId || saved) { setBusy(false); return; }
     setBusy(true);
     void api.read(groupId, selectedId).then((value) => {
-      if (request.current === version) setDocument(value);
+      if (request.current === version) acceptDocument(value);
     }).catch((cause: unknown) => {
       if (request.current === version) setError(messageOf(cause));
     }).finally(() => { if (request.current === version) setBusy(false); });
@@ -78,7 +88,7 @@ function GroupDocumentPanel({ api, groupId, openId = "", openRequestId, onClose,
       if (reading) return;
       reading = true;
       void api.read(groupId, id).then((value) => {
-        if (!cancelled && request.current === version) { setDocument(value); setError(""); }
+        if (!cancelled && request.current === version) { acceptDocument(value); setError(""); }
       }).catch((cause: unknown) => {
         if (!cancelled && request.current === version) setError(messageOf(cause));
       }).finally(() => { reading = false; });
@@ -87,11 +97,13 @@ function GroupDocumentPanel({ api, groupId, openId = "", openRequestId, onClose,
   }, [api, groupId, document?.id, editing, history, busy]);
 
   async function run(action: () => Promise<void>) {
+    if (changing.current) return;
+    changing.current = true;
     request.current++;
     setBusy(true); setError("");
     try { await action(); }
     catch (cause) { setError(messageOf(cause)); }
-    finally { setBusy(false); }
+    finally { changing.current = false; setBusy(false); }
   }
 
   function edit() {
@@ -130,6 +142,7 @@ function GroupDocumentPanel({ api, groupId, openId = "", openRequestId, onClose,
           <div className="flex flex-wrap gap-2">
             <Button variant="primary" className="text-xs" disabled={busy || !title.trim()} data-testid="group-document-save" onClick={() => void run(async () => {
               const saved = await api.save(groupId, document ? { id: document.id, expectedRevision: document.revision, title, body } : { title, body });
+              confirmed.current = selectedId === saved.id ? null : saved;
               setDocument(saved); setSelectedId(saved.id); setEditing(false); setPreview(null); setDiscard(false); setRefreshKey((key) => key + 1);
             })}>Save shared document</Button>
             <Button variant="ghost" className="text-xs" disabled={busy} onClick={() => { setEditing(false); setPreview(null); setError(""); setDiscard(false); }}>Cancel</Button>
@@ -152,7 +165,7 @@ function GroupDocumentPanel({ api, groupId, openId = "", openRequestId, onClose,
             <div className="flex flex-wrap gap-1.5">
               <Button variant="ghost" className="px-2 text-xs" disabled={busy} onClick={edit}>Edit</Button>
               <Button variant="ghost" className="px-2 text-xs" disabled={busy} data-testid="group-document-history" onClick={() => void run(async () => { setHistory(await api.revisions(groupId, document.id)); })}>History</Button>
-              <Button variant="ghost" className="px-2 text-xs" disabled={busy} onClick={() => void run(async () => { setDocument(await api.read(groupId, document.id)); setHistory(null); })}>Refresh</Button>
+              <Button variant="ghost" className="px-2 text-xs" disabled={busy} onClick={() => void run(async () => { acceptDocument(await api.read(groupId, document.id)); setHistory(null); })}>Refresh</Button>
             </div>
             <DocumentMarkdown text={document.body} onOpenDocument={(id) => { if (!busy) setSelectedId(id); }} className="!mx-0 !max-w-none" />
             {history ? <section className="space-y-2 border-t border-line pt-3" data-testid="group-document-history-view">

@@ -118,6 +118,9 @@ function mergeActivityReads(current: CoworkerActivitySnapshots, reads: Array<{ s
   for (const { slug, scope, activity } of reads) {
     if (!samePreparationScope(currentScope(slug), scope)) continue;
     if (!activity && !next[slug]) continue;
+    const previous = next[slug];
+    if (activity && previous && samePreparationScope(previous.scope, scope)
+      && JSON.stringify(previous.activity) === JSON.stringify(activity)) continue;
     if (next === current) next = { ...current };
     if (activity) next[slug] = { scope, activity };
     else delete next[slug];
@@ -967,7 +970,14 @@ export default function App() {
   const selectedPreparation = runtime && selected ? workspacePreparationScope(runtime, selected, session) : null;
   const updateSelectedLiveActivity = useCallback((activity: CoworkerActivity | null) => {
     if (!selectedSlug || !selectedPreparation) return;
-    setLiveActivityBySlug((current) => mergeActivityReads(current, [{ slug: selectedSlug, scope: selectedPreparation, activity }], currentPreparationScope));
+    setLiveActivityBySlug((current) => {
+      const previous = current[selectedSlug];
+      // The transcript can reobserve the same phase on each streaming snapshot.
+      // Its observation time alone does not change the shell's visible activity.
+      if (activity && previous && samePreparationScope(previous.scope, selectedPreparation)
+        && JSON.stringify({ ...previous.activity, updatedAt: activity.updatedAt }) === JSON.stringify(activity)) return current;
+      return mergeActivityReads(current, [{ slug: selectedSlug, scope: selectedPreparation, activity }], currentPreparationScope);
+    });
   }, [currentPreparationScope, selectedSlug, selectedPreparation?.runtimeKey, selectedPreparation?.workspaceKey, selectedPreparation?.configurationKey]);
 
   // Opening a conversation reads it: its activity leaves the unread list, the way

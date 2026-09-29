@@ -1426,6 +1426,29 @@ test("Activity recovery preserves creation identity and never backfills a missin
   });
 });
 
+test("Activity acknowledges the durable write without a fallible second membership read", async () => {
+  const actor = { slug: "scout", workspaceId: "workspace_scout", createdAt: fixtureCreatedAt };
+  const visible = { id: "activity_visible", kind: "reply", at: 1, slug: actor.slug, workspaceId: actor.workspaceId,
+    coworkerCreatedAt: actor.createdAt, readAt: null, preview: "Done", target: { kind: "private", threadId: "ses_private" } };
+  const hidden = { ...visible, id: "activity_hidden", slug: "other" };
+  let membershipReads = 0;
+  const writes = [];
+  const inbox = createActivityInbox({
+    collaboration: {
+      read: async (project) => project({ activity: [visible, hidden] }),
+      markActivityRead: async (ids) => { writes.push(ids); return [{ ...visible, readAt: 42 }, hidden]; },
+    },
+    coworkers: async () => {
+      if (++membershipReads > 1) throw new Error("Membership refresh unavailable after successful write");
+      return [actor];
+    },
+    groups: async () => [],
+  });
+  assert.deepEqual(await inbox.markRead([visible.id, hidden.id]), [{ ...visible, readAt: 42 }]);
+  assert.deepEqual(writes, [[visible.id]], "only visible origins can be acknowledged");
+  assert.equal(membershipReads, 1);
+});
+
 test("Activity persists only final private text, explicit read state, and original workspace identity", async () => {
   await withHome(async (home) => {
     let clock = 1000;

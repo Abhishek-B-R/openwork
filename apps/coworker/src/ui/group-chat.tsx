@@ -83,13 +83,14 @@ const GROUP_HOLDINGS_POLL_MS = 15_000;
  * scheduled ones, live Workers, documents in play — so the numbers agree.
  * Null until the first read, and null when nobody holds anything.
  */
-function useGroupHoldings(members: readonly CoworkerSummary[], runtime: RuntimeInfo): CoworkerSummaryLine | null {
+function useGroupHoldings(members: readonly CoworkerSummary[], runtime: RuntimeInfo, active: boolean): CoworkerSummaryLine | null {
   const [line, setLine] = useState<CoworkerSummaryLine | null>(null);
   useEffect(() => {
+    if (!active) return;
     let cancelled = false;
     let reading = false;
     const read = async () => {
-      if (reading) return;
+      if (reading || document.hidden) return;
       reading = true;
       try {
         const lines = await Promise.all(members.map(async (member) => {
@@ -125,7 +126,7 @@ function useGroupHoldings(members: readonly CoworkerSummary[], runtime: RuntimeI
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [members, runtime.engineManaged, runtime.ownerToken, runtime.serverUrl]);
+  }, [active, members, runtime.engineManaged, runtime.ownerToken, runtime.serverUrl]);
   return line;
 }
 
@@ -356,7 +357,7 @@ function GroupChatView({
   );
   const membersRef = useRef(members);
   membersRef.current = members;
-  const holdings = useGroupHoldings(members, runtime);
+  const holdings = useGroupHoldings(members, runtime, active);
   const nameFor = useCallback((slug: string) => coworkers.find((coworker) => coworker.slug === slug)?.name ?? slug, [coworkers]);
 
   function isEventPhaseRequest(clientMessageId?: string, turnId?: string): boolean {

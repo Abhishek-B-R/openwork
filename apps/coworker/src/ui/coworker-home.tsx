@@ -1,4 +1,4 @@
-import { Suspense, lazy, useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { coworkerBridge, type CoworkerSummary, type LocalResponsibility, type ProviderSyncRun, type RuntimeInfo, type TeamStates } from "@/lib/bridge";
 import { abilitiesSummary } from "@/lib/abilities";
 import { CoworkerAbilitiesEditor } from "@/ui/coworker-abilities";
@@ -111,7 +111,7 @@ export type CoworkerHomeRequest =
  * rows, and the Assignments level share one picture. Follows a run closely
  * while one is going or waiting, and idles otherwise.
  */
-function useCoworkerHoldings(slug: string): {
+function useCoworkerHoldings(slug: string, active: boolean): {
   scheduled: LocalResponsibility[];
   setScheduled: (items: LocalResponsibility[]) => void;
   workers: WorkerSummary[];
@@ -125,9 +125,13 @@ function useCoworkerHoldings(slug: string): {
     setWorkers([]);
   }, [slug]);
   useEffect(() => {
+    if (!active) return;
     let cancelled = false;
-    const load = () =>
-      Promise.all([
+    let reading = false;
+    const load = async () => {
+      if (reading || document.hidden) return;
+      reading = true;
+      return Promise.all([
         coworkerBridge.localResponsibilities.list(slug).catch((): LocalResponsibility[] => []),
         coworkerBridge.workers.list(slug).catch((): WorkerSummary[] => []),
       ])
@@ -136,14 +140,16 @@ function useCoworkerHoldings(slug: string): {
           setScheduled((current) => (JSON.stringify(current) === JSON.stringify(items) ? current : items));
           setWorkers((current) => (JSON.stringify(current) === JSON.stringify(liveWorkers) ? current : liveWorkers));
         })
-        .catch(() => undefined);
+        .catch(() => undefined)
+        .finally(() => { reading = false; });
+    };
     void load();
     const timer = window.setInterval(() => void load(), busy ? 1_500 : 5_000);
     return () => {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [busy, slug]);
+  }, [active, busy, slug]);
   return { scheduled, setScheduled, workers };
 }
 
@@ -247,8 +253,8 @@ export function CoworkerHome({
     return () => window.removeEventListener("keydown", protectDraft, true);
   }, [active, allowDocumentNavigation]);
   const [windowWidth, setWindowWidth] = useState(() => window.innerWidth);
-  const { documents, refresh: refreshDocuments, error: documentsError } = useDocuments(coworker.slug);
-  const holdings = useCoworkerHoldings(coworker.slug);
+  const { documents, refresh: refreshDocuments, error: documentsError } = useDocuments(coworker.slug, 0, active);
+  const holdings = useCoworkerHoldings(coworker.slug, active);
   // Optional features: what is off is not shown. Scheduled assignments belong to Calendar.
   const features = useFeatures();
   const scheduled = features.calendar ? holdings.scheduled : NO_SCHEDULED;
@@ -385,7 +391,7 @@ export function CoworkerHome({
     if (!message && overlayPanel) collapseContextPanel();
     return message;
   });
-  const documentHooks: DocumentHooks = {
+  const documentHooks = useMemo<DocumentHooks>(() => ({
     list: documents ?? NO_DOCUMENTS,
     onOpenDocument: (documentId) => {
       if (!allowDocumentNavigation()) return;
@@ -409,7 +415,7 @@ export function CoworkerHome({
       setBesideDocumentId(documentId);
     },
     canOpenBeside,
-  };
+  }), [documents, allowDocumentNavigation, openActivityLevel, canOpenBeside, besidePath, besideDocumentId]);
   const summary = describeCoworkerSummary({
     assignments: assignmentThreads,
     scheduled,

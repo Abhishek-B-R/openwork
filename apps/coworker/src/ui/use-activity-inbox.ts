@@ -26,13 +26,24 @@ export function useActivityInbox(enabled: boolean): {
   const writeTail = useRef<Promise<void>>(Promise.resolve());
   const pendingWrites = useRef(0);
   const writeRevision = useRef(0);
+  const confirmedItems = useRef<CoworkerActivityItem[]>([]);
+  const hasLoaded = useRef(false);
+  const readIntentions = useRef(new Map<string, { revision: number; readAt: number | null }>());
+
+  const publishItems = useCallback(() => {
+    const next = confirmedItems.current.map((item) => {
+      const intention = readIntentions.current.get(item.id);
+      return intention && item.readAt !== intention.readAt ? { ...item, readAt: intention.readAt } : item;
+    });
+    setItems((current) => JSON.stringify(current) === JSON.stringify(next) ? current : next);
+  }, []);
 
   const refresh = useCallback((): Promise<void> => {
     if (!active.current || document.hidden || pendingWrites.current > 0) return Promise.resolve();
     if (listFlight.current) return listFlight.current;
 
     const revision = writeRevision.current;
-    setLoading(true);
+    if (!hasLoaded.current) setLoading(true);
     // Start on a microtask so even a synchronous bridge failure releases the flight.
     const flight = Promise.resolve()
       .then(() => {
@@ -41,7 +52,9 @@ export function useActivityInbox(enabled: boolean): {
       })
       .then((next) => {
         if (!next || !mounted.current || !active.current || revision !== writeRevision.current) return;
-        setItems(next);
+        confirmedItems.current = next;
+        hasLoaded.current = true;
+        publishItems();
         setError("");
       })
       .catch((cause: unknown) => {
@@ -54,7 +67,7 @@ export function useActivityInbox(enabled: boolean): {
       });
     listFlight.current = flight;
     return flight;
-  }, []);
+  }, [publishItems]);
 
   const markRead = useCallback((ids: string[], read = true): Promise<void> => {
     // Copy the caller's snapshot before queueing; later arrivals cannot join this write.
@@ -63,8 +76,11 @@ export function useActivityInbox(enabled: boolean): {
     if (!mounted.current || !active.current) return Promise.reject(new Error("Activity is not available right now."));
 
     // Invalidate any older list immediately, including while the write is still queued.
-    writeRevision.current += 1;
+    const revision = ++writeRevision.current;
     pendingWrites.current += 1;
+    const readAt = read ? Date.now() : null;
+    for (const id of snapshotIds) readIntentions.current.set(id, { revision, readAt });
+    publishItems();
     setBusy(true);
     setError("");
     // Serialize acknowledgements as well as reads: a slow earlier response must not
@@ -73,13 +89,20 @@ export function useActivityInbox(enabled: boolean): {
       .then(async () => {
         const next = await coworkerBridge.activity.markRead(snapshotIds, read);
         if (mounted.current) {
-          setItems(next);
+          confirmedItems.current = next;
+          for (const id of snapshotIds) {
+            if (readIntentions.current.get(id)?.revision === revision) readIntentions.current.delete(id);
+          }
+          publishItems();
           setError("");
         }
       })
       .catch((cause: unknown) => {
-        const message = errorMessage(cause, "Read status could not be saved. Try again.");
-        if (mounted.current) setError(message);
+        const message = errorMessage(cause, "Read status could not be confirmed. Check Activity before trying again.");
+        for (const id of snapshotIds) {
+          if (readIntentions.current.get(id)?.revision === revision) readIntentions.current.delete(id);
+        }
+        if (mounted.current) { publishItems(); setError(message); }
         throw new Error(message);
       })
       .finally(() => {
@@ -88,7 +111,7 @@ export function useActivityInbox(enabled: boolean): {
       });
     writeTail.current = operation.catch(() => undefined);
     return operation;
-  }, []);
+  }, [publishItems]);
 
   useEffect(() => {
     mounted.current = true;

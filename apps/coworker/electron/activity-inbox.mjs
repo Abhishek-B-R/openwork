@@ -152,8 +152,11 @@ export function createActivityInbox({ collaboration, coworkers, groups, now = Da
     async markRead(ids, read = true) {
       const requested = activityReadIds(ids, read);
       const visible = await list();
-      await collaboration.markActivityRead(visible.filter((item) => requested.has(item.id)).map((item) => item.id), read);
-      return list();
+      const saved = await collaboration.markActivityRead(visible.filter((item) => requested.has(item.id)).map((item) => item.id), read);
+      // The write already returns its durable snapshot. A second membership
+      // read must not turn a confirmed acknowledgement into an apparent failure.
+      const confirmed = new Map(saved.map((item) => [item.id, item]));
+      return visible.map((item) => ({ ...item, readAt: confirmed.get(item.id)?.readAt ?? null }));
     },
   };
 }

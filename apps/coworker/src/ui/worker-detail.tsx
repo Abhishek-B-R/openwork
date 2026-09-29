@@ -37,7 +37,7 @@ export function WorkerDetail({ coworker, initialWorker, onChanged, onOpenThread,
   const [verified, setVerified] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const request = useRef(0);
-  const reading = useRef(false);
+  const reading = useRef({ record: false, findings: false });
   const changing = useRef(false);
   const labelId = useId();
   const alive = isLiveWorker(worker);
@@ -53,28 +53,42 @@ export function WorkerDetail({ coworker, initialWorker, onChanged, onOpenThread,
   }
 
   async function refresh() {
-    if (reading.current || changing.current) return;
-    reading.current = true;
-    const version = ++request.current;
+    if (changing.current) return;
+    const version = request.current;
     setRefreshing(true);
-    const [record, findings] = await Promise.allSettled([
-      coworkerBridge.workers.get(coworker.slug, initialWorker.id),
-      coworkerBridge.workers.findings(coworker.slug, initialWorker.id, 40),
-    ]);
-    reading.current = false;
-    if (version !== request.current) return;
-    setRefreshing(false);
-    try {
-      if (record.status === "rejected") throw record.reason;
-      accept(record.value);
-      setReadError("");
-      setVerified(true);
-    } catch (cause) {
-      setVerified(false);
-      setReadError(`Updates unavailable. Last known state is shown. ${cause instanceof Error ? cause.message : String(cause)}`);
+    const observe = async (kind: "record" | "findings", read: () => Promise<void>) => {
+      if (reading.current[kind]) return;
+      reading.current[kind] = true;
+      try { await read(); }
+      finally {
+        reading.current[kind] = false;
+        if (version === request.current) setRefreshing(reading.current.record || reading.current.findings);
+      }
+    };
+    void observe("record", async () => {
+      try {
+        const record = await coworkerBridge.workers.get(coworker.slug, initialWorker.id);
+        if (version !== request.current) return;
+        accept(record);
+        setReadError("");
+        setVerified(true);
+      } catch (cause) {
+        if (version !== request.current) return;
+        setVerified(false);
+        setReadError(`Updates unavailable. Last known state is shown. ${cause instanceof Error ? cause.message : String(cause)}`);
+      }
+    });
+    void observe("findings", async () => {
+      try {
+        const findings = await coworkerBridge.workers.findings(coworker.slug, initialWorker.id, 40);
+        if (version === request.current) { setEvents(findings); setFindingsError(""); }
+      } catch {
+        if (version === request.current) setFindingsError("Findings could not refresh. Earlier updates are kept.");
+      }
+    });
+    if (!reading.current.record && !reading.current.findings) {
+      setRefreshing(false);
     }
-    if (findings.status === "fulfilled") { setEvents(findings.value); setFindingsError(""); }
-    else setFindingsError("Findings could not refresh. Earlier updates are kept.");
   }
   const readLatest = useEffectEvent(refresh);
   useEffect(() => {

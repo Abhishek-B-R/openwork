@@ -49,6 +49,7 @@ const SECTIONS: Array<{ id: SettingsSection; label: string; detail: string; help
 ];
 
 const EMPTY_CATALOG: EngineModelCatalog = { models: [], connectedProviderIds: [], cloud: null };
+type ConfigurationRead = { active: boolean; revision: number; flightRevision: number; flight: Promise<void> | null };
 
 function sectionTitle(section: SettingsSection): string {
   return SECTIONS.find((item) => item.id === section)?.label ?? "Settings";
@@ -288,20 +289,40 @@ export function OpenWorkSettings({
     [catalogCoworker?.workspaceId, runtime.engineManaged, runtime.ownerToken, runtime.serverUrl],
   );
 
+  const configurationRead = useMemo<ConfigurationRead>(() => ({ active: false, revision: 0, flightRevision: -1, flight: null }), [session, threads]);
   const refreshConfiguration = useCallback(async (options: { sync?: boolean } = {}) => {
+    if (configurationRead.flight) {
+      const waiting = configurationRead.flight;
+      await waiting;
+      if (configurationRead.flight && configurationRead.flight !== waiting) return configurationRead.flight;
+      if (!options.sync && configurationRead.flightRevision === configurationRead.revision) return;
+    }
+    if (!configurationRead.active) return;
+    const revision = ++configurationRead.revision;
+    configurationRead.flightRevision = revision;
+    const current = () => configurationRead.active && revision === configurationRead.revision;
     setRefreshing(true);
     setError("");
-    try {
-      if (options.sync && session) await onSyncProviders();
-      await onRefreshRuntime();
-      setCatalog(threads && runtime.engineManaged ? await threads.listModelCatalog() : EMPTY_CATALOG);
-      setCatalogLoaded(Boolean(threads && runtime.engineManaged));
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
-    } finally {
-      setRefreshing(false);
-    }
-  }, [onRefreshRuntime, onSyncProviders, runtime.engineManaged, session, threads]);
+    const flight = (async () => {
+      try {
+        if (options.sync && session) await onSyncProviders();
+        if (!current()) return;
+        await onRefreshRuntime();
+        if (!current()) return;
+        const next = threads && runtime.engineManaged ? await threads.listModelCatalog() : EMPTY_CATALOG;
+        if (!current()) return;
+        setCatalog(next);
+        setCatalogLoaded(Boolean(threads && runtime.engineManaged));
+      } catch (cause) {
+        if (current()) setError(cause instanceof Error ? cause.message : String(cause));
+      } finally {
+        if (current()) setRefreshing(false);
+      }
+    })();
+    configurationRead.flight = flight;
+    try { await flight; }
+    finally { if (configurationRead.flight === flight) configurationRead.flight = null; }
+  }, [configurationRead, onRefreshRuntime, onSyncProviders, runtime.engineManaged, session, threads]);
 
   useEffect(() => {
     if (!active) return;
@@ -310,9 +331,10 @@ export function OpenWorkSettings({
   }, [active, initialSection]);
 
   useEffect(() => {
-    if (!active) return;
-    void refreshConfiguration();
-  }, [active, refreshConfiguration]);
+    configurationRead.active = active;
+    if (active) void refreshConfiguration();
+    return () => { configurationRead.active = false; configurationRead.revision++; };
+  }, [active, configurationRead, refreshConfiguration]);
 
   const [signingOut, setSigningOut] = useState(false);
   async function signOut() {

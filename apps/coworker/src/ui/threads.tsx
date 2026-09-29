@@ -557,7 +557,7 @@ export function ThreadsPanel({
       setWorkerThreadIds((current) => (current.length === workerIds.length && current.every((id, index) => id === workerIds[index]) ? current : workerIds));
       setWorkerRecords((current) => (current.length === workers.length && current.every((worker, index) => worker.id === workers[index]?.id && worker.updatedAt === workers[index]?.updatedAt) ? current : workers));
       const split = classifyThreads(all.filter((thread) => !excluded.includes(thread.id)), { discussions: discussionThreadIds, workers: workerIds });
-      setDiscussions(split.discussions);
+      setDiscussions((current) => JSON.stringify(current) === JSON.stringify(split.discussions) ? current : split.discussions);
       const attention: Record<string, string> = {};
       for (const permission of pending.permissions) {
         attention[permission.sessionID] ??= describeInteractions({ permissions: [permission], questions: [] });
@@ -576,7 +576,8 @@ export function ThreadsPanel({
   // Re-read quickly while the workspace is not answering so the view heals as soon as it does.
   const failing = Boolean(error);
   useEffect(() => {
-    listingActive.current = true;
+    listingActive.current = active;
+    if (!active) return;
     void refresh();
     if (!threads) return;
     const unsubscribe = threads.subscribe(() => void refresh(), undefined, () => {
@@ -589,7 +590,7 @@ export function ThreadsPanel({
       unsubscribe();
       window.clearInterval(timer);
     };
-  }, [failing, threads, refresh, readiness, retryPreparation]);
+  }, [active, failing, threads, refresh, readiness, retryPreparation]);
 
   // The moment the AI service is back, drop any listing error it caused and re-read.
   useEffect(() => {
@@ -1241,6 +1242,7 @@ function ThreadView({
   const workerFeed = useWorkerFeed(coworker, threadId, { enabled: kind === "discussion" && browserEligible });
   const [openWorkerId, setOpenWorkerId] = useState("");
   const workerLinks = useMemo(() => ({ workers: workerFeed.workers ?? [], open: setOpenWorkerId }), [workerFeed.workers]);
+  const transcriptAppContext = useMemo<CoworkerMcpAppContext>(() => ({ sessionId: threadId, engine: "v2", readOnly: !active || kind !== "discussion" }), [threadId, active, kind]);
   const trayActive = browserEligible && (Boolean(openWorkerId) || (workerFeed.workers ?? []).some((worker) => isLiveWorker(worker) || recentlyEnded(worker, workerFeed.now)));
   // Entrances belong to what arrives after the conversation first paints: a message
   // already on screen when it loads, or handed over from a new discussion, stays still.
@@ -1532,7 +1534,14 @@ function ThreadView({
             completedAt: call.completedAt,
           })),
         }));
-      setMessages(visible);
+      setMessages((current) => {
+        const previous = new Map(current.map((message) => [message.id, message]));
+        const next = visible.map((message) => {
+          const known = previous.get(message.id);
+          return known && JSON.stringify(known) === JSON.stringify(message) ? known : message;
+        });
+        return current.length === next.length && current.every((message, index) => message === next[index]) ? current : next;
+      });
       rememberTranscript(transcriptCacheKey, displayedTitle, visible);
       setTranscriptLoaded(true);
       setTranscriptReadStartedAt(readStartedAt);
@@ -2612,7 +2621,7 @@ function ThreadView({
           {!transcriptLoaded && !readErrors.transcript ? <p role="status" className="text-xs text-mist">Loading conversation...</p> : null}
           {freshDiscussion ? <QuietEmptyConversation coworker={coworker} proposerName={team?.coworkers.find((member) => member.slug === coworker.suggestedBy?.slug)?.name ?? ""} /> : null}
           <WorkerLinksContext.Provider value={workerLinks}>
-          <TranscriptAppContext.Provider value={{ sessionId: threadId, engine: "v2", readOnly: !active || kind !== "discussion" }}>
+          <TranscriptAppContext.Provider value={transcriptAppContext}>
           <ConversationWindow items={blocks} {...conversationWindow} render={(block) => {
             const retriedWith = block.kind === "message" ? executionsByMessage.get(block.message.id)?.retryLabel : undefined;
             if (block.kind === "actions") {
@@ -2659,6 +2668,7 @@ function ThreadView({
               if (block.message.parentId === pendingTurn?.messageId) return null;
               return <QuietLine key={block.message.id} outcome={block.ended} text={block.ended === "stopped" ? "Stopped." : describeTurnFailure(block.message.error ? failureText(block.message.error) : "", coworker.name).headline} />;
             }
+            const hasTeamCards = kind === "discussion" && teamCardsFromCalls(block.calls).length > 0;
             return (
               <div key={block.message.id} data-scroll-anchor={block.message.id}>
                 <TimeLabel label={timeLabelBetween(block.previous?.createdAt, block.message.createdAt)} />
@@ -2675,10 +2685,10 @@ function ThreadView({
                   kind={kind}
                   turnCalls={block.calls}
                   documentCalls={block.documentCalls}
-                  team={kind === "discussion" ? team : undefined}
+                  team={hasTeamCards ? team : undefined}
                   laterPersonMessage={(messagePositions.get(block.message.id) ?? -1) < lastPersonIndex}
-                  conversation={visibleMessages}
-                  onSendReply={sendText}
+                  conversation={hasTeamCards ? visibleMessages : EMPTY_BUBBLE_CONVERSATION}
+                  onSendReply={hasTeamCards ? sendText : undefined}
                   onLongReply={block.message.id === visibleMessages[lastAssistantIndex]?.id ? recordLongReply : undefined}
                   liveStream={block.message.role === "assistant" && block.message.parentId === currentMessageId ? correlatedStream : null}
                   sentAt={block.message.parentId ? visibleMessages[messagePositions.get(block.message.parentId) ?? -1]?.createdAt ?? null : null}
@@ -2856,6 +2866,10 @@ function reviewTurn(message: TranscriptMessage): WorkerReview | null {
   return message.role === "user" ? parseWorkerReview(message.text) : null;
 }
 
+// Plain historical bubbles share their empty collections across stream frames.
+const EMPTY_BUBBLE_CALLS: TranscriptToolCall[] = [];
+const EMPTY_BUBBLE_CONVERSATION: ReadonlyArray<{ role: string; text: string }> = [];
+
 /**
  * Lay a transcript out as bubbles with observed actions gathered into one
  * small line between them. Consecutive replies that only did work (no words) fold into the
@@ -2938,6 +2952,7 @@ export function conversationBlocks(
     const position = bubblePositions.get(message.id) ?? -1;
     const previous = position > 0 ? bubbles[position - 1] : undefined;
     const next = position >= 0 ? bubbles[position + 1] : undefined;
+    const documentCalls = message.parentId ? documentCallsByParent.get(message.parentId) ?? turnCalls : turnCalls;
     blocks.push({
       kind: "message",
       message,
@@ -2945,8 +2960,8 @@ export function conversationBlocks(
       active,
       continued: Boolean(previous && previous.role === message.role),
       tail: !next || next.role !== message.role,
-      calls: turnCalls,
-      documentCalls: message.parentId ? documentCallsByParent.get(message.parentId) ?? turnCalls : turnCalls,
+      calls: turnCalls.length ? turnCalls : EMPTY_BUBBLE_CALLS,
+      documentCalls: documentCalls.length ? documentCalls : EMPTY_BUBBLE_CALLS,
     });
     appendDocuments(message, index);
   });

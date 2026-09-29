@@ -82,7 +82,7 @@ export function useWorkerFeed(coworker: CoworkerSummary, threadId: string, { ena
       if (version !== request.current) return;
       const mine = items.filter((worker) => worker.slug === coworker.slug && worker.spawnedFromThreadId === threadId);
       const at = Date.now();
-      setWorkers(mine);
+      setWorkers((current) => JSON.stringify(current) === JSON.stringify(mine) ? current : mine);
       setNow(at);
       setError("");
       await readNotes(everyNote ? mine : mine.filter((worker) => isLiveWorker(worker) || recentlyEnded(worker, at)), version);
