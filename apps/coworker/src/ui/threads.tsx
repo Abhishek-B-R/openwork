@@ -70,6 +70,7 @@ import { WorkerLinksContext, useWorkerLinks } from "@/ui/worker-links";
 import { useFeatures } from "@/ui/use-features";
 import { coworkerToolName } from "@/lib/coworker-tools";
 import { EXECUTION_KINDS, executionMetadata, executionState, safeWorkLabel, summarizeWorkerReceipt } from "@/lib/work-receipt";
+import { receiptIsSettled, receiptLines } from "@/lib/collaboration-receipts";
 import { executionProgress, pendingAdmissionState, type ExecutionActivity } from "@/lib/progress-activity";
 import { PROGRESS_LIMITS } from "@/lib/progress-config";
 import type { ProgressObservation } from "@/lib/progress-service";
@@ -2837,16 +2838,14 @@ export function CollaborationReceipts({ receipts, canRetry, retryUnavailable }: 
     setError("");
     try { await action(); } catch { setError("That request could not be completed. The existing work has been kept."); }
   };
+  // Turns that ended the same way read as one line with a count, never the same line again and again.
   return <div className="space-y-2" data-testid="collaboration-receipts" aria-live="polite">
-    {receipts.slice(-12).map((receipt) => <div key={receipt.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-2 text-[11px] text-mist [overflow-wrap:anywhere]" data-testid="collaboration-receipt" data-work-id={receipt.id} data-state={receipt.state}>
-      <span>{receipt.state === "waiting" ? "Waiting for requested work" : receipt.state === "waiting-person" ? "Waiting for your answer" : receipt.state === "resumption-queued" ? "Results ready; follow-up queued" : receipt.state === "resuming" ? "Following up on the results" : receipt.state === "succeeded" ? "Follow-up completed" : receipt.state === "cancelled" ? "Collaboration stopped" : receipt.state === "running" ? "Requested work is running" : "Collaboration needs attention"}</span>
-      {receipt.dependencies.slice(0, 3).map((dependency) => {
-        const name = safeWorkLabel(dependency.label, dependency.kind === "worker" ? "Worker" : "Coworker");
-        const label = `${name}: ${dependency.state === "succeeded" ? "received" : dependency.state === "failed" ? "failed" : dependency.state === "cancelled" ? "cancelled" : dependency.state === "waiting-person" ? "needs your input" : "pending"}`;
-        return dependency.groupId ? <button key={dependency.id} type="button" className="underline underline-offset-2" onClick={() => window.dispatchEvent(new CustomEvent("coworker:open-group", { detail: dependency.groupId }))}>{label}</button> : <span key={dependency.id}>{label}</span>;
-      })}
-      {!["succeeded", "failed", "cancelled"].includes(receipt.state) ? <button type="button" className="underline underline-offset-2" title="Stop this task, its delegated work, and its automatic follow-up" onClick={() => void act(() => coworkerBridge.collaboration.cancel(receipt.id))}>Stop task</button> : null}
-      {receipt.state === "failed" ? canRetry?.(receipt) === false ? retryUnavailable : <button type="button" className="underline underline-offset-2" onClick={() => void act(() => coworkerBridge.collaboration.retry(receipt.id))}>Continue with available results</button> : null}
+    {receiptLines(receipts).map((line) => <div key={line.ids[0]} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-2 text-[11px] text-mist [overflow-wrap:anywhere]" data-testid="collaboration-receipt" data-work-id={line.latest.id} data-work-ids={line.ids.join(" ")} data-state={line.state} data-count={line.ids.length}>
+      <span>{line.text}</span>
+      {line.dependencies.map((dependency) => dependency.groupId ? <button key={dependency.id} type="button" className="underline underline-offset-2" onClick={() => window.dispatchEvent(new CustomEvent("coworker:open-group", { detail: dependency.groupId }))}>{dependency.text}</button> : <span key={dependency.id}>{dependency.text}</span>)}
+      {line.more ? <span>{line.more} more</span> : null}
+      {!receiptIsSettled(line.state) ? <button type="button" className="underline underline-offset-2" title={line.ids.length > 1 ? "Stop these tasks, their delegated work, and their automatic follow-ups" : "Stop this task, its delegated work, and its automatic follow-up"} onClick={() => void act(() => Promise.all(line.ids.map((id) => coworkerBridge.collaboration.cancel(id))))}>{line.ids.length > 1 ? "Stop tasks" : "Stop task"}</button> : null}
+      {line.state === "failed" ? canRetry?.(line.latest) === false ? retryUnavailable : <button type="button" className="underline underline-offset-2" onClick={() => void act(() => coworkerBridge.collaboration.retry(line.latest.id))}>Continue with available results</button> : null}
     </div>)}
     {error ? <p role="alert" className="text-xs text-mist">{error}</p> : null}
   </div>;
