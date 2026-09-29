@@ -2,23 +2,20 @@ import { and, desc, eq, inArray, isNull, isNotNull, lte, or, sql } from "@openwo
 import { ArtifactViewRevisionTable, ArtifactViewTable, DashboardAppTable } from "@openwork-ee/den-db/schema"
 import { createDenTypeId, normalizeDenTypeId, type DenTypeId } from "@openwork-ee/utils/typeid"
 import type { GeneratedArtifactView, GeneratedArtifactViewRevision } from "@openwork/types/workflows"
-import { memberFacingMcpConnectionsEnabled } from "./capability-sources/external-mcp-rollout.js"
 import { db } from "./db.js"
-import { env } from "./env.js"
+import { appMcpServersEnabled } from "./mcp-app-rollout.js"
 import { getWorkflowAccess, getWorkflowDetail } from "./workflows.js"
 import { buildGeneratedArtifactView } from "./generated-artifact-view-builder.js"
 import type { PluginArchActorContext } from "./routes/org/plugin-system/access.js"
 import { artifactViewResourceUri } from "./artifact-view-resource.js"
 
 /**
- * Workflow-bound views are read-only wherever Apps are built as their own MCP
- * servers (DEN_APP_MCP_SERVERS_ENABLED and the member-facing MCP connections
- * setting). They keep rendering, running live data, and can be retired, but
- * are not created, edited, or re-activated.
+ * Workflow-bound views are read-only wherever the organization builds its own
+ * Apps as MCP servers (see appMcpServersEnabled). They keep rendering, running
+ * live data, and can be retired, but are not created, edited, or re-activated.
  */
 export function legacyArtifactViewsReadOnly(context: PluginArchActorContext): boolean {
-  return env.appMcpServersEnabled
-    && memberFacingMcpConnectionsEnabled(context.organizationContext.organization.metadata, { gatingEnabled: env.mcpConnectionsGatingEnabled })
+  return appMcpServersEnabled(context.organizationContext.organization.metadata)
 }
 
 const ARTIFACT_VIEW_LIST_LIMIT = 50

@@ -33,9 +33,11 @@ beforeAll(async () => {
 })
 afterAll(() => mock.restore())
 
-test("with App servers on, Workflow-bound views refuse creation, edits, and activation before touching the database", async () => {
+const buildsApps = { capabilities: { appMcpServers: true } }
+
+test("where an organization builds its own Apps, Workflow-bound views refuse creation, edits, and activation before touching the database", async () => {
   expect(env.appMcpServersEnabled).toBe(true)
-  const organization = context(null)
+  const organization = context(buildsApps)
   const draft = { context: organization, configObjectId: createDenTypeId("configObject"), title: "Weekly overview", reactSource: "export default function View() { return <p /> }" }
   await expect(artifactViews.saveArtifactViewRevision(draft)).rejects.toThrow("legacy_view_read_only")
   await expect(artifactViews.saveArtifactViewRevision({ ...draft, artifactViewId: createDenTypeId("artifactView") })).rejects.toThrow("legacy_view_read_only")
@@ -46,14 +48,16 @@ test("with App servers on, Workflow-bound views refuse creation, edits, and acti
   expect(databaseReads).toBe(0)
 })
 
-test("views stay writable only where Apps are not their own servers", () => {
-  expect(artifactViews.legacyArtifactViewsReadOnly(context(null))).toBe(true)
-  expect(artifactViews.legacyArtifactViewsReadOnly(context({ capabilities: { mcpConnections: true } }))).toBe(true)
-  expect(artifactViews.legacyArtifactViewsReadOnly(context({ capabilities: { mcpConnections: false } }))).toBe(false)
+test("views stay writable unless the organization builds its own Apps", () => {
+  // Building your own Apps is per organization and off by default.
+  expect(artifactViews.legacyArtifactViewsReadOnly(context(null))).toBe(false)
+  expect(artifactViews.legacyArtifactViewsReadOnly(context({ capabilities: { mcpConnections: true } }))).toBe(false)
+  expect(artifactViews.legacyArtifactViewsReadOnly(context(buildsApps))).toBe(true)
+  expect(artifactViews.legacyArtifactViewsReadOnly(context({ capabilities: { appMcpServers: true, mcpConnections: false } }))).toBe(false)
   const enabled = env.appMcpServersEnabled
   try {
     Object.assign(env, { appMcpServersEnabled: false })
-    expect(artifactViews.legacyArtifactViewsReadOnly(context(null))).toBe(false)
+    expect(artifactViews.legacyArtifactViewsReadOnly(context(buildsApps))).toBe(false)
   } finally {
     Object.assign(env, { appMcpServersEnabled: enabled })
   }

@@ -99,6 +99,7 @@ import {
 } from "./connection-action.js"
 import { needsGeneratedArtifactCatalog } from "./generated-artifact-catalog-request.js"
 import { AppBuilderError, mcpAppLaunchResult, registerAppBuilderTools, searchMcpApps } from "./app-builder-tools.js"
+import { appMcpServersEnabled } from "../mcp-app-rollout.js"
 import { resolveMcpAppTools } from "./app-tools.js"
 import { createMcpApp, isActiveMcpApp, listAccessibleMcpApps, loadMcpAppServerDefinition, McpAppError, readMcpApp, updateMcpApp, type McpAppEntry } from "../mcp-apps.js"
 import {
@@ -489,9 +490,9 @@ export function registerAgentMcpRoutes<T extends { Variables: RequestIdVariables
       mcpConnectionsGatingEnabled: env.mcpConnectionsGatingEnabled,
     })
     const { externalMcpConnectionsEnabled } = capabilityContext
-    // Apps as their own MCP servers follow the deployment flag and the
-    // organization's member-facing MCP connections setting.
-    const appServersEnabled = env.appMcpServersEnabled && externalMcpConnectionsEnabled
+    // Building your own Apps is per-organization and default-off; MCP Apps
+    // from connected MCP servers work either way.
+    const appServersEnabled = appMcpServersEnabled(organizationMetadata)
     // Resolved once per request, and only by the methods that need it: the
     // skill resources at discovery time, and list_skills / get_skill on call.
     let remoteSkillsPromise: Promise<RemoteSkillDescriptor[]> | null = null

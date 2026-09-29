@@ -77,6 +77,13 @@ test("an owner composes an App that is its own MCP server, and a teammate uses i
   let ownerSince = "";
   let updatedResourceUri = "";
 
+  await step("before: an organization has no App builder until a platform admin turns it on in /admin", async () => {
+    expect(world.builderToolsBefore).toEqual([]);
+    const names = rows((await world.rpc("owner", "connect", "tools/list", {})).tools).map(tool => tool.name);
+    expect(names).toEqual(expect.arrayContaining(["create_app", "update_app", "read_app"]));
+    evidence.recordAssertionEvidence("Building your own Apps is off until /admin turns it on", "Before the organization's Apps built in OpenWork capability was on, Connect offered none of create_app, update_app, or read_app. After a platform admin turned it on through the route the /admin panel uses, Connect offers all three.", true);
+  });
+
   await step("before: a teammate the App's Plugin is not shared with is refused by its MCP server", async () => {
     await refused("member", world.created.resourceUri);
     await user.navigate(world.url("member"));

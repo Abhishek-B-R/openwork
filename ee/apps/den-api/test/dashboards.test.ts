@@ -106,7 +106,7 @@ async function cleanup() {
 
 type Actor = "admin" | "casey" | "nova"
 
-function organizationContext(actor: Actor, dashboardsEnabled: boolean) {
+function organizationContext(actor: Actor, dashboardsEnabled: boolean, appsEnabled: boolean) {
   const now = new Date()
   const member = actor === "admin"
     ? { id: adminMemberId, userId: adminUserId, role: "admin" }
@@ -120,7 +120,7 @@ function organizationContext(actor: Actor, dashboardsEnabled: boolean) {
       slug: `dashboards-${organizationId}`,
       logo: null,
       allowedEmailDomains: null,
-      metadata: dashboardsEnabled ? { capabilities: { orgManagedDashboards: true } } : null,
+      metadata: dashboardsEnabled || appsEnabled ? { capabilities: { orgManagedDashboards: dashboardsEnabled, appMcpServers: appsEnabled } } : null,
       createdAt: now,
       updatedAt: now,
     },
@@ -145,11 +145,12 @@ function memberTeams(actor: Actor) {
   return [{ id: teamId, organizationId, name: "Product", createdAt: now, updatedAt: now }]
 }
 
-function request(path: string, init: RequestInit & { actor?: Actor; dashboardsEnabled?: boolean } = {}) {
-  const { actor, dashboardsEnabled, ...rest } = init
+function request(path: string, init: RequestInit & { actor?: Actor; dashboardsEnabled?: boolean; appsEnabled?: boolean } = {}) {
+  const { actor, dashboardsEnabled, appsEnabled, ...rest } = init
   const headers = new Headers(rest.headers)
   headers.set("x-test-actor", actor ?? "admin")
   if (dashboardsEnabled === false) headers.set("x-test-dashboards", "off")
+  if (appsEnabled === false) headers.set("x-test-apps", "off")
   if (rest.body) headers.set("content-type", "application/json")
   return app.request(path, { ...rest, headers })
 }
@@ -192,7 +193,7 @@ beforeAll(async () => {
   app.use("*", async (c, next) => {
     const header = c.req.header("x-test-actor")
     const actor: Actor = header === "casey" ? "casey" : header === "nova" ? "nova" : "admin"
-    c.set("organizationContext", organizationContext(actor, c.req.header("x-test-dashboards") !== "off"))
+    c.set("organizationContext", organizationContext(actor, c.req.header("x-test-dashboards") !== "off", c.req.header("x-test-apps") !== "off"))
     c.set("memberTeams", memberTeams(actor))
     await next()
   })
@@ -439,14 +440,16 @@ test("admins list the Apps built in OpenWork they can use, in dashboard element 
 
     expect((await request("/v1/mcp-apps", { actor: "casey" })).status).toBe(403)
 
+    // Building your own Apps is off for this organization, or for the whole deployment.
+    listed.mockClear()
+    expect(await (await request("/v1/mcp-apps", { appsEnabled: false })).json()).toEqual({ apps: [] })
     Object.assign(env, { appMcpServersEnabled: false })
     try {
-      listed.mockClear()
       expect(await (await request("/v1/mcp-apps")).json()).toEqual({ apps: [] })
-      expect(listed).not.toHaveBeenCalled()
     } finally {
       Object.assign(env, { appMcpServersEnabled: true })
     }
+    expect(listed).not.toHaveBeenCalled()
   } finally {
     listed.mockRestore()
   }

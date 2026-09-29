@@ -28,7 +28,7 @@ import {
 import { EXTERNAL_MCP_PRESETS } from "../capability-sources/external-mcp-presets.js"
 import { getConnectedAccount, getOrgOAuthClient } from "../capability-sources/oauth-credentials.js"
 import { db } from "../db.js"
-import { env } from "../env.js"
+import { organizationBuildsMcpApps } from "../mcp-app-rollout.js"
 import { resolvePluginArchGrantRole } from "../routes/org/plugin-system/access.js"
 import { openworkOrganizationConnectionsUrl, openworkYourConnectionsUrl } from "./connection-navigation.js"
 import { parseCodemodeScriptPayload, type CodemodeScriptInputIssue } from "./codemode-script-object.js"
@@ -1614,9 +1614,9 @@ export async function executeMarketplaceCapability(input: {
       result: {
         ...basePayload(row),
         status: "unsupported",
-        hint: env.appMcpServersEnabled
+        hint: await organizationBuildsMcpApps(input.organizationId)
           ? `This App is its own MCP server at ${mcpAppServerPath(row.configObject.id)}; its ${MCP_APP_LAUNCH_TOOL_NAME} tool opens it. Code Mode and generic Plugin execution do not open Apps or return their source. Editors can use read_app to edit it. No App was opened.`
-          : "Apps built in OpenWork are turned off on this server, so this App cannot be opened or edited here. No App was opened.",
+          : "Apps built in OpenWork are turned off for this organization, so this App cannot be opened or edited here. No App was opened.",
       },
     }
   }

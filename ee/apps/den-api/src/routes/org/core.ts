@@ -22,6 +22,7 @@ import { denTypeIdSchema, enterprisePlanRequiredSchema, forbiddenSchema, invalid
 import { validateInvitationAcceptVerification } from "../../organization-join-verification.js"
 import { normalizeOrganizationMetadata } from "../../organization-limits.js"
 import { organizationHasCapability, organizationManagedDashboardsEnabled } from "../../organization-capabilities.js"
+import { appMcpServersEnabled } from "../../mcp-app-rollout.js"
 import { isOpenWorkWebAvailableForOrganization } from "../../openwork-web-availability.js"
 import { getOpenWorkWebAccess } from "../../stripe-billing.js"
 import {
@@ -733,11 +734,9 @@ export function registerOrgCoreRoutes<T extends { Variables: OrgRouteVariables }
           mcpConnections: memberFacingMcpConnectionsEnabled(payload.organization.metadata, {
             gatingEnabled: env.mcpConnectionsGatingEnabled,
           }),
-          // Apps built in OpenWork are their own MCP servers only while the
-          // deployment switch and member-facing MCP connections are both on.
-          appMcpServers: env.appMcpServersEnabled && memberFacingMcpConnectionsEnabled(payload.organization.metadata, {
-            gatingEnabled: env.mcpConnectionsGatingEnabled,
-          }),
+          // Building your own Apps is per-organization and default-off:
+          // platform admins enable metadata.capabilities.appMcpServers in /admin.
+          appMcpServers: appMcpServersEnabled(payload.organization.metadata),
           // Workflows/Code Mode are enabled for every organization; the field
           // remains for published clients that still read it.
           workflows: true,

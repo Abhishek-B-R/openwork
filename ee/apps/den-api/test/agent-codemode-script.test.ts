@@ -189,8 +189,9 @@ test("advertises standard Workflow discovery and execution instructions", async 
   }))
   expect(initialized.instructions).toContain("Workflows are saved procedures discovered through search_capabilities")
   expect(initialized.instructions).toContain("Use execute_capability only with exact names returned by search_capabilities")
-  expect(initialized.instructions).toContain("Use create_app to build a new app, dashboard, or interactive view, and read_app then update_app to change one")
-  expect(initialized.instructions).toContain("Builder tools such as create_skill and create_app are not capability search results")
+  // Building your own Apps is off by default, so an ordinary organization gets the previous instructions.
+  expect(initialized.instructions).toContain("For an app, dashboard, or artifact view of Workflow results")
+  expect(initialized.instructions).toContain("Direct MCP tools are not capability search results")
   expect(initialized.instructions).not.toContain("Always call search_capabilities first")
   expect(initialized.instructions).toContain("Workflow runs produce artifacts rendered by render_workflow_artifact")
   expect(initialized.instructions).not.toContain("search/selection tools")

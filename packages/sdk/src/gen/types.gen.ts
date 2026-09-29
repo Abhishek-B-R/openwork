@@ -75,6 +75,7 @@ export type AdminOrganizationsPageResponse = {
       modelsAnalytics: boolean;
       auditLogs: boolean;
       orgManagedDashboards: boolean;
+      appMcpServers: boolean;
       /**
        * Compatibility field, always true. AI Gateway is available to every organization; deployment configuration and authorization still apply.
        *
@@ -149,6 +150,7 @@ export type AdminOverviewResponse = {
       modelsAnalytics: boolean;
       auditLogs: boolean;
       orgManagedDashboards: boolean;
+      appMcpServers: boolean;
       /**
        * Compatibility field, always true. AI Gateway is available to every organization; deployment configuration and authorization still apply.
        *
@@ -1281,7 +1283,13 @@ export type CreateInstallLinkResponse = {
 
 export type CapabilityDisabledError = {
   error: "capability_disabled";
-  capability: "installLinks" | "mcpConnections" | "modelsAnalytics" | "auditLogs" | "orgManagedDashboards";
+  capability:
+    | "installLinks"
+    | "mcpConnections"
+    | "modelsAnalytics"
+    | "auditLogs"
+    | "orgManagedDashboards"
+    | "appMcpServers";
 };
 
 export type CreateInstallLinkRequest = {
@@ -5148,6 +5156,7 @@ export type GetV1AdminOrganizationsByOrganizationIdCapabilitiesResponses = {
       modelsAnalytics: boolean;
       auditLogs: boolean;
       orgManagedDashboards: boolean;
+      appMcpServers: boolean;
       /**
        * Compatibility field, always true. AI Gateway is available to every organization; deployment configuration and authorization still apply.
        *
@@ -5210,6 +5219,7 @@ export type PutV1AdminOrganizationsByOrganizationIdCapabilitiesResponses = {
       modelsAnalytics: boolean;
       auditLogs: boolean;
       orgManagedDashboards: boolean;
+      appMcpServers: boolean;
       /**
        * Compatibility field, always true. AI Gateway is available to every organization; deployment configuration and authorization still apply.
        *

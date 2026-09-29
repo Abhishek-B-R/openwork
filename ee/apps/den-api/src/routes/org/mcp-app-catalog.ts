@@ -5,9 +5,8 @@ import { MCP_APP_LAUNCH_TOOL_NAME, mcpAppResourceUri } from "@openwork/types/mcp
 import type { Hono } from "hono"
 import { describeRoute } from "hono-openapi"
 import { z } from "zod"
-import { memberFacingMcpConnectionsEnabled } from "../../capability-sources/external-mcp-rollout.js"
 import { db } from "../../db.js"
-import { env } from "../../env.js"
+import { appMcpServersEnabled } from "../../mcp-app-rollout.js"
 import { listAccessibleMcpApps } from "../../mcp-apps.js"
 import { orgRoleRoute, resolveMemberTeamsMiddleware } from "../../middleware/index.js"
 import { forbiddenSchema, jsonResponse, unauthorizedSchema } from "../../openapi.js"
@@ -56,15 +55,12 @@ export function registerOrgMcpAppCatalogRoutes<T extends { Variables: OrgRouteVa
     resolveMemberTeamsMiddleware,
     async (c) => {
       const payload = c.get("organizationContext")
-      const enabled = env.appMcpServersEnabled && memberFacingMcpConnectionsEnabled(payload.organization.metadata, {
-        gatingEnabled: env.mcpConnectionsGatingEnabled,
-      })
-      if (!enabled) return c.json({ apps: [] })
+      if (!appMcpServersEnabled(payload.organization.metadata)) return c.json({ apps: [] })
       const memberTeams: MemberTeamSummary[] = c.get("memberTeams") ?? []
       const apps = await listAccessibleMcpApps({
         organizationId: payload.organization.id,
         member: { orgMembershipId: payload.currentMember.id, teamIds: memberTeams.map((team) => team.id) },
-        enabled,
+        enabled: true,
       })
       const pluginIds = [...new Set(apps.map((entry) => normalizeDenTypeId("plugin", entry.pluginId)))]
       const plugins = pluginIds.length === 0 ? [] : await db.select({ id: PluginTable.id, name: PluginTable.name })

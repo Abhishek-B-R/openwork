@@ -125,6 +125,12 @@ const session = typeof signedIn.body.token === "string" ? signedIn.body.token : 
 if (!session) throw new Error(`Sign-in failed for ${email}: HTTP ${signedIn.status}`);
 const org = await den("/v1/org", { token: session });
 const orgId = outputValue(outputs, "orgId") ?? (isRecord(org.body.organization) && typeof org.body.organization.id === "string" ? org.body.organization.id : "");
+// Building your own Apps is default-off per organization. The world's owner is a
+// platform admin, so the demo switches it on the way /admin does.
+const capabilities = await den(`/v1/admin/organizations/${orgId}/capabilities`, {
+  method: "PUT", token: session, body: JSON.stringify({ capabilities: { appMcpServers: true } }),
+});
+if (capabilities.status !== 200) throw new Error(`Turn on "Apps built in OpenWork" for this organization in /admin, then rerun: HTTP ${capabilities.status}`);
 const minted = await den("/v1/mcp/token", { method: "POST", token: session, orgId, body: JSON.stringify({ scopes: ["mcp:read", "mcp:write"] }) });
 const mcpToken = typeof minted.body.token === "string" ? minted.body.token : "";
 if (!mcpToken) throw new Error(`Minting an MCP token failed: HTTP ${minted.status}`);

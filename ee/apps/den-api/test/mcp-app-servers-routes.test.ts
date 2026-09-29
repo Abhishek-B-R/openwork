@@ -70,6 +70,8 @@ const launchMeta = (app: McpAppSummary) => ({
 let current: McpAppSummary | null = null
 let scopes = new Set(["mcp:read", "mcp:write"])
 let enabled = true
+// The organization's appMcpServers capability, off by default outside these tests.
+let appsEnabled = true
 let editor = true
 let visible = true
 let memberPresent = true
@@ -94,7 +96,7 @@ let grant = true
 let useMarketplaceFixture = false
 
 function rowsFor(table: unknown): unknown[] {
-  if (table === OrganizationTable) return [{ metadata: { capabilities: { mcpConnections: enabled } } }]
+  if (table === OrganizationTable) return [{ metadata: { capabilities: { mcpConnections: enabled, appMcpServers: appsEnabled } } }]
   if (!useMarketplaceFixture) return []
   if (table === ConfigObjectTable) return [{
     configObject: { id: appId, objectType: "app", title: source.title, description: null },
@@ -523,34 +525,44 @@ test("Code Mode and generic Plugin execution cannot return App source or HTML", 
   expect(legacy).toMatchObject({ ok: true, result: { status: "unsupported", definition: "legacy-definition" } })
 })
 
-test("with App servers off, Connect keeps its previous surface and App URLs refuse every request", async () => {
+test("with building Apps off for the deployment or the organization, Connect keeps its previous surface and App URLs refuse every request", async () => {
   current = appSummary
   const { env } = await import("../src/env.js")
-  Object.assign(env, { appMcpServersEnabled: false })
-  try {
-    await withClient("/mcp/agent", async (client) => {
-      const names = (await client.listTools()).tools.map((tool) => tool.name)
-      for (const builder of ["create_app", "update_app", "read_app"]) expect(names).not.toContain(builder)
-      expect(client.getInstructions()).toContain("save_artifact_view and follow its prerequisites")
-      expect(client.getInstructions()).not.toContain("create_app")
-      expect(client.getInstructions()).not.toContain(MCP_APP_SHOWN_NOTE)
-      const board = await client.callTool({ name: "execute_capability", arguments: { name: "mcp:emc_widgets:open_board" } })
-      expect(JSON.stringify(board.content)).not.toContain(MCP_APP_SHOWN_NOTE)
-      const index = await client.readResource({ uri: "openwork://connect/mcp-servers/index.json" })
-      const text = index.contents[0] && "text" in index.contents[0] ? index.contents[0].text : "{}"
-      expect(JSON.parse(text).servers).toEqual([])
-      const search = await client.callTool({ name: "search_capabilities", arguments: { query: "project" } })
-      expect(JSON.stringify(search.structuredContent)).not.toContain('"kind":"mcp_app"')
-    })
-    await expect(withClient(appSummary.serverPath, async () => undefined)).rejects.toThrow()
-    // Chat's generic Plugin match no longer points at tools that do not exist.
-    useMarketplaceFixture = true
-    const hint = await marketplace.executeMarketplaceCapability({ organizationId, pluginId, configObjectId: appId, member, enabled: true })
-    expect(hint).toMatchObject({ ok: true, result: { status: "unsupported" } })
-    expect(JSON.stringify(hint)).toContain("turned off")
-    for (const missing of ["read_app", MCP_APP_LAUNCH_TOOL_NAME, mcpAppServerPath(appId)]) expect(JSON.stringify(hint)).not.toContain(missing)
-  } finally {
-    Object.assign(env, { appMcpServersEnabled: true })
+  const turnOff = {
+    deployment: () => { Object.assign(env, { appMcpServersEnabled: false }) },
+    organization: () => { appsEnabled = false },
+  }
+  for (const off of Object.values(turnOff)) {
+    off()
+    useMarketplaceFixture = false
+    try {
+      await withClient("/mcp/agent", async (client) => {
+        const names = (await client.listTools()).tools.map((tool) => tool.name)
+        for (const builder of ["create_app", "update_app", "read_app"]) expect(names).not.toContain(builder)
+        expect(client.getInstructions()).toContain("save_artifact_view and follow its prerequisites")
+        expect(client.getInstructions()).not.toContain("create_app")
+        expect(client.getInstructions()).not.toContain(MCP_APP_SHOWN_NOTE)
+        // MCP Apps from connected servers keep working either way.
+        const board = await client.callTool({ name: "execute_capability", arguments: { name: "mcp:emc_widgets:open_board" } })
+        expect(board.content).toEqual([{ type: "text", text: "Board ready" }])
+        expect(board._meta).toMatchObject({ "openwork/mcpApp": { connectionId: "emc_widgets", toolName: "open_board" } })
+        const index = await client.readResource({ uri: "openwork://connect/mcp-servers/index.json" })
+        const text = index.contents[0] && "text" in index.contents[0] ? index.contents[0].text : "{}"
+        expect(JSON.parse(text).servers).toEqual([])
+        const search = await client.callTool({ name: "search_capabilities", arguments: { query: "project" } })
+        expect(JSON.stringify(search.structuredContent)).not.toContain('"kind":"mcp_app"')
+      })
+      await expect(withClient(appSummary.serverPath, async () => undefined)).rejects.toThrow()
+      // Chat's generic Plugin match no longer points at tools that do not exist.
+      useMarketplaceFixture = true
+      const hint = await marketplace.executeMarketplaceCapability({ organizationId, pluginId, configObjectId: appId, member, enabled: true })
+      expect(hint).toMatchObject({ ok: true, result: { status: "unsupported" } })
+      expect(JSON.stringify(hint)).toContain("turned off")
+      for (const missing of ["read_app", MCP_APP_LAUNCH_TOOL_NAME, mcpAppServerPath(appId)]) expect(JSON.stringify(hint)).not.toContain(missing)
+    } finally {
+      Object.assign(env, { appMcpServersEnabled: true })
+      appsEnabled = true
+    }
   }
 })
 

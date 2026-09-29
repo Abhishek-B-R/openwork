@@ -25,6 +25,7 @@ import type { Context, Hono } from "hono"
 import { resolvePublicOrigin } from "../capability-sources/generic-oauth.js"
 import { db } from "../db.js"
 import { env } from "../env.js"
+import { appMcpServersEnabled } from "../mcp-app-rollout.js"
 import {
   loadMcpAppResource,
   loadMcpAppServerDefinition,
@@ -207,12 +208,13 @@ export async function handleMcpAppServerRequest(input: {
 }) {
   const { context, principal } = input
   if (context.req.method !== "POST") return new Response(null, { status: 405, headers: { allow: "POST" } })
-  if (!env.appMcpServersEnabled) return appUnavailableResponse(context.req.raw)
   const organizationId = normalizeDenTypeId("organization", principal.organizationId)
   const member = await resolveMcpMemberIdentity({ userId: principal.userId, organizationId })
   if (!member) return appUnavailableResponse(context.req.raw)
   const organization = await db.select({ metadata: OrganizationTable.metadata }).from(OrganizationTable)
     .where(eq(OrganizationTable.id, organizationId)).limit(1)
+  // Building your own Apps is per-organization and default-off.
+  if (!appMcpServersEnabled(organization[0]?.metadata)) return appUnavailableResponse(context.req.raw)
   const capabilityContext = createCapabilityRegistryContext({
     app: input.app,
     env: context.env,
