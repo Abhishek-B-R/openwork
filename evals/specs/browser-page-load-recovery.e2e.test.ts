@@ -9,24 +9,25 @@ const test = spec.world(browserConnectionFailureWorld, {
   },
 });
 
-test("a refused connection shows recovery, retries the same address, and allows navigation to a working page", async ({ world, user, probe, step }) => {
+test("a person sees why a site cannot connect and reloads the same tab when it returns", async ({ world, user, probe, step, evidence }) => {
   const address = { placeholder: "Enter URL..." };
   const error = { text: "This site refused the connection. Check that it is running, then reload." };
-  const recoveredUrl = `${world.origin}/?connection-probe=recovered`;
 
-  await step("before: a working browser page is visible before opening an unavailable local site", async () => {
+  await step("given a working browser tab and an unavailable local site", async () => {
     await user.see(address);
-    await probe.eventually(() => probe.browserState(), {
+    const initial = await probe.eventually(() => probe.browserState(), {
       within: 15_000,
       until: state => state.nativeViews.some(view => view.tabId === world.tab.tabId && view.visible && view.attached),
       label: "the initial native browser page is visible",
     });
+    evidence.recordAssertionEvidence("The browser starts with one visible tab", `1 native tab is visible; ${initial.tabs.length} tab is registered.`, initial.tabs.length === 1);
+    expect(initial.tabs).toHaveLength(1);
     await user.screenshot();
     await user.type(address, world.failedUrl, { replace: true });
     await user.press("Enter");
   });
 
-  await step("after: the refused connection has a visible Reload action and collapsed technical details", async () => {
+  await step("after: the unavailable site shows a connection error and Reload", async () => {
     await user.see(error, { timeoutMs: 15_000 });
     await user.see(address, { value: world.failedUrl });
     const failed = await probe.browserState();
@@ -37,23 +38,29 @@ test("a refused connection shows recovery, retries the same address, and allows 
     await user.screenshot();
     await user.click({ role: "button", label: "Technical details" });
     await user.see({ text: /ERR_CONNECTION_REFUSED/ });
+    evidence.recordAssertionEvidence("A real refused connection leaves the recovery controls visible", "Chromium reports ERR_CONNECTION_REFUSED (-102); 0 failed native views cover the error; 1 Reload action is visible.", failed.nativeViews.every(view => view.tabId !== world.tab.tabId || !view.visible));
+    await user.screenshot();
     await user.click({ role: "button", label: "Technical details" });
     await user.click({ role: "button", label: /^Reload$/ });
     await user.see(error);
     await user.see(address, { value: world.failedUrl });
   });
 
-  await step("a working address restores the native page in the same tab", async () => {
-    await user.type(address, recoveredUrl, { replace: true });
-    await user.press("Enter");
+  await step("after: Reload opens the same address when the site returns", async () => {
+    await world.restoreConnection();
+    await user.click({ role: "button", label: /^Reload$/ });
+    await user.on(world.page).see({ role: "heading", label: "Connection restored" }, { timeoutMs: 15_000 });
     await user.notSee(error, { timeoutMs: 15_000 });
-    await probe.eventually(() => probe.browserState(), {
+    const recovered = await probe.eventually(() => probe.browserState(), {
       within: 15_000,
       until: state => state.nativeViews.some(view => view.tabId === world.tab.tabId && view.visible && view.attached),
       label: "successful navigation restores the native page",
     });
-    expect((await probe.browserState()).activeTabId).toBe(world.tab.tabId);
-    expect((await probe.browserTabMetrics(world.tab.targetId)).url).toBe(recoveredUrl);
+    const page = await probe.browserTabMetrics(world.tab.targetId);
+    expect(recovered.activeTabId).toBe(world.tab.tabId);
+    expect(recovered.tabs).toHaveLength(1);
+    expect(page.url).toBe(world.failedUrl);
+    evidence.recordAssertionEvidence("Reload recovers the original address and tab", "1 tab remains; the original tab and target are retained; its URL matches the failed address; 0 connection errors remain.", recovered.activeTabId === world.tab.tabId && recovered.tabs.length === 1 && page.url === world.failedUrl);
     await user.screenshot();
   });
 });

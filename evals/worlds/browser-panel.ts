@@ -727,7 +727,48 @@ export async function browserConnectionFailureWorld(seed: Seed) {
     return port;
   `);
   if (typeof port !== "number") throw new Error("The connection failure fixture returned no port.");
-  return { ...world, tab, failedUrl: `http://127.0.0.1:${port}/connection-probe` };
+  const failedUrl = `http://127.0.0.1:${port}/connection-probe`;
+  const page = await attachBuiltinTab(world.app, tab.targetId);
+  let recoveryPid: number | null = null;
+  return {
+    ...world, tab, page, failedUrl,
+    // Restoring this fixture's network fault changes only the local site;
+    // the person must still use the browser's Reload control to recover.
+    async restoreConnection() {
+      const source = `
+        const { createServer } = await import('node:http');
+        const server = createServer((request, response) => {
+          response.setHeader('Content-Type', 'text/html');
+          response.end('<!doctype html><title>Connection restored</title><h1>Connection restored</h1><p>The same address is available again.</p>');
+        });
+        server.listen(${port}, '127.0.0.1');
+        process.on('SIGTERM', () => server.close(() => process.exit(0)));
+      `;
+      const pid = await runBrowserHost(world.app, `
+        const { spawn } = await import('node:child_process');
+        const child = spawn(process.execPath, ['--input-type=module', '-e', ${browserScriptValue(source)}], { detached: true, stdio: 'ignore' });
+        child.unref();
+        return child.pid;
+      `);
+      if (typeof pid !== "number") throw new Error("The recovery site returned no process.");
+      recoveryPid = pid;
+      const ready = await runBrowserHost(world.app, `
+        for (let attempt = 0; attempt < 50; attempt++) {
+          try {
+            const response = await fetch(${browserScriptValue(failedUrl)}, { signal: AbortSignal.timeout(1000) });
+            if (response.ok && (await response.text()).includes('<title>Connection restored</title>')) return true;
+          } catch {}
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+        return false;
+      `);
+      if (ready !== true) throw new Error("The recovery site did not become available.");
+    },
+    async [Symbol.asyncDispose]() {
+      await page.stop();
+      if (recoveryPid !== null) await runBrowserHost(world.app, `try { process.kill(${recoveryPid}, 'SIGTERM'); } catch {} return true;`);
+    },
+  };
 }
 
 /** Real native tab and deterministic document, with no viewport emulation. */
