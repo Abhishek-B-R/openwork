@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type PointerEvent } from "react";
+import { callDuration } from "@/lib/call";
 import type { AvatarColor, AvatarGlasses } from "@openwork/ui/coworker";
 import { CoworkerAvatar } from "@/ui/coworker-avatar";
 
@@ -9,6 +10,7 @@ type BubbleState = {
   open: boolean;
   side: "left" | "right";
   face: number;
+  callStartedAt?: number | null;
 };
 
 type BubbleHost = {
@@ -45,6 +47,8 @@ const DIZZY_REST_MS = 5_000;
 export function Bubble() {
   const host = (window as Window & { __COWORKER_BUBBLE__?: BubbleHost }).__COWORKER_BUBBLE__;
   const [state, setState] = useState<BubbleState | null>(null);
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => { if (!state?.callStartedAt) return; const timer = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(timer); }, [state?.callStartedAt]);
   const [regard, setRegard] = useState({ x: 0, y: 0 });
   const [dizzy, setDizzy] = useState(false);
   const circling = useRef<{ angle: number | null; turns: Array<{ at: number; by: number }>; restUntil: number }>({ angle: null, turns: [], restUntil: 0 });
@@ -102,6 +106,7 @@ export function Bubble() {
     const current = drag.current;
     drag.current = null;
     if (!current || current.travelled >= TAP_SLOP) return;
+    if (state?.callStartedAt) { host!.open(); return; }
     // One tap shows or hides the speech; two open the conversation.
     if (tap.current !== null) {
       window.clearTimeout(tap.current);
@@ -144,14 +149,15 @@ export function Bubble() {
       ) : null}
       <button
         type="button"
-        aria-label={`${coworker.name}: tap for messages, double-click to open`}
-        title={`${coworker.name} · tap for messages, double-click to open, drag to move`}
+        aria-label={state.callStartedAt ? `Return to your call with ${coworker.name}` : `${coworker.name}: tap for messages, double-click to open`}
+        title={state.callStartedAt ? `${coworker.name} · tap to return to the call, drag to move` : `${coworker.name} · tap for messages, double-click to open, drag to move`}
         className="relative flex shrink-0 cursor-grab touch-none items-center justify-center active:cursor-grabbing focus-visible:outline-none"
         style={{ width: face, height: face }}
         onPointerDown={down}
         onPointerMove={move}
         onPointerUp={up}
         onPointerCancel={() => { drag.current = null; }}
+        onClick={(event) => { if (event.detail === 0) { if (state.callStartedAt) host.open(); else host.toggle(); } }}
         data-testid="coworker-bubble-face"
       >
         <span className={`relative flex size-[50px] items-center justify-center rounded-full border border-white/12 bg-panel ${dizzy ? "bubble-dizzy" : ""}`} data-dizzy={dizzy ? "true" : "false"} data-testid="coworker-bubble-head">
@@ -162,6 +168,7 @@ export function Bubble() {
           ) : null}
           <CoworkerAvatar identity={`${coworker.slug}:bubble`} name={coworker.name} color={coworker.avatarColor as AvatarColor} glasses={coworker.avatarGlasses as AvatarGlasses} size={38} motion="attentive" regard={regard} />
         </span>
+        {state.callStartedAt ? <span className="absolute bottom-0 rounded-full bg-emerald-700 px-2 py-0.5 text-[10px] tabular-nums text-white" aria-label="Call in progress">{callDuration(now - state.callStartedAt)}</span> : null}
         {speech && !open ? <span aria-hidden="true" className="absolute right-3 top-3 size-2.5 rounded-full bg-spark ring-2 ring-ink" data-testid="coworker-bubble-unread" /> : null}
       </button>
     </div>

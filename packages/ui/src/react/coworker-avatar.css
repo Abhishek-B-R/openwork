@@ -691,3 +691,10 @@
     transition: none !important;
   }
 }
+
+/* Call audio drives the existing mouth; ordinary and static avatars have no audio variable. */
+.coworker-avatar[style*="--avatar-audio-level"] .coworker-avatar__mouth-o {
+  opacity: var(--avatar-audio-level, 0);
+  transform-box: fill-box; transform-origin: center;
+  transform: scaleX(calc(1 + var(--avatar-audio-level, 0) * .7)) scaleY(calc(.5 + var(--avatar-audio-level, 0) * 2));
+}

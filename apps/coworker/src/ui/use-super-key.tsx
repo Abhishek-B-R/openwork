@@ -19,7 +19,8 @@ export type SuperAction =
   | { kind: "coworker"; index: number }
   | { kind: "cycle"; by: 1 | -1 }
   | { kind: "pace"; by: 1 | -1 }
-  | { kind: "focus" };
+  | { kind: "focus" }
+  | { kind: "call" };
 
 export type SuperKey = {
   /** The layer shows: the super key has been held past a moment, or has just acted. */
@@ -88,6 +89,7 @@ function actionFor(event: KeyboardEvent): { action: SuperAction; key: string } |
   const digit = /^(?:Digit|Numpad)([1-9])$/.exec(event.code)?.[1];
   if (digit) return { action: { kind: "coworker", index: Number(digit) - 1 }, key: digit };
   switch (event.code) {
+    case "KeyC": return { action: { kind: "call" }, key: "C" };
     case "KeyF": return { action: { kind: "focus" }, key: "F" };
     case "ArrowLeft": return { action: { kind: "pace", by: -1 }, key: "←" };
     case "ArrowRight": return { action: { kind: "pace", by: 1 }, key: "→" };

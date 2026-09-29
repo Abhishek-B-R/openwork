@@ -16,6 +16,8 @@ export const TURNS_FILE = "turns.json";
 
 export type QueuedMessage = SkillFields & {
   id: string;
+  /** A spoken request retains its native message identity while queued. */
+  messageId?: string;
   text: string;
   queuedAt: number;
 };
@@ -61,7 +63,7 @@ function parsePending(value: unknown): PendingTurnRecord | null {
 
 function parseQueued(value: unknown): QueuedMessage | null {
   if (!isRecord(value) || typeof value.id !== "string" || !value.id || typeof value.text !== "string" || !value.text.trim()) return null;
-  return { id: value.id, text: value.text, queuedAt: finite(value.queuedAt) ?? 0, ...parseSkillFields(value) };
+  return { id: value.id, ...(typeof value.messageId === "string" && value.messageId.startsWith("msg_") ? { messageId: value.messageId } : {}), text: value.text, queuedAt: finite(value.queuedAt) ?? 0, ...parseSkillFields(value) };
 }
 
 function parseSkillFields(value: Record<string, unknown>): SkillFields {

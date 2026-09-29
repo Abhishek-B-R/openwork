@@ -43,7 +43,7 @@ function readFocus(): boolean {
 /** On a desktop, Focus mode also docks the window as a small conversation at the right of the screen. While the macOS window buttons are hidden, headers stop keeping room for them. */
 function dockWindow(on: boolean): Promise<void> {
   return coworkerBridge.appWindow.focusMode(on)
-    .then(({ controlsHidden }) => { document.documentElement.dataset.windowControls = controlsHidden ? "hidden" : "shown"; })
+    .then(() => undefined)
     .catch(() => { /* Without the native window the layout alone changes. */ });
 }
 

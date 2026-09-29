@@ -1,5 +1,7 @@
 /** Typed access to the Open Coworker main-process bridge. */
 import { configureCoworkerSessionAccess } from "./session-routing.ts";
+import { callConnectPolicy } from "./call-connect-policy.ts";
+import { denApiBase } from "./den.ts";
 import type { CoworkerAbilities, CoworkerAbilitiesCatalog } from "./abilities";
 import type { CoworkerDocument, CoworkerDocumentSummary, DocumentRevision, DocumentStatus } from "./documents";
 import type { GroupDocument, GroupDocumentSave, GroupDocumentSaved, GroupDocumentSummary, GroupDocumentsApi } from "./group-documents";
@@ -527,6 +529,7 @@ type BridgeWindow = Window & {
     invoke: (command: string, payload?: unknown) => Promise<BridgeResponse>;
     onDeepLink?: (listener: (urls: string[]) => void) => () => void;
     onRuntimeChanged?: (listener: (runtime: RuntimeInfo) => void) => () => void;
+    onCallEnd?: (listener: () => void) => () => void;
     onBubble?: (listener: (change: { on: boolean }) => void) => () => void;
     onReactionsChanged?: (listener: (change: { scope: MessageReactionScope; revision: number }) => void) => () => void;
   };
@@ -546,6 +549,12 @@ async function invoke<T>(command: string, payload?: unknown): Promise<T> {
 }
 
 function configureSessionRuntime(runtime: RuntimeInfo): RuntimeInfo {
+  // File-backed Electron pages need a meta CSP. Install once the trusted main supplies
+  // the configured origins, before any thread/Den transport is constructed.
+  if (typeof document !== "undefined" && !document.querySelector("meta[data-call-connect-policy]")) {
+    const policy = document.createElement("meta"); policy.httpEquiv = "Content-Security-Policy"; policy.dataset.callConnectPolicy = "true";
+    policy.content = callConnectPolicy([runtime.serverUrl, runtime.denBaseUrl, denApiBase(runtime.denBaseUrl)]); document.head.append(policy);
+  }
   configureCoworkerSessionAccess(runtime.teamWorkspaceId ? { ...coworkerBridge.sessions, workspace: () => runtime.teamWorkspaceId ?? "", apiContract: () => runtime.apiContract ?? "beta19271" } : undefined);
   return runtime;
 }
@@ -582,6 +591,19 @@ export const coworkerBridge = {
     },
     restoreDefaults: () => invoke<CoworkerSettings>("maintenance.restoreDefaults"),
   },
+  calls: {
+    settings: () => invoke<{ keySet: boolean; voice: string; model: string }>("calls.settings"),
+    microphone: () => invoke<{ granted: boolean }>("calls.microphone"),
+    editKey: () => invoke<{ keySet: boolean; voice: string; model: string }>("calls.editKey"),
+    removeKey: () => invoke<{ keySet: boolean; voice: string; model: string }>("calls.removeKey"),
+    setVoice: (voice: string) => invoke<{ keySet: boolean; voice: string; model: string }>("calls.voice", { voice }),
+    test: () => invoke<{ ok: boolean; message: string }>("calls.test"),
+    secret: (slug: string, createdAt: string) => invoke<{ value: string; expiresAt: number }>("calls.secret", { slug, createdAt }),
+    cancel: () => invoke<void>("calls.cancel"),
+    history: (slug: string, threadId: string) => invoke<import("./call").CallHistory>("calls.history", { slug, threadId }),
+    record: (slug: string, threadId: string, entry: { kind: "spoken"; id: string; text: string; at: number } | { kind: "call"; id: string; name: string; startedAt: number; endedAt: number }) => invoke<import("./call").CallHistory>("calls.record", { slug, threadId, entry }),
+    onEnd: (listener: () => void) => { const host: BridgeWindow = window; return host.__COWORKER__?.onCallEnd?.(listener) ?? (() => undefined); },
+  },
   voice: {
     status: () => invoke<{ access: "ready" | "sign_in" | "membership_required" | "unavailable"; message?: string }>("voice.status"),
     transcribe: (input: { requestId: string; data: string; format: "webm" | "wav" | "mp3" | "m4a" | "ogg" }) => invoke<{ text: string }>("voice.transcribe", input),
@@ -591,10 +613,14 @@ export const coworkerBridge = {
   },
   appWindow: {
     /** Dock the window as a small conversation at the right of the screen (hiding the macOS window buttons), or put it back where it was. */
-    focusMode: (on: boolean) => invoke<{ docked: boolean; controlsHidden: boolean }>("window.focusMode", { on }),
+    focusMode: (on: boolean) => invoke<{ docked: boolean; controlsHidden: boolean }>("window.focusMode", { on }).then((state) => {
+      if (typeof document !== "undefined") document.documentElement.dataset.windowControls = state.controlsHidden ? "hidden" : "shown";
+      return state;
+    }),
     /** The coworker as a floating bubble (the window steps aside until the bubble is tapped), or back. */
     bubble: (on: boolean, coworker?: Pick<CoworkerSummary, "slug" | "name" | "avatarColor" | "avatarGlasses">) => invoke<{ on: boolean }>("window.bubble", { on, coworker }),
     /** A speech bubble beside the floating face: something the coworker has for the person. */
+    callStatus: (startedAt: number | null) => invoke<{ ok: boolean }>("window.callStatus", { startedAt }),
     bubbleSay: (text: string, from: string) => invoke<{ shown: boolean }>("window.bubbleSay", { text, from }),
   },
   browser: {

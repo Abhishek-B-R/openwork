@@ -635,7 +635,7 @@ export function createCollaboration({ directory, clientFor, cleanupClientFor = c
           const owner = state.owners[key];
           if (!owner) continue;
           const message = turns.next.shift();
-          const entry = execution(state, { owner: { ...owner, coworkerCreatedAt: message.coworkerCreatedAt ?? null }, prompt: message.text, ...skillFields(message), messageId: nativeMessageId(), personRequest: true, activityEligible: message.activityEligible === true });
+          const entry = execution(state, { owner: { ...owner, coworkerCreatedAt: message.coworkerCreatedAt ?? null }, prompt: message.text, ...skillFields(message), messageId: typeof message.messageId === "string" && message.messageId.startsWith("msg_") ? message.messageId : nativeMessageId(), personRequest: true, activityEligible: message.activityEligible === true });
           turns.pending = { messageId: entry.messageId, prompt: entry.prompt, ...skillFields(entry), startedAt: now(), stoppedAt: null };
         }
         return expired;

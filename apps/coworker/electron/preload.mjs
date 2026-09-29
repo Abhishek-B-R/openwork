@@ -25,7 +25,7 @@ if (process.isMainFrame) {
       payload: command === "browser.command" && payload?.action === "bounds" && payload.bounds
         ? { ...payload, bounds: { ...payload.bounds, zoomFactor: webFrame.getZoomFactor() } }
         : payload,
-      userGesture: command === "voice.microphone" && navigator.userActivation.isActive,
+      userGesture: (command === "voice.microphone" || command === "calls.microphone") && navigator.userActivation.isActive,
     }),
     onDeepLink: (listener) => {
       const handler = (_event, urls) => {
@@ -33,6 +33,11 @@ if (process.isMainFrame) {
       };
       ipcRenderer.on("coworker:deep-link", handler);
       return () => ipcRenderer.removeListener("coworker:deep-link", handler);
+    },
+    onCallEnd: (listener) => {
+      const handler = () => listener();
+      ipcRenderer.on("coworker:call-end", handler);
+      return () => ipcRenderer.removeListener("coworker:call-end", handler);
     },
     onBubble: (listener) => {
       const handler = (_event, change) => listener({ on: change?.on === true });

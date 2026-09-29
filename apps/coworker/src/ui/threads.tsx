@@ -138,6 +138,9 @@ import { TeamCardsForTurn, type TeamHooks } from "@/ui/team-cards";
 import { WorkPopover, workPopoverPlacement, type WorkPopoverPlacement } from "@/ui/work-popover";
 import { appendVoiceDraft, privateVoiceReply, type VoiceExpectation } from "@/lib/voice";
 import { useVoice, type VoiceActivation, type VoiceController, type VoicePreparation } from "@/ui/use-voice";
+import { CallButton, useCallState } from "@/ui/voice-call";
+import { coworkerCall } from "@/lib/realtime-call";
+import { callDuration, type CallHistory, type CallObservation } from "@/lib/call";
 import { VoicePanel, VoiceToggle } from "@/ui/voice";
 
 // Computer, browser and interactive app hosts are discussion-time features;
@@ -435,6 +438,7 @@ export function ThreadsPanel({
 }) {
   // The saved selection only seeds this view. Every later choice is made here and
   // saved behind it, so a coworker record read before that choice cannot move it.
+  const callState = useCallState();
   const [discussionThreadId, setDiscussionThreadId] = useState(coworker.conversationThreadId);
   const discussionSelection = useRef(0);
   /** Thread ids registered as discussions in `discussions.json`; the open one is added even when unregistered. */
@@ -714,43 +718,11 @@ export function ThreadsPanel({
     );
   }
 
-  if (openThreadId) {
-    return (
-      <ThreadView
-        key={openThreadId}
-        active={active}
-        threads={threads}
-        threadId={openThreadId}
-        coworker={coworker}
-        runtime={runtime}
-        kind={workerThreadIds.includes(openThreadId) ? "worker" : "assignment"}
-        headerSlots={headerSlots}
-        initialTurn={queuedTurn?.threadId === openThreadId ? queuedTurn : null}
-        onBack={() => {
-          setOpenThreadId("");
-          void refresh();
-        }}
-        onInitialTurnHandled={(id) => setQueuedTurn((current) => current?.id === id ? null : current)}
-        onOpenModelSettings={onOpenModelSettings}
-        onOpenAccount={onOpenAccount}
-        onOpenProviders={onOpenProviders}
-        session={session}
-        onSyncProviders={onSyncProviders}
-        onActivityChange={reportActivity}
-        readReadiness={readReadiness}
-        workspacePreparation={preparation}
-        onCoworkerChanged={onCoworkerChanged}
-        documents={documents}
-        summary={summary}
-        onOpenSummary={onOpenSummary}
-        team={team}
-      />
-    );
-  }
-
-  if (!discussionThreadId) {
-    return (
-      <DiscussionWelcome
+  const displayedId = openThreadId || discussionThreadId;
+  const kept = callState.retained.filter((target) => target.slug === coworker.slug && target.createdAt === coworker.createdAt).map((target) => target.threadId);
+  const displayed = [...new Set([displayedId, ...kept].filter(Boolean))];
+  return <>
+    {!displayedId ? (<DiscussionWelcome
         active={active}
         coworker={coworker}
         headerSlots={headerSlots}
@@ -777,6 +749,7 @@ export function ThreadsPanel({
             throw cause;
           }
         }}
+        onPrepareCall={startDiscussion}
         onPrepareVoice={async (request, takeDraft) => {
           await startDiscussion({
             isCurrent: request.isCurrent,
@@ -800,27 +773,52 @@ export function ThreadsPanel({
         onOpenSummary={onOpenSummary}
         onCoworkerChanged={onCoworkerChanged}
         proposerName={team?.coworkers.find((member) => member.slug === coworker.suggestedBy?.slug)?.name ?? ""}
-      />
-    );
-  }
-
-  return (
-    <ThreadView
-      key={discussionThreadId}
-      active={active}
+      />) : null}
+    {displayed.map((id) => <div key={id} className={id === displayedId ? "flex h-full min-h-0 flex-1 flex-col" : "hidden"}>
+      {id === openThreadId ? (<ThreadView
+        key={id}
+        active={active && id === displayedId}
+        threads={threads}
+        threadId={id}
+        coworker={coworker}
+        runtime={runtime}
+        kind={workerThreadIds.includes(id) ? "worker" : "assignment"}
+        headerSlots={id === displayedId ? headerSlots : { lead: null, title: null, actions: null, tools: null }}
+        initialTurn={queuedTurn?.threadId === id ? queuedTurn : null}
+        onBack={() => {
+          setOpenThreadId("");
+          void refresh();
+        }}
+        onInitialTurnHandled={(id) => setQueuedTurn((current) => current?.id === id ? null : current)}
+        onOpenModelSettings={onOpenModelSettings}
+        onOpenAccount={onOpenAccount}
+        onOpenProviders={onOpenProviders}
+        session={session}
+        onSyncProviders={onSyncProviders}
+        onActivityChange={id === displayedId ? reportActivity : ignoreRetainedActivity}
+        readReadiness={readReadiness}
+        workspacePreparation={preparation}
+        onCoworkerChanged={onCoworkerChanged}
+        documents={documents}
+        summary={summary}
+        onOpenSummary={onOpenSummary}
+        team={team}
+      />) : (<ThreadView
+      key={id}
+      active={active && id === displayedId}
       threads={threads}
-      threadId={discussionThreadId}
+      threadId={id}
       coworker={coworker}
       runtime={runtime}
       kind="discussion"
-      activityRequest={openThreadRequest?.kind === "discussion" && openThreadRequest.threadId === discussionThreadId ? openThreadRequest : null}
-      preparedVoice={preparedVoice?.threadId === discussionThreadId ? preparedVoice : undefined}
-      onVoicePreparedHandled={() => setPreparedVoice((current) => current?.threadId === discussionThreadId ? null : current)}
-      browserEligible={registeredDiscussions.includes(discussionThreadId)}
-      headerSlots={headerSlots}
-      assignmentDraft={pendingAssignment}
-      discussionDraft={discussionDraft}
-      initialTurn={queuedTurn?.threadId === discussionThreadId ? queuedTurn : null}
+      activityRequest={openThreadRequest?.kind === "discussion" && openThreadRequest.threadId === id ? openThreadRequest : null}
+      preparedVoice={preparedVoice?.threadId === id ? preparedVoice : undefined}
+      onVoicePreparedHandled={() => setPreparedVoice((current) => current?.threadId === id ? null : current)}
+      browserEligible={registeredDiscussions.includes(id)}
+      headerSlots={id === displayedId ? headerSlots : { lead: null, title: null, actions: null, tools: null }}
+      assignmentDraft={id === displayedId ? pendingAssignment : null}
+      discussionDraft={id === displayedId ? discussionDraft : undefined}
+      initialTurn={queuedTurn?.threadId === id ? queuedTurn : null}
       discussions={discussions}
       onOpenDiscussion={(threadId) => void openDiscussion(threadId)}
       onNewDiscussion={() => void openNewDiscussion()}
@@ -833,7 +831,7 @@ export function ThreadsPanel({
       onOpenProviders={onOpenProviders}
       session={session}
       onSyncProviders={onSyncProviders}
-      onActivityChange={reportActivity}
+      onActivityChange={id === displayedId ? reportActivity : ignoreRetainedActivity}
       readReadiness={readReadiness}
       workspacePreparation={preparation}
       onCoworkerChanged={onCoworkerChanged}
@@ -843,9 +841,11 @@ export function ThreadsPanel({
       onWorkersChanged={() => void refresh()}
       summary={summary}
       onOpenSummary={onOpenSummary}
-    />
-  );
+    />)}
+    </div>)}
+  </>;
 }
+const ignoreRetainedActivity = () => undefined;
 
 function DiscussionWelcome({
   active,
@@ -856,6 +856,7 @@ function DiscussionWelcome({
   assignmentDraft,
   onStartDiscussion,
   onPrepareVoice,
+  onPrepareCall,
   onCreateAssignment,
   onAssignmentDraftHandled,
   discussionDraft,
@@ -878,6 +879,7 @@ function DiscussionWelcome({
   /** The teammate who proposed this coworker, when one did: its empty conversation says so. */
   proposerName?: string;
   onStartDiscussion: (draft: ComposerDraftSnapshot, takeCurrentDraft: () => ComposerDraftSnapshot, isCurrent: () => boolean, signal: AbortSignal) => Promise<void>;
+  onPrepareCall: () => Promise<string>;
   onPrepareVoice: (request: VoicePreparation, takeDraft: () => ComposerDraftSnapshot) => Promise<void>;
   onCreateAssignment: (outcome: string, messages: ReadonlyArray<DiscussionMessage>) => Promise<void>;
   onAssignmentDraftHandled: () => void;
@@ -973,7 +975,7 @@ function DiscussionWelcome({
       <HeaderContent
         slots={headerSlots}
         title={<span className="truncate">New discussion</span>}
-        actions={startingMessage ? <IconButton label="Stop" tooltip="Cancel starting this message" tooltipSide="bottom" data-testid="coworker-stop" className="border border-line" onClick={() => { startCancelled.current = true; startController.current?.abort(new Error("Starting cancelled. Your draft is kept.")); setStartingMessage(null); setComposerError("Starting cancelled. Your draft is kept."); }}><StopIcon className="size-3.5" /></IconButton> : null}
+        actions={<><CallButton person={coworker} prepare={onPrepareCall} active={active} />{startingMessage ? <IconButton label="Stop" tooltip="Cancel starting this message" tooltipSide="bottom" data-testid="coworker-stop" className="border border-line" onClick={() => { startCancelled.current = true; startController.current?.abort(new Error("Starting cancelled. Your draft is kept.")); setStartingMessage(null); setComposerError("Starting cancelled. Your draft is kept."); }}><StopIcon className="size-3.5" /></IconButton> : null}</>}
       />
       <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-8 pt-[calc(var(--conversation-top,0px)+2rem)]">
         {problem ? <WorkspaceProblemNote problem={problem} onRetry={onRetry} /> : null}
@@ -1331,6 +1333,14 @@ function ThreadView({
   const checkingDraft = useRef(false);
   const transferredDraftId = useRef(preparedVoice ? discussionDraft?.id : undefined);
   const voiceRef = useRef<VoiceController | null>(null);
+  const [callHistory, setCallHistory] = useState<CallHistory>({ spoken: [], calls: [] });
+  const spokenSeen = useRef(new Set<string>());
+  useEffect(() => {
+    let current = true;
+    const read = () => void coworkerBridge.calls.history(coworker.slug, threadId).then((history) => { if (current) setCallHistory(history); }).catch(() => {});
+    read(); window.addEventListener("coworker:call-history", read);
+    return () => { current = false; window.removeEventListener("coworker:call-history", read); };
+  }, [coworker.slug, threadId]);
   const [assignmentMode, setAssignmentMode] = useState(false);
   const [assignmentText, setAssignmentText] = useComposerDraft(`${coworker.slug}:${coworker.createdAt}:${threadId}:assignment`);
   const [error, setError] = useState("");
@@ -1685,7 +1695,7 @@ function ThreadView({
       if (send.submission) composerDraftStore.finishSubmission(send.submission, false);
       voiceRef.current?.abandonReply(send.voice ?? null);
       setError("Check the recorded message again or confirm Stop before sending another request. Your draft is kept.");
-      return;
+      return false;
     }
     let voiceIntent = send.voice ?? null;
     let voiceFollowup = false;
@@ -2136,7 +2146,7 @@ function ThreadView({
     const { state, message } = dequeue(turnStateRef.current);
     if (!message) return;
     commitTurnState(() => state);
-    void submitTurn(message.text, newMessageId(), { mode: "send", skills: message.skillSelections });
+    void submitTurn(message.text, message.messageId ?? newMessageId(), { mode: "send", skills: message.skillSelections });
   }, [commitTurnState, stopScope, submitTurn]);
 
   useEffect(() => {
@@ -2168,24 +2178,25 @@ function ThreadView({
   }
 
   /** Words that become the person's next message without passing through the field: a pill the person tapped. */
-  const sendText = useCallback((words: string, submission?: ComposerDraftSubmission) => {
+  const sendText = useCallback((words: string, submission?: ComposerDraftSubmission, spokenMessageId?: string): boolean => {
     const text = words.trim();
-    if (!text) return;
+    if (!text) return false;
     if (admissionBlocked.current) {
       if (submission) composerDraftStore.finishSubmission(submission, false);
       setError("Check the recorded message again or confirm Stop before sending another request. Your draft is kept.");
-      return;
+      return false;
     }
     jumpToLatest();
     acknowledgeCoworker(coworker.slug);
     if (activeTurnRef.current || turnStateRef.current.pending || appRetry || engineRunning || threadStop(stopScope) || composerDraftStore.hasOtherSubmission(draftKey, submission?.messageId)) {
       voiceRef.current?.expectReply(null);
-      commitTurnState((state) => enqueue(state, { id: newQueuedId(), text, queuedAt: Date.now(), ...selectionFields(submission?.snapshot.value.skills ?? []) }), (kept) => { if (submission) composerDraftStore.finishSubmission(submission, kept); });
-      return;
+      commitTurnState((state) => enqueue(state, { id: newQueuedId(), ...(spokenMessageId ? { messageId: spokenMessageId } : {}), text, queuedAt: Date.now(), ...selectionFields(submission?.snapshot.value.skills ?? []) }), (kept) => { if (submission) composerDraftStore.finishSubmission(submission, kept); });
+      return true;
     }
-    const messageId = submission?.messageId ?? newMessageId();
+    const messageId = spokenMessageId ?? submission?.messageId ?? newMessageId();
     const voiceIntent = voiceRef.current?.expectReply(messageId);
     void submitTurn(text, messageId, { mode: "send", voice: voiceIntent, skills: submission?.snapshot.value.skills, submission });
+    return true;
   }, [appRetry, commitTurnState, coworker.slug, draftKey, engineRunning, jumpToLatest, stopScope, submitTurn]);
 
   /** Put a waiting message back in the field to change it. */
@@ -2220,7 +2231,7 @@ function ThreadView({
     if (!viewMounted.current || admissionBlocked.current || threadStop(stopScope) || !turnStateRef.current.next.some((item) => item.id === id && JSON.stringify(item) === JSON.stringify(message))) return;
     // The stopped turn keeps its line in the transcript; the record moves on to this message.
     commitTurnState((state) => clearPending(removeQueued(state, id)));
-    void submitTurn(message.text, newMessageId(), { mode: "send", skills: message.skillSelections });
+    void submitTurn(message.text, message.messageId ?? newMessageId(), { mode: "send", skills: message.skillSelections });
   }
 
   /**
@@ -2445,6 +2456,8 @@ function ThreadView({
   const currentWords = useMemo(() => writingText(correlatedStream, activeReply), [correlatedStream, activeReply]);
   const streamingMessageIds = useMemo(() => new Set(correlatedStream?.parts.filter((part) => part.type === "text").map((part) => part.messageId)), [correlatedStream]);
   const blocks = useMemo(() => conversationBlocks(visibleMessages, (message, index) => working && message.role === "assistant" && (index === lastAssistantIndex || streamingMessageIds.has(message.id))), [visibleMessages, working, lastAssistantIndex, streamingMessageIds]);
+  const callAnchors = callHistory.calls.map((call) => ({ call, before: blocks.find((block) => (block.kind === "message" || block.kind === "ended") && block.message.createdAt !== null && block.message.createdAt > call.endedAt) }));
+  const callLines = (messageId?: string) => callAnchors.filter(({ before }) => before && (before.kind === "message" || before.kind === "ended") ? before.message.id === messageId : messageId === undefined).map(({ call }) => <p key={call.id} className="py-1 text-center text-[11px] text-mist" data-testid="coworker-call-history">Call with {call.name} · {callDuration(call.endedAt - call.startedAt)}</p>);
   const conversationWindow = useConversationWindow(scrollRef, blocks, (block) => block.kind === "actions" || block.kind === "documents" || block.kind === "connect" ? block.id : block.message.id);
   // Connect cards read the person's live OpenWork connections, once for the whole conversation.
   const connectCatalog = useConnectorCatalog(session, blocks.some((block) => block.kind === "connect"));
@@ -2476,6 +2489,51 @@ function ThreadView({
     landedWords: working ? currentWords : "",
   });
   const workingLabel = admissionState === "preparing" ? "Preparing" : outcome?.kind === "slow" ? "Still working" : phaseWord(phase);
+  const lastCallReply = voiceSettled ? visibleMessages.findLast((message) => message.role === "assistant" && message.completedAt !== null && !message.error && message.text.trim()) : null;
+  const callObservation: CallObservation = {
+    working: working || turnState.next.length > 0,
+    phase: workingLabel,
+    doing: activeToolLabel ?? "",
+    failure: failure ? "The current work did not finish. Review the conversation's recovery action." : error,
+    attention: pending.permissions.length ? "A permission needs an on-screen click." : pending.questions.map((question) => question.questions.map((item) => item.question).join(" ")).join(" "),
+    reply: lastCallReply ? { id: lastCallReply.id, text: lastCallReply.text } : null,
+    stream: working ? currentWords.slice(-6000) : "",
+    tools: [...new Map([...currentReplies.flatMap((reply) => reply.toolCalls), ...(currentExecution?.tools ?? [])].map((call) => [call.partId, call])).values()].slice(-6).map((call) => ({ id: call.partId, label: EXECUTION_KINDS[executionMetadata(call).kind], status: executionState(call.status) })),
+    workers: (workerFeed.workers ?? []).map((worker) => ({ id: worker.id, name: worker.name, status: worker.status, note: workerFeed.notes[worker.id]?.text ?? "" })),
+  };
+  const callAdapterRef = useRef<import("@/lib/realtime-call").CallAdapter | null>(null);
+  callAdapterRef.current = {
+    prepare: () => voice.stop(""),
+    observation: callObservation,
+    send: async (text, itemId) => {
+      if (spokenSeen.current.has(itemId)) return true;
+      if (admissionBlocked.current) return false;
+      const id = newMessageId();
+      const history = await coworkerBridge.calls.record(coworker.slug, threadId, { kind: "spoken", id, text, at: Date.now() });
+      setCallHistory(history); spokenSeen.current.add(itemId);
+      voice.stop("");
+      return sendText(text, undefined, id);
+    },
+    stop,
+    answer: async (text) => {
+      const question = pending.questions[0];
+      if (!question || question.questions.length !== 1 || !text.trim()) return false;
+      const field = question.questions[0];
+      if (!field) return false;
+      const option = field.options.find((item) => item.label.toLowerCase() === text.trim().toLowerCase());
+      if (!option && field.custom === false) return false;
+      await threads.replyQuestion(question, [[option?.label ?? text.trim()]]); await refresh(); return true;
+    },
+    type: () => {
+      window.dispatchEvent(new CustomEvent("coworker:call-type", { detail: { slug: coworker.slug, threadId } }));
+      window.setTimeout(() => voice.fieldRef.current?.focus(), 0);
+    },
+  };
+  useEffect(() => {
+    if (kind !== "discussion") return;
+    const adapter = callAdapterRef.current;
+    if (adapter) return coworkerCall.bind({ slug: coworker.slug, createdAt: coworker.createdAt, threadId }, adapter);
+  });
   /** Words of the reply have arrived this turn — streaming now, or landed by an earlier step of the same turn. */
   const wordsArrived = Boolean(currentWords) || phase === "writing"
     || currentReplies.some((message) => message.text.trim() !== "");
@@ -2596,11 +2654,11 @@ function ThreadView({
             <span className="sr-only">Back</span>
           </IconButton>
         ) : null}
-        actions={kind !== "worker" && stoppable ? (
+        actions={<>{kind === "discussion" ? <CallButton person={coworker} threadId={threadId} active={active} /> : null}{kind !== "worker" && stoppable ? (
           <IconButton label={stopLabel} tooltip={stopPending ? "Stopping this conversation's work" : "Stop work in this conversation"} tooltipSide="bottom" disabled={!active || stopPending} data-testid="coworker-stop" className="border border-line" onClick={() => void stop()}>
             <StopIcon className="size-3.5" />
           </IconButton>
-        ) : null}
+        ) : null}</>}
       />
       {active && computerUse && kind === "discussion" && browserEligible && headerSlots.tools ? createPortal(<Suspense fallback={null}><ComputerControl key={`${coworker.slug}:${threadId}`} slug={coworker.slug} threadId={threadId} statusSlot={controlStatusSlot} floatingSlot={floatingSlot} openRequest={computerOpenRequest} onOpenRequestHandled={() => setComputerOpenRequest(0)} onBackToConversation={() => voice.fieldRef.current?.focus()} /></Suspense>, headerSlots.tools) : null}
       {/* Progress and problems show inline in the conversation; this keeps the turn state readable to assistive tech and tests. */}
@@ -2666,11 +2724,13 @@ function ThreadView({
             // unresolved is told by the outcome below instead, with its actions.
             if (block.kind === "ended") {
               if (block.message.parentId === pendingTurn?.messageId) return null;
-              return <QuietLine key={block.message.id} outcome={block.ended} text={block.ended === "stopped" ? "Stopped." : describeTurnFailure(block.message.error ? failureText(block.message.error) : "", coworker.name).headline} />;
+              return <div key={block.message.id}>{callLines(block.message.id)}<QuietLine outcome={block.ended} text={block.ended === "stopped" ? "Stopped." : describeTurnFailure(block.message.error ? failureText(block.message.error) : "", coworker.name).headline} /></div>;
             }
             const hasTeamCards = kind === "discussion" && teamCardsFromCalls(block.calls).length > 0;
             return (
               <div key={block.message.id} data-scroll-anchor={block.message.id}>
+                {callLines(block.message.id)}
+                {block.message.role === "user" && callHistory.spoken.some((item) => item.id === block.message.id) ? <span className="mb-0.5 block text-right text-[10px] text-mist" aria-label="Spoken request">♩ Voice</span> : null}
                 <TimeLabel label={timeLabelBetween(block.previous?.createdAt, block.message.createdAt)} />
                 <MessageBubble
                   message={block.message}
@@ -2699,6 +2759,7 @@ function ThreadView({
           }} />
           </TranscriptAppContext.Provider>
           </WorkerLinksContext.Provider>
+          {callLines()}
           <CollaborationReceipts receipts={collaborationReceipts} />
           <InteractionCards
             coworker={coworker}

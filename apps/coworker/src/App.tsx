@@ -42,6 +42,7 @@ import type { PanelBounds } from "@/lib/panel-layout";
 
 /** The team rail: drag it narrower than a row can show and it folds to avatars. */
 const RAIL_BOUNDS: PanelBounds = { min: 220, max: 380, collapsedWidth: 88, collapseBelow: 170 };
+const ignoreCallBackgroundActivity = () => undefined;
 import { OnboardingWelcome } from "@/ui/onboarding";
 import { OnboardingExperience } from "@/ui/onboarding-experience";
 import { OnboardingIntents } from "@/ui/onboarding-intents";
@@ -53,6 +54,8 @@ import { AppLoader, CoworkerMark } from "@/ui/brand";
 import type { SettingsSection } from "@/ui/openwork-settings";
 import { VoiceContext } from "@/ui/use-voice";
 import { useActivityInbox } from "@/ui/use-activity-inbox";
+import { CallScreen, useCallState } from "@/ui/voice-call";
+import { coworkerCall } from "@/lib/realtime-call";
 import { useBubble } from "@/ui/use-bubble";
 import { useGlints } from "@/ui/glints";
 import { refreshFeatures, useFeatures } from "@/ui/use-features";
@@ -167,6 +170,7 @@ function onboardingContext(session: DenSession | null): string {
 }
 
 export default function App() {
+  const callState = useCallState();
   const [runtime, setRuntime] = useState<RuntimeInfo | null>(null);
   const runtimeRef = useRef(runtime);
   const runtimeObservation = useRef(0);
@@ -250,6 +254,7 @@ export default function App() {
   const sessionRef = useRef(session);
   sessionRef.current = session;
   const accountKey = session ? sessionKey(session) : "local";
+  useEffect(() => () => { coworkerCall.end(); }, [accountKey]);
   const onboardingStep = onboardingStepFor(onboardingDraft);
   const updateOnboardingDraft = useCallback((next: OnboardingDraft | ((current: OnboardingDraft) => OnboardingDraft)) => {
     const resolved = typeof next === "function" ? next(onboardingDraftRef.current) : next;
@@ -441,6 +446,11 @@ export default function App() {
   const closeGlobalSettings = useCallback(() => {
     setGlobalSettings(null);
   }, []);
+  useEffect(() => { const open = () => openGlobalSettings("voice-calls"); window.addEventListener("coworker:call-settings", open); return () => window.removeEventListener("coworker:call-settings", open); }, [openGlobalSettings]);
+  useEffect(() => {
+    const type = () => { const target = coworkerCall.snapshot().target; if (!target) return; setGlobalSettings(null); if (visitCoworker(target.slug)) setHomeRequest({ id: nextRequestId(), slug: target.slug, kind: "discussion", threadId: target.threadId }); };
+    window.addEventListener("coworker:call-type", type); return () => window.removeEventListener("coworker:call-type", type);
+  });
 
   useEffect(() => {
     if (globalSettings) return;
@@ -1548,36 +1558,39 @@ export default function App() {
                 }}
                 onOpenDetails={() => setGroupDetailsOpen(true)}
               />
-            ) : (
-            selected ? <CoworkerHome
-              key={`${selected.slug}:${selected.createdAt}`}
+            ) : null}
+            {coworkers.filter((person) => person.slug === selected?.slug || callState.retained.some((target) => target.slug === person.slug && target.createdAt === person.createdAt)).map((shown) => (
+              <div key={`${shown.slug}:${shown.createdAt}`} className={shown.slug === selected?.slug && !selectedGroup ? "flex min-h-0 min-w-0 flex-1" : "hidden"}>
+                <CoworkerHome
+              key={`${shown.slug}:${shown.createdAt}`}
               navigationGuard={readerNavigation}
-              active={chatActive && !creatingGroup}
+              active={shown.slug === selected?.slug && !selectedGroup && chatActive && !creatingGroup}
               onExitActivity={activityVisible ? exitActivity : undefined}
               runtime={runtime}
               session={session}
               coworkers={coworkers}
-              coworker={selected}
-              activity={visibleActivityBySlug[selected.slug]}
-              request={homeRequest?.slug === selected.slug && (!homeRequest.createdAt || homeRequest.createdAt === selected.createdAt) ? homeRequest : null}
-              onActivityChange={updateSelectedLiveActivity}
+              coworker={shown}
+              activity={visibleActivityBySlug[shown.slug]}
+              request={homeRequest?.slug === shown.slug && (!homeRequest.createdAt || homeRequest.createdAt === shown.createdAt) ? homeRequest : null}
+              onActivityChange={shown.slug === selected?.slug ? updateSelectedLiveActivity : ignoreCallBackgroundActivity}
               onCoworkerChanged={updateCoworkerInList}
               onCoworkerRemoved={removeCoworkerFromList}
               onRefreshRuntime={refreshRuntime}
               onRestartRuntime={restartRuntime}
               onSyncProviders={syncProviders}
               onOpenOpenWork={(section) => openGlobalSettings(section ?? "general")}
-              connect={connectBySlug[selected.slug] ?? null}
-              onRepairConnect={() => syncConnect({ force: true, remint: true, slug: selected.slug })}
+              connect={connectBySlug[shown.slug] ?? null}
+              onRepairConnect={() => syncConnect({ force: true, remint: true, slug: shown.slug })}
               onConnectAccount={() => setConnecting(true)}
               railWidth={chatOnly ? 0 : activityVisible ? Math.max(RAIL_BOUNDS.min, rail.width) : rail.width}
               onCoworkerAdded={addCoworkerToList}
               canHandOff={allowSourceNavigation}
               onHandOff={(slug, prompt) => visitCoworker(slug, prompt)}
               onVisitCoworker={(slug) => visitCoworker(slug)}
-              onCustomize={(focus) => openCustomize(selected.slug, focus)}
-            /> : null
-            )}
+              onCustomize={(focus) => openCustomize(shown.slug, focus)}
+            />
+              </div>
+            ))}
             </div>
             {features.calendar ? <div className={calendarVisible ? "flex min-h-0 min-w-0 flex-1" : "hidden"}>
               <CalendarView active={workspaceActive && calendarVisible && !creatingGroup && !groupDetailsOpen} coworkers={coworkers} data={calendar} preferences={calendarPreferences} onPreferencesChange={setCalendarPreferences} request={calendarRequest}
@@ -1593,6 +1606,7 @@ export default function App() {
           </div>
         )}
       </div>
+      <CallScreen />
       {marketplaceOpen && workspaceActive && features.marketplace ? (
         <MarketplaceDialog
           session={session}

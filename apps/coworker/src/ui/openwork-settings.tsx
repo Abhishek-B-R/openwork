@@ -31,7 +31,9 @@ import { FreshStartSettings } from "@/ui/fresh-start-settings";
 import { FEATURES, featureProfile, profileFeatures, type FeatureId, type FeatureProfile, type Features } from "@/lib/features";
 import { setFeatures, useFeatures } from "@/ui/use-features";
 
-export type SettingsSection = "general" | "features" | "model-defaults" | "account" | "models" | "engine" | "fresh-start";
+import { VoiceCallSettings } from "@/ui/voice-call-settings";
+
+export type SettingsSection = "voice-calls" | "general" | "features" | "model-defaults" | "account" | "models" | "engine" | "fresh-start";
 
 /**
  * Each section's page says what it is once, in the header, so the page itself
@@ -42,6 +44,7 @@ const SECTIONS: Array<{ id: SettingsSection; label: string; detail: string; help
   { id: "general", label: "My coworkers", detail: "Personal choices for each coworker", wide: true },
   { id: "features", label: "Features", detail: "Start simple and turn on what you need. Turning one off keeps its data for later.", wide: true },
   { id: "model-defaults", label: "Shared AI models", detail: "Starting models for everyone. Personal choices still win.", wide: true },
+  { id: "voice-calls", label: "Voice calls", detail: "Call your coworker with your own OpenAI key" },
   { id: "account", label: "Account", detail: "OpenWork account and organization" },
   { id: "models", label: "Available models", detail: "AI models your coworkers can choose", help: "These models are connected for your team. Availability here does not confirm a paid account with every provider. Choose a shared model in Shared AI models, or choose one for a coworker." },
   { id: "engine", label: "This Mac", detail: "AI service and files on this Mac", wide: true },
@@ -470,6 +473,7 @@ export function OpenWorkSettings({
                 {SECTIONS.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
               </select>
             </label>
+            {section === "voice-calls" ? <VoiceCallSettings /> : null}
             {section === "features" ? <FeaturesSettings /> : null}
             {section === "fresh-start" ? <FreshStartSettings onReplay={onReplayOnboarding} onFactoryReset={onFactoryReset} /> : null}
             {section === "model-defaults" ? <AppModelDefaults active={active} runtime={runtime} session={session} catalog={catalog} catalogLoaded={catalogLoaded} catalogLoading={refreshing} onRefreshCatalog={refreshConfiguration} onOpenModels={() => setSection("models")} /> : null}

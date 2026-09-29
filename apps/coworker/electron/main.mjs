@@ -16,8 +16,10 @@ import { homedir } from "node:os";
 import { createServer as createPortProbe } from "node:net";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { BrowserWindow, Menu, app, dialog, ipcMain, nativeTheme, screen, shell, systemPreferences } from "electron";
+import { BrowserWindow, Menu, app, dialog, ipcMain, nativeTheme, screen, shell, systemPreferences, safeStorage, powerMonitor } from "electron";
 import { createVoice, installVoicePermissions } from "./voice.mjs";
+import { createVoiceCalls, createCallHistory } from "./voice-calls.mjs";
+import { requestCallKey } from "./call-key-entry.mjs";
 import { bindWindowAppearance, windowMaterial } from "./window-appearance.mjs";
 import { createFocusWindow } from "./focus-window.mjs";
 import { createBubbleWindow } from "./bubble-window.mjs";
@@ -263,6 +265,14 @@ const serverConfigPath = process.env.COWORKER_SERVER_CONFIG?.trim()
 process.env.OPENWORK_RUNTIME_DB ||= path.join(path.dirname(serverConfigPath), "coworker-runtime.sqlite");
 process.env.OPENWORK_ENV_STORE ||= path.join(path.dirname(serverConfigPath), "coworker-env.json");
 const settingsPath = path.join(path.dirname(serverConfigPath), SETTINGS_FILE);
+if (process.env.OPENWORK_ELECTRON_USE_MOCK_KEYCHAIN === "1") app.commandLine.appendSwitch("use-mock-keychain");
+const voiceCalls = createVoiceCalls({ directory: userDataDir, safeStorage, requestKey: requestCallKey });
+const callHistory = createCallHistory(async (slug) => (await getCoworker(coworkersDir, slug)).path);
+function endVoiceCall() {
+  voiceCalls.cancel();
+  bubbleWindow.callStatus(null);
+  if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.webContents.isDestroyed()) mainWindow.webContents.send("coworker:call-end");
+}
 // A profile-owned sibling survives Fresh start's profile/home moves. Never use
 // the shared OpenCode history or derive the native database from its env flags.
 const opencodeV2RootDir = `${path.resolve(userDataDir)}-opencode2`;
@@ -3623,6 +3633,21 @@ const commands = {
       return runCloudProviderSync(handle, tokens.hostToken, "manual_refresh");
     });
   },
+  "calls.settings": () => voiceCalls.settings(),
+  "calls.microphone": () => voiceCalls.microphone(() => voice.microphone()),
+  "calls.editKey": () => voiceCalls.editKey(),
+  "calls.removeKey": () => { endVoiceCall(); return voiceCalls.remove(); },
+  "calls.voice": ({ voice }) => voiceCalls.voice(voice),
+  "calls.test": () => voiceCalls.test(),
+  "calls.secret": async ({ slug, createdAt }) => {
+    const person = await getCoworker(coworkersDir, slug);
+    if (person.createdAt !== createdAt) throw new Error("This coworker changed. Open the conversation again.");
+    return voiceCalls.clientSecret(person);
+  },
+  "calls.cancel": () => voiceCalls.cancel(),
+  "calls.history": ({ slug, threadId }) => callHistory.read(slug, threadId),
+  "calls.record": ({ slug, threadId, entry }) => callHistory.append(slug, threadId, entry),
+  "window.callStatus": ({ startedAt } = {}) => { bubbleWindow.callStatus(Number.isFinite(startedAt) ? startedAt : null); return { ok: true }; },
   "voice.status": () => voice.status(),
   "voice.transcribe": (input) => voice.transcribe(input),
   "voice.speech": (input) => voice.speech(input),
@@ -3884,10 +3909,10 @@ function registerIpc() {
       return { ok: false, error: "Open Coworker commands are only available to the main app frame." };
     }
     const command = typeof request?.command === "string" ? request.command : "";
-    if ((command === "coworkers.openFolder" || command.startsWith("events.") || command.startsWith("voice.") || command.startsWith("window.") || command.startsWith("computer.") || command.startsWith("browser.") || command.startsWith("workers.") || command.startsWith("groups.documents.")) && !trustedComputerSender(event, mainWindow?.webContents, rendererUrl())) {
+    if ((command === "coworkers.openFolder" || command.startsWith("events.") || command.startsWith("voice.") || command.startsWith("calls.") || command.startsWith("window.") || command.startsWith("computer.") || command.startsWith("browser.") || command.startsWith("workers.") || command.startsWith("groups.documents.")) && !trustedComputerSender(event, mainWindow?.webContents, rendererUrl())) {
       return { ok: false, error: "Native controls require the trusted Open Coworker window and renderer URL." };
     }
-    if (command === "voice.microphone" && request?.userGesture !== true) {
+    if ((command === "voice.microphone" || command === "calls.microphone") && request?.userGesture !== true) {
       return { ok: false, error: "Click the microphone control to allow audio input." };
     }
     const handler = commands[command];
@@ -4013,11 +4038,11 @@ async function createMainWindow() {
   });
   // A reload replaces the renderer; its deep-link listener must re-announce.
   window.webContents.on("did-start-navigation", (_event, _url, _isInPlace, isMainFrame) => {
-    if (isMainFrame) { voice.reset(); deepLinkListenerReady = false; browserControl.hideWindow(); }
+    if (isMainFrame && !_isInPlace) { endVoiceCall(); voice.reset(); deepLinkListenerReady = false; browserControl.hideWindow(); }
   });
-  window.on("close", () => { voice.reset(); browserControl.hideWindow(); });
-  window.webContents.on("render-process-gone", () => { voice.reset(); deepLinkListenerReady = false; browserControl.hideWindow(); });
-  window.webContents.on("destroyed", () => { voice.reset(); browserControl.hideWindow(); });
+  window.on("close", () => { endVoiceCall(); voice.reset(); browserControl.hideWindow(); });
+  window.webContents.on("render-process-gone", () => { endVoiceCall(); voice.reset(); deepLinkListenerReady = false; browserControl.hideWindow(); });
+  window.webContents.on("destroyed", () => { endVoiceCall(); voice.reset(); browserControl.hideWindow(); });
   window.on("unresponsive", () => browserControl.hideWindow());
   window.on("closed", () => {
     if (mainWindow === window) { mainWindow = null; bubbleWindow.close(); }
@@ -4078,6 +4103,7 @@ if (!singleInstanceLock) {
     if (process.platform === "darwin" && existsSync(APP_ICON_PATH)) app.dock.setIcon(APP_ICON_PATH);
     installApplicationMenu();
     registerIpc();
+    powerMonitor.on("suspend", endVoiceCall);
     if (maintenanceNotice && (maintenanceNotice.phase !== "completed" || maintenanceNotice.relaunchFailed)) {
       await dialog.showMessageBox({ type: maintenanceNotice.phase === "completed" ? "info" : "warning",
         title: maintenanceNotice.phase === "completed" ? "Fresh start complete" : "Fresh start did not finish",
@@ -4118,6 +4144,7 @@ if (!singleInstanceLock) {
   });
 
   app.on("before-quit", (event) => {
+    endVoiceCall();
     voice.reset();
     if (resetExitReady) return;
     if (resetInProgress) {

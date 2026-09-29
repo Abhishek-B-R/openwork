@@ -51,6 +51,7 @@ export function createBubbleWindow({ BrowserWindow, screen, ipcMain, preload, ur
   let window = null;
   let face = null;
   let state = null;
+  let callStartedAt = null;
   let cursorTimer = null;
   let lastCursor = "";
 
@@ -117,7 +118,7 @@ export function createBubbleWindow({ BrowserWindow, screen, ipcMain, preload, ur
     },
     /** Shows the bubble for a coworker, at its last place or `near` the window it stands in for. */
     async show({ coworker, near }) {
-      state = { coworker, speech: null, open: false };
+      state = { coworker, speech: null, open: false, callStartedAt };
       const start = face ?? { x: near.x + near.width - BUBBLE_FACE - 12, y: near.y + near.height - BUBBLE_FACE - 48 };
       face = clampFace(start, workAreaFor(start));
       if (!window || window.isDestroyed()) {
@@ -150,6 +151,10 @@ export function createBubbleWindow({ BrowserWindow, screen, ipcMain, preload, ur
         watchCursor();
       }
       layout();
+    },
+    callStatus(startedAt) {
+      callStartedAt = startedAt;
+      if (state) { state = { ...state, callStartedAt }; layout(); }
     },
     /** Something for the person: a speech bubble beside the face. */
     say(speech) {
