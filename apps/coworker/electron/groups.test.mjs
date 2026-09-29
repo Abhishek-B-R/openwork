@@ -747,7 +747,7 @@ test("turn submission preserves definitive refusal and generation checks without
       nativeWorkspaceRequest: async (_handle, _workspaceId, _method, route) => {
         if (route === "/api/plugin/await-activation" && warmGate) { warmGate.entered.resolve(); await warmGate.release.promise; }
         if (route === "/api/agent/build") return { data: { permissions: [] } };
-        if (route === "/api/plugin") return { data: ["collaboration", "computer", "browser", "group-documents", "events", "abilities", "turn-roles", "progress-summary", "auto-memory"].map((id) => ({ id: `coworker.${id}`, state: { status: "active" } })) };
+        if (route === "/api/plugin") return { data: ["collaboration", "computer", "browser", "group-documents", "events", "abilities", "turn-roles", "progress-summary", "auto-memory", "fast-decision"].map((id) => ({ id: `coworker.${id}`, state: { status: "active" } })) };
       },
       denSessionHandoff: Promise.resolve(), storedSkillSession: null, appliedSkillSession: null,
       denAccountHandoff: Promise.resolve(), denAccountGeneration: 0, denAccountReady: false,
@@ -756,7 +756,7 @@ test("turn submission preserves definitive refusal and generation checks without
         return getCoworker(...args);
       },
       readSettings, updateCoworker: (...args) => save(() => updateCoworker(...args)), updateSettings: (...args) => save(() => updateSettings(...args)),
-      privateOwner: async () => ({}), progressSummaries: { configure() {} }, conversationMemory: { configure() {} },
+      privateOwner: async () => ({}), progressSummaries: { configure() {} }, conversationMemory: { configure() {} }, fastDecisions: { cancel() {} },
       ensurePlatformServer: async () => { serverCalls++; return handle; }, loadOrCreateTokens: async () => ({ hostToken: "fixture-host" }),
       fetchJson: async () => {
         if (syncGate) { syncGate.entered.resolve(); await syncGate.release.promise; }

@@ -9,7 +9,7 @@ import { createFastDecisions, fastGroupObservation } from "./fast-decisions.mjs"
 import { fastDecisionModel, nativeFastDecision } from "./fast-decisions-native.mjs";
 
 const key = "sk-synthetic-shared-key-never-real";
-const storage = { isAsyncEncryptionAvailable: async () => true, encryptStringAsync: async () => Buffer.from("sealed"), decryptStringAsync: async () => ({ result: key }) };
+const storage = { isAsyncEncryptionAvailable: async () => true, getSelectedStorageBackend: () => "gnome_libsecret", encryptStringAsync: async () => Buffer.from("sealed"), decryptStringAsync: async () => ({ result: key }) };
 const observation = fastGroupObservation({ message: "Who can test this release?", participants: [{ slug: "tester", name: "Private name", role: "Release tester", mission: "Private mission" }, { slug: "designer", role: "Designer" }], mentions: { everyone: false, slugs: [] } });
 const model = { providerId: "connected-provider", modelId: "luna", variant: "none" };
 const transport = { key: "native-generation", model, client: {} };
@@ -17,7 +17,7 @@ const ready = async () => transport;
 const response = (choice = "member_0") => ({ text: JSON.stringify({ choice }), usage: { inputTokens: 250, outputTokens: 8, cost: 0.000029 } });
 async function fixture(run) {
   const directory = await mkdtemp(path.join(tmpdir(), "coworker-fast-decisions-"));
-  const credential = createOpenAICredential({ directory, safeStorage: storage, requestKey: async () => key });
+  const credential = createOpenAICredential({ directory, platform: "linux", safeStorage: storage, requestKey: async () => key });
   try { await run({ directory, credential }); } finally { await rm(directory, { recursive: true, force: true }); }
 }
 
@@ -96,7 +96,7 @@ test("deadline, cancellation and provider changes discard late decisions with on
 test("removing a credential during secure entry cannot resurrect it", async () => fixture(async ({ directory }) => {
   let resolveKey, entryStarted;
   const entered = new Promise((resolve) => { entryStarted = resolve; });
-  const credential = createOpenAICredential({ directory, safeStorage: storage, requestKey: () => { entryStarted(); return new Promise((resolve) => { resolveKey = resolve; }); } });
+  const credential = createOpenAICredential({ directory, platform: "linux", safeStorage: storage, requestKey: () => { entryStarted(); return new Promise((resolve) => { resolveKey = resolve; }); } });
   const editing = credential.editKey(); await entered; await credential.remove(); resolveKey(key);
   await assert.rejects(editing, /connection changed/); assert.equal((await credential.settings()).keySet, false);
 }));
