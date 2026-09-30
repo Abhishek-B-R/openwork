@@ -8,7 +8,7 @@ const test = spec.world(agentBackground, {
 });
 
 test("AGENT-VIS-03 v2: a person keeps chatting while a background helper works, and the chat tells them when it's done", async ({ world, user, probe, step, evidence }) => {
-  await step("the person hands a long comparison to a background helper", async () => {
+  await step("before: the person hands a long comparison to a background helper", async () => {
     await user.type("composer", world.prompt);
     await user.click("Run task");
     await user.see({ text: world.started }, { timeoutMs: 60_000 });
@@ -17,15 +17,16 @@ test("AGENT-VIS-03 v2: a person keeps chatting while a background helper works, 
 
   await step("the chat is free again while the helper keeps working, and says so", async () => {
     await user.see("Run task", { timeoutMs: 30_000 });
-    await user.see({ text: /1 agent running/ }, { timeoutMs: 30_000 });
-    evidence.recordAssertionEvidence("The helper keeps working after the reply", "composer shows Run task; '1 agent running' is visible", true);
+    await user.see({ text: /1 agent working/ }, { timeoutMs: 30_000 });
+    await user.click({ role: "button", label: /1 agent working/ });
+    evidence.recordAssertionEvidence("The helper keeps working after the reply", "composer shows Run task; '1 agent working' is visible", true);
     await user.screenshot();
   });
 
   await step("the launch step finishing does not make the helper look finished", async () => {
     // v2 marks the launch tool completed at once; only the child's own activity says whether it still runs.
-    const running = (await probe.dom('[data-subagent-activity="shimmer"]')).elements.length;
-    const helperRows = (await probe.dom("[data-subagent-run]")).elements.map((element) => element.text).join(" | ");
+    const running = (await probe.dom('[data-agent-tray] [data-subagent-activity="shimmer"]')).elements.length;
+    const helperRows = (await probe.dom("[data-agent-tray] [data-subagent-run]")).elements.map((element) => element.text).join(" | ");
     const looksDone = /Completed|Finished/i.test(helperRows);
     evidence.recordAssertionEvidence("A launched helper still shows as running", `${running} running helper row(s); row reads "${helperRows.slice(0, 120)}"`, running === 1 && !looksDone);
     expect(running).toBe(1);
@@ -43,12 +44,7 @@ test("AGENT-VIS-03 v2: a person keeps chatting while a background helper works, 
   });
 
   await step("the running helper can be stopped from where it is shown", async () => {
-    // TODO(primitive): no probe finds a Stop control scoped to the running-agents area.
-    const canStop = await probe.eval(() => {
-      const areas = [...document.querySelectorAll<HTMLElement>("[data-subagent-run], [data-testid='active-subagents']")];
-      return areas.some((area) => [...area.querySelectorAll<HTMLElement>("button, [role=button]")]
-        .some((button) => /stop/i.test(button.getAttribute("aria-label") ?? button.textContent ?? "")));
-    });
+    const canStop = (await probe.dom('[data-subagent-run] button[aria-label*="Stop sub-agent"], [data-agent-tray] button')).elements.some(element => /stop/i.test(element.text));
     evidence.recordAssertionEvidence("A background helper can be stopped", canStop ? "a Stop control is next to the running helper" : "no way to stop the background helper", canStop);
     expect.soft(canStop, "Stop control for the background helper").toBe(true);
   });
@@ -73,13 +69,13 @@ test("AGENT-VIS-03 v2: a person keeps chatting while a background helper works, 
     const result = await probe.eventually(async () => {
       const text = await probe.text();
       // Only the turn's own Working line, not a helper row's timer.
-      const turnLine = (await probe.dom("[data-loading-message]")).elements.map((element) => element.text).join(" ");
+      const turnLine = (await probe.dom("[data-working-line]")).elements.map((element) => element.text).join(" ");
       const working = turnLine.match(/Working\s*\d+(?:m\s*\d+)?s/)?.[0];
       if (working) readings.push(working);
       return text;
     }, { within: 60_000, intervalMs: 150, label: "the chat reports the helper's result", until: (text) => text.includes(world.wakeReply) });
     expect(result).toContain(world.wakeReply);
-    await user.notSee({ text: /1 agent running/ }, { timeoutMs: 15_000 });
+    await user.notSee({ text: /1 agent working/ }, { timeoutMs: 15_000 });
     evidence.recordAssertionEvidence("The chat reports the helper's result on its own", `"${world.wakeReply}" appeared; Working readings while it picked back up: ${readings.join(", ") || "none"}`, true);
     await user.screenshot();
   });

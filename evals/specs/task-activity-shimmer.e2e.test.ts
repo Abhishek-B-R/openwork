@@ -6,7 +6,7 @@ const test = spec.world(taskActivityWeb, {
   resources: { surfaces: ["appWeb"], services: ["mock"] },
 });
 
-test("ACT-01 delegated-task activity stays with its original message after a follow-up", async ({ world, user, probe, evidence }) => {
+test("ACT-01 delegated-task activity stays with its original message after a follow-up", async ({ world, user, probe, evidence, step }) => {
   await user.type("composer", world.prompt);
   await user.click("Run task");
   const native = await probe.eventually(() => world.native(), {
@@ -16,6 +16,8 @@ test("ACT-01 delegated-task activity stays with its original message after a fol
   if (!native?.childId) throw new Error("Missing native child association");
   expect(native.status, JSON.stringify(native)).toBe("running");
   evidence.recordJsonArtifact("Native delegation identity", native);
+  await user.click({ role: "button", label: /Earlier steps.*Show steps/ });
+  await step("before: the delegated task remains in the steady live rail", () => user.screenshot());
   const readWorkingFooter = () => probe.eval(() =>
     document.querySelector('[data-loading-message="working"]')?.textContent ?? "",
   );
@@ -32,8 +34,8 @@ test("ACT-01 delegated-task activity stays with its original message after a fol
   await user.type("composer", "What is the update?", { verify: true });
   // Busy Enter queues; the production Cmd/Ctrl+Enter shortcut sends steering now.
   await user.press(world.app.handle.hostKind !== "daytona" && process.platform === "darwin" ? "Meta+Enter" : "Control+Enter");
-  await user.see({ text: "Build isolated Azure repro" });
   await user.see({ text: "What is the update?" });
+  await user.see({ text: "Build isolated Azure repro" });
   // TODO(primitive): inspect the visual treatment classes on a delegated-task status row.
   const readActivity = () => probe.eval(() => {
     const row = document.querySelector<HTMLElement>('[data-subagent-activity="shimmer"]');
@@ -122,6 +124,7 @@ test("ACT-01 delegated-task activity stays with its original message after a fol
   await user.see({ text: /ACTIVITY_CHILD_HOLD/ }, { timeoutMs: 30_000 });
   await user.see({ text: /Working/ });
   expect((await probe.dom(`[data-session-surface-id="${native.childId}"]`)).elements).toHaveLength(1);
+  await step("after: the exact child chat remains active across reload", () => user.screenshot());
   expect((await world.replyState()).deliveredChunks).toBe(1);
   await user.notSee({ text: "Activity child finished." });
   evidence.recordAssertionEvidence("Delegated activity opens the exact live child across reload",

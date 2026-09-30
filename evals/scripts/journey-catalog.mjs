@@ -12,6 +12,9 @@ import { readdir, readFile } from 'node:fs/promises';
 // journey-ci.test.mjs checks these against what each spec and world guards.
 const PACKAGED_BINARY = { env: ['OPENWORK_EVAL_ELECTRON_BINARY'] };
 const definitions = {
+  'whole-activity-conversation.e2e.test.ts': {
+    cases: [{ id: 'ACT-WHOLE', engines: ['v1', 'v2'], optIns: ['OPENWORK_EVAL_E2E_TESTS'], example: { placement: '--local', engine: 'v2' } }],
+  },
   'opencode-v2-context-activity.e2e.test.ts': {
     cases: [{ id: 'V2-CONTEXT-ACTIVITY', engines: ['v2'], optIns: ['OPENWORK_EVAL_E2E_TESTS'], example: { placement: '--local', engine: 'v2' } }],
   },
@@ -28,6 +31,15 @@ const definitions = {
   },
   // Its registered OAuth callback and synthetic client exchange run on owned loopback services.
   'mcp-connection-consent.e2e.test.ts': { name: 'Authorize a connected client once', placement: 'local' },
+  'agent-child-messaging.e2e.test.ts': {
+    cases: [{ id: 'AGENT-CHILD-01', engines: ['v1', 'v2'], optIns: ['OPENWORK_EVAL_E2E_TESTS'], example: { placement: '--local', engine: 'v2' } }],
+  },
+  'agent-child-desktop.e2e.test.ts': {
+    cases: [{ id: 'AGENT-CHILD-DESKTOP', engines: ['v1', 'v2'], optIns: ['OPENWORK_EVAL_E2E_TESTS'], example: { placement: '--local', engine: 'v2' } }],
+  },
+  'agent-child-split-desktop.e2e.test.ts': {
+    cases: [{ id: 'AGENT-CHILD-SPLIT', engines: ['v1', 'v2'], optIns: ['OPENWORK_EVAL_E2E_TESTS'], example: { placement: '--local', engine: 'v2' } }],
+  },
   'agent-background-journey.e2e.test.ts': {
     cases: [{ id: 'AGENT-VIS-03', engines: ['v2'], optIns: ['OPENWORK_EVAL_E2E_TESTS'], example: { placement: '--local', engine: 'v2' } }],
   },

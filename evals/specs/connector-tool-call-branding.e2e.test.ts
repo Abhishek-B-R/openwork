@@ -1,15 +1,35 @@
 import { expect } from "vitest";
 import { spec } from "@openwork/testkit";
-import { connectorBranding, isRecord } from "../worlds/library.ts";
+import { isRecord } from "../worlds/library.ts";
+import { connectorActivity } from "../worlds/connector-activity.ts";
 
-const test = spec.world(connectorBranding, { timeout: 420_000 });
+const test = spec.world(connectorActivity, { timeout: 420_000, resources: { surfaces: ["desktop"], services: ["den", "mock"], nativeReason: "The connector fixture uses a native Desktop conversation and Den connection catalog to verify service assets and exact MCP results." } });
 
 test("connector-backed tool calls show first-class branding and human-readable labels", async ({ world, user, probe, step, evidence }) => {
+  const send = async (text: string) => {
+    await probe.eventually(() => probe.composer(), { within: 30_000, label: "the connector fixture's composer and model have loaded",
+      until: state => state.route.includes(world.session.sessionId) && state.composerEditable && state.selectedModelLabel.includes("Connector display model"),
+    });
+    await user.type("composer", text, { replace: true, verify: true });
+    await probe.eventually(() => probe.composer(), { within: 30_000, label: "the composer admits a connector turn", until: state => state.runTaskEnabled });
+    await user.click("Run task");
+  };
+  const openTurn = async (index: number) => {
+    const all = await probe.dom('[data-steady-activity] > div > button > span:first-of-type');
+    const closed = await probe.dom('[data-steady-activity] > div > button[aria-expanded="false"] > span:first-of-type');
+    const text = all.elements[index]?.text;
+    if (!text || !closed.elements.some(element => element.text === text)) return;
+    const label = text.includes("earlier steps") ? "Earlier steps" : text;
+    await user.click({ role: "button", label: `${label}. Show steps` });
+  };
   const sinceIso = new Date().toISOString();
-  await user.type("composer", world.prompt);
-  await user.click("Run task");
+  await send(world.prompt);
 
-  await step("the search and connector action stay readable", async () => {
+  await step("before: the search and connector action stay readable", async () => {
+    await user.see({ text: world.proof }, { timeoutMs: 60_000 });
+    await user.see("Run task");
+    await openTurn(0);
+    if (world.engine === "v2" && (await probe.dom('[data-code-mode-call] > button[aria-expanded="false"]')).elements.length) await user.click({ role: "button", label: /(?:Looking|Looked) up.*Show steps/ });
     await user.see({ text: /Searched your connections for.*Slack list_channels/ }, { timeoutMs: 60_000 });
     await user.see({ text: /^(Listing|Listed) channels$/ }, { timeoutMs: 30_000 });
     await user.notSee({ text: /openwork-cloud_execute_capability/ });
@@ -20,7 +40,8 @@ test("connector-backed tool calls show first-class branding and human-readable l
   await step("the completed connector action exposes its arguments and survives reload", async () => {
     await user.see({ text: world.proof }, { timeoutMs: 60_000 });
     await user.see("Run task");
-    if (world.engine === "v2") await user.click({ role: "button", label: /Looked up.*Show steps/ });
+    await openTurn(0);
+    if (world.engine === "v2" && (await probe.dom('[data-code-mode-call] > button[aria-expanded="false"]')).elements.length) await user.click({ role: "button", label: /Looked up.*Show steps/ });
     expect(await world.den.mocks.connector.toolCalls({ name: "list_channels", sinceIso, atLeast: 1 }))
       .toMatchObject([{ name: "list_channels", args: { limit: 3 } }]);
     // TODO(primitive): probe.connectorBranding
@@ -35,12 +56,15 @@ test("connector-backed tool calls show first-class branding and human-readable l
     const branded = await probe.eventually(inspect, { within: 15_000, label: "Slack tool icon and one completed row",
       until: (value) => isRecord(value) && value.imageLoaded === true });
     expect(branded).toMatchObject({ count: 1, connector: "Slack", imageLoaded: true });
+    const preview = await probe.dom('[data-tool-result-preview]');
+    expect(preview.elements.some(element => element.text.includes(world.proof))).toBe(true);
     await user.click({ role: "button", label: "Listed channels. Show technical details" });
     await user.see({ text: /mcp:.*:list_channels/ });
     await user.see({ text: /"limit":\s*3/ });
     await user.screenshot();
     await user.reload();
-    if (world.engine === "v2") await user.click({ role: "button", label: /Looked up.*Show steps/ });
+    await openTurn(0);
+    if (world.engine === "v2" && (await probe.dom('[data-code-mode-call] > button[aria-expanded="false"]')).elements.length) await user.click({ role: "button", label: /Looked up.*Show steps/ });
     await user.see({ text: /^Listed channels$/ }, { timeoutMs: 30_000 });
     expect(await inspect()).toMatchObject({ count: 1, connector: "Slack" });
     await user.notSee({ text: /openwork-cloud_execute_capability/ });
@@ -57,8 +81,9 @@ test("connector-backed tool calls show first-class branding and human-readable l
   });
 
   await step("a member sees the note being created rather than the last lookup", async () => {
-    await user.type("composer", world.mutationPrompt);
-    await user.click("Run task");
+    await send(world.mutationPrompt);
+    await user.see({ role: "button", label: /Earlier steps.*Show steps/ });
+    await openTurn(1);
     if (world.engine === "v2") {
       await user.see({ role: "button", label: /(?:Creating|Created) a note in Slack/ }, { timeoutMs: 60_000 });
       await user.notSee({ text: /Tool activity|Task step|Completed with errors/ });
@@ -74,6 +99,7 @@ test("connector-backed tool calls show first-class branding and human-readable l
     await user.see("Run task");
     expect(await world.den.mocks.connector.toolCalls({ name: "create_note", sinceIso, atLeast: 1 }))
       .toMatchObject([{ name: "create_note", args: { limit: 3 } }]);
+    await openTurn(1);
     if (world.engine === "v2") {
       await user.see({ role: "button", label: /Created a note in Slack/ });
     } else {
@@ -87,8 +113,9 @@ test("connector-backed tool calls show first-class branding and human-readable l
   });
 
   await step("a failed connector action stays identifiable and is not shown as successful", async () => {
-    await user.type("composer", world.failurePrompt);
-    await user.click("Run task");
+    await send(world.failurePrompt);
+    await user.see({ role: "button", label: /Earlier steps.*Show steps/ });
+    await openTurn(2);
     if (world.engine === "v2") {
       await user.see({ role: "button", label: /Reading history|Couldn.t finish this step/ }, { timeoutMs: 30_000 });
       await user.notSee({ text: /Completed with errors|Tool activity/ });
@@ -105,6 +132,7 @@ test("connector-backed tool calls show first-class branding and human-readable l
     evidence.recordAssertionEvidence("history lookup failed without claiming success", "read_history received limit 3; the reply says the lookup failed", true);
     await user.screenshot();
     await user.reload();
+    await openTurn(2);
     if (world.engine === "v2") {
       await user.notSee({ text: /Completed with errors|Tool activity/ });
     } else {
