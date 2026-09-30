@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
 import { z } from "zod"
-import { anthropicModel, ModelError, openAIModel, toAnthropicMessages } from "../src/model.js"
+import { anthropicModel, ModelError, openAIModel, toAnthropicMessages, toOpenAIMessages } from "../src/model.js"
 import type { Message } from "../src/types.js"
 
 type Captured = { url: string; headers: Headers; body: unknown }
@@ -107,4 +107,31 @@ test("malformed tool arguments become a tool error instead of a crash", async ()
   const model = openAIModel({ baseUrl: "https://g.example", maxOutputTokens: 1000, fetch: fetchImpl, sleep: noSleep })
   const step = await model.complete({ system: "", messages: history, tools: [], model: "m", apiKey: "k", signal: new AbortController().signal })
   assert.equal(step.toolCalls[0].inputError, "Tool arguments were not a JSON object.")
+})
+
+test("tool images reach the model: Anthropic image blocks, OpenAI image parts", () => {
+  const withImage: Message[] = [
+    { role: "user", text: "what does it say?" },
+    { role: "assistant", text: "", toolCalls: [{ id: "t1", name: "execute_capability", input: {} }] },
+    { role: "tool", callId: "t1", name: "execute_capability", output: "[image 1: image/png, attached]", isError: false, images: [{ mediaType: "image/png", data: "QUJD" }] },
+  ]
+  const anthropic = toAnthropicMessages(withImage)
+  assert.deepEqual(anthropic[2].content[0], {
+    type: "tool_result",
+    tool_use_id: "t1",
+    content: [
+      { type: "text", text: "[image 1: image/png, attached]" },
+      { type: "image", source: { type: "base64", media_type: "image/png", data: "QUJD" } },
+    ],
+    is_error: false,
+  })
+  const openai = toOpenAIMessages("sys", withImage)
+  assert.deepEqual(openai.map((message) => message.role), ["system", "user", "assistant", "tool", "user"])
+  assert.deepEqual(openai[4], {
+    role: "user",
+    content: [
+      { type: "text", text: "Images returned by execute_capability:" },
+      { type: "image_url", image_url: { url: "data:image/png;base64,QUJD" } },
+    ],
+  })
 })

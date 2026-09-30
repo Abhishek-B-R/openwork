@@ -198,7 +198,8 @@ export function SlackAssistantSetup({ connection }: { connection: ExternalMcpCon
               />
             </label>
             <p className="text-xs text-gray-500">
-              Separate IDs with commas. Direct messages remain available to eligible members.
+              Separate IDs with commas. Direct messages remain available to eligible members. OpenWork only
+              answers in channels it has been invited to: run <code>/invite @openwork</code> in each one.
             </p>
             <label className="block text-sm">
               Requests per member per day

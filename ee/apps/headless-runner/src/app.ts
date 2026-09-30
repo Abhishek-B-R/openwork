@@ -24,7 +24,7 @@ const readQuery = z.object({
   limit: z.coerce.number().int().min(1).max(500).default(100),
 })
 
-export function createApp(input: { store: Store; runner: Runner; apiToken: string }) {
+export function createApp(input: { store: Store; runner: Runner; apiToken: string; modelLabel?: string }) {
   const { store, runner } = input
   const expected = Buffer.from(input.apiToken)
   /** Constant-time compare; only the length of the (random, 32+ char) token can leak. */
@@ -70,7 +70,14 @@ export function createApp(input: { store: Store; runner: Runner; apiToken: strin
       session,
       status: turns.some((turn) => ACTIVE.has(turn.status)) ? "busy" : "idle",
       turns,
-      messages: scoped.slice(-query.data.limit).map((entry) => ({ seq: entry.seq, messageId: entry.messageId, ...entry.message })),
+      // Image data stays in the store; callers poll this, so they get a count instead.
+      messages: scoped.slice(-query.data.limit).map((entry) => {
+        const { seq, messageId, message } = entry
+        if (message.role !== "tool" || !message.images) return { seq, messageId, ...message }
+        const { images, ...rest } = message
+        return { seq, messageId, ...rest, imageCount: images.length }
+      }),
+      modelLabel: input.modelLabel ?? null,
       finalAssistantText,
     })
   })

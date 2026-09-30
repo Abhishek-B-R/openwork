@@ -52,6 +52,8 @@ Turn status is one of `queued`, `running`, `completed`, `failed`, `interrupted` 
 - `max_steps_exceeded`
 - `runner_restarted`
 
+Images that a tool returns (MCP `image` content, or `resource` blobs with an image type), for example a file read from Slack, are passed to the model as image input: PNG, JPEG, GIF or WebP, at most 4 per result and about 3.7 MB each. They go to Anthropic as image blocks in the tool result, and to OpenAI as image parts in a following user message. Only the turn that fetched an image sees it; later turns keep the text. The session API reports `imageCount` instead of the image data.
+
 The model sees these tools:
 
 - OpenWork MCP tools as the server names them, e.g. `search_capabilities` and `execute_capability`
@@ -65,6 +67,7 @@ The model sees these tools:
 | `HEADLESS_MODEL_PROTOCOL` | required | `anthropic` or `openai` |
 | `HEADLESS_MODEL_BASE_URL` | required | e.g. `https://gateway.openworklabs.com/api/v1/providers/ipr_…` |
 | `HEADLESS_MODEL` | required | Default model alias (`gwm_…`) |
+| `HEADLESS_MODEL_LABEL` | unset | Readable model name, e.g. `Claude Fable 5.1`. The agent is told what it runs on, and callers get it as `modelLabel` (Slack shows "Answered by …") |
 | `HEADLESS_MODEL_API_KEY` | unset | Fallback key for single-tenant use; callers normally send their own |
 | `HEADLESS_MCP_URL` | unset | e.g. `https://api.openworklabs.com/mcp/agent` |
 | `HEADLESS_MCP_TOOL_ALLOWLIST` | all | Comma-separated MCP tool names |

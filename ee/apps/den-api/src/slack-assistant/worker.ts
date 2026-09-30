@@ -20,6 +20,7 @@ import {
   lockSlackThread,
   releaseSlackThread,
   resolveSlackActor,
+  linkConnectedSlackMembers,
   slackRuntimeForInstallation,
   revokeSlackInstallation,
   saveSlackSession,
@@ -30,7 +31,6 @@ import { pruneSlackEvents, renewSlackLease, SlackLeaseLostError } from "./reposi
 
 /** OpenWork Web runs stop after 15 minutes; headless runs get the runner's longer bound. */
 const WEB_RUN_MAX_MS = 15 * 60_000
-const OPENING_LINE = "On it. I'll reply here when it's done.\n\n"
 
 async function remoteCall(actor: SlackActor, action: RemoteSessionAction, body: Record<string, unknown>) {
   if (actor.runtime === "headless") return headlessRemoteCall(actor, action, body)
@@ -112,7 +112,7 @@ export async function processSlackEvent(event: EventRow, suppliedDeps = defaultW
               type: "section",
               text: {
                 type: "mrkdwn",
-                text: "Your own OpenWork assistant. Connect your Slack account, then mention @openwork or send a message here.",
+                text: "Your own OpenWork assistant. Connect your Slack account, then message me here, or mention @openwork in a channel. Invite me to a channel first with `/invite @openwork`.",
               },
             },
             {
@@ -143,14 +143,17 @@ export async function processSlackEvent(event: EventRow, suppliedDeps = defaultW
   }
   if (payload.type === "app_context_changed") return checkpointEvent(event, { status: "context" })
   const cp = checkpointSchema.parse(event.checkpoint ? JSON.parse(event.checkpoint) : {})
-  const actor = await resolveSlackActor(installation, event.slackUserId)
+  let actor = await resolveSlackActor(installation, event.slackUserId)
+  // Members who connected Slack before the assistant existed are linked from their token, not asked to reconnect.
+  if (!actor && event.status !== "running" && installation.enabled && (await linkConnectedSlackMembers(installation, deps.slack)) > 0)
+    actor = await resolveSlackActor(installation, event.slackUserId)
   if (!actor) {
     if (
       event.status === "running" ||
       !installation.enabled ||
       !(await slackAssistantEnabledForInstallation(installation))
     ) {
-      if (cp.streamTs) {
+      if (cp.channel) {
         try {
           await stopSlackStream(slack, { ...cp, finalStatus: "suspended" })
         } catch {
@@ -166,16 +169,18 @@ export async function processSlackEvent(event: EventRow, suppliedDeps = defaultW
       user: event.slackUserId,
       thread_ts: event.threadTs,
       text: headless
-        ? "I work as you in OpenWork. Connect once to get started."
-        : "I run on your own OpenWork workspace. Connect once to get started.",
+        ? "I work as you in OpenWork. Connect once to get started. I'll answer this message as soon as you're connected."
+        : "I run on your own OpenWork workspace. Connect once to get started. I'll answer this message as soon as you're connected.",
       blocks: [
         {
           type: "section",
           text: {
             type: "mrkdwn",
-            text: headless
-              ? "I work as you, with the apps and skills you have in OpenWork. Connect your Slack account once to continue. Your workspace must give you access to this connection."
-              : "I run on your own OpenWork workspace. Connect your Slack account to continue. Your workspace must grant access to this connection and OpenWork Web.",
+            text: `${
+              headless
+                ? "I work as you, with the apps and skills you have in OpenWork. Connect your Slack account once to continue. Your workspace must give you access to this connection."
+                : "I run on your own OpenWork workspace. Connect your Slack account to continue. Your workspace must grant access to this connection and OpenWork Web."
+            }\nI'll answer this message as soon as you're connected. No need to send it again.`,
           },
         },
         {
@@ -205,7 +210,7 @@ export async function processSlackEvent(event: EventRow, suppliedDeps = defaultW
   if (event.cancelled || Date.now() - event.createdAt.getTime() > maxRunMs) {
     if (cp.sessionId && cp.phase !== "create")
       await deps.remote(actor, "stop", { sessionId: cp.sessionId, messageId: `msg_${event.id}` })
-    if (cp.streamTs)
+    if (cp.channel)
       await stopSlackStream(
         slack,
         { ...cp, finalStatus: "suspended" },
@@ -241,33 +246,33 @@ export async function processSlackEvent(event: EventRow, suppliedDeps = defaultW
       const dm = z
         .object({ channel: z.object({ id: z.string() }) })
         .parse(await slack("conversations.open", { users: event.slackUserId }))
-      const root = z
-        .object({ ts: z.string() })
-        .parse(await slack("chat.postMessage", { channel: dm.channel.id, text: "Your private OpenWork reply" }))
+      let link = ""
+      try {
+        const permalink = z
+          .object({ permalink: z.string() })
+          .parse(await slack("chat.getPermalink", { channel: event.channelId, message_ts: payload.ts ?? event.threadTs }))
+        link = ` <${permalink.permalink}|View your message>`
+      } catch {
+        /* The reply still arrives; only the link back is missing. */
+      }
+      const root = z.object({ ts: z.string() }).parse(
+        await slack("chat.postMessage", {
+          channel: dm.channel.id,
+          text: `Private reply to your message in <#${event.channelId}>.${link}`,
+        }),
+      )
       cp.channel = dm.channel.id
       cp.threadTs = root.ts
     }
-    if (!cp.streamTs) {
-      await slack("agents.sessions.setStatus", {
-        channel_id: cp.channel,
-        thread_ts: cp.threadTs,
-        status: "processing",
-        initiator_user_id: event.slackUserId,
-        title: "OpenWork task",
-      })
-      const stream = z.object({ ts: z.string() }).parse(
-        await slack("chat.startStream", {
-          channel: cp.channel,
-          thread_ts: cp.threadTs,
-          recipient_user_id: event.slackUserId,
-          recipient_team_id: event.teamId,
-          chunks: [{ type: "markdown_text", text: OPENING_LINE }],
-          task_display_mode: "timeline",
-        }),
-      )
-      cp.streamTs = stream.ts
-      await persistSlackCheckpoint(event, cp)
-    }
+    // Slack's thinking status shows right away; the reply stream opens with the first step or answer text.
+    await slack("agents.sessions.setStatus", {
+      channel_id: cp.channel,
+      thread_ts: cp.threadTs,
+      status: "processing",
+      initiator_user_id: event.slackUserId,
+      title: "OpenWork task",
+    })
+    await persistSlackCheckpoint(event, cp)
     // Fetch with the member's token: bot access must never widen what the actor sees.
     let context: unknown = { unavailable: true, instruction: "Read the relevant thread using your Slack connection." }
     try {
@@ -289,6 +294,7 @@ export async function processSlackEvent(event: EventRow, suppliedDeps = defaultW
       botUserId: installation.botUserId ?? "",
       context,
       privateReply: cp.privateReply,
+      webHandoff: !headless,
     })
     cp.sessionId = thread.sessionId ?? undefined
     cp.workspaceId = thread.workspaceId ?? undefined
@@ -352,7 +358,7 @@ export async function handleSlackEventFailure(event: EventRow, error: unknown, d
         /* Runtime may be unreachable. */
       }
     }
-    if (installation.botToken && cp.streamTs) {
+    if (installation.botToken && cp.channel) {
       try {
         await stopSlackStream(
           deps.slack(installation.botToken),

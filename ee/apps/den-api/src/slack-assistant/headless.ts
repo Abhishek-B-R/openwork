@@ -56,6 +56,7 @@ const snapshotSchema = z.object({
   turns: z.array(turnSchema),
   messages: z.array(z.unknown()),
   finalAssistantText: z.string(),
+  modelLabel: z.string().nullable().optional(),
 })
 
 /** A short, human label for one tool step in Slack's task timeline. */
@@ -186,6 +187,7 @@ export async function headlessRemoteCall(
   return {
     status: terminal ? "idle" : "busy",
     title: null,
+    modelLabel: snapshot.data.modelLabel ?? null,
     messageCount: messages.length,
     finalAssistantText,
     ...(failed ? { terminalError: { code: turn.error ?? "headless_run_failed" } } : {}),

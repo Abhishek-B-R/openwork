@@ -8,7 +8,8 @@ import {
   stepLabel,
   type HeadlessDeps,
 } from "../src/slack-assistant/headless.js"
-import { advanceSlackRun, checkpointSchema, doneSummary, type RemoteCall } from "../src/slack-assistant/run.js"
+import { advanceSlackRun, checkpointSchema, doneSummary, stopSlackStream, type RemoteCall } from "../src/slack-assistant/run.js"
+import { buildSlackPrompt } from "../src/slack-assistant/protocol.js"
 
 const TOKEN = "t".repeat(40)
 const env = { DEN_HEADLESS_RUNNER_URL: "http://headless-runner:8795", DEN_HEADLESS_RUNNER_TOKEN: TOKEN }
@@ -169,7 +170,7 @@ describe("Slack run loop on the headless runtime", () => {
     return { calls, slack }
   }
 
-  test("finishes without Web links and pings when a run took over a minute", async () => {
+  test("finishes without Web links, names the model, and pings when a run took over three minutes", async () => {
     const { calls, slack } = slackRecorder()
     const remote: RemoteCall = async () => ({})
     const checkpoint = checkpointSchema.parse({
@@ -181,16 +182,62 @@ describe("Slack run loop on the headless runtime", () => {
       recipientUserId: "U1",
       startedAt: 0,
       sentText: "## Digest\n- Launch moved to Tuesday",
+      modelLabel: "Claude Fable 5.1",
     })
-    await advanceSlackRun({ checkpoint, remote, slack, messageId: "msg_1", saveSession: async () => {}, title: "t", webHandoff: false, now: () => 90_000 })
+    await advanceSlackRun({ checkpoint, remote, slack, messageId: "msg_1", saveSession: async () => {}, title: "t", webHandoff: false, now: () => 200_000 })
     expect(JSON.stringify(calls)).not.toContain("OpenWork Web")
+    expect(JSON.stringify(calls[0])).toContain("Answered by Claude Fable 5.1 · OpenWork")
     expect(calls.at(-1)).toEqual({ method: "chat.postMessage", body: { channel: "C1", thread_ts: "1.0", text: "<@U1> Done: Digest" } })
+  })
+
+  test("the reply stream opens with the first step, not a placeholder", async () => {
+    const { calls, slack } = slackRecorder()
+    const remote: RemoteCall = async () => ({
+      status: "busy",
+      messageCount: 2,
+      finalAssistantText: "",
+      messages: [{ role: "assistant", toolCalls: [{ id: "c1", name: "Finding the right tool", status: "running" }] }],
+    })
+    const checkpoint = checkpointSchema.parse({ phase: "read", channel: "C1", threadTs: "1.0", sessionId: "hs_1", startedAt: 0 })
+    await advanceSlackRun({ checkpoint, remote, slack, messageId: "msg_1", saveSession: async () => {}, title: "t", webHandoff: false, now: () => 5_000 })
+    expect(calls.map((call) => call.method)).toEqual(["chat.startStream"])
+    expect(JSON.stringify(calls[0].body)).toContain("Finding the right tool")
+    expect(JSON.stringify(calls)).not.toContain("I'll reply here")
+  })
+
+  test("a quick answer streams straight away, with no 'still working' line", async () => {
+    const { calls, slack } = slackRecorder()
+    const remote: RemoteCall = async () => ({ status: "idle", messageCount: 2, finalAssistantText: "Hi there!", messages: [] })
+    const checkpoint = checkpointSchema.parse({ phase: "read", channel: "C1", threadTs: "1.0", sessionId: "hs_1", startedAt: 0 })
+    const result = await advanceSlackRun({ checkpoint, remote, slack, messageId: "msg_1", saveSession: async () => {}, title: "t", webHandoff: false, now: () => 3_000 })
+    expect(calls[0]).toMatchObject({ method: "chat.startStream", body: { chunks: [{ type: "markdown_text", text: "Hi there!" }] } })
+    expect(result.checkpoint.phase).toBe("finish")
+  })
+
+  test("after 20 seconds without an answer it says it is still working, once", async () => {
+    const { calls, slack } = slackRecorder()
+    const remote: RemoteCall = async () => ({ status: "busy", messageCount: 1, finalAssistantText: "", messages: [] })
+    const checkpoint = checkpointSchema.parse({ phase: "read", channel: "C1", threadTs: "1.0", sessionId: "hs_1", startedAt: 0 })
+    const input = { remote, slack, messageId: "msg_1", saveSession: async () => {}, title: "t", webHandoff: false, now: () => 25_000 }
+    const first = await advanceSlackRun({ ...input, checkpoint })
+    await advanceSlackRun({ ...input, checkpoint: first.checkpoint })
+    expect(JSON.stringify(calls).match(/Still working on it/g)?.length).toBe(1)
+  })
+
+  test("stopping before anything streamed posts the note and clears the status", async () => {
+    const { calls, slack } = slackRecorder()
+    const checkpoint = checkpointSchema.parse({ channel: "C1", threadTs: "1.0" })
+    await stopSlackStream(slack, { ...checkpoint, finalStatus: "suspended" }, { chunks: [{ type: "markdown_text", text: "\n\nStopped." }] })
+    expect(calls).toEqual([
+      { method: "chat.postMessage", body: { channel: "C1", thread_ts: "1.0", text: "Stopped." } },
+      { method: "agents.sessions.setStatus", body: { channel_id: "C1", thread_ts: "1.0", status: "suspended" } },
+    ])
   })
 
   test("quick runs get no extra ping", async () => {
     const { calls, slack } = slackRecorder()
     const checkpoint = checkpointSchema.parse({ phase: "finish", channel: "C1", threadTs: "1.0", streamTs: "1.5", recipientUserId: "U1", startedAt: 0 })
-    await advanceSlackRun({ checkpoint, remote: async () => ({}), slack, messageId: "msg_1", saveSession: async () => {}, title: "t", webHandoff: false, now: () => 20_000 })
+    await advanceSlackRun({ checkpoint, remote: async () => ({}), slack, messageId: "msg_1", saveSession: async () => {}, title: "t", webHandoff: false, now: () => 120_000 })
     expect(calls.some((call) => call.method === "chat.postMessage")).toBe(false)
   })
 
@@ -216,4 +263,14 @@ test("labels and summaries are short and readable", () => {
   expect(doneSummary("\n\n> **Summary** of the week\nmore")).toBe("Summary of the week")
   expect(doneSummary("")).toBe("your answer is above.")
   expect(doneSummary("x".repeat(300)).length).toBe(140)
+})
+
+test("the runner-path prompt never points to OpenWork Web and says Slack files can be opened", () => {
+  const input = { event: { type: "app_mention", user: "U1", text: "<@B1> what is written here", files: [{ id: "F1", name: "image.png" }] }, teamId: "T1", botUserId: "B1", context: {}, privateReply: false }
+  const headless = buildSlackPrompt({ ...input, webHandoff: false })
+  expect(headless).not.toContain("open OpenWork Web")
+  expect(headless).toContain("Never suggest OpenWork Web")
+  expect(headless).toContain("Open them before saying you can't read them")
+  expect(headless).toContain("F1")
+  expect(buildSlackPrompt(input)).toContain("open OpenWork Web")
 })

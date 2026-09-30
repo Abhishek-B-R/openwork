@@ -24,9 +24,10 @@ const runner = new Runner({
     : undefined,
   limits: config.limits,
   systemPrompt: config.systemPrompt,
+  modelLabel: config.model.label,
 })
 
-const server = serve({ fetch: createApp({ store, runner, apiToken: config.apiToken }).fetch, port: config.port }, (info) => {
+const server = serve({ fetch: createApp({ store, runner, apiToken: config.apiToken, modelLabel: config.model.label }).fetch, port: config.port }, (info) => {
   console.log(`[headless-runner] listening on :${info.port} (${recovered} interrupted turn(s) recovered)`)
 })
 
