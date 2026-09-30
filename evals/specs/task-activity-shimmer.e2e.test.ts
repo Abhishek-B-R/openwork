@@ -17,7 +17,12 @@ test("ACT-01 delegated-task activity stays with its original message after a fol
   expect(native.status, JSON.stringify(native)).toBe("running");
   evidence.recordJsonArtifact("Native delegation identity", native);
   await user.click({ role: "button", label: /Earlier steps.*Show steps/ });
-  await step("before: the delegated task remains in the steady live rail", () => user.screenshot());
+  await step("before: the delegated task remains in the steady live rail", async () => {
+    expect((await probe.dom(`[data-subagent-session-id="${native.childId}"]`)).elements).toHaveLength(1);
+    evidence.recordAssertionEvidence("The live rail contains the engine's delegated child",
+      "Exactly one live row identifies the running child returned by the engine.", true);
+    await user.screenshot();
+  });
   const readWorkingFooter = () => probe.eval(() =>
     document.querySelector('[data-loading-message="working"]')?.textContent ?? "",
   );
@@ -96,12 +101,13 @@ test("ACT-01 delegated-task activity stays with its original message after a fol
   expect(rendered.titleStyle.animationName).toBe(rendered.reducedMotion ? "none" : "ow-text-shimmer");
   if (!rendered.reducedMotion) expect(rendered.titleStyle.backgroundImage).toContain("linear-gradient");
 
-  await user.hover({ role: "button", label: /Build isolated Azure repro/ });
-  const hovered = await probe.eventually(readActivity, {
-    within: 5_000, intervalMs: 50, label: "hovered task title uses solid foreground",
-    until: (value) => value.hovered && value.colorSettled
-      && value.titleStyle.backgroundImage === "none" && value.titleStyle.animationName === "none"
-      && value.titleStyle.color === value.buttonColor,
+  await step("hovering preserves the delegated row and exposes solid text", async () => {
+    await user.hover({ role: "button", label: /Build isolated Azure repro/ });
+    const hovered = await probe.eventually(readActivity, {
+      within: 5_000, intervalMs: 50, label: "hovered task title uses solid foreground",
+      until: (value) => value.hovered && value.colorSettled
+        && value.titleStyle.backgroundImage === "none" && value.titleStyle.animationName === "none"
+        && value.titleStyle.color === value.buttonColor,
   });
   expect(hovered.titleStyle.color).not.toBe(rendered.buttonColor);
   expect(hovered.mutedColors).toEqual(rendered.mutedColors);
@@ -119,16 +125,19 @@ test("ACT-01 delegated-task activity stays with its original message after a fol
   evidence.recordJsonArtifact("Delegated task hover", { rendered, hovered, restored });
   evidence.recordAssertionEvidence("Running task titles use the normal hover foreground",
     "Hover replaces the title shimmer with solid inherited text; pointer leave restores its running treatment without recoloring the agent label or status.", true);
-  await user.click({ role: "button", label: /Build isolated Azure repro/ });
-  await user.see({ text: /ACTIVITY_CHILD_HOLD/ });
-  await user.see({ text: /Working/ });
-  await user.reload();
-  await user.see({ text: /ACTIVITY_CHILD_HOLD/ }, { timeoutMs: 30_000 });
-  await user.see({ text: /Working/ });
-  expect((await probe.dom(`[data-session-surface-id="${native.childId}"]`)).elements).toHaveLength(1);
-  await step("after: the exact child chat remains active across reload", () => user.screenshot());
-  expect((await world.replyState()).deliveredChunks).toBe(1);
-  await user.notSee({ text: "Activity child finished." });
-  evidence.recordAssertionEvidence("Delegated activity opens the exact live child across reload",
-    "Original row shimmers before follow-up; opening it and reloading preserves the child session, prompt and Working state while the provider remains held.", true);
+  });
+  await step("after: the exact child chat remains active across reload", async () => {
+    await user.click({ role: "button", label: /Build isolated Azure repro/ });
+    await user.see({ text: /ACTIVITY_CHILD_HOLD/ });
+    await user.see({ text: /Working/ });
+    await user.reload();
+    await user.see({ text: /ACTIVITY_CHILD_HOLD/ }, { timeoutMs: 30_000 });
+    await user.see({ text: /Working/ });
+    expect((await probe.dom(`[data-session-surface-id="${native.childId}"]`)).elements).toHaveLength(1);
+    expect((await world.replyState()).deliveredChunks).toBe(1);
+    await user.notSee({ text: "Activity child finished." });
+    evidence.recordAssertionEvidence("Delegated activity opens the exact live child across reload",
+      "Original row shimmers before follow-up; opening it and reloading preserves the child session, prompt and Working state while the provider remains held.", true);
+    await user.screenshot();
+  });
 });

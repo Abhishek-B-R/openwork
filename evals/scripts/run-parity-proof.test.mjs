@@ -20,6 +20,12 @@ test("connector tool activity publishes separate v1 and v2 journeys", () => {
   ]);
 });
 
+test("shared child and steady-activity journeys run on both pinned engines", () => {
+  for (const name of ["agent-child-desktop", "agent-child-messaging", "agent-child-split-desktop", "task-activity-shimmer", "whole-activity-conversation"]) {
+    assert.deepEqual(parityProofPlan(`evals/specs/${name}.e2e.test.ts`).map(item => item.engine), ["v1", "v2"]);
+  }
+});
+
 test("either engine failing or skipping keeps proof red; both always run", async () => {
   for (const codes of [[0, 0], [1, 0], [0, 1], [2, 0], [0, 2]]) {
     const calls = [];

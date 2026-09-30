@@ -17,6 +17,7 @@ test(`AGENT-CHILD-DESKTOP ${resolveEvalEngine()}: a person messages a busy child
     await user.click("Run task");
     await user.see({ text: "Review fixture" }, { timeoutMs: 60_000 });
     await user.click({ role: "button", label: /Earlier steps.*Show steps/ });
+    evidence.recordAssertionEvidence("Native Desktop delegation is visible", "The admitted prompt exposes the Review fixture child in the opened steady rail.", true);
     await user.screenshot();
   });
   await step("the child displays its original brief and keeps its own composer", async () => {
@@ -26,6 +27,7 @@ test(`AGENT-CHILD-DESKTOP ${resolveEvalEngine()}: a person messages a busy child
     await user.see({ text: "Check fixture output" }, { timeoutMs: 60_000 });
     await user.screenshot();
     await probe.eventually(() => world.grandchildState(), { within: 60_000, label: "grandchild holds its live reply", until: state => state.deliveredChunks === 1 });
+    evidence.recordAssertionEvidence("The delegated brief and live grandchild are accessible", "The child shows its original brief and own composer while the grandchild holds exactly one reply chunk.", true);
     await user.screenshot();
   });
   await step("Enter admits a message to the child and issues no abort", async () => {
@@ -41,6 +43,7 @@ test(`AGENT-CHILD-DESKTOP ${resolveEvalEngine()}: a person messages a busy child
     const state = await world.grandchildState();
     expect(state.deliveredChunks).toBe(1);
     expect(state.complete).toBe(false);
+    evidence.recordAssertionEvidence("Busy-child Enter preserves delegated work", `Shift+Enter retains the newline; sending issues 0 aborts while the grandchild has ${state.deliveredChunks} chunk and complete=${state.complete}.`, true);
   });
   await step("Escape returns to the originating card and preserves the child's unsent draft", async () => {
     await user.type("composer", "Ask about the fixture provenance", { verify: true });
@@ -50,6 +53,7 @@ test(`AGENT-CHILD-DESKTOP ${resolveEvalEngine()}: a person messages a busy child
     await user.click({ role: "button", label: "Review fixture. Open sub-agent chat" });
     await probe.eventually(() => probe.composer(), { within: 10_000, label: "the child restores its scoped draft", until: state => state.draftText === "Ask about the fixture provenance" });
     expect((await commands.read()).filter(request => /\/(?:abort|interrupt)$/.test(request.path))).toEqual([]);
+    evidence.recordAssertionEvidence("Escape preserves the child's draft", "Returning exposes the original card, leaves the parent draft separate, and reopening restores the exact unsent child draft with 0 aborts.", true);
   });
   await step("after: the grandchild and child finish and the result reaches the main chat", async () => {
     await world.releaseGrandchild();
@@ -57,6 +61,7 @@ test(`AGENT-CHILD-DESKTOP ${resolveEvalEngine()}: a person messages a busy child
     await user.press(process.platform === "darwin" ? "Meta+[" : "Escape");
     await user.see({ text: "The delegated fixture review is ready." }, { timeoutMs: 90_000 });
     await user.see("Run task");
+    evidence.recordAssertionEvidence("The native child result returns to its parent", "Releasing the grandchild finishes the child; keyboard return exposes the delegated review result and an idle parent composer.", true);
     await user.screenshot();
   });
 });

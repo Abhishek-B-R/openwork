@@ -12,6 +12,7 @@ test(`AGENT-CHILD-01 ${resolveEvalEngine()}: a person messages a busy child with
     await user.click("Run task");
     await user.see({ text: "Review fixture" }, { timeoutMs: 60_000 });
     await user.click({ role: "button", label: /Earlier steps.*Show steps/ });
+    evidence.recordAssertionEvidence("Delegation is visible in its original turn", "The admitted parent prompt exposes the Review fixture child in the opened steady rail.", true);
     await user.screenshot();
   });
   await step("the child displays its original brief and keeps its own composer", async () => {
@@ -22,6 +23,7 @@ test(`AGENT-CHILD-01 ${resolveEvalEngine()}: a person messages a busy child with
     await user.screenshot();
     evidence.recordJsonArtifact("Native delegated child tools", await world.delegatedTools());
     await probe.eventually(() => world.grandchildState(), { within: 60_000, label: "grandchild holds its live reply", until: state => state.deliveredChunks === 1 });
+    evidence.recordAssertionEvidence("The child exposes its original delegated brief", "Opening the child displays its brief and own composer while the grandchild holds exactly one reply chunk.", true);
     await user.screenshot();
   });
   await step("Enter admits a message to the child and issues no abort", async () => {
@@ -34,6 +36,7 @@ test(`AGENT-CHILD-01 ${resolveEvalEngine()}: a person messages a busy child with
     const state = await world.grandchildState();
     expect(state.deliveredChunks).toBe(1);
     expect(state.complete).toBe(false);
+    evidence.recordAssertionEvidence("Busy-child messaging issues no abort", `The sent follow-up is visible with 0 aborts; the grandchild remains at ${state.deliveredChunks} chunk and complete=${state.complete}.`, true);
   });
   await step("Escape returns to the originating card and preserves the child's unsent draft", async () => {
     await user.type("composer", "Ask about the fixture provenance", { verify: true });
@@ -43,6 +46,7 @@ test(`AGENT-CHILD-01 ${resolveEvalEngine()}: a person messages a busy child with
     await user.click({ role: "button", label: "Review fixture. Open sub-agent chat" });
     await probe.eventually(() => probe.composer(), { within: 10_000, label: "the child restores its scoped draft", until: state => state.draftText === "Ask about the fixture provenance" });
     expect((await commands.read()).filter(request => /\/(?:abort|interrupt)$/.test(request.path))).toEqual([]);
+    evidence.recordAssertionEvidence("Return navigation preserves scoped drafts", "Escape returns to the original card; the parent excludes the child draft, and reopening restores its exact text with 0 aborts.", true);
   });
   await step("after: the grandchild and child finish and the result reaches the main chat", async () => {
     await world.releaseGrandchild();
@@ -50,6 +54,7 @@ test(`AGENT-CHILD-01 ${resolveEvalEngine()}: a person messages a busy child with
     await user.press("Escape");
     await user.see({ text: "The delegated fixture review is ready." }, { timeoutMs: 90_000 });
     await user.see("Run task");
+    evidence.recordAssertionEvidence("The child result reaches the main chat", "Releasing delegated work finishes the child; returning shows the parent review result and an idle composer.", true);
     await user.screenshot();
   });
 });

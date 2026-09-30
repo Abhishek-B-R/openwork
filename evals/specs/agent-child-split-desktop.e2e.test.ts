@@ -26,6 +26,7 @@ test(`AGENT-CHILD-SPLIT ${resolveEvalEngine()}: returning from a helper restores
     await user.press("Enter");
     await user.see({ text: "Review fixture" }, { timeoutMs: 60_000 });
     await user.click({ role: "button", label: /Earlier steps.*Show steps/ });
+    evidence.recordAssertionEvidence("The side chat owns the delegated task", "The secondary pane has exactly one composer, admits its prompt, and exposes the Review fixture child while the main draft remains separate.", true);
     await user.screenshot();
   });
   await step("the helper opens inside the originating pane, and Escape returns to its card", async () => {
@@ -41,6 +42,7 @@ test(`AGENT-CHILD-SPLIT ${resolveEvalEngine()}: returning from a helper restores
     expect(panes.elements[1]?.text).not.toContain("helper draft");
     evidence.recordJsonArtifact("Independent pane drafts after return", panes);
     expect((await commands.read()).filter(request => /\/(?:abort|interrupt)$/.test(request.path))).toEqual([]);
+    evidence.recordAssertionEvidence("Escape returns within the originating pane", `The child has ${child.elements.length} secondary surface; return retains the main draft, excludes the helper draft from its parent, and issues 0 aborts.`, true);
   });
   await step("after: reopening the helper restores its draft, and Cmd+[ returns to the same pane", async () => {
     await user.click({ role: "button", label: "Review fixture. Open sub-agent chat" });
@@ -49,6 +51,7 @@ test(`AGENT-CHILD-SPLIT ${resolveEvalEngine()}: returning from a helper restores
     });
     await user.press(process.platform === "darwin" ? "Meta+[" : "Escape");
     await user.see({ role: "button", label: "Review fixture. Open sub-agent chat" });
+    evidence.recordAssertionEvidence("Reopening restores the helper draft", "The secondary composer restores the exact helper draft; the platform return shortcut exposes its original card in the same pane.", true);
     await user.screenshot();
   });
 });

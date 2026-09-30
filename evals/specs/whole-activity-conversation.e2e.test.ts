@@ -30,6 +30,7 @@ test(`ACT-WHOLE ${resolveEvalEngine()}: a person follows a whole conversation fr
     await send(world.shortPrompt);
     await user.see({ text: "Version three." });
     await user.see({ role: "button", label: /Worked for.*0 steps.*Show steps/ });
+    evidence.recordAssertionEvidence("Short replies receive a finished summary", "The short answer is visible beside a finished activity summary with 0 steps.", true);
     await user.screenshot();
   });
   await step("one steady run reads, runs a command and uses a connected service before delegating", async () => {
@@ -71,6 +72,7 @@ test(`ACT-WHOLE ${resolveEvalEngine()}: a person follows a whole conversation fr
     expect(Math.max(...trace.map(sample => sample.railHeight ?? 0)), "the proof observes tool rows, not just the compact shell").toBeGreaterThan(48);
     expect(trace.flatMap(sample => sample.replacements), "native step rows stay mounted during streaming").toEqual([]);
     expect(trace.slice(1).filter((sample, index) => sample.liveHeight! < trace[index]!.liveHeight! - 1), "automatic updates do not shrink the opened rail").toEqual([]);
+    evidence.recordAssertionEvidence("Expanded activity remains steady through native tools and a child decision", `${trace.length} samples remain expanded with ${Math.max(...trace.map(sample => sample.visibleRows.length))} visible rows, 0 replacements and 0 height drops; the needs-you tray stays above the editor and waiting time pauses.`, true);
     await user.screenshot();
   });
   await step("the tray opens the correct child decision, and the child can receive a message while working", async () => {
@@ -96,6 +98,7 @@ test(`ACT-WHOLE ${resolveEvalEngine()}: a person follows a whole conversation fr
     await user.press(process.platform === "darwin" ? "Meta+[" : "Escape");
     await user.see({ text: world.answer }, { timeoutMs: 90_000 });
     await user.see("Run task");
+    evidence.recordAssertionEvidence("The correct child accepts a busy follow-up without interruption", "Answer opens the child's original brief and decision; the follow-up is visible with 0 aborts, Escape closes its model menu first, and return exposes the parent answer.", true);
   });
   await step("finished tools fold while the answer and exact service result stay accessible", async () => {
     await user.click({ role: "button", label: /Worked for.*[1-9] steps.*Show steps/ });
@@ -104,6 +107,7 @@ test(`ACT-WHOLE ${resolveEvalEngine()}: a person follows a whole conversation fr
     evidence.recordJsonArtifact("Recorded tool results", { native: await world.nativeTools(), rendered: results });
     expect(results.elements.some(element => element.text.includes(world.proof))).toBe(true);
     await user.see({ text: world.answer });
+    evidence.recordAssertionEvidence("Readable service results stay associated with their step", `A recorded tool preview contains the exact fixture result ${world.proof}; the final answer remains visible after reopening the finished turn.`, true);
     await user.screenshot();
   });
   await step("a model switch keeps historical model identity, and Stop leaves an ordinary composer", async () => {
@@ -125,6 +129,7 @@ test(`ACT-WHOLE ${resolveEvalEngine()}: a person follows a whole conversation fr
     const summaries = (await probe.dom("[data-steady-activity] > div > button")).elements.map(element => element.text);
     expect(summaries.some(text => text.includes("First fixture model"))).toBe(true);
     expect(summaries.some(text => text.includes("Second fixture model"))).toBe(true);
+    evidence.recordAssertionEvidence("Stop leaves an ordinary composer and preserves model history", "Acknowledged Stop shows a stopped summary and 0 Continue/Resume controls; manually sending the continuation produces the answer, while both historical model names remain visible.", true);
   });
   if (world.engine === "v2") await step("native background completion resumes the idle parent and Stop all reaches an active background child", async () => {
     await send(world.backgroundPrompt);
@@ -139,11 +144,13 @@ test(`ACT-WHOLE ${resolveEvalEngine()}: a person follows a whole conversation fr
     await probe.eventually(() => world.stoppedBackgroundState(), { within: 30_000, label: "another background child holds its own reply", until: state => state.deliveredChunks === 1 });
     await user.click({ role: "button", label: "Stop all" });
     await probe.eventually(() => world.stoppedBackgroundState(), { within: 30_000, label: "Stop all is acknowledged by the active background child", until: state => state.aborted });
+    evidence.recordAssertionEvidence("Native v2 background completion and Stop all are observable", "The idle parent resumes from a linked native completion notice; a later active background child's Stop all is acknowledged by its provider.", true);
   });
   await step("after: reload preserves readable results, finished turns and the final answer", async () => {
     await user.reload();
     await user.see({ text: "The fixture version is 3." }, { timeoutMs: 60_000 });
     await user.notSee({ role: "button", label: /^(Continue|Resume)$/ });
+    evidence.recordAssertionEvidence("Reload preserves the completed conversation", "The final manually continued answer survives reload with 0 Continue/Resume controls.", true);
     await user.screenshot();
   });
 });
