@@ -1,0 +1,98 @@
+{{- if .Values.headlessWorker.enabled }}
+{{- include "openwork-ee.gateway.validate" . }}
+{{- include "openwork-ee.customCa.validate" . }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "openwork-ee.fullname" . }}-headless-worker
+  labels:
+    {{- include "openwork-ee.componentLabels" (dict "root" . "component" "headless-worker") | nindent 4 }}
+spec:
+  replicas: {{ .Values.headlessWorker.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "openwork-ee.componentSelectorLabels" (dict "root" . "component" "headless-worker") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "openwork-ee.componentSelectorLabels" (dict "root" . "component" "headless-worker") | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      containers:
+        - name: headless-worker
+          image: "{{ .Values.headlessWorker.image.repository }}:{{ include "openwork-ee.imageTag" (dict "root" . "componentTag" .Values.headlessWorker.image.tag) }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          ports:
+            - name: health
+              containerPort: 9091
+          envFrom:
+            - configMapRef:
+                name: {{ include "openwork-ee.configName" . }}
+          env:
+            # This worker never provisions desktop/Web workspaces.
+            - name: CLOUD_RUNTIME_PROVIDER
+              value: "stub"
+            - name: PROVISIONER_MODE
+              value: "stub"
+            {{- range $name, $key := dict "DATABASE_URL" "databaseUrl" "DATABASE_HOST" "databaseHost" "DATABASE_USERNAME" "databaseUsername" "DATABASE_PASSWORD" "databasePassword" "DATABASE_REDIS_URL" "databaseRedisUrl" "BETTER_AUTH_SECRET" "betterAuthSecret" "DEN_DB_ENCRYPTION_KEY" "denDbEncryptionKey" }}
+            - name: {{ $name }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "openwork-ee.secretName" $ }}
+                  key: {{ get $.Values.secret.keys $key }}
+                  optional: {{ not (or (eq $key "betterAuthSecret") (eq $key "denDbEncryptionKey")) }}
+            {{- end }}
+            {{- include "openwork-ee.gatewayDeploymentEnv" (dict "root" . "env" .Values.denApi.env) | nindent 12 }}
+            {{- if .Values.customCa.enabled }}
+            {{- include "openwork-ee.customCa.env" . | nindent 12 }}
+            {{- end }}
+            {{- range $key, $value := .Values.headlessWorker.env }}
+            - name: {{ $key }}
+              value: {{ $value | quote }}
+            {{- end }}
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: health
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: health
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 6
+          volumeMounts:
+            - name: scratch
+              mountPath: /tmp
+            {{- if .Values.customCa.enabled }}
+            {{- include "openwork-ee.customCa.volumeMount" . | nindent 12 }}
+            {{- end }}
+          resources:
+            {{- toYaml .Values.headlessWorker.resources | nindent 12 }}
+      volumes:
+        - name: scratch
+          emptyDir:
+            sizeLimit: 2Gi
+        {{- if .Values.customCa.enabled }}
+        {{- include "openwork-ee.customCa.volume" . | nindent 8 }}
+        {{- end }}
+{{- end }}

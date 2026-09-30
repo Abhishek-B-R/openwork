@@ -124,6 +124,22 @@ jobs:
               -e DEN_DB_ENCRYPTION_KEY=ci-den-db-encryption-key-value-123456
               -e BETTER_AUTH_SECRET=ci-better-auth-secret-value-123456
               -e BETTER_AUTH_URL=http://127.0.0.1:8788
+          - image: openwork-den-headless
+            dockerfile: packaging/docker/Dockerfile.den
+            target: headless-worker
+            port: 9091
+            health_path: /health
+            smoke_env: >-
+              --read-only
+              --tmpfs /tmp:rw,noexec,nosuid,size=2g
+              --cap-drop ALL
+              --security-opt no-new-privileges
+              -e DB_MODE=mysql
+              -e CLOUD_RUNTIME_PROVIDER=stub
+              -e GATEWAY_ENABLED=false
+              -e DEN_DB_ENCRYPTION_KEY=ci-den-db-encryption-key-value-123456
+              -e BETTER_AUTH_SECRET=ci-better-auth-secret-value-123456
+              -e BETTER_AUTH_URL=http://127.0.0.1:9091
           - image: openwork-den-web
             dockerfile: packaging/docker/Dockerfile.den-web
             port: 3005
@@ -224,6 +240,7 @@ jobs:
         with:
           context: .
           file: ${{ matrix.dockerfile }}
+          target: ${{ matrix.target || '' }}
           platforms: ${{ (github.event_name == 'pull_request' || github.ref == 'refs/heads/dev') && 'linux/amd64' || 'linux/amd64,linux/arm64' }}
           load: ${{ github.event_name == 'pull_request' }}
           push: ${{ needs.artifact-version.outputs.publish == 'true' }}
@@ -232,7 +249,7 @@ jobs:
           cache-from: type=gha,scope=${{ matrix.image }}
           cache-to: type=gha,mode=max,scope=${{ matrix.image }}
           build-args: |
-            ${{ matrix.image == 'openwork-den-api' && format('DEN_API_VERSION={0}', needs.artifact-version.outputs.chart_version || github.sha) || '' }}
+            ${{ (matrix.image == 'openwork-den-api' || matrix.image == 'openwork-den-headless') && format('DEN_API_VERSION={0}', needs.artifact-version.outputs.chart_version || github.sha) || '' }}
             ${{ matrix.image == 'openwork-den-gateway' && format('DEN_GATEWAY_VERSION={0}', needs.artifact-version.outputs.chart_version || github.sha) || '' }}
             ${{ matrix.image == 'openwork-den-api' && 'DEN_UPLOAD_SENTRY_SOURCEMAPS=0' || '' }}
             ${{ matrix.image == 'openwork-den-web' && 'DEN_WEB_UPLOAD_SENTRY_SOURCEMAPS=0' || '' }}
@@ -243,6 +260,7 @@ jobs:
         with:
           context: .
           file: ${{ matrix.dockerfile }}
+          target: ${{ matrix.target || '' }}
           platforms: ${{ (github.event_name == 'pull_request' || github.ref == 'refs/heads/dev') && 'linux/amd64' || 'linux/amd64,linux/arm64' }}
           push: true
           tags: ${{ steps.meta.outputs.tags }}
@@ -250,7 +268,7 @@ jobs:
           cache-from: type=gha,scope=${{ matrix.image }}
           cache-to: type=gha,mode=max,scope=${{ matrix.image }}
           build-args: |
-            ${{ matrix.image == 'openwork-den-api' && format('DEN_API_VERSION={0}', needs.artifact-version.outputs.chart_version || github.sha) || '' }}
+            ${{ (matrix.image == 'openwork-den-api' || matrix.image == 'openwork-den-headless') && format('DEN_API_VERSION={0}', needs.artifact-version.outputs.chart_version || github.sha) || '' }}
             ${{ matrix.image == 'openwork-den-gateway' && format('DEN_GATEWAY_VERSION={0}', needs.artifact-version.outputs.chart_version || github.sha) || '' }}
             ${{ matrix.image == 'openwork-den-api' && 'DEN_UPLOAD_SENTRY_SOURCEMAPS=1' || '' }}
             ${{ matrix.image == 'openwork-den-web' && 'DEN_WEB_UPLOAD_SENTRY_SOURCEMAPS=1' || '' }}
@@ -320,7 +338,7 @@ jobs:
           }
           trap cleanup EXIT
 
-          if [ "${{ matrix.image }}" = "openwork-den-api" ]; then
+          if [ "${{ matrix.image }}" = "openwork-den-api" ] || [ "${{ matrix.image }}" = "openwork-den-headless" ]; then
             network_name="openwork-den-api-smoke"
             mysql_container="openwork-den-api-smoke-mysql"
             database_url="mysql://smoke:smoke@${mysql_container}:3306/smoke"

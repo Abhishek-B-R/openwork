@@ -1,9 +1,9 @@
 "use client";
 
+import { ComposerAction, Message } from "@openwork/ui/react";
 import { Dialog } from "@base-ui/react/dialog";
 import { Popover } from "@base-ui/react/popover";
 import {
-  ArrowUp,
   CalendarDays,
   ChevronRight,
   Clock3,
@@ -12,7 +12,6 @@ import {
   Link2,
   Lock,
   Plus,
-  Square,
   X,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -35,6 +34,7 @@ import styles from "./workbot.module.css";
 
 const stateSchema = z.object({
   enabled: z.boolean(),
+  ready: z.boolean(),
   blockedReason: z.string().nullable(),
   runs: z.array(runSchema),
   schedules: z.array(scheduleSchema),
@@ -169,8 +169,10 @@ function DraftCard({
   path,
   onOpen,
   onEdit,
+  canEdit,
 }: {
   path: string;
+  canEdit: boolean;
   onOpen: (path: string) => void;
   onEdit: (path: string) => void;
 }) {
@@ -207,7 +209,12 @@ function DraftCard({
         <DenButton variant="ghost" size="sm" onClick={() => onOpen(path)}>
           Open
         </DenButton>
-        <DenButton variant="ghost" size="sm" onClick={() => onEdit(path)}>
+        <DenButton
+          variant="ghost"
+          size="sm"
+          disabled={!canEdit}
+          onClick={() => onEdit(path)}
+        >
           Edit together
         </DenButton>
       </div>
@@ -235,15 +242,16 @@ export function WorkbotReply({
     <div className={styles.assistantMessage}>
       {run.result ? (
         <>
-          <div className={styles.assistantBubble}>
+          <Message className={styles.assistantBubble}>
             <ChatText text={run.result} files={files} onOpen={onOpen} />
-          </div>
+          </Message>
           {drafts
             .filter((path) => run.result?.includes(path))
             .map((path) => (
               <DraftCard
                 key={path}
                 path={path}
+                canEdit={canRetry}
                 onOpen={onOpen}
                 onEdit={onEdit}
               />
@@ -346,11 +354,16 @@ export function WorkbotScreen() {
       );
     }
   }, []);
+  const pollMs = state?.runs.some(
+    (run) => run.status === "queued" || run.status === "running",
+  )
+    ? 2000
+    : 15000;
   useEffect(() => {
     void refresh();
-    const timer = window.setInterval(() => void refresh(), 2000);
+    const timer = window.setInterval(() => void refresh(), pollMs);
     return () => window.clearInterval(timer);
-  }, [refresh]);
+  }, [refresh, pollMs]);
   const running = state?.runs.find(
     (run) => run.status === "queued" || run.status === "running",
   );
@@ -383,7 +396,8 @@ export function WorkbotScreen() {
       busy ||
       sendBusy.current ||
       running ||
-      !state?.enabled
+      !state?.enabled ||
+      !state?.ready
     )
       return;
     sendBusy.current = true;
@@ -573,10 +587,19 @@ export function WorkbotScreen() {
               ) : null}
             </div>
           ) : null}
-          {state && !state.enabled ? (
+          {state && (!state.enabled || !state.ready) ? (
             <div className={styles.blocked}>
               <Lock size={16} strokeWidth={1.5} />
               <span>{state.blockedReason}</span>
+              {state.enabled ? (
+                <DenButton
+                  href="/dashboard/ai-gateway"
+                  variant="ghost"
+                  size="xs"
+                >
+                  AI Gateway
+                </DenButton>
+              ) : null}
             </div>
           ) : null}
           <div
@@ -603,7 +626,10 @@ export function WorkbotScreen() {
                     <span />
                   </div>
                 ) : null}
-                {state && chatRuns.length === 0 && !pendingMessage ? (
+                {state?.enabled &&
+                state.ready &&
+                chatRuns.length === 0 &&
+                !pendingMessage ? (
                   <>
                     <div className={styles.intro}>
                       <span className={styles.largeMonogram}>W</span>
@@ -611,14 +637,14 @@ export function WorkbotScreen() {
                       <span>Your team assistant</span>
                     </div>
                     <div className={styles.welcome}>
-                      <div className={styles.assistantBubble}>
+                      <Message className={styles.assistantBubble}>
                         Hi{user?.name ? ` ${user.name.split(" ")[0]}` : ""}!
                         What would you like to work on?
-                      </div>
-                      <div className={styles.assistantBubble}>
+                      </Message>
+                      <Message className={styles.assistantBubble}>
                         We can draft something, save a note, or make a plan for
                         your day.
-                      </div>
+                      </Message>
                     </div>
                   </>
                 ) : null}
@@ -632,13 +658,19 @@ export function WorkbotScreen() {
                     </time>
                     {!run.scheduleId ? (
                       <div className={styles.memberRow}>
-                        <div className={styles.memberMessage}>{run.prompt}</div>
+                        <Message className={styles.memberMessage}>
+                          {run.prompt}
+                        </Message>
                       </div>
                     ) : null}
                     <WorkbotReply
                       run={run}
                       files={state?.files ?? []}
-                      canRetry={Boolean(state?.enabled) && !busy && !running}
+                      canRetry={
+                        Boolean(state?.enabled && state.ready) &&
+                        !busy &&
+                        !running
+                      }
                       onOpen={(path) => void openFile(path)}
                       onEdit={editFile}
                       onRetry={() => void send(run.prompt)}
@@ -651,9 +683,9 @@ export function WorkbotScreen() {
                 ) ? (
                   <article className={styles.turn}>
                     <div className={styles.memberRow}>
-                      <div className={styles.memberMessage}>
+                      <Message className={styles.memberMessage}>
                         {pendingMessage.prompt}
-                      </div>
+                      </Message>
                     </div>
                     <div className={styles.assistantMessage}>
                       <Typing />
@@ -683,7 +715,12 @@ export function WorkbotScreen() {
                   <DenButton
                     size="xs"
                     variant="ghost"
-                    disabled={!state?.enabled || busy || Boolean(running)}
+                    disabled={
+                      !state?.enabled ||
+                      !state?.ready ||
+                      busy ||
+                      Boolean(running)
+                    }
                     onClick={() =>
                       void send(
                         "What can you help me with using my connected apps?",
@@ -721,7 +758,12 @@ export function WorkbotScreen() {
                   <DenButton
                     size="sm"
                     variant="secondary"
-                    disabled={!state?.enabled || busy || Boolean(running)}
+                    disabled={
+                      !state?.enabled ||
+                      !state?.ready ||
+                      busy ||
+                      Boolean(running)
+                    }
                     onClick={() => void send(calendarPrompt, false)}
                   >
                     Refresh calendar
@@ -741,14 +783,14 @@ export function WorkbotScreen() {
                     <h2>Bring your week into view</h2>
                     <p>
                       {calendar?.blockedReason ??
-                        "Connect your calendar so Workbot can see your meetings."}
+                        "No calendar events loaded. Refresh to check your team calendar."}
                     </p>
                     <DenButton
                       href={getMcpConnectionsRoute()}
                       size="sm"
                       variant="secondary"
                     >
-                      Connect calendar
+                      Manage calendar
                     </DenButton>
                   </div>
                 ) : calendar.events.length === 0 ? (
@@ -769,7 +811,7 @@ export function WorkbotScreen() {
                   <DenButton
                     size="xs"
                     variant="ghost"
-                    disabled={!state?.enabled || busy}
+                    disabled={!state?.enabled || !state?.ready || busy}
                     onClick={() => openSchedule(null)}
                   >
                     Add
@@ -810,7 +852,7 @@ export function WorkbotScreen() {
               <Popover.Trigger
                 className={styles.addButton}
                 aria-label="Add to conversation"
-                disabled={!state?.enabled}
+                disabled={!state?.enabled || !state?.ready}
               >
                 <Plus size={16} strokeWidth={1.5} />
               </Popover.Trigger>
@@ -851,7 +893,7 @@ export function WorkbotScreen() {
               rows={1}
               maxLength={20000}
               value={message}
-              disabled={!state?.enabled}
+              disabled={!state?.enabled || !state?.ready}
               onChange={(event) => {
                 setMessage(event.target.value);
                 event.target.style.height = "auto";
@@ -868,28 +910,23 @@ export function WorkbotScreen() {
                 }
               }}
             />
-            {running ? (
-              <DenButton
-                type="button"
-                className={styles.round}
-                aria-label="Stop assistant"
-                size="sm"
-                icon={Square}
-                disabled={busy}
-                onClick={() =>
-                  void mutate(`/v1/headless/runs/${running.id}/cancel`, {})
-                }
-              />
-            ) : (
-              <DenButton
-                type="submit"
-                className={styles.round}
-                aria-label="Send message"
-                size="sm"
-                icon={ArrowUp}
-                disabled={!state?.enabled || busy || !message.trim()}
-              />
-            )}
+            <ComposerAction
+              mode={running ? "stop" : "send"}
+              type={running ? "button" : "submit"}
+              className={styles.round}
+              aria-label={running ? "Stop assistant" : "Send message"}
+              disabled={
+                running
+                  ? busy
+                  : !state?.enabled || !state.ready || busy || !message.trim()
+              }
+              onClick={
+                running
+                  ? () =>
+                      void mutate(`/v1/headless/runs/${running.id}/cancel`, {})
+                  : undefined
+              }
+            />
           </form>
         </section>
         <aside className={styles.sidebar} aria-label="Your views">
@@ -942,9 +979,7 @@ export function WorkbotScreen() {
                 ))}
               </>
             ) : (
-              <p className={styles.cardEmpty}>
-                Your meetings and recurring work will appear here.
-              </p>
+              <p className={styles.cardEmpty}>No upcoming work.</p>
             )}
             <DenButton
               variant="ghost"
@@ -976,10 +1011,7 @@ export function WorkbotScreen() {
                 </button>
               ))
             ) : (
-              <p className={styles.cardEmpty}>
-                Draft something in chat. You can open it or keep editing
-                together.
-              </p>
+              <p className={styles.cardEmpty}>No saved drafts.</p>
             )}
           </section>
           <section className={styles.viewCard}>
@@ -989,7 +1021,7 @@ export function WorkbotScreen() {
               <DenButton
                 size="xs"
                 variant="ghost"
-                disabled={!state?.enabled || busy}
+                disabled={!state?.enabled || !state?.ready || busy}
                 onClick={() => openSchedule(null)}
               >
                 Add
@@ -1044,7 +1076,12 @@ export function WorkbotScreen() {
                       <DenButton
                         size="xs"
                         variant="secondary"
-                        disabled={busy || !state?.enabled || Boolean(running)}
+                        disabled={
+                          busy ||
+                          !state?.enabled ||
+                          !state?.ready ||
+                          Boolean(running)
+                        }
                         onClick={() => {
                           setTab("Home");
                           followConversation.current = true;
@@ -1082,18 +1119,16 @@ export function WorkbotScreen() {
                 </div>
               ))
             ) : (
-              <p className={styles.cardEmpty}>
-                A morning brief, a weekly update, or anything you do regularly.
-              </p>
+              <p className={styles.cardEmpty}>No scheduled work.</p>
             )}
           </section>
           <button
             className={styles.newView}
-            disabled={!state?.enabled}
-            onClick={() => focusMessage("Help me make a new view of ")}
+            disabled={!state?.enabled || !state?.ready}
+            onClick={() => focusMessage("Help me draft ")}
           >
             <Plus size={14} strokeWidth={1.5} />
-            Ask Workbot for a new view
+            Draft something together
           </button>
         </aside>
       </div>
@@ -1126,7 +1161,7 @@ export function WorkbotScreen() {
               <DenButton
                 size="sm"
                 variant="secondary"
-                disabled={!file || !state?.enabled}
+                disabled={!file || !state?.enabled || !state?.ready}
                 onClick={() => {
                   if (file) editFile(file.path);
                 }}
@@ -1218,7 +1253,7 @@ export function WorkbotScreen() {
                 <DenButton
                   size="sm"
                   type="submit"
-                  disabled={busy || !state?.enabled}
+                  disabled={busy || !state?.enabled || !state?.ready}
                 >
                   Save schedule
                 </DenButton>

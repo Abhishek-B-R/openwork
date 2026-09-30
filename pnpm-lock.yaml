@@ -1558,6 +1558,9 @@ importers:
       '@paper-design/shaders-react':
         specifier: 0.0.72
         version: 0.0.72(@types/react@19.2.14)(react@19.2.8)
+      tailwind-merge:
+        specifier: ^3.6.0
+        version: 3.6.0
     devDependencies:
       '@types/react':
         specifier: ^19.2.14

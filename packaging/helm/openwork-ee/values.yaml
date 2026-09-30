@@ -367,3 +367,20 @@ ingress:
     path: /
     pathType: Prefix
   tls: []
+
+# Build packaging/docker/Dockerfile.den with --target headless-worker.
+# One message per replica; actor leases serialize messages across every surface.
+headlessWorker:
+  enabled: false
+  replicaCount: 1
+  image:
+    repository: ghcr.io/different-ai/openwork-den-headless
+    tag: ""
+  env: {}
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 2Gi

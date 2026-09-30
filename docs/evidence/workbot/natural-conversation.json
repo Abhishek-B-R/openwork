@@ -1,0 +1,20 @@
+{
+  "status": "succeeded",
+  "failureCode": null,
+  "nativeMcpConnected": true,
+  "openworkReadForwarded": false,
+  "persistentFileMatches": true,
+  "gatewayRoutedRequests": 9,
+  "gatewayCompletedRequests": 9,
+  "tokens": {
+    "inputTokens": 3506,
+    "outputTokens": 2114,
+    "durationMs": 130102
+  },
+  "authorization": "isolated Gateway grant/quota fixture; real existing Den membership/session/MCP",
+  "inference": "real local Qwen through production Gateway proxy",
+  "execution": "Linux non-root container; real encrypted MySQL repository",
+  "accepted": true,
+  "acceptance": "Natural chat requires both injected MCPs to connect and the generated draft to persist. This message did not need an OpenWork tool read; default injection was verified.",
+  "nativeTestImage": "sha256:715dad52214324c25beda4db8f1903c14f9264a336e9105b8ad7bcf9927bab47"
+}

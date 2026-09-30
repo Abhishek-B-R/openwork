@@ -1,0 +1,25 @@
+{
+  "status": "succeeded",
+  "failureCode": null,
+  "nativeMcpConnected": true,
+  "openworkReadForwarded": true,
+  "persistentFileMatches": true,
+  "gatewayRoutedRequests": 6,
+  "gatewayCompletedRequests": 6,
+  "tokens": {
+    "inputTokens": 3571,
+    "outputTokens": 4510,
+    "durationMs": 138161
+  },
+  "authorization": "isolated Gateway grant/quota fixture; real existing Den membership/session/MCP",
+  "inference": "real local Qwen through production Gateway proxy",
+  "execution": "Linux non-root container; real encrypted MySQL repository",
+  "independentOpenworkSkillRead": {
+    "httpStatus": 200,
+    "rpcError": false,
+    "toolError": false
+  },
+  "accepted": true,
+  "acceptance": "Native MCPs connected, actual OpenWork read forwarded, real model output, encrypted file persisted and read back.",
+  "nativeTestImage": "sha256:715dad52214324c25beda4db8f1903c14f9264a336e9105b8ad7bcf9927bab47"
+}

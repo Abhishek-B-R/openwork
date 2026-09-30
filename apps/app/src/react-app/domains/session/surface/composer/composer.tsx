@@ -1,4 +1,5 @@
 /** @jsxImportSource react */
+import { ComposerAction } from "@openwork/ui/react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { Agent } from "@opencode-ai/sdk/v2/client";
 import { AppWindowMac, Cloud, Monitor, ArrowUp, Check, ChevronDown, FileText, LoaderCircle, RefreshCw, Square, Terminal, Zap } from "lucide-react";
@@ -1609,7 +1610,8 @@ export const ReactSessionComposer = memo(function ReactSessionComposer(props: Co
                   Cmd/Ctrl+Enter still steers).
               */}
               <div data-composer-actions className="col-start-2 row-start-2 ml-auto flex shrink-0 items-center gap-1.5">
-                <button
+                <ComposerAction
+                  mode={props.stopping || props.submissionPreparing ? "busy" : showStop ? "stop" : "send"}
                   type="button"
                   onPointerDown={(event) => {
                     // Preserve focus until submission succeeds; rejected sends keep the keyboard.
@@ -1674,7 +1676,7 @@ export const ReactSessionComposer = memo(function ReactSessionComposer(props: Co
                           ? props.submissionPreparingLabel ?? "Preparing connected service tools…"
                           : t("composer.run_task")}
                   </span>
-                </button>
+                </ComposerAction>
               </div>
             </div>
           </div>

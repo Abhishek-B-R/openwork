@@ -39,7 +39,8 @@
     "test:usage-limits:auth": "DEN_USAGE_TEST_DATABASE_URL=${DEN_USAGE_TEST_DATABASE_URL:?Set an isolated loopback usage_limits_test database URL} bun test --conditions development test/gateway-usage-auth-db.test.ts",
     "typecheck:usage-limits": "tsc -p tsconfig.usage-limits-test.json --pretty false",
     "dev:headless": "node --conditions=development --import tsx src/headless/worker.ts",
-    "test:headless": "bun test --conditions development test/headless-authority.test.ts"
+    "test:headless": "bun test --conditions development test/headless-authority.test.ts && bun test --conditions development test/headless-gateway.test.ts",
+    "test:headless:db": "node --conditions=development --import tsx --test test/headless-repository-db.test.ts"
   },
   "dependencies": {
     "@better-auth/api-key": "1.7.0-beta.10",

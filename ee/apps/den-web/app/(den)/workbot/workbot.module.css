@@ -1,6 +1,6 @@
 .shell {
   --chat-canvas: color-mix(in srgb, var(--dls-surface) 67%, var(--dls-app-bg));
-  --chat-bubble: color-mix(in srgb, var(--dls-accent) 8%, var(--dls-surface));
+  --chat-bubble: color-mix(in srgb, var(--dls-accent) 6%, var(--dls-surface));
   --chat-line: color-mix(in srgb, var(--dls-accent) 9%, transparent);
   height: 100dvh;
   display: flex;
@@ -334,7 +334,7 @@
   margin: 6px auto 24px;
   padding: 8px;
   max-width: 620px;
-  width: calc(100% - 80px);
+  width: calc(100% - 48px);
   border-radius: 26px;
   background: var(--dls-surface);
   box-shadow:

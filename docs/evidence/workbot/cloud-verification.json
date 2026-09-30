@@ -1,0 +1,45 @@
+{
+  "storage": "real MySQL, two independent pools",
+  "databaseTests": {
+    "passed": 8,
+    "failed": 0,
+    "skipped": 0
+  },
+  "runtimeTests": {
+    "passed": 7,
+    "failed": 0
+  },
+  "authorityTests": {
+    "passed": 6,
+    "failed": 0
+  },
+  "uiTests": {
+    "passed": 5,
+    "failed": 0
+  },
+  "workerImage": {
+    "id": "sha256:92c00c29000a7c5249f3718a725a175cc2c70e4a6e100bed6752ccd42b927d3a",
+    "platform": "linux/arm64",
+    "user": "node",
+    "build": "passed",
+    "productionModeStartup": "passed",
+    "hardenedHealth": {
+      "httpStatus": 200,
+      "ready": true
+    },
+    "restartHealth": {
+      "httpStatus": 200,
+      "ready": true
+    },
+    "runtimeLimits": {
+      "cpus": 1,
+      "memoryGiB": 2
+    },
+    "observedActiveMemoryMiB": 665.1
+  },
+  "helmWorkerChecks": "passed",
+  "denApiBuild": "passed",
+  "denWebBuild": "passed",
+  "desktopCheck": "Passed with ES2024 library override; normal typecheck has a pre-existing Promise.withResolvers lib-target error in mcp-app-frame.tsx",
+  "deployedCloudWorkspaceAcceptance": "not run; no existing cloud member Gateway session provided"
+}

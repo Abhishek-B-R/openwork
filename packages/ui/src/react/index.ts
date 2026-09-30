@@ -25,3 +25,8 @@ export { detectPlatform } from "./platform-detect"
 export type { DetectedArch, DetectedOS, DetectedPlatform } from "./platform-detect"
 export { DitheredOnboardingShell } from "./dithered-onboarding-shell"
 export type { DitheredOnboardingShellProps } from "./dithered-onboarding-shell"
+
+export { Message, MessageActions } from "./message"
+export type { MessageProps, MessageActionsProps } from "./message"
+export { ComposerAction } from "./composer-action"
+export type { ComposerActionProps } from "./composer-action"

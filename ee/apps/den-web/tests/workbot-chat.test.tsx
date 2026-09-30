@@ -58,6 +58,15 @@ test("a reply shows the answer once and a real saved draft, without execution UI
     createElement(WorkbotReply, { run, files: [], canRetry: true, ...actions }),
   );
   expect(missing).not.toContain("Saved draft");
+  const blocked = renderToStaticMarkup(
+    createElement(WorkbotReply, {
+      run,
+      files: ["daily-brief.md"],
+      canRetry: false,
+      ...actions,
+    }),
+  );
+  expect(blocked).toMatch(/<button[^>]*disabled[^>]*>[\s\S]*?Edit together/);
 });
 
 test("waiting for an answer shows only a typing indicator", () => {

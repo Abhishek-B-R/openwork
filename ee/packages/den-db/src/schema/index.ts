@@ -23,3 +23,5 @@ export * from "./workers"
 export * from "./system"
 export * from "./telemetry"
 export * from "./web-origins"
+
+export * from "./headless"

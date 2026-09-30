@@ -1,3 +1,5 @@
+import { Message, MessageActions } from "@openwork/ui/react"
+export type { MessageProps, MessageActionsProps } from "@openwork/ui/react"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import {
   Tooltip,
@@ -10,16 +12,6 @@ import { cn } from "@/lib/utils"
 const messageContentClassName =
   "rounded-lg p-2 text-foreground leading-relaxed bg-secondary prose wrap-break-word whitespace-normal"
 
-export type MessageProps = {
-  children: React.ReactNode
-  className?: string
-} & React.HTMLProps<HTMLDivElement>
-
-const Message = ({ children, className, ...props }: MessageProps) => (
-  <div className={cn("flex gap-3", className)} {...props}>
-    {children}
-  </div>
-)
 
 export type MessageAvatarProps = {
   src: string
@@ -86,24 +78,6 @@ const MessageContent = ({
     </div>
   )
 }
-
-export type MessageActionsProps = {
-  children: React.ReactNode
-  className?: string
-} & React.HTMLProps<HTMLDivElement>
-
-const MessageActions = ({
-  children,
-  className,
-  ...props
-}: MessageActionsProps) => (
-  <div
-    className={cn("text-muted-foreground flex items-center gap-2", className)}
-    {...props}
-  >
-    {children}
-  </div>
-)
 
 export type MessageActionProps = {
   className?: string

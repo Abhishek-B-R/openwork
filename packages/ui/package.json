@@ -19,7 +19,8 @@
   },
   "dependencies": {
     "@paper-design/shaders": "0.0.72",
-    "@paper-design/shaders-react": "0.0.72"
+    "@paper-design/shaders-react": "0.0.72",
+    "tailwind-merge": "^3.6.0"
   },
   "peerDependencies": {
     "react": "^18 || ^19"
