@@ -8,10 +8,11 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible"
-import { useMessageList } from "@/components/chat/message-list-provider"
+import { useOptionalMessageList } from "@/components/chat/message-list-provider"
 import { taskChildSessionId, type TaskToolPart } from "@/lib/build-in-tools"
 import { isToolPartInFlight } from "@/lib/tool-activity"
 import { formatElapsedSeconds, getToolCallStartedAt, trackToolCallDuration } from "@/lib/tool-call-duration"
+import { runElapsed } from "@/lib/session-run"
 import { cn } from "@/lib/utils"
 import { t } from "@/i18n"
 import { useSessionActivityStore } from "@/react-app/domains/session/status/session-activity-store"
@@ -24,6 +25,9 @@ type SubagentRunLineProps = {
   part: TaskToolPart
   className?: string
   parentActive?: boolean
+  actions?: { workspaceId: string; syncDegraded?: boolean; onOpenSubagentSession?: (id: string) => void; onStopSubagentSession?: (id: string) => Promise<void> }
+  onNeedsUser?: (id: string, kind: "permission" | "question", requestId: string) => void
+  stopFailure?: string
 }
 
 export function subagentRunActivity(input: {
@@ -68,10 +72,12 @@ function agentName(slug: string): string {
  * session in the main chat surface. Without that route, details stay limited
  * to safe task/output labels, never raw prompts or payloads.
  */
-export function SubagentRunLine({ part, className, parentActive = true }: SubagentRunLineProps) {
+export function SubagentRunLine({ part, className, parentActive = true, actions, onNeedsUser, stopFailure }: SubagentRunLineProps) {
   const [open, setOpen] = useState(false)
-  const { onOpenSubagentSession, onStopSubagentSession, syncDegraded, workspaceId } = useMessageList()
+  const context = useOptionalMessageList();
+  const { onOpenSubagentSession, onStopSubagentSession, syncDegraded = false, workspaceId = "" } = actions ?? context ?? {}
   const [stopping, setStopping] = useState(false)
+  const [stopError, setStopError] = useState<string | null>(null)
   const stoppedByPerson = useRef(false)
   const childSessionId = taskChildSessionId(part)
   const child = useSessionActivityStore((state) => (
@@ -85,7 +91,9 @@ export function SubagentRunLine({ part, className, parentActive = true }: Subage
   const permissionPending = (child?.waitingPermissionIds.length ?? 0) > 0
   const questionPending = (child?.waitingQuestionIds.length ?? 0) > 0
   const childRunning = child?.runActive === true || childStatus?.type === "busy" || childStatus?.type === "retry"
-  const inFlight = isToolPartInFlight(part) || childRunning
+  const inFlight = part.callProviderMetadata?.openwork?.inventoryOnly ? childRunning : isToolPartInFlight(part) || childRunning
+  const childRun = child?.currentRunId ? child.runs[child.currentRunId] : undefined
+  const statusUnavailable = Boolean(part.callProviderMetadata?.openwork?.inventoryOnly && !child && !childStatus)
   const isFailed = part.state === "output-error"
   const duration = trackToolCallDuration(part)
   const [elapsedSeconds, setElapsedSeconds] = useState(0)
@@ -107,18 +115,18 @@ export function SubagentRunLine({ part, className, parentActive = true }: Subage
     // module-scoped anchor resumes the true elapsed time on recovery.
     if (!inFlight || startedAt === null || syncDegraded) return
     const update = () => {
-      setElapsedSeconds(Math.max(0, Math.floor((Date.now() - startedAt) / 1000)))
+      setElapsedSeconds(Math.max(0, Math.floor((childRun ? runElapsed(childRun, Date.now()) : Date.now() - startedAt) / 1000)))
     }
     update()
     const interval = window.setInterval(update, 1000)
     return () => window.clearInterval(interval)
-  }, [inFlight, startedAt, part.toolCallId, syncDegraded])
+  }, [inFlight, startedAt, childRun, part.toolCallId, syncDegraded])
   const title = part.input?.description?.trim().slice(0, 160) || "Sub-agent task"
   // A helper the person stopped is not a failure (DESIGN.md C5): say "Stopped".
   const errorText = part.state === "output-error" ? part.errorText : undefined
-  const stopped = isFailed && (stoppedByPerson.current || /abort|interrupt|cancel/i.test(errorText ?? ""))
+  const stopped = childRun?.outcome === "stopped" || stoppedByPerson.current || isFailed && /abort|interrupt|cancel/i.test(errorText ?? "")
   const agent = agentName(part.input?.subagent_type ?? "")
-  const status = permissionPending
+  const status = statusUnavailable ? "Status unavailable" : stopping ? "Stopping…" : stopError || stopFailure ? "Could not stop — retry" : stopped && !childRunning ? "Stopped" : permissionPending
     ? t("session.subagent_permission_needed")
     : questionPending ? t("session.subagent_question_pending")
     : activity === "retrying" ? "Retrying"
@@ -151,17 +159,15 @@ export function SubagentRunLine({ part, className, parentActive = true }: Subage
         {childSessionId && onOpenSubagentSession ? (
           <ArrowUpRight
             aria-hidden="true"
-            className="size-3.5 shrink-0 text-muted-foreground/70 opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
+            className="size-3.5 shrink-0 text-muted-foreground/70 opacity-70"
           />
         ) : null}
       </span>
-      <span className={cn("min-w-0 truncate text-xs", permissionPending ? "font-medium text-amber-11" : "text-muted-foreground/70")}>
+      <span role={stopError || stopFailure ? "alert" : undefined} className={cn("min-w-0 truncate text-xs", permissionPending ? "font-medium text-amber-11" : "text-muted-foreground/70")}>
         {status}
         {!inFlight && !isFailed && duration ? ` · ${duration}` : ""}
       </span>
-      {inFlight && child?.latestActivity ? (
-        <span className="text-xs text-muted-foreground/70">Last activity: {child.latestActivity}{child.lastProgressAt > 0 ? ` · ${formatElapsedSeconds(Math.max(0, Math.floor((Date.now() - child.lastProgressAt) / 1000)))} ago` : ""}</span>
-      ) : null}
+
     </>
   )
 
@@ -174,16 +180,18 @@ export function SubagentRunLine({ part, className, parentActive = true }: Subage
         data-subagent-permission={permissionPending ? "pending" : undefined}
         // The open button stays a direct child of the row: hover styling and
         // row probes address it as `:scope > button.group`.
-        className={cn("flex min-w-0 max-w-full items-start gap-2", className)}
+        className={cn("flex h-12 min-w-0 max-w-full items-center gap-2", (permissionPending || questionPending) && "bg-amber-3/40", className)}
       >
         <button
           type="button"
-          className="group flex min-w-0 max-w-full cursor-pointer flex-col gap-0.5 text-start text-sm text-muted-foreground transition-colors hover:text-foreground"
+          className="group flex min-w-0 max-w-full flex-1 cursor-pointer flex-col gap-0.5 text-start text-sm text-muted-foreground transition-colors hover:text-foreground"
           aria-label={`${title}. Open sub-agent chat`}
           onClick={() => onOpenSubagentSession(childSessionId)}
         >
           {lines}
         </button>
+        <div className="flex w-16 shrink-0 items-center justify-end gap-1">
+        {(permissionPending || questionPending) && onNeedsUser ? <button type="button" className="rounded bg-amber-4 px-0.5 py-0.5 text-xs" onClick={() => onNeedsUser(childSessionId, permissionPending ? "permission" : "question", permissionPending ? child!.waitingPermissionIds[0]! : child!.waitingQuestionIds[0]!)}>{permissionPending ? "Review" : "Answer"}</button> : null}
         {/* Stop just this helper; the turn's own Stop stays in the composer. */}
         {childRunning && onStopSubagentSession ? (
           <button
@@ -193,14 +201,17 @@ export function SubagentRunLine({ part, className, parentActive = true }: Subage
             aria-label={stopping ? `${title}. Stopping sub-agent` : `${title}. Stop sub-agent`}
             className="mt-0.5 flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground/70 transition-colors hover:bg-muted hover:text-foreground disabled:cursor-default disabled:opacity-50"
             onClick={() => {
-              stoppedByPerson.current = true
+              setStopError(null)
               setStopping(true)
-              void Promise.resolve(onStopSubagentSession(childSessionId)).finally(() => setStopping(false))
+              void Promise.resolve(onStopSubagentSession(childSessionId)).then(() => { stoppedByPerson.current = true }, error => {
+                setStopError(error instanceof Error ? error.message : "Could not stop")
+              }).finally(() => setStopping(false))
             }}
           >
             <Square className="size-2.5 fill-current" aria-hidden="true" />
           </button>
         ) : null}
+        </div>
       </div>
     )
   }
@@ -212,7 +223,7 @@ export function SubagentRunLine({ part, className, parentActive = true }: Subage
       data-subagent-permission={permissionPending ? "pending" : undefined}
       open={open}
       onOpenChange={setOpen}
-      className={cn("min-w-0 max-w-full", className)}
+      className={cn("h-12 min-w-0 max-w-full", className)}
     >
       <CollapsibleTrigger
         className="group flex min-w-0 max-w-full cursor-pointer flex-col gap-0.5 text-start text-sm text-muted-foreground transition-colors hover:text-foreground"
