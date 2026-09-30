@@ -1,7 +1,8 @@
 /** @jsxImportSource react */
+import { childOrigin, rememberChildOrigin, prepareChildReturn, consumeChildReturn, registerChildDraftPersistence } from "@/lib/child-navigation";
 import { AgentTray } from "@/components/chat/agent-tray";
-import { agentInventory } from "@/lib/agent-inventory";
-import { taskChildSessionId } from "@/lib/build-in-tools";
+import { agentInventory, agentResultVersion } from "@/lib/agent-inventory";
+import { isTaskToolPart, taskChildSessionId } from "@/lib/build-in-tools";
 import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { UIMessage } from "ai";
 import { hashKey, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -664,6 +665,10 @@ export type SessionSurfaceProps = {
   onForkAtMessage?: (messageId: string | null, sessionId: string, isCurrent: () => boolean) => Promise<void>;
   /** Open a sub-agent (child) session in the main chat surface. */
   onOpenSubagentSession?: (sessionId: string) => void;
+  onReturnToParent?: () => void;
+  parentSessionTitle?: string;
+  sessionTitle?: string;
+
   onOpenTarget?: (target: OpenTarget, options?: OpenTargetOptions, sessionId?: string) => void;
   environmentRuntimeKey?: string | null;
   onApplyEnvironmentChanges?: () => Promise<ApplyEnvironmentChangesResult>;
@@ -2137,13 +2142,14 @@ export function SessionSurface(props: SessionSurfaceProps) {
       // bounded newest read; never wait on the uncapped read.
       const sendMessages = await openingHistory.readSendHistory({ revealLatest: true });
       if (getQueuedSendGeneration(props.sessionId) !== generation) throw new Error("Send cancelled by Stop.");
-      const result = await submitImmediateSessionTurn<CloudMcpSubmissionResult>(props.opencodeBaseUrl, opencodeClient, props.sessionId,
-        sendMessages, async () => {
-          if (getQueuedSendGeneration(props.sessionId) !== generation) {
-            return { outcome: "cancelled", reason: "context_changed" };
-          }
-          return props.onSendDraft({ ...nextDraft, messageId }, props.sessionId, onPrepared, agent);
-        }, { directory: props.workspaceRoot.trim() || undefined, messageID: messageId });
+      const submit = async () => {
+        if (getQueuedSendGeneration(props.sessionId) !== generation) return { outcome: "cancelled" as const, reason: "context_changed" as const };
+        return props.onSendDraft({ ...nextDraft, messageId }, props.sessionId, onPrepared, agent);
+      };
+      const result = snapshot?.session.parentID
+        ? await submitAfterInterruption(props.opencodeBaseUrl, props.sessionId, submit, messageId)
+        : await submitImmediateSessionTurn<CloudMcpSubmissionResult>(props.opencodeBaseUrl, opencodeClient, props.sessionId,
+          sendMessages, submit, { directory: props.workspaceRoot.trim() || undefined, messageID: messageId });
       // Drain listeners can reconcile idle and claim another item synchronously.
       // Consume the submitted row while its send slot is still held.
       if (options.consumeQueuedItem && (result.outcome === "sent" || result.outcome === "accepted")) {
@@ -2196,7 +2202,7 @@ export function SessionSurface(props: SessionSurfaceProps) {
       pendingSendsRef.current.delete(submissionId);
       setPendingSendSessions([...pendingSendsRef.current.values()]);
     }
-  }, [archived, archiveStateKnown, opencodeClient, openingHistory.readSendHistory, props.onSendDraft, props.opencodeBaseUrl, props.selectedAgent, props.sessionId, props.workspaceId, props.workspaceRoot, removeQueuedDraftFromStore, renderedMessages.length, sessionOwner, setError]);
+  }, [snapshot?.session.parentID, archived, archiveStateKnown, opencodeClient, openingHistory.readSendHistory, props.onSendDraft, props.opencodeBaseUrl, props.selectedAgent, props.sessionId, props.workspaceId, props.workspaceRoot, removeQueuedDraftFromStore, renderedMessages.length, sessionOwner, setError]);
 
   const clearComposer = useCallback(() => {
     clearPersistedDraft();
@@ -2982,6 +2988,101 @@ export function SessionSurface(props: SessionSurfaceProps) {
   }, [props.client, props.workspaceId]);
 
   const scrollRef = useRef<HTMLDivElement>(null);
+  const childNavigationScope = JSON.stringify([props.opencodeBaseUrl, props.workspaceId, props.draftScope]);
+  const origin = childOrigin(childNavigationScope, props.sessionId);
+  const parentID = snapshot?.session.parentID;
+  const [delegatedBrief, setDelegatedBrief] = useState("");
+  const [delegatedDetails, setDelegatedDetails] = useState("");
+  useEffect(() => {
+    setDelegatedBrief(origin?.brief ?? "");
+    setDelegatedDetails(origin?.rawDetails ?? "");
+    if (origin?.brief || !parentID) return;
+    let cancelled = false;
+    void opencodeClient.session.messages({ sessionID: parentID, directory: props.workspaceRoot.trim() || undefined, limit: 50 }).then(unwrap).then(messages => {
+      const task = messages.flatMap(message => message.parts).find(part => part.type === "tool" && part.tool === "task"
+        && "metadata" in part.state && part.state.metadata?.sessionId === props.sessionId);
+      if (!cancelled && task?.type === "tool" && typeof task.state.input.prompt === "string") {
+        setDelegatedBrief(task.state.input.prompt);
+        setDelegatedDetails(JSON.stringify(task.state.input, null, 2));
+      }
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [childNavigationScope, props.sessionId, parentID, origin?.brief, origin?.rawDetails, opencodeClient, props.workspaceRoot]);
+  const openChild = useCallback((id: string) => {
+    const task = baseRenderedMessages.flatMap(message => message.parts).find(part => part.type === "dynamic-tool"
+      && isTaskToolPart(part) && taskChildSessionId(part) === id);
+    rememberChildOrigin(childNavigationScope, id, { parentId: props.sessionId, pane: props.chatPane ?? "primary",
+      anchor: id, scrollTop: scrollRef.current?.scrollTop ?? 0, title: props.sessionTitle,
+      rawDetails: task?.type === "dynamic-tool" ? JSON.stringify(task.input, null, 2) : undefined,
+      brief: task?.type === "dynamic-tool" && isTaskToolPart(task) ? task.input?.prompt ?? "" : "" });
+    const part = agentInventory(props.sessionId, baseRenderedMessages, useSessionActivityStore.getState().recordsByWorkspaceId[props.workspaceId]).find(part => taskChildSessionId(part) === id);
+    const version = part ? agentResultVersion(part, useSessionActivityStore.getState().recordsByWorkspaceId[props.workspaceId]?.[id]) : null;
+    if (version && props.draftScope) try {
+      const key = `openwork:agent-results:${sessionOwner}`;
+      const seen = JSON.parse(localStorage.getItem(key) ?? "{}");
+      const newValue = JSON.stringify({ ...seen, [id]: version });
+      localStorage.setItem(key, newValue);
+      window.dispatchEvent(new StorageEvent("storage", { key, newValue }));
+    } catch { /* Optional read markers. */ }
+    props.onOpenSubagentSession?.(id);
+  }, [sessionOwner, props.draftScope, props.workspaceId, baseRenderedMessages, childNavigationScope, props.sessionId, props.chatPane, props.onOpenSubagentSession, props.sessionTitle]);
+  const handleQueueDraftPersistenceRef = useRef<(() => void) | null>(null);
+  handleQueueDraftPersistenceRef.current = () => {
+    // The store receives keystrokes synchronously; a keyboard navigation event
+    // can run before React commits the render containing the latest draft.
+    const state = useComposerStateStore.getState();
+    const current = buildDraft(getComposerDraft(state, props.sessionId), getComposerAttachments(state, props.sessionId));
+    if (hydratedDraftScopeKey === persistedDraftKey) persistDraft({ text: persistableComposerDraftText(current.text), mode: current.mode });
+  };
+  useLayoutEffect(() => {
+    if (!parentID) return;
+    return registerChildDraftPersistence(childNavigationScope, props.sessionId, () => handleQueueDraftPersistenceRef.current?.());
+  }, [childNavigationScope, props.sessionId, parentID]);
+  const returnToParent = useCallback(() => {
+    prepareChildReturn(childNavigationScope, props.sessionId);
+    props.onReturnToParent?.();
+  }, [childNavigationScope, props.sessionId, props.onReturnToParent]);
+  useEffect(() => {
+    if (!parentID || !props.onReturnToParent || props.isControlTarget === false) return;
+    const handler = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.isComposing) return;
+      if (event.key !== "Escape" && !(event.metaKey && event.key === "[")) return;
+      if ([...document.querySelectorAll<HTMLElement>('[role="dialog"], [role="menu"], [role="listbox"]')]
+        .some(element => element.getClientRects().length > 0 && !element.hasAttribute("data-closed")
+          && element.getAttribute("data-state") !== "closed")) return;
+      event.preventDefault();
+      returnToParent();
+    };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [parentID, props.onReturnToParent, props.isControlTarget, returnToParent]);
+  useEffect(() => {
+    const restore = consumeChildReturn(childNavigationScope, props.sessionId);
+    if (!restore) return;
+    let frame = 0;
+    let observer: MutationObserver | undefined;
+    const restoreRow = () => {
+      const element = scrollRef.current;
+      if (!element) return false;
+      element.scrollTop = restore.scrollTop;
+      const row = element.querySelector(`[data-subagent-session-id="${CSS.escape(restore.anchor)}"]`);
+      if (row) {
+        observer?.disconnect();
+        const rail = row.closest<HTMLElement>("[data-steps-rail]");
+        if (rail?.hidden) row.closest("[data-steady-activity]")?.querySelector<HTMLButtonElement>("button[aria-expanded='false']")?.click();
+        frame = requestAnimationFrame(() => row.scrollIntoView({ block: "nearest" }));
+        return true;
+      }
+      return false;
+    };
+    frame = requestAnimationFrame(() => {
+      if (restoreRow() || !scrollRef.current) return;
+      observer = new MutationObserver(restoreRow);
+      observer.observe(scrollRef.current, { childList: true, subtree: true });
+    });
+    return () => { cancelAnimationFrame(frame); observer?.disconnect(); };
+  }, [childNavigationScope, props.sessionId]);
+
   const contentRef = useRef<HTMLDivElement>(null);
   const sessionScroll = useSessionScrollController({
     selectedSessionId: props.sessionId,
@@ -3435,6 +3536,18 @@ export function SessionSurface(props: SessionSurfaceProps) {
                 onOpenModelPicker={handleOpenModelPicker}
               />
             ) : null}
+            {parentID ? <div data-child-brief className="mx-auto w-full max-w-3xl px-4 py-2 text-sm">
+              <div className="flex items-center justify-between text-muted-foreground">
+                <button type="button" className={chatStreaming ? "hover:text-foreground" : "font-medium text-foreground underline underline-offset-4"} onClick={returnToParent}>← {props.parentSessionTitle ?? origin?.title ?? "Main chat"}</button>
+                {chatStreaming ? <button type="button" aria-label="Stop child agent" disabled={stopping} onClick={() => void handleAbort()}>{stopping ? "Stopping…" : "Stop"}</button> : null}
+              </div>
+              <p className="mt-2 text-xs text-muted-foreground">Task from the main chat</p>
+              <p className="mt-1 whitespace-pre-wrap">{delegatedBrief || "The original task brief is unavailable."}</p>
+              {delegatedDetails ? <details className="mt-2 text-xs text-muted-foreground">
+                <summary className="cursor-pointer">Raw task details</summary>
+                <pre className="mt-1 whitespace-pre-wrap">{delegatedDetails}</pre>
+              </details> : null}
+            </div> : null}
             <SessionHistoryBoundary owner={sessionOwner} pending={pendingSessionLoad}
               failed={Boolean(openingHistory.openingError) || snapshotQuery.isError && !snapshotQuery.isFetching} saved={initialScroll}>
             {renderedMessages.length === 0 && effectiveActivityStatus !== "idle" && !error ? (
@@ -3487,7 +3600,7 @@ export function SessionSurface(props: SessionSurfaceProps) {
                       onForkAtMessage={handleForkAtMessage}
                       forkingMessageId={forkingMessageId}
                       onEditUserMessage={handleEditUserMessage}
-                      onOpenSubagentSession={props.onOpenSubagentSession}
+                      onOpenSubagentSession={openChild}
                       onStopSubagentSession={archived ? undefined : handleStopSubagentSession}
                       onResumeInterrupted={archived ? undefined : handleResumeInterrupted}
                       onMcpReconnect={handleMcpReconnect}
@@ -3595,6 +3708,8 @@ export function SessionSurface(props: SessionSurfaceProps) {
           onDraftChange={handleComposerDraftChange}
         onSend={() => handleSend()}
         onSteer={handleSteer}
+        childConversation={Boolean(snapshot?.session.parentID)}
+        onReturnToParent={returnToParent}
         onQueue={handleQueue}
         onStop={async () => { await handleAbort(); }}
         busy={chatStreaming}
@@ -3668,7 +3783,7 @@ export function SessionSurface(props: SessionSurfaceProps) {
             (
               <div>
                 <AgentTray workspaceId={props.workspaceId} sessionId={props.sessionId} owner={props.draftScope ? sessionOwner : null}
-                  messages={baseRenderedMessages} syncDegraded={runSyncHealth.degraded} onOpen={props.onOpenSubagentSession}
+                  messages={baseRenderedMessages} syncDegraded={runSyncHealth.degraded} onOpen={openChild}
                   onStop={handleStopSubagentSession} />
                 {queuedItems.length > 0 ? (
                   <QueuedMessagesPanel

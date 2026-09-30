@@ -59,6 +59,8 @@ type ComposerProps = {
   onQueue: () => void | Promise<void>;
   onStop: () => void | Promise<void>;
   busy: boolean;
+  childConversation?: boolean;
+  onReturnToParent?: () => void;
   editing?: boolean;
   stopping?: boolean;
   steering: boolean;
@@ -322,13 +324,14 @@ export const ReactSessionComposer = memo(function ReactSessionComposer(props: Co
     const hasContent = props.draft.trim().length > 0 || props.attachments.length > 0;
     if (!hasContent) return;
     if (props.submissionPreparing || props.stopping) return;
+    if (props.childConversation) { void props.onSend(); return; }
     if (props.busy && !props.editing) {
       if (options.queue) void props.onSteer();
       else void props.onQueue();
       return;
     }
     void props.onSend();
-  }, [props.busy, props.editing, props.draft, props.attachments, props.onSend, props.onSteer, props.onQueue, props.submissionPreparing, props.stopping]);
+  }, [props.childConversation, props.busy, props.editing, props.draft, props.attachments, props.onSend, props.onSteer, props.onQueue, props.submissionPreparing, props.stopping]);
 
   const showStop = props.busy && !props.editing;
 
@@ -1045,7 +1048,7 @@ export const ReactSessionComposer = memo(function ReactSessionComposer(props: Co
     // Escape can still close menus. First press arms a confirmation prompt
     // for 3s; a second Escape within that window stops the agent.
     const anyMenuOpen = agentMenuOpen || toolMenuOpen || props.modelPickerOpen || Boolean(activeMenu);
-    if (event.key === "Escape" && props.busy && !anyMenuOpen) {
+    if (event.key === "Escape" && props.busy && !props.childConversation && !anyMenuOpen) {
       event.preventDefault();
       if (props.stopping) return;
       if (escapeArmed) {
