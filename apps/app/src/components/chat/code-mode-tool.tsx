@@ -12,11 +12,12 @@ import { cn } from "@/lib/utils";
 import { resolveConnectorToolIdentity, type ConnectorToolIdentity } from "@/react-app/domains/connections/connector-tool-identity";
 
 /** Keep the script's activity on the same rail as the rest of the turn. */
-export function CodeModeTool({ part, calls, lifecycle, connectors }: {
+export function CodeModeTool({ part, calls, lifecycle, connectors, parentActive = false }: {
   part: DynamicToolUIPart;
   calls: DynamicToolUIPart[];
   lifecycle: CurrentToolLifecycle | null;
   connectors: ConnectorToolIdentity[];
+  parentActive?: boolean;
 }) {
   // A finished group folds unless the person explicitly chose otherwise.
   const [userOpen, setUserOpen] = useState<boolean | null>(null);
@@ -34,7 +35,7 @@ export function CodeModeTool({ part, calls, lifecycle, connectors }: {
     const interval = window.setInterval(() => setNow(Date.now()), 1_000);
     return () => window.clearInterval(interval);
   }, [running]);
-  const open = userOpen ?? inFlight;
+  const open = userOpen ?? (inFlight || parentActive);
   const failedCalls = calls.filter(call => call.state === "output-error");
   const failed = part.state === "output-error";
   const startedAt = running ? getToolCallStartedAt(part) : null;

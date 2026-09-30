@@ -1156,6 +1156,9 @@ export function SessionSurface(props: SessionSurfaceProps) {
     runtimeWorkspaceId: props.workspaceId,
     sessionId: props.sessionId,
   }), [props.draftScope, props.opencodeBaseUrl, props.workspaceId, props.sessionId]);
+  useLayoutEffect(() => {
+    useSessionActivityStore.getState().bindRunTimingScope(props.workspaceId, props.sessionId, props.draftScope ? sessionOwner : null);
+  }, [props.workspaceId, props.sessionId, props.draftScope, sessionOwner]);
   const activeSessionOwnerRef = useRef(sessionOwner);
   activeSessionOwnerRef.current = sessionOwner;
   const snapshotTargetRef = useRef<NativeSessionSnapshotTarget>({
@@ -2277,6 +2280,7 @@ export function SessionSurface(props: SessionSurfaceProps) {
       }
     };
     if (sentAttachments.length) setAttachmentsUploading(true);
+    useSessionActivityStore.getState().beginRun(props.workspaceId, props.sessionId, nextDraft.messageId, Date.now());
     try {
       const result = await sendDraft(nextDraft, nextDraft.messageId, markPrepared);
       if ((result.outcome === "sent" || result.outcome === "accepted")
@@ -2288,6 +2292,7 @@ export function SessionSurface(props: SessionSurfaceProps) {
         focusedComposer.blur();
       }
       if (result.outcome === "blocked" || result.outcome === "cancelled") {
+        useSessionActivityStore.getState().cancelUnadmittedRun(props.workspaceId, props.sessionId, nextDraft.messageId);
         restore();
         return;
       }
@@ -2301,6 +2306,7 @@ export function SessionSurface(props: SessionSurfaceProps) {
         } }));
       }
     } catch {
+      useSessionActivityStore.getState().cancelUnadmittedRun(props.workspaceId, props.sessionId, nextDraft.messageId);
       restore();
     } finally {
       setAttachmentsUploading(false);
@@ -2465,7 +2471,7 @@ export function SessionSurface(props: SessionSurfaceProps) {
         props.workspaceRoot.trim() || undefined, {
           admissionUnknown: phase.kind === "admission_unknown",
           admissionMessageID: phase.kind === "admission_unknown" ? phase.messageID : undefined,
-          onStopped: () => dispatchQueuedDrain(props.sessionId, { type: "stop_confirmed" }),
+          onStopped: () => { useSessionActivityStore.getState().markRunStopped(props.workspaceId, props.sessionId); dispatchQueuedDrain(props.sessionId, { type: "stop_confirmed" }); },
         });
       captureAnalyticsEvent("task_run_stopped", {});
       // The surface survives navigation; refresh the stopped conversation, not
@@ -3448,6 +3454,7 @@ export function SessionSurface(props: SessionSurfaceProps) {
                       displaySuggestions={!archived && shellConfig.starterCards && snapshot !== null && snapshot.messages.length === 0}
                       providerConnectedCount={props.providerConnectedCount ?? 0}
                       connectorIdentities={connectorIdentities}
+                      providerCatalog={props.providerCatalog}
                       syncDegraded={runSyncHealth.degraded}
                       dispatchAction={handleMessageListDispatchAction}
                       setPrompt={handleMessageListSetPrompt}

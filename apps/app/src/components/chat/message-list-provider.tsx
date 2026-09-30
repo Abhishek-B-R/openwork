@@ -1,5 +1,7 @@
 "use memo";
 
+import type { ProviderCatalog } from "@/react-app/domains/session/surface/use-model-behavior";
+
 import { useSessionActivityStore } from "@/react-app/domains/session/status/session-activity-store"
 import type {
   ChatToolReconnectAction,
@@ -26,6 +28,7 @@ interface MessageListContextValue {
   developerMode: boolean
   displaySuggestions: boolean
   providerConnectedCount: number
+  providerCatalog?: ProviderCatalog
   connectorIdentities: ConnectorToolIdentity[]
   /**
    * True while the workspace sync layer cannot validate live run status
@@ -82,6 +85,7 @@ interface MessageListProviderProps {
   onMcpReopenAuthorization: (action: ChatToolReconnectAction, authorizeUrl: string, isCurrent?: () => boolean) => Promise<void>
   displaySuggestions: boolean
   providerConnectedCount: number
+  providerCatalog?: ProviderCatalog
   connectorIdentities?: ConnectorToolIdentity[]
   syncDegraded?: boolean
   dispatchAction: (action: DispatchAction) => void
@@ -109,6 +113,7 @@ export function MessageListProvider({
   developerMode,
   displaySuggestions,
   providerConnectedCount,
+  providerCatalog,
   connectorIdentities = [],
   syncDegraded = false,
   dispatchAction,
@@ -200,6 +205,7 @@ export function MessageListProvider({
       developerMode,
       displaySuggestions,
       providerConnectedCount,
+      providerCatalog,
       connectorIdentities,
       syncDegraded,
       ...stableHandlers,
@@ -227,6 +233,7 @@ export function MessageListProvider({
       developerMode,
       displaySuggestions,
       providerConnectedCount,
+      providerCatalog,
       connectorIdentities,
       syncDegraded,
       stableHandlers,

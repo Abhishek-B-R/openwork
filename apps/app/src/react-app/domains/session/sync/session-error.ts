@@ -331,7 +331,7 @@ export function presentOpencodeSessionError(error: unknown, fallback = "Session 
     title: credentialCopy?.title ?? errorTitle(kind, fallbackTitle),
     description: credentialCopy?.description ?? errorDescription(kind, gatewayAuth),
     technicalDetails: kind === "gateway-selection-required" ? "Error code: gateway_selection_required\nStatus: 409" : gatewayAuth ? "Error code: openwork_auth_required\nStatus: 401" : technicalErrorDetails(error, fallback, fields),
-    recoveryPrompt: errorRecoveryPrompt(kind),
+    recoveryPrompt: kind === "aborted" ? null : errorRecoveryPrompt(kind),
     ...(gatewayAuth ? { connectUrl: gatewayAuth.connectUrl } : {}),
     ...(gatewayUsage ? { gatewayUsage, providerId: fields.provider } : {}),
   };

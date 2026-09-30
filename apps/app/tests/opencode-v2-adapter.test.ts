@@ -60,6 +60,42 @@ describe("MCP status", () => {
 });
 
 describe("native conversation mutations", () => {
+  test("a busy child prompt forwards its stable admission identity with native steer delivery", async () => {
+    const originalFetch = globalThis.fetch;
+    let body: unknown;
+    globalThis.fetch = async (input, init) => {
+      const request = new Request(input, init);
+      if (request.url.endsWith("/prompt")) body = await request.json();
+      return new Response(null, { status: 204 });
+    };
+    try {
+      await createClientV2("http://localhost/opencode2", "/workspace", {}).session.promptAsync({
+        sessionID: "child", messageID: "stable-child-prompt", model: { providerID: "fixture", modelID: "model" }, parts: [{ type: "text", text: "Include version three." }],
+      });
+      expect(body).toEqual({ id: "stable-child-prompt", text: "Include version three.", delivery: "steer" });
+    } finally { globalThis.fetch = originalFetch; }
+  });
+
+  test("the first native assistant creation time replaces a local fallback and survives later steps", () => {
+    const state = createV2EventTranslationState();
+    const start = (timestamp?: number) => translateV2Event({ type: "session.text.started", data: {
+      sessionID: "s", assistantMessageID: "m", ...(timestamp === undefined ? {} : { timestamp }),
+    } }, state)?.find(event => event.type === "message.updated");
+    start();
+    expect(start(1_000)).toMatchObject({ properties: { info: { time: { created: 1_000 } } } });
+    expect(start(3_000)).toMatchObject({ properties: { info: { time: { created: 1_000 } } } });
+  });
+
+  test("a session model switch does not assign the current model to an older unknown reply", () => {
+    const state = createV2EventTranslationState();
+    translateV2Event({ type: "session.model.selected", data: { sessionID: "s", model: { providerID: "p", modelID: "new" } } }, state);
+    const old = translateV2Event({ type: "session.text.started", data: { sessionID: "s", assistantMessageID: "old", timestamp: 1_000 } }, state);
+    const info = old?.find(event => event.type === "message.updated")?.properties.info;
+    expect(info).not.toHaveProperty("model");
+    const current = translateV2Event({ type: "session.text.started", data: { sessionID: "s", assistantMessageID: "current", timestamp: 2_000, model: { providerID: "p", modelID: "new" } } }, state);
+    expect(current?.find(event => event.type === "message.updated")).toMatchObject({ properties: { info: { model: { providerID: "p", modelID: "new" } } } });
+  });
+
   test("fork excludes the selected boundary and preserves a root conversation", async () => {
     const originalFetch = globalThis.fetch;
     const requests: Request[] = [];
@@ -142,7 +178,7 @@ describe("explicit native skill attachments", () => {
       const result = await createClientV2("http://localhost:4096/opencode2", "/workspace", {}).session.promptAsync({ sessionID: "ses_cloud", model: { providerID: "witness", modelID: "model" }, parts });
       expect(result.error).toBeUndefined();
       expect(requests.map(request => request.path)).toEqual(["/opencode2/api/session/ses_cloud/model", "/opencode2/api/session/ses_cloud/prompt"]);
-      expect(requests.at(-1)?.body).toEqual({ text: v2PromptText(parts) });
+      expect(requests.at(-1)?.body).toEqual({ text: v2PromptText(parts), delivery: "steer" });
       expect(v2PromptText(parts)).toContain(capability);
       expect(v2PromptText(parts)).toContain("openwork-cloud_");
     } finally { globalThis.fetch = originalFetch; }
@@ -165,7 +201,7 @@ describe("explicit native skill attachments", () => {
         sessionID: "ses_skills", model: { providerID: "witness", modelID: "model" }, parts,
       });
       expect(result.error).toBeUndefined();
-      expect(requests.at(-1)?.body).toEqual({ text: "Prepare a report [skill release]", skills: [{ id: "native-release" }] });
+      expect(requests.at(-1)?.body).toEqual({ text: "Prepare a report [skill release]", delivery: "steer", skills: [{ id: "native-release" }] });
     } finally { globalThis.fetch = originalFetch; }
   });
 
@@ -744,7 +780,7 @@ describe("OpenCode v2 event translation", () => {
               input: command,
               output: "TOOL_RESULT_OK\n\nCommand exited with code 0.",
               title: "bash",
-              metadata: { status: "completed", truncated: false, exit: 0 },
+              metadata: { shellID: "sh_06e0e7c1e0017KTSezeFHBiGRk", status: "completed", truncated: false, exit: 0 },
               time: { start: 1_788_552_838_052, end: 1_788_552_838_184 },
             },
           },
@@ -1500,7 +1536,7 @@ describe("OpenCode v2 client compatibility", () => {
       ] as const) {
         const data = { ...identity, ordinal };
         const started = translateV2Event({ type: `session.${kind}.started`, created: start, data }, state);
-        expect(started?.[0]).toMatchObject({ properties: { info: { time: { created: start } } } });
+        expect(started?.[0]).toMatchObject({ properties: { info: { time: { created: 10 } } } });
         expect(started?.[1]).toMatchObject({ properties: { part: { id: parts?.[index]?.id, type: kind, text: "" } } });
         translateV2Event({ type: `session.${kind}.delta`, data: { ...data, delta: "partial" } }, state);
         const ended = { type: `session.${kind}.ended`, created: end, data: { ...data, text } };
@@ -1922,6 +1958,7 @@ describe("OpenCode v2 client compatibility", () => {
           id: "msg_06e0e76b900178zSuF55n4XEPY",
           sessionID: "ses_tool",
           role: "assistant",
+          model: capturedV2ToolMessage.model,
           time: { created: 1_788_552_837_299, completed: 1_788_552_838_186 },
         },
         parts: [
@@ -1981,7 +2018,7 @@ describe("OpenCode v2 client compatibility", () => {
       const request = await dispatched.promise;
       await delay(10);
       expect(settled).toBe(false);
-      expect(await request.clone().json()).toEqual({ text: "hello" });
+      expect(await request.clone().json()).toEqual({ text: "hello", delivery: "steer" });
       admission.resolve(response);
       const result = await pending;
       expect(result.error).toBeUndefined();
@@ -2552,7 +2589,7 @@ test("v2 prompts set the exact selected variant on the native model ref and omit
       { model: { providerID: "witness", id: "model" } },
     ]);
     expect(writes.filter((write) => write.path.endsWith("/prompt")).map((write) => write.body)).toEqual([
-      { text: "Hello" }, { text: "Hello" }, { text: "Hello" }, { text: "Hello" },
+      { text: "Hello", delivery: "steer" }, { text: "Hello", delivery: "steer" }, { text: "Hello", delivery: "steer" }, { text: "Hello", delivery: "steer" },
     ]);
   } finally { globalThis.fetch = originalFetch; }
 });
@@ -2730,7 +2767,7 @@ describe("v2 question forms", () => {
       expect((await client.session.promptAsync(parameters)).response.status).toBe(204);
       expect(requests.map((item) => item.method)).toEqual(["POST", "PUT", "POST"]);
       expect(requests[1]).toMatchObject({ path: "/opencode2/api/session/ses_side/instructions/entries/openwork-context", body: { value: parameters.system } });
-      expect(requests[2]?.body).toEqual({ text: "What is happening?" });
+      expect(requests[2]?.body).toEqual({ text: "What is happening?", delivery: "steer" });
       requests.length = 0; status = 503;
       expect((await client.session.promptAsync(parameters)).response.status).toBe(503);
       expect(requests.map((item) => item.method)).toEqual(["POST", "PUT"]);

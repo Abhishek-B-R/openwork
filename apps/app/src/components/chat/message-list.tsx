@@ -1,5 +1,8 @@
 "use memo";
 
+import { SteadyActivity } from "./steady-activity";
+import { messageActivity, messageNotice, runElapsed } from "@/lib/session-run";
+import { getCapabilityCallSentence } from "@/lib/capability-call";
 import * as React from "react"
 import {
   AlertTriangle,
@@ -225,7 +228,7 @@ function isReservedConnectionQuestionPart(part: ToolUIPart | DynamicToolUIPart):
   return part.type === "dynamic-tool" && /(?:^|_)question$/.test(part.toolName) && isReservedConnectionQuestion(part.input)
 }
 
-const ToolMessageInner = ({ part }: ToolMessageProps) => {
+const ToolMessageContent = ({ part }: ToolMessageProps) => {
   const { connectorIdentities, onMcpReconnect, onMcpReopenAuthorization, connectionQuestionToolCallId, getConnectionDecision } = useMessageList()
   const parentActive = React.useContext(ParentRunActiveContext)
   const resolveLifecycle = useCurrentToolLifecycleResolver()
@@ -238,7 +241,7 @@ const ToolMessageInner = ({ part }: ToolMessageProps) => {
 
   if (part.type === "dynamic-tool") {
     const calls = codeModeToolCalls(part)
-    if (calls) return <CodeModeTool part={part} calls={calls} lifecycle={lifecycle} connectors={connectorIdentities} />
+    if (calls) return <CodeModeTool part={part} calls={calls} lifecycle={lifecycle} connectors={connectorIdentities} parentActive={parentActive} />
   }
 
   if (lifecycle === "waiting") {
@@ -351,6 +354,12 @@ const ToolMessageInner = ({ part }: ToolMessageProps) => {
     />
   )
 }
+
+const ToolMessageInner = (props: ToolMessageProps) => {
+  const { connectionQuestionToolCallId } = useMessageList();
+  if (props.part.toolCallId === connectionQuestionToolCallId || isReservedConnectionQuestionPart(props.part)) return null;
+  return <div data-step-identity={props.part.callProviderMetadata?.openwork?.connectionOnly ? undefined : props.part.toolCallId}><ToolMessageContent {...props} /></div>;
+};
 
 const isEmptyMessage = (message: UIMessage): boolean => message.parts.length === 0
 
@@ -587,6 +596,8 @@ const AssistantMessage = React.memo(
                   key={`reasoning-${index}`}
                   disclosureKey={JSON.stringify(["reasoning", message.id, index])}
                   text={group.text}
+                  startedAt={group.startedAt}
+                  endedAt={group.endedAt}
                   isStreaming={group.isStreaming}
                 />
               )
@@ -1010,11 +1021,12 @@ const MessageComponent = React.memo(
   ({ message, isLastMessage, isStreaming, isLastStep, hideReasoning }: MessageComponentProps) => {
     if (isSessionErrorMessage(message)) {
       const presentation = sessionErrorPresentationFromUIMessage(message)
+      if (presentation?.kind === "aborted") return null
       return (
         <ErrorMessage
           error={getMessagesText([message]) || "Session failed"}
           description={presentation?.description}
-          showDescriptionOnResume={presentation?.kind !== "aborted" && presentation?.kind !== "provider-timeout"}
+          showDescriptionOnResume={presentation?.kind !== "provider-timeout"}
           resumePrompt={presentation?.recoveryPrompt}
           canRetry={isLastMessage && !isStreaming}
           technicalDetails={presentation?.technicalDetails}
@@ -1025,6 +1037,8 @@ const MessageComponent = React.memo(
       )
     }
 
+    const notice = messageNotice(message);
+    if (notice) return <SessionNoticeLine notice={notice} />;
     if (isEmptyMessage(message)) {
       return null
     }
@@ -1199,9 +1213,6 @@ const RetryMessage = React.memo(({ status }: RetryMessageProps) => {
 
 RetryMessage.displayName = "RetryMessage"
 
-const isMessageEmptyGroup = (messages: UIMessageWithIndex[]) =>
-  messages.every(message => isEmptyMessage(message.message));
-
 const getRenderableMessages = (messages: UIMessageWithIndex[]) =>
   messages.flatMap((item) => {
     const renderableMessage = getRenderableMessage(item.message);
@@ -1215,80 +1226,17 @@ function getRenderableMessage(message: UIMessage) {
   return parts.length > 0 ? { ...message, parts } : null;
 }
 
-/**
- * Running steps only ever grow. When a finished step folds its live detail
- * before the next step's row arrives, the area briefly got shorter and the
- * chat jumped; holding the tallest height seen during the run keeps it still.
- * The hold ends when the turn folds (this element unmounts).
- */
-function LiveSteps({ children }: { children: React.ReactNode }) {
-  const ref = React.useRef<HTMLDivElement>(null)
-  React.useLayoutEffect(() => {
-    const element = ref.current
-    if (!element || typeof ResizeObserver === "undefined") return
-    let tallest = 0
-    const hold = () => {
-      element.style.minHeight = ""
-      const height = element.getBoundingClientRect().height
-      if (height > tallest) tallest = height
-      element.style.minHeight = `${tallest}px`
-    }
-    hold()
-    const observer = new ResizeObserver(hold)
-    for (const child of element.children) observer.observe(child)
-    const mutations = new MutationObserver(() => {
-      observer.disconnect()
-      for (const child of element.children) observer.observe(child)
-      hold()
-    })
-    mutations.observe(element, { childList: true })
-    return () => {
-      observer.disconnect()
-      mutations.disconnect()
-    }
-  }, [])
-  return <div ref={ref} data-live-steps="" className="flex flex-col gap-2">{children}</div>
-}
-
-/**
- * A finished turn's steps collapse to a single "Worked for 1m 19s" line
- * that expands back into the full run. Only live turns show their steps
- * unprompted; once the answer is in, the reasoning is available but out
- * of the way.
- */
-function CompletedStepRun({ label, children }: { label: string; children: React.ReactNode }) {
-  const [open, setOpen] = React.useState(false)
-
-  return (
-    <Collapsible open={open} onOpenChange={setOpen} className="flex w-full flex-col gap-2">
-      <div className="mx-auto flex w-full max-w-3xl px-2 md:px-10">
-        <CollapsibleTrigger
-          className="group flex cursor-pointer items-center gap-1 text-sm text-muted-foreground transition-colors hover:text-foreground"
-          aria-label={open ? `${label}. Hide steps` : `${label}. Show steps`}
-        >
-          <span>{label}</span>
-          <ChevronRight
-            aria-hidden="true"
-            className={cn(
-              "size-3.5 text-muted-foreground/70 transition-transform duration-150",
-              open && "rotate-90"
-            )}
-          />
-        </CollapsibleTrigger>
-      </div>
-      <CollapsibleContent className="h-(--collapsible-panel-height) overflow-hidden transition-[height] duration-150 ease-out data-starting-style:h-0 data-ending-style:h-0 [&[hidden]:not([hidden='until-found'])]:hidden">
-        {children}
-      </CollapsibleContent>
-    </Collapsible>
-  )
-}
-
 interface AssistantMessageGroupProps {
   items: UIMessageWithIndex[]
+  runItems?: UIMessageWithIndex[]
+  hideRun?: boolean
   isLastGroup: boolean
   isStreaming: boolean
   /** Newline-joined tool call ids of each built App's newest card in the conversation. */
   newestAppCallIds: string
+  initiatingId?: string
+  elapsedSeconds: number
+  waiting: boolean
 }
 
 function isMcpAppFramePart(part: UIMessage["parts"][number]): part is DynamicToolUIPart {
@@ -1304,6 +1252,9 @@ function collectMcpAppParts(items: UIMessageWithIndex[]): DynamicToolUIPart[] {
     if (item.message.role !== "assistant" || isSessionErrorMessage(item.message)) continue
     for (const part of item.message.parts) {
       if (isMcpAppFramePart(part)) parts.set(part.toolCallId, part)
+      if (part.type === "dynamic-tool") for (const call of codeModeToolCalls(part) ?? []) {
+        if (isMcpAppFramePart(call)) parts.set(call.toolCallId, call)
+      }
     }
   }
   return [...parts.values()]
@@ -1319,9 +1270,12 @@ function newestBuiltAppCallIds(messages: UIMessage[]): string {
   for (const message of messages) {
     if (message.role !== "assistant" || isSessionErrorMessage(message)) continue
     for (const part of message.parts) {
-      if (!isMcpAppFramePart(part)) continue
-      const appId = builtMcpAppId(part)
-      if (appId) newest.set(appId, part.toolCallId)
+      const calls = part.type === "dynamic-tool" ? codeModeToolCalls(part) ?? [] : [];
+      for (const candidate of [part, ...calls]) {
+        if (!isMcpAppFramePart(candidate)) continue;
+        const appId = builtMcpAppId(candidate);
+        if (appId) newest.set(appId, candidate.toolCallId);
+      }
     }
   }
   return [...newest.values()].sort().join("\n")
@@ -1331,9 +1285,11 @@ function MessageGroup({
   items,
   isLastGroup,
   isStreaming,
-  newestAppCallIds,
+  newestAppCallIds, initiatingId, elapsedSeconds, waiting, runItems, hideRun,
 }: AssistantMessageGroupProps) {
-  const { onRevertToUserMessage, onForkAtMessage, forkingMessageId, showThinking, readOnly, getConnectionDecision } = useMessageList()
+  const { onRevertToUserMessage, onForkAtMessage, forkingMessageId, showThinking, readOnly, getConnectionDecision, workspaceId, sessionId, providerCatalog, connectorIdentities, syncDegraded } = useMessageList()
+  const activity = useSessionActivityStore(state => state.recordsByWorkspaceId[workspaceId]?.[sessionId]);
+  const run = initiatingId ? activity?.runs[initiatingId] : undefined;
   const connectionCardParts = React.useMemo(() => connectionCardPartIds(items, getConnectionDecision), [items, getConnectionDecision])
   const newestAppCalls = React.useMemo(() => new Set(newestAppCallIds.split("\n")), [newestAppCallIds])
   const lastItem = items[items.length - 1]
@@ -1343,7 +1299,7 @@ function MessageGroup({
   const lastRealItem = items.findLast((item) => !isSessionErrorMessage(item.message))
   const isLiveGroup = isStreaming && isLastGroup
 
-  if (!lastItem || isMessageEmptyGroup(items)) {
+  if (!lastItem) {
     return null;
   }
 
@@ -1381,62 +1337,70 @@ function MessageGroup({
         : <McpAppFrame part={part} />}
     </Message>
   )
-  // How long the turn spent working, from the first step to when the answer
-  // finished (or started, for older history without a completed timestamp).
-  // Server timestamps, so this survives a reload.
-  const stepsStartedAt = stepItems.length > 0 ? getMessageCreated(stepItems[0].message) : null
-  const stepsEndedAt = getMessageCompleted(lastItem.message) ?? getMessageCreated(lastItem.message)
-
   // The answer message's own thinking belongs to the work, not the answer, so
   // a collapsed run shows it and the message below renders text only.
   const proseReasoning = proseItems.flatMap((item) =>
     item.message.role === "assistant" && !isSessionErrorMessage(item.message)
       ? getAssistantRenderGroups(item.message.parts, showThinking).flatMap((group, groupIndex) =>
         group.kind === "reasoning"
-          ? [{ key: JSON.stringify(["reasoning", item.message.id, groupIndex]), text: group.text, isStreaming: group.isStreaming }]
+          ? [{ key: JSON.stringify(["reasoning", item.message.id, groupIndex]), text: group.text, isStreaming: group.isStreaming, startedAt: group.startedAt, endedAt: group.endedAt }]
           : []
       )
       : []
   )
   // An aggregate line counts each call it absorbed: it reads as one row but
   // stands for that much work, and folding should key off the work done.
-  const stepRowCount =
-    stepItems.reduce(
-      (total, item) =>
-        total +
-        (item.message.role === "assistant" && !isSessionErrorMessage(item.message)
-          ? getAssistantRenderGroups(item.message.parts, showThinking).reduce(
-            (rows, group) => rows + (group.kind === "tool-aggregate" ? group.parts.length + group.thoughts.length : 1),
-            0
-          )
-          : 1),
-      0
-    ) + proseReasoning.length
-  const stepRunLabel =
-    stepsStartedAt !== null && stepsEndedAt !== null && stepsEndedAt > stepsStartedAt
-      ? `Worked for ${formatToolCallDuration(stepsEndedAt - stepsStartedAt)}`
-      : stepRowCount === 1
-        ? "1 step"
-        : `${stepRowCount} steps`
-  // A short finished run reads fine as a list, so only long ones fold away.
-  const collapseSteps =
-    !isLiveGroup && stepItems.length > 0 && stepRowCount > COLLAPSED_STEP_RUN_MIN_ROWS
+  const activityItems = runItems ?? items;
+  const stepRowCount = new Set(activityItems.flatMap(item => item.message.parts.filter(isToolUIPart).filter(part => !part.callProviderMetadata?.openwork?.connectionOnly).map(part => part.toolCallId))).size
+    + activityItems.flatMap(item => item.message.parts).filter(part => part.type === "reasoning").length;
+  const stopped = run?.outcome === "stopped" || items.some(item => messageActivity(item.message).outcome === "stopped"
+    || isSessionErrorMessage(item.message) && sessionErrorPresentationFromUIMessage(item.message)?.kind === "aborted");
+  const stepRunLabel = `${stopped ? run ? "Stopped after" : "Stopped" : run ? "Worked for" : "Finished"}${run ? ` ${formatToolCallDuration(runElapsed(run, run.endedAt ?? Date.now()))}` : ""} · ${stepRowCount} ${stepRowCount === 1 ? "step" : "steps"}`;
+  const collapseSteps = !isLiveGroup;
+  const latestTool = activityItems.flatMap(item => item.message.parts).filter(isToolUIPart).at(-1);
+  const meaningful = isLiveGroup && Boolean(activity?.assistantOutput || activity?.latestActivity) || items.some(item => item.message.parts.some(part => isToolUIPart(part) || part.type === "reasoning" || part.type === "text" && part.text.trim()));
+  const innerCalls = latestTool?.type === "dynamic-tool" ? codeModeToolCalls(latestTool) : null;
+  const displayedTool = innerCalls?.findLast(isToolPartInFlight) ?? innerCalls?.at(-1) ?? latestTool;
+  const sentence = displayedTool?.type === "dynamic-tool" ? getCapabilityCallSentence(displayedTool) : null;
+  const waitingService = isLiveGroup && !syncDegraded && displayedTool?.type === "dynamic-tool"
+    && isToolPartInFlight(displayedTool) && activity?.lastProgressAt && Date.now() - activity.lastProgressAt >= 8_000
+    ? resolveConnectorToolIdentity(displayedTool, connectorIdentities)?.name ?? sentence?.service : null;
+  const currentLabel = waiting ? "Waiting for your action" : waitingService ? `Waiting on ${waitingService}` : displayedTool
+    ? isTaskToolPart(displayedTool) ? displayedTool.input?.description || "Running an agent" : sentence ? displayedTool.state === "output-available" ? sentence.past : displayedTool.state === "output-error" ? sentence.failure ?? `${sentence.past} failed` : sentence.present : "Working…"
+    : meaningful ? "Working…" : elapsedSeconds >= 10 ? "Starting the engine…" : "Starting…";
+  const models = [...new Set(activityItems.map(item => {
+    const value = messageActivity(item.message).model;
+    if (!value || typeof value !== "object") return null;
+    const provider = "providerID" in value ? value.providerID : undefined;
+    const id = "modelID" in value ? value.modelID : "id" in value ? value.id : undefined;
+    return typeof provider === "string" && typeof id === "string" ? providerCatalog?.[provider]?.[id]?.name ?? "Model unavailable" : "Model unavailable";
+  }).filter(Boolean))].join(" · ");
   const foldedReasoning = collapseSteps
     ? proseReasoning.map((reasoning) => (
       <Message
         key={`folded-reasoning-${reasoning.key}`}
         className="mx-auto flex w-full max-w-3xl flex-col items-start gap-2 px-2 md:px-10"
       >
-        <ReasoningBlock disclosureKey={reasoning.key} text={reasoning.text} isStreaming={reasoning.isStreaming} />
+        <ReasoningBlock disclosureKey={reasoning.key} text={reasoning.text} isStreaming={reasoning.isStreaming} startedAt={reasoning.startedAt} endedAt={reasoning.endedAt} />
       </Message>
     ))
     : []
 
+  if (runItems || hideRun) {
+    stepItems = (runItems ?? []).flatMap(item => {
+      const parts = item.message.parts.filter(part => isToolUIPart(part) || part.type === "reasoning");
+      return parts.length ? [{ index: item.index, message: { ...item.message, parts } }] : [];
+    });
+    proseItems = items.flatMap(item => {
+      const parts = item.message.parts.filter(part => !isToolUIPart(part) && part.type !== "reasoning");
+      return parts.length ? [{ index: item.index, message: { ...item.message, parts } }] : [];
+    });
+  }
   const renderItem = (item: UIMessageWithIndex, groupIndex: number, hideReasoning?: boolean) => {
     const isLastMessage = isLastGroup && item.index === lastItem.index
 
     return (
-      <div key={item.message.id}>
+      <div key={item.message.id.replace(/:steps$/, "")}>
         <MessageComponent
           message={item.message}
           isLastMessage={isLastMessage}
@@ -1471,7 +1435,7 @@ function MessageGroup({
           ? getAggregateOnlyParts(item.message, showThinking)
           : null
       if (aggregateParts) {
-        if (!run) run = { parts: [], key: item.message.id }
+        if (!run) run = { parts: [], key: item.message.id.replace(/:steps$/, "") }
         run.parts.push(...aggregateParts)
         return
       }
@@ -1489,20 +1453,11 @@ function MessageGroup({
       {/* The scroll area keeps the same 8px rhythm the parts inside a single
           message use, so a step row is spaced identically whether or not a
           message boundary happens to fall between it and the previous row. */}
-      {stepItems.length > 0 ? (
-        collapseSteps ? (
-          <CompletedStepRun label={stepRunLabel}>
-            <div className="flex flex-col gap-2">
-              {renderItems(stepItems, 0)}
-              {foldedReasoning}
-            </div>
-          </CompletedStepRun>
-        ) : (
-          <LiveSteps>
-            {renderItems(stepItems, 0)}
-          </LiveSteps>
-        )
-      ) : null}
+      {!hideRun ? <SteadyActivity active={isLiveGroup} waiting={waiting} label={currentLabel} summary={stepRunLabel}
+        count={stepRowCount} elapsed={elapsedSeconds} models={models}>
+        {renderItems(stepItems, 0)}
+        {!runItems && foldedReasoning}
+      </SteadyActivity> : null}
       {mcpAppParts.map(appFrame)}
       {renderItems(proseItems, stepItems.length, collapseSteps)}
       {lastTextMessage && !isStreaming && (
@@ -1549,8 +1504,14 @@ function MessageGroup({
 }
 
 function sameMessageGroupProps(left: AssistantMessageGroupProps, right: AssistantMessageGroupProps): boolean {
-  return left.isLastGroup === right.isLastGroup
+  return left.hideRun === right.hideRun
+    && left.runItems?.length === right.runItems?.length
+    && (left.runItems?.every((item, index) => item.message === right.runItems?.[index]?.message) ?? true)
+    && left.isLastGroup === right.isLastGroup
     && left.isStreaming === right.isStreaming
+    && left.initiatingId === right.initiatingId
+    && left.elapsedSeconds === right.elapsedSeconds
+    && left.waiting === right.waiting
     && left.newestAppCallIds === right.newestAppCallIds
     && left.items.length === right.items.length
     && left.items.every((item, index) => (
@@ -1582,6 +1543,14 @@ export interface RunSyncHealth {
   lastConfirmedAt: number | null
 }
 
+function SessionNoticeLine({ notice }: { notice: NonNullable<ReturnType<typeof messageNotice>> }) {
+  const { onOpenSubagentSession } = useMessageList();
+  const label = `${notice.description} ${notice.outcome === "completed" ? "completed" : notice.outcome === "cancelled" ? "stopped" : "reported an error"}`;
+  return <div data-session-notice={notice.id} className="mx-auto w-full max-w-3xl px-2 text-xs text-muted-foreground md:px-10">
+    {notice.source === "subagent" && onOpenSubagentSession ? <button type="button" onClick={() => onOpenSubagentSession(notice.subjectId)}>{label} ↗</button> : label}
+  </div>;
+}
+
 interface MessageListProps {
   messages: UIMessage[]
   messageIdReplacements?: ReadonlyMap<string, string>
@@ -1610,46 +1579,43 @@ export function shouldShowRunReconnecting(status: ThreadStatus, syncDegraded: bo
 }
 
 export function MessageList({ messages, messageIdReplacements, status, activityStatus, retryStatus, syncHealth, viewport, sessionErrorHandled = false }: MessageListProps) {
-  const { workspaceId, sessionId, onStopSubagentSession } = useMessageList()
-  const [stoppingBackground, setStoppingBackground] = React.useState(false)
+  const { workspaceId, sessionId } = useMessageList()
   const workspace = useWorkspaceMaybe()
-  const tasks = React.useMemo(() => activeDelegatedTasks(messages), [messages])
+  const tasks = React.useMemo(() => activeDelegatedTasks(messages).filter(part => part.input?.background !== true), [messages])
   const newestAppCallIds = React.useMemo(() => newestBuiltAppCallIds(messages), [messages])
-  const delegatedIds = React.useMemo(() => [...new Set(messages.flatMap(message => message.parts)
-    .filter(isToolUIPart).filter(isTaskToolPart).map(taskChildSessionId).filter((id): id is string => Boolean(id)))], [messages])
-  const backgroundCount = useSessionActivityStore(state => delegatedIds.filter(id =>
-    state.recordsByWorkspaceId[workspaceId]?.[id]?.runActive).length)
-
   const [observedAt] = React.useState(() => Date.now())
   const lastProgressAt = useSessionActivityStore((state) => {
     const records = state.recordsByWorkspaceId[workspaceId]
     const own = records?.[sessionId]
     return lastTaskProgressAt(Math.max(own?.runStartedAt || observedAt, own?.lastProgressAt ?? 0), tasks, records)
   })
-  const childBlocked = useSessionActivityStore((state) => tasks.some((part) => {
-    const id = taskChildSessionId(part)
-    const child = id ? state.recordsByWorkspaceId[workspaceId]?.[id] : undefined
-    return (child?.waitingPermissionIds.length ?? 0) > 0 || (child?.waitingQuestionIds.length ?? 0) > 0
-      || child?.compacting || child?.retrying
-  }))
+  const childBlocked = useSessionActivityStore((state) => {
+    const own = state.recordsByWorkspaceId[workspaceId]?.[sessionId];
+    return Boolean(own?.foregroundChildIds.length && !own.independentToolActive
+      && own.foregroundChildIds.every(id => {
+        const child = state.recordsByWorkspaceId[workspaceId]?.[id];
+        return (child?.waitingPermissionIds.length ?? 0) + (child?.waitingQuestionIds.length ?? 0) > 0;
+      }));
+  })
   const isStreaming = status === "streaming" || status === "retrying"
-  const runActive = status === "streaming" || status === "retrying"
+  const runActive = status === "submitted" || status === "streaming" || status === "retrying"
   const syncDegraded = syncHealth?.degraded === true
   const activityActive = runActive || tasks.length > 0
+  const ownActivity = useSessionActivityStore(state => state.recordsByWorkspaceId[workspaceId]?.[sessionId]);
+  const activeRun = ownActivity?.currentRunId ? ownActivity.runs[ownActivity.currentRunId] : undefined;
   const runStartedAtRef = React.useRef<number | null>(null)
   const [runElapsedSeconds, setRunElapsedSeconds] = React.useState(0)
-  // Anchor the counter to the user message that started the run (server
-  // timestamp), so switching sessions and back doesn't reset it to 0 on
-  // remount. Optimistic messages without metadata fall back to first-mount
-  // wall clock.
+  // Prefer the admitted run, which survives steering and navigation. Native
+  // message time is the fallback while the engine confirms an opening run.
   const runStartedAt = React.useMemo(() => {
     if (!runActive) return null
+    if (activeRun) return activeRun.startedAt
     for (let index = messages.length - 1; index >= 0; index--) {
       const message = messages[index]
       if (message && message.role === "user") return getMessageCreated(message)
     }
     return null
-  }, [messages, runActive])
+  }, [messages, runActive, activeRun])
   React.useEffect(() => {
     if (!activityActive) {
       runStartedAtRef.current = null
@@ -1665,27 +1631,46 @@ export function MessageList({ messages, messageIdReplacements, status, activityS
     if (syncDegraded) return
     const updateElapsed = () => {
       const startedAt = runStartedAtRef.current
-      if (startedAt !== null) setRunElapsedSeconds(Math.max(0, Math.floor((Date.now() - startedAt) / 1000)))
+      if (startedAt !== null) setRunElapsedSeconds(Math.max(0, Math.floor((activeRun ? runElapsed(activeRun, Date.now()) : Date.now() - startedAt) / 1000)))
     }
     updateElapsed()
     const interval = window.setInterval(updateElapsed, 1000)
     return () => window.clearInterval(interval)
-  }, [activityActive, runStartedAt, syncDegraded])
+  }, [activityActive, runStartedAt, syncDegraded, activeRun])
   const latestUserMessageId = React.useMemo(() => messages.findLast((message) => message.role === "user")?.id, [messages])
   const items = React.useMemo(() => groupMessages(messages, status), [messages, status]);
+  const runGroups = React.useMemo(() => {
+    const runs = Object.values(ownActivity?.runs ?? {});
+    const owners = new Map<string, string>();
+    const members = new Map<string, UIMessageWithIndex[]>();
+    const forGroup = new Map<string, string>();
+    for (const item of items) {
+      if (!isMessageGroup(item)) continue;
+      const first = item.messages[0];
+      if (!first) continue;
+      const initiating = messages.slice(0, first.index).findLast(message => message.role === "user" || messageNotice(message))?.id;
+      const run = runs.find(run => run.id === initiating || Boolean(initiating && (run.promptIds?.includes(initiating) || run.noticeIds?.includes(initiating))));
+      if (!run) continue;
+      forGroup.set(first.message.id, run.id);
+      if (!owners.has(run.id)) owners.set(run.id, first.message.id);
+      members.set(run.id, [...(members.get(run.id) ?? []), ...item.messages]);
+    }
+    return { owners, members, forGroup };
+  }, [items, messages, ownActivity?.runs]);
+  const activityOwner = activeRun ? runGroups.owners.get(activeRun.id) : null;
   const error = useSessionErrorMessage();
   const hasSessionErrorMessage = React.useMemo(() => messages.some(isSessionErrorMessage), [messages])
   const latestAssistantToolParts = React.useMemo(
     () => collectLatestAssistantToolParts(messages),
     [messages],
   )
-  const waiting = activityStatus === "waiting" || activityStatus === "compacting" || childBlocked
+  const waiting = activityStatus === "waiting" || childBlocked
   const showReconnecting = !waiting && !retryStatus && shouldShowRunReconnecting(status, syncDegraded)
   const noNewActivity = hasNoNewActivity({
     active: activityActive && activityStatus !== "error", waiting, retrying: status === "retrying" || Boolean(retryStatus),
     disconnected: syncDegraded, lastProgressAt, now: Date.now(),
   })
-  const showLoading = !waiting && !noNewActivity && !showReconnecting
+  const showLoading = !showReconnecting
     && shouldShowMessageListLoading(status, messages.length)
   const baseUrl = workspace?.opencodeBaseUrl
   React.useEffect(() => {
@@ -1715,13 +1700,21 @@ export function MessageList({ messages, messageIdReplacements, status, activityS
         header={messages.length === 0 && <TaskSuggestions className="mx-auto w-full max-w-3xl shrink-0 px-3 pb-3 md:px-5 md:pb-5 grow" />}
         renderGroup={(item) => {
         if (isMessageGroup(item)) {
+          const firstId = item.messages[0]?.message.id ?? "";
+          const groupRunId = runGroups.forGroup.get(firstId);
+          const ownsRun = groupRunId ? runGroups.owners.get(groupRunId) === firstId : true;
           return (
             <MemoizedMessageGroup
               key={item.messages[0]?.message.id ?? "empty-assistant-group"}
               items={item.messages}
-              isLastGroup={item.messages.at(-1)?.index === messages.length - 1}
-              isStreaming={isStreaming && item.messages.at(-1)?.index === messages.length - 1}
+              isLastGroup={activityOwner ? item.messages[0]?.message.id === activityOwner : item.messages.at(-1)?.index === messages.length - 1}
+              isStreaming={runActive}
+              runItems={ownsRun && groupRunId ? runGroups.members.get(groupRunId) : undefined}
+              hideRun={!ownsRun}
               newestAppCallIds={newestAppCallIds}
+              initiatingId={groupRunId ?? messages.slice(0, item.messages[0]?.index ?? 0).findLast(message => message.role === "user" || messageNotice(message))?.id}
+              elapsedSeconds={runElapsedSeconds}
+              waiting={waiting}
             />
           )
         }
@@ -1741,30 +1734,10 @@ export function MessageList({ messages, messageIdReplacements, status, activityS
         )
         }}
       >
-        {!runActive && backgroundCount > 0 && <div data-background-agents className="flex items-center gap-3 px-3 py-2 text-sm text-muted-foreground md:px-5">
-          <span>{syncDegraded ? "Background activity — reconnecting…" : `${backgroundCount} ${backgroundCount === 1 ? "agent" : "agents"} running`}</span>
-          {/* Stops only the background helpers; the chat itself is already idle. */}
-          {onStopSubagentSession && !syncDegraded ? (
-            <button
-              type="button"
-              disabled={stoppingBackground}
-              className="cursor-pointer text-xs text-muted-foreground/70 underline-offset-2 transition-colors hover:text-foreground hover:underline disabled:cursor-default disabled:opacity-50"
-              onClick={() => {
-                const records = useSessionActivityStore.getState().recordsByWorkspaceId[workspaceId]
-                const running = delegatedIds.filter((id) => records?.[id]?.runActive)
-                setStoppingBackground(true)
-                void Promise.allSettled(running.map((id) => onStopSubagentSession(id)))
-                  .finally(() => setStoppingBackground(false))
-              }}
-            >
-              {stoppingBackground ? "Stopping…" : backgroundCount === 1 ? "Stop" : "Stop all"}
-            </button>
-          ) : null}
-        </div>}
-        {showLoading && <LoadingMessage elapsedSeconds={runElapsedSeconds} starting={status === "submitted"} />}
+        {showLoading && !activityOwner && !items.some(item => isMessageGroup(item) && item.messages.at(-1)?.index === messages.length - 1) ? <SteadyActivity active waiting={waiting} label={ownActivity?.assistantOutput || ownActivity?.latestActivity ? "Working…" : runElapsedSeconds >= 10 ? "Starting the engine…" : "Starting…"} summary="" count={0} elapsed={runElapsedSeconds}>{null}</SteadyActivity> : null}
         {showReconnecting && <ReconnectingMessage lastConfirmedAt={syncHealth?.lastConfirmedAt ?? null} />}
         {retryStatus ? <RetryMessage status={retryStatus} /> : null}
-        {error && !hasSessionErrorMessage && !sessionErrorHandled ? <ErrorMessage error={error} /> : null}
+        {error && presentOpencodeSessionError(error).kind !== "aborted" && !hasSessionErrorMessage && !sessionErrorHandled ? <ErrorMessage error={error} /> : null}
       </ProgressiveMessageList>
     </CurrentToolLifecycleProvider>
     </ParentRunActiveContext.Provider>

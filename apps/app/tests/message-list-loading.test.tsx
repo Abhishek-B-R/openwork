@@ -113,10 +113,10 @@ describe("message-list loading feedback", () => {
   test("acknowledges a submitted message before streaming starts", () => {
     const markup = renderList([userMessage], "submitted");
 
-    expect(markup).toContain('role="status" data-loading-message="starting"');
+    expect(markup).toContain('data-working-line="true"');
     expect(markup).toContain("Starting…");
-    expect(markup).not.toContain("Working");
-    expect(markup).toContain("ow-text-shimmer");
+    expect(markup).toContain("Working 0s");
+    expect(markup).toContain("motion-reduce:animate-none");
     expect(markup).not.toContain("animate-spin");
     expect(markup).not.toContain("PaperGrainGradient");
   });
@@ -129,8 +129,8 @@ describe("message-list loading feedback", () => {
     const markup = renderList([userMessage], "streaming");
 
     expect(markup).toContain("Working 0s");
-    expect(markup).not.toContain("Starting");
-    expect(markup).toContain("ow-text-shimmer");
+    expect(markup).toContain("Starting…");
+    expect(markup).toContain("motion-reduce:animate-none");
     expect(markup).not.toContain("animate-spin");
     expect(markup).not.toContain("PaperGrainGradient");
   });
@@ -141,50 +141,24 @@ describe("message-list loading feedback", () => {
     expect(shouldShowMessageListLoading("submitted", 2)).toBe(true);
   });
 
-  test.each<SessionActivityStatus>(["waiting", "compacting"])("does not mask %s with pending feedback", (activityStatus) => {
+  test.each<SessionActivityStatus>(["waiting"])("does not mask %s with pending feedback", (activityStatus) => {
     const markup = renderToStaticMarkup(list([userMessage], "submitted", undefined, activityStatus));
     expect(markup).not.toContain('data-loading-message="starting"');
     expect(markup).not.toContain('data-loading-message="working"');
   });
 
-  test("does not start a work timer or age out pending feedback before confirmed activity", async () => {
-    const ownedDom = typeof window === "undefined";
-    if (ownedDom) GlobalRegistrator.register({ url: "http://localhost/" });
-    const actEnvironment = Reflect.get(globalThis, "IS_REACT_ACT_ENVIRONMENT");
-    Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
-    const container = document.createElement("div");
-    document.body.append(container);
-    const root = createRoot(container);
-    const clock = spyOn(Date, "now").mockReturnValue(1_000);
-    const interval = spyOn(window, "setInterval");
-    try {
-      await act(async () => { root.render(list([userMessage], "submitted")); });
-      expect(container.textContent).toContain("Starting…");
-      expect(interval).not.toHaveBeenCalled();
-      clock.mockReturnValue(62_000);
-      await act(async () => { root.render(list([userMessage], "submitted")); });
-      expect(container.textContent).toContain("Starting…");
-      expect(container.querySelector('[data-loading-message="working"]')).toBeNull();
-      expect(interval).not.toHaveBeenCalled();
-      await act(async () => {
-        useSessionActivityStore.getState().setRunStatus("ws", "session", { type: "busy" });
-        root.render(list([userMessage], "streaming"));
-      });
-      expect(container.textContent).toContain("Working 0s");
-      expect(container.querySelector('[data-loading-message="starting"]')).toBeNull();
-      expect(interval).toHaveBeenCalledTimes(1);
-      await act(async () => { root.render(list([userMessage], "ready")); });
-      expect(container.querySelector("[data-loading-message]")).toBeNull();
-    } finally {
-      await act(async () => { root.unmount(); });
-      container.remove();
-      interval.mockRestore();
-      clock.mockRestore();
-      Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", actEnvironment);
-      if (ownedDom) await GlobalRegistrator.unregister();
-    }
+  test("compaction is engine work and retains the ticking working line", () => {
+    const markup = renderToStaticMarkup(list([userMessage], "submitted", undefined, "compacting"));
+    expect(markup).toContain('data-loading-message="working"');
+    expect(markup).not.toContain("Waiting for your action");
   });
-});
+
+  test("starts the timer from Enter before confirmed activity", async () => {
+    const markup = renderList([userMessage], "submitted");
+    expect(markup).toContain("Starting…");
+    expect(markup).toContain("Working 0s");
+    expect(markup).toContain('data-live-steps=""');
+  });});
 
 const task: TaskToolPart = {
   type: "dynamic-tool", toolName: "task", toolCallId: "delegation", state: "input-available",
@@ -211,8 +185,8 @@ describe("task-linked meaningful progress", () => {
     }
     expect(renderList([userMessage, delegated], "ready")).not.toContain('data-loading-message="working"');
     expect(renderList([userMessage, delegated], "streaming", { degraded: true, lastConfirmedAt: null }))
-      .not.toContain('data-loading-message="working"');
-    for (const activityStatus of ["waiting", "compacting"] satisfies SessionActivityStatus[]) {
+      .toContain('data-loading-message="reconnecting"');
+    for (const activityStatus of ["waiting"] satisfies SessionActivityStatus[]) {
       expect(renderToStaticMarkup(list([userMessage, delegated], "streaming", undefined, activityStatus)))
         .not.toContain('data-loading-message="working"');
     }
@@ -226,8 +200,8 @@ describe("task-linked meaningful progress", () => {
     expect(html.indexOf('data-subagent-run="delegation"')).toBeLessThan(html.indexOf("What is the update?"));
     expect(html).not.toContain('data-testid="active-subagents"');
     expect(html).not.toContain("data-subagent-history");
-    expect(html.includes('data-loading-message="working"')).toBe(status === "streaming");
-    expect(html.includes('data-loading-message="starting"')).toBe(status === "submitted");
+    expect(html.includes('data-loading-message="working"')).toBe(status !== "ready");
+    expect(html.includes('data-loading-message="starting"')).toBe(false);
     expect(html).not.toContain("PRIVATE TASK PROMPT");
   });
 
@@ -283,7 +257,7 @@ describe("task-linked meaningful progress", () => {
       let html = container.innerHTML;
       expect(html).toContain('data-subagent-activity="no-new-activity"');
       expect(html).toContain("Still working — waiting for updates");
-      expect(html).not.toContain('data-loading-message="working"');
+      expect(html).toContain('data-loading-message="working"');
       expect(html).not.toContain('data-testid="session-error-resume"');
       const newTask: TaskToolPart = {
         ...task,
@@ -326,7 +300,7 @@ describe("task-linked meaningful progress", () => {
       expect(html).not.toContain('data-loading-message="no-new-activity"');
       expect(html).toContain('data-subagent-activity="shimmer"');
       expect(html).not.toContain("PRIVATE OUTPUT");
-      expect(html).toContain("Last activity: Response updated");
+      expect(html).not.toContain("Last activity:");
       clock.mockReturnValue(123_000);
       await act(async () => {
         store.observeTranscript("ws", "child", structuredClone([output]), true);
@@ -480,7 +454,7 @@ describe("message-list reconnecting feedback", () => {
 
     expect(markup).toContain('data-loading-message="reconnecting"');
     expect(markup).toContain("Connection lost — reconnecting…");
-    expect(markup).not.toContain("Working");
+    expect(markup).not.toContain("Working 0s");
     expect(markup).not.toContain("ow-text-shimmer");
   });
 

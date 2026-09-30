@@ -155,7 +155,7 @@ describe("session error resilience", () => {
     expect(presentation.technicalDetails).toContain("Error type: MessageAbortedError")
     expect(presentation.technicalDetails).toContain("Provider: openai")
     expect(presentation.technicalDetails).toContain("Code: ABORT_ERR")
-    expect(presentation.recoveryPrompt).toContain("do not repeat side effects")
+    expect(presentation.recoveryPrompt).toBeNull()
   })
 
   test("distinguishes a provider header timeout from an engine abort", () => {
@@ -256,7 +256,7 @@ describe("session error resilience", () => {
       </MessageListProvider>,
     )
 
-    expect(html).toContain("Task interrupted")
+    expect(html).toContain("Stopped · 0 steps")
     expect(html).not.toContain("Output and files already produced are kept")
     expect(html).not.toContain("Prepare recovery")
     expect(html).not.toContain('aria-label="Show error details"')
@@ -356,7 +356,7 @@ describe("session error resilience", () => {
     }
     const presentation = presentOpencodeSessionError(error)
     expect(presentation).toMatchObject({ kind: "provider-incomplete", title: "The model response was interrupted" })
-    expect(presentation.recoveryPrompt).toContain("do not repeat side effects")
+    expect(presentation.recoveryPrompt).toContain("Continue the interrupted task")
     const html = renderErrorTranscriptWithResume(error)
     expect(html).toContain('data-testid="session-error-interruption-warning"')
     expect(html).toContain("Some steps may have finished. Check before continuing.")
@@ -413,14 +413,14 @@ describe("session error resilience", () => {
     expect(presentation.connectUrl).toBeUndefined()
   })
 
-  test("offers an accessible icon-only retry below an interrupted message", () => {
+  test("leaves interrupted tasks for a person to follow up through the composer", () => {
     const html = renderErrorTranscriptWithResume({
       name: "MessageAbortedError",
       data: { message: "Aborted" },
     })
 
-    expect(html).toContain('data-testid="session-error-resume"')
-    expect(html).toContain('aria-label="Retry task"')
+    expect(html).not.toContain('data-testid="session-error-resume"')
+    expect(html).not.toContain('aria-label="Retry task"')
     expect(html).not.toContain(">Resume<")
   })
 
@@ -428,7 +428,7 @@ describe("session error resilience", () => {
     const html = renderErrorTranscriptWithResume({ name: "MessageAbortedError", data: { message: "Aborted" } }, [
       { id: "later-answer", role: "assistant", parts: [{ type: "text", text: "The next task is complete." }] },
     ])
-    expect(html).toContain("Task interrupted")
+    expect(html).toContain("Stopped · 0 steps")
     expect(html).not.toContain('aria-label="Retry task"')
   })
 
@@ -446,14 +446,14 @@ describe("session error resilience", () => {
     expect(presentOpencodeSessionError("connect ECONNREFUSED 127.0.0.1:12345").kind).toBe("generic")
   })
 
-  test("renders a resumable interruption as a quiet status line, not an error card", () => {
+  test("folds a stopped turn without a generated recovery action", () => {
     const html = renderErrorTranscriptWithResume({
       name: "MessageAbortedError",
       data: { message: "Aborted" },
     })
 
-    expect(html).toContain("Task interrupted")
-    expect(html).toContain('data-testid="session-error-interrupted"')
+    expect(html).toContain("Stopped · 0 steps")
+    expect(html).not.toContain('data-testid="session-error-interrupted"')
     expect(html).not.toContain('data-testid="session-error-interruption-warning"')
     expect(html).not.toContain("Output and files already produced are kept")
     expect(html).not.toContain("border-destructive/30")
@@ -594,7 +594,7 @@ describe("session error resilience", () => {
       expect(container.textContent).toContain("Review account")
 
       await renderRetry({ type: "retry", attempt: 4, next: Date.now() + 11000, message: "Internal server error" })
-      expect(container.querySelector('[role="status"]')?.textContent).toBe("The model couldn’t respond. Retrying…")
+      expect(container.querySelector('[data-testid="session-retrying"] [role="status"], [data-testid="session-retrying"][role="status"]')?.textContent).toBe("The model couldn’t respond. Retrying…")
       expect(container.textContent).not.toContain("Internal server error")
       expect(container.textContent).not.toContain("attempt 4")
       const details = container.querySelector<HTMLButtonElement>('[data-testid="session-error-details-toggle"]')
@@ -605,7 +605,7 @@ describe("session error resilience", () => {
       expect(container.querySelector('[data-testid="session-retrying"] .animate-spin')).toBeNull()
       await act(async () => details.click())
       expect(container.querySelector('[data-testid="session-error-details"]')?.textContent).toContain("attempt 4")
-      expect(container.querySelector('[role="status"]')?.textContent).not.toContain("attempt")
+      expect(container.querySelector('[data-testid="session-retrying"] [role="status"], [data-testid="session-retrying"][role="status"]')?.textContent).not.toContain("attempt")
     } finally {
       await act(async () => root.unmount())
       container.remove()

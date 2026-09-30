@@ -104,7 +104,7 @@ describe("finished turn step fold (single OpenCode message per turn)", () => {
       expect(markup).not.toContain("ow-text-shimmer");
     }
   });
-  test("folds interleaved steps into a 'Worked for …' line and keeps the answer", () => {
+  test("folds historical interleaved steps without inventing active time and keeps the answer", () => {
     const assistant: UIMessage = {
       id: "assistant-1",
       role: "assistant",
@@ -124,13 +124,14 @@ describe("finished turn step fold (single OpenCode message per turn)", () => {
 
     const markup = renderList([userMessage, assistant]);
 
-    // 79 seconds of work between created and completed.
-    expect(markup).toContain("Worked for 1m 19s");
+    // Historical timestamps do not tell us how much time was spent waiting.
+    expect(markup).toContain("Finished · 6 steps");
+    expect(markup).not.toContain("Worked for");
     // The answer stays visible outside the fold.
     expect(markup).toContain("Everything passed — the change is in.");
   });
 
-  test("a short turn stays inline with one aggregate line", () => {
+  test("a short turn also folds, preserving its underlying aggregate and answer", () => {
     const assistant: UIMessage = {
       id: "assistant-2",
       role: "assistant",
@@ -146,7 +147,9 @@ describe("finished turn step fold (single OpenCode message per turn)", () => {
     const markup = renderList([userMessage, assistant]);
 
     expect(markup).not.toContain("Worked for");
-    // Both calls merge into one aggregate summary line.
+    expect(markup).toContain("Finished · 2 steps");
+    expect(markup).toContain('hidden="" data-steps-rail');
+    // Both calls remain available in the folded rail.
     expect(markup).toContain("Edited 1 file, ran command");
     expect(markup).toContain("Done.");
   });

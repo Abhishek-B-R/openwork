@@ -71,18 +71,23 @@ function toolCallProviderMetadata(part: ToolPart): ProviderMetadata {
   const childSessionId = part.tool === "task" && typeof stateMetadata.sessionId === "string" && stateMetadata.sessionId.trim()
     ? stateMetadata.sessionId.trim()
     : null;
-  const toolStartedAt = (part.tool === "task" || part.metadata?.openworkV2CodeMode === true) && "time" in part.state && typeof part.state.time?.start === "number"
+  const toolStartedAt = stateMetadata.openworkToolTimingUnavailable !== true && "time" in part.state && typeof part.state.time?.start === "number"
     && Number.isFinite(part.state.time.start)
     ? part.state.time.start
     : null;
   const openwork = {
+    ...(stateMetadata.openworkToolTimingUnavailable === true ? { timingUnavailable: true } : {}),
+    ...(part.metadata?.openworkV2ConnectionOnly === true ? { connectionOnly: true } : {}),
     ...(part.id !== part.callID ? { sourcePartId: part.id } : {}),
     ...(mcpResult ? { mcpResult } : {}),
+    ...(stateMetadata.executionSource === "cloud" || stateMetadata.executionSource === "local" ? { executionSource: stateMetadata.executionSource } : {}),
     ...(childSessionId ? { childSessionId } : {}),
     ...(toolStartedAt === null ? {} : { toolStartedAt }),
+    ...(stateMetadata.openworkToolTimingUnavailable !== true && "time" in part.state && "end" in part.state.time && typeof part.state.time.end === "number" ? { toolEndedAt: part.state.time.end } : {}),
     ...(part.metadata?.openworkV2CodeMode === true ? {
       codeMode: {
         calls: Array.isArray(stateMetadata.toolCalls) && isJsonValue(stateMetadata.toolCalls) ? stateMetadata.toolCalls : [],
+        details: Array.isArray(stateMetadata.openworkToolDetails) && isJsonValue(stateMetadata.openworkToolDetails) ? stateMetadata.openworkToolDetails : [],
       },
     } : {}),
   };
