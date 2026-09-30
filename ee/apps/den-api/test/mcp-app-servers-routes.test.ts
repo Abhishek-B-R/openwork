@@ -409,7 +409,7 @@ test("each App's own MCP server exposes only its launch tool, declared tools, an
       uri: appSummary.resourceUri, mimeType: "text/html;profile=mcp-app", text: expect.stringContaining("compiled-marker"),
     })
     await expect(client.readResource({ uri: mcpAppResourceUri(otherAppId, revisionId) })).rejects.toThrow("not an available revision")
-    expect(resourceReads).toEqual([{ organizationId, member, enabled: true, appId, revisionId }])
+    expect(resourceReads).toEqual([{ organizationId, member, enabled: true, appId, revisionId, requestScope: expect.any(Object) }])
     await expect(client.callTool({ name: "search_capabilities", arguments: { query: "project" } })).rejects.toThrow("is not available on Project explorer")
   })
 
