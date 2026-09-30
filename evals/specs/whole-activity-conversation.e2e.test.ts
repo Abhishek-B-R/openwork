@@ -40,7 +40,13 @@ test(`ACT-WHOLE ${resolveEvalEngine()}: a person follows a whole conversation fr
     const delegation = await probe.eventually(async () => ({ failures: (await world.nativeTools()).filter(tool => tool.state?.status === "error"), needs: (await probe.dom("[data-agent-tray]")).elements.some(element => element.text.includes("needs you")) }), {
       within: 60_000, label: "the native child reaches its decision", until: state => state.needs || state.failures.length > 0,
     }).catch(async error => {
-      evidence.recordJsonArtifact("Native tools before the missing child decision", await world.nativeTools());
+      const tools = await world.nativeTools();
+      evidence.recordJsonArtifact("Native tools before the missing child decision", tools);
+      for (const tool of tools) {
+        const metadata = tool.state?.metadata;
+        if (tool.tool !== "task" || !metadata || typeof metadata !== "object" || !("sessionId" in metadata) || typeof metadata.sessionId !== "string") continue;
+        evidence.recordJsonArtifact("Native child tools before the missing decision", await world.nativeTools(metadata.sessionId));
+      }
       evidence.recordJsonArtifact("Child rows before the missing decision", await probe.dom("[data-subagent-run], [data-agent-tray]"));
       evidence.recordJsonArtifact("Composer before the missing decision", await probe.composer());
       await user.screenshot();

@@ -99,8 +99,8 @@ export async function wholeActivity(seed: Seed) {
     backgroundState: () => base.den.mocks.connector.agentReplyState(backgroundBrief),
     finishBackground: () => base.den.mocks.connector.releaseAgentReply(backgroundBrief),
     stoppedBackgroundState: () => base.den.mocks.connector.agentReplyState(backgroundStopBrief),
-    nativeTools: (): Promise<{ tool?: string; state?: { status: string; error?: unknown; metadata?: unknown } }[]> => seed.evalIn(base.app, browserScript(async (workspaceId, engine) => {
-      const sessionId = document.querySelector("[data-session-surface-id]")?.getAttribute("data-session-surface-id");
+    nativeTools: (targetSessionId?: string): Promise<{ tool?: string; state?: { status: string; error?: unknown; metadata?: unknown } }[]> => seed.evalIn(base.app, browserScript(async (workspaceId, engine, targetSessionId) => {
+      const sessionId = targetSessionId ?? document.querySelector("[data-session-surface-id]")?.getAttribute("data-session-surface-id");
       const response = await fetch("http://127.0.0.1:" + localStorage.getItem("openwork.server.port") + "/workspace/" + encodeURIComponent(workspaceId)
         + (engine === "v2" ? "/opencode2/api" : "/opencode") + "/session/" + encodeURIComponent(sessionId ?? "") + "/message?limit=50", {
         headers: { Authorization: "Bearer " + localStorage.getItem("openwork.server.token") },
@@ -110,6 +110,6 @@ export async function wholeActivity(seed: Seed) {
       return (Array.isArray(raw) ? raw : raw.data ?? []).flatMap((message: { parts?: { type: string; tool?: string; state?: { status: string; error?: unknown; metadata?: unknown } }[]; content?: { type: string; name?: string; state?: { status: string; error?: unknown; metadata?: unknown } }[] }) =>
         (message.parts ?? message.content ?? []).filter(part => part.type === "tool")
           .map(part => ({ tool: "tool" in part ? part.tool : "name" in part ? part.name : undefined, state: part.state })));
-    }, [workspace.workspaceId, engine]), { awaitPromise: true }),
+    }, [workspace.workspaceId, engine, targetSessionId ?? null]), { awaitPromise: true }),
   };
 }
