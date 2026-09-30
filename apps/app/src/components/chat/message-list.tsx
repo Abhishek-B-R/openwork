@@ -77,6 +77,10 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible"
 import { ImageAttachmentBadge } from "@/components/chat/image-attachment-badge"
+import { AttachmentFileChip, ComposerBadgeChip, ComposerPillChip, PastedTextChip } from "@/components/chat/composer-pill"
+import { agentBadge, fileMentionBadge } from "@/react-app/domains/session/surface/composer/composer-chips"
+import { isChatAttachmentUrl } from "@/react-app/domains/session/sync/attachment-file-part"
+import { readComposerPill, splitComposerPillText } from "@/react-app/domains/session/surface/composer/composer-pills"
 import { Image } from "@/components/ui/image"
 import {
   Message,
@@ -91,7 +95,7 @@ import { ConnectionCard } from "@/components/chat/connection-card"
 import { connectionFromChatToolPart } from "@/components/tools/error-attribution"
 import { isReservedConnectionQuestion, type ChatConnectionDecisionBinding } from "@/react-app/domains/session/surface/mcp-chat-reconnect"
 import { codeModeToolCalls } from "@/lib/code-mode-tools"
-import { hasPreservedMcpAppResult, isNativeConnectionAppLaunch, McpAppFrame } from "@/components/chat/mcp-app-frame"
+import { builtMcpAppId, hasPreservedMcpAppResult, isNativeConnectionAppLaunch, McpAppFrame } from "@/components/chat/mcp-app-frame"
 import { ReasoningBlock } from "@/components/chat/reasoning-block"
 import { SubagentRunLine } from "@/components/chat/subagent-run-line"
 import { ToolAggregateGroup } from "@/components/chat/tool-aggregate-group"
@@ -406,8 +410,59 @@ function FileMessage({ part, tone }: FileMessageProps) {
     </>
   )
 
-  if (isImage && tone === "user") {
+  const actions = downloadUrl || canReveal ? (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        render={
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            aria-label={`More actions for ${title}`}
+          >
+            <MoreHorizontal />
+          </Button>
+        }
+      />
+      <DropdownMenuContent align="end" className="min-w-44">
+        {downloadUrl ? (
+          <DropdownMenuItem onClick={handleDownload}>
+            <Download />
+            Download
+          </DropdownMenuItem>
+        ) : null}
+        {canReveal ? (
+          <DropdownMenuItem onClick={handleReveal}>
+            <FolderOpen />
+            Reveal in Finder
+          </DropdownMenuItem>
+        ) : null}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  ) : null
+
+  if (isImage && tone === "user" && !revealPath) {
     return <ImageAttachmentBadge src={part.url} alt={title} />
+  }
+
+  if (tone === "user" && revealPath && !isChatAttachmentUrl(part.url)) {
+    return (
+      <button type="button" className="inline rounded-lg align-middle" onClick={() => openArtifactPath(revealPath)} title={`Open ${title} in Artifacts`}>
+        <ComposerBadgeChip badge={fileMentionBadge(revealPath)} className="mx-0" />
+      </button>
+    )
+  }
+
+  if (tone === "user") {
+    return (
+      <AttachmentFileChip
+        filename={title}
+        mime={part.mediaType}
+        bytes={fileBytes(part)}
+        onOpen={revealPath ? () => openArtifactPath(revealPath) : undefined}
+        actions={actions}
+      />
+    )
   }
 
   if (isImage) {
@@ -438,36 +493,7 @@ function FileMessage({ part, tone }: FileMessageProps) {
       ) : (
         <div className="flex min-w-0 items-center gap-2 pe-2">{fileContent}</div>
       )}
-      {downloadUrl || canReveal ? (
-        <DropdownMenu>
-          <DropdownMenuTrigger
-            render={
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-xs"
-                aria-label={`More actions for ${title}`}
-              >
-                <MoreHorizontal />
-              </Button>
-            }
-          />
-          <DropdownMenuContent align="end" className="min-w-44">
-            {downloadUrl ? (
-              <DropdownMenuItem onClick={handleDownload}>
-                <Download />
-                Download
-              </DropdownMenuItem>
-            ) : null}
-            {canReveal ? (
-              <DropdownMenuItem onClick={handleReveal}>
-                <FolderOpen />
-                Reveal in Finder
-              </DropdownMenuItem>
-            ) : null}
-          </DropdownMenuContent>
-        </DropdownMenu>
-      ) : null}
+      {actions}
     </div>
   )
 }
@@ -601,14 +627,35 @@ type UserMessageProps = {
   isStreaming: boolean
 }
 
-const USER_SKILL_TOKEN_RE = /(Load \[skill [^\]]+\] and follow its instructions\.|\[skill [^\]]+\])/
+function isPastedTextPart(part: UIMessage["parts"][number]) {
+  if (part.type !== "text") return false
+  const metadata = part.providerMetadata?.opencode
+  return Boolean(metadata && typeof metadata === "object" && "pastedText" in metadata && metadata.pastedText === true)
+}
 
-function UserSkillChip(props: { name: string }) {
-  return (
-    <span className="mx-0.5 inline-flex items-center rounded-full border border-violet-6/35 bg-violet-3/20 px-2.5 py-1 text-xs font-medium text-violet-11 align-middle" title={`Skill: ${props.name}`}>
-      {props.name}
-    </span>
-  )
+function fileBytes(part: FileUIPart) {
+  const metadata = part.providerMetadata?.opencode
+  const bytes = metadata && typeof metadata === "object" && "bytes" in metadata ? metadata.bytes : undefined
+  return typeof bytes === "number" ? bytes : undefined
+}
+
+/** Agent and file mentions keep their composer badge in the sent message. */
+function textPartMentionBadge(part: UIMessage["parts"][number]) {
+  if (part.type !== "text") return null
+  const metadata = part.providerMetadata?.opencode
+  if (!metadata || typeof metadata !== "object") return null
+  if ("agentMention" in metadata && typeof metadata.agentMention === "string") return agentBadge(metadata.agentMention)
+  if ("fileMention" in metadata && typeof metadata.fileMention === "string") return fileMentionBadge(metadata.fileMention)
+  return null
+}
+
+/** The pill a sent text part was tagged with in the composer, if any. */
+function textPartComposerPill(part: UIMessage["parts"][number]) {
+  if (part.type !== "text") return null
+  const metadata = part.providerMetadata?.opencode
+  return metadata && typeof metadata === "object" && "composerPill" in metadata
+    ? readComposerPill(metadata.composerPill)
+    : null
 }
 
 function renderPlainTextWithSearchHighlights(text: string, highlightQuery: string | undefined, keyPrefix: string) {
@@ -730,15 +777,18 @@ function renderPlainTextWithLinks(text: string, highlightQuery: string | undefin
   return nodes
 }
 
-function renderUserTextWithSkillChips(text: string, highlightQuery: string | undefined, references: SessionReferences | undefined) {
-  if (!USER_SKILL_TOKEN_RE.test(text)) return renderPlainTextWithLinks(text, highlightQuery, "text", references)
+function renderUserTextWithPills(text: string, highlightQuery: string | undefined, references: SessionReferences | undefined) {
+  const segments = splitComposerPillText(text)
+  if (segments.length === 1 && typeof segments[0] === "string") return renderPlainTextWithLinks(text, highlightQuery, "text", references)
   let offset = 0
-  return text.split(USER_SKILL_TOKEN_RE).map((segment) => {
-    const key = `${offset}:${segment}`
+  return segments.map((segment) => {
+    const key = `${offset}`
+    if (typeof segment !== "string") {
+      offset += 1
+      return <ComposerPillChip key={`pill:${key}`} pill={segment} />
+    }
     offset += segment.length
-    const skillMatch = segment.match(/^(?:Load )?\[skill ([^\]]+)\](?: and follow its instructions\.)?$/)
-    if (skillMatch?.[1]) return <UserSkillChip key={key} name={skillMatch[1]} />
-    return <React.Fragment key={key}>{renderPlainTextWithLinks(segment, highlightQuery, key, references)}</React.Fragment>
+    return <React.Fragment key={`text:${key}`}>{renderPlainTextWithLinks(segment, highlightQuery, key, references)}</React.Fragment>
   })
 }
 
@@ -760,21 +810,21 @@ function renderUserProse(text: string, highlightQuery: string | undefined, refer
     const exactId = Boolean(closing) && /^ses_[A-Za-z0-9][A-Za-z0-9_-]*$/.test(body)
     nodes.push(
       <React.Fragment key={`prose:${cursor}`}>
-        {renderUserTextWithSkillChips(text.slice(cursor, start), highlightQuery, references)}
+        {renderUserTextWithPills(text.slice(cursor, start), highlightQuery, references)}
       </React.Fragment>,
       <React.Fragment key={`inline-code:${start}`}>
-        {renderUserTextWithSkillChips(text.slice(start, end), highlightQuery, exactId ? references : undefined)}
+        {renderUserTextWithPills(text.slice(start, end), highlightQuery, exactId ? references : undefined)}
       </React.Fragment>
     )
     cursor = end
     if (!closing) break
   }
-  nodes.push(<React.Fragment key={`prose:${cursor}`}>{renderUserTextWithSkillChips(text.slice(cursor), highlightQuery, references)}</React.Fragment>)
+  nodes.push(<React.Fragment key={`prose:${cursor}`}>{renderUserTextWithPills(text.slice(cursor), highlightQuery, references)}</React.Fragment>)
   return nodes
 }
 
 function renderUserText(text: string, highlightQuery: string | undefined, references: SessionReferences | undefined) {
-  if (!references) return renderUserTextWithSkillChips(text, highlightQuery, undefined)
+  if (!references) return renderUserTextWithPills(text, highlightQuery, undefined)
   const nodes: React.ReactNode[] = []
   const blocks = /^(?:[ \t]*(?:>[ \t]*)*(?:(?:[-+*]|\d+[.)])[ \t]+)?(`{3,}|~{3,})[^\n]*(?:\n|$)|(?: {4}|\t)[^\n]*(?:\n|$))/gm
   let cursor = 0
@@ -794,7 +844,7 @@ function renderUserText(text: string, highlightQuery: string | undefined, refere
         {renderUserProse(text.slice(cursor, start), highlightQuery, references)}
       </React.Fragment>,
       <React.Fragment key={`code-block:${start}`}>
-        {renderUserTextWithSkillChips(text.slice(start, end), highlightQuery, undefined)}
+        {renderUserTextWithPills(text.slice(start, end), highlightQuery, undefined)}
       </React.Fragment>
     )
     cursor = end
@@ -857,6 +907,11 @@ const UserMessage = React.memo(
                     onClick={openLink}
                   >
                     {inlineParts.map((part, index) => {
+                      const pill = textPartComposerPill(part)
+                      if (pill) return <ComposerPillChip key={`pill-${index}`} pill={pill} />
+                      if (part.type === "text" && isPastedTextPart(part)) return <PastedTextChip key={`pasted-${index}`} text={part.text} />
+                      const mention = textPartMentionBadge(part)
+                      if (mention) return <ComposerBadgeChip key={`mention-${index}`} badge={mention} />
                       if (part.type === "text") {
                         return (
                           <span key={`text-${index}`} className="whitespace-pre-wrap">
@@ -1232,6 +1287,15 @@ interface AssistantMessageGroupProps {
   items: UIMessageWithIndex[]
   isLastGroup: boolean
   isStreaming: boolean
+  /** Newline-joined tool call ids of each built App's newest card in the conversation. */
+  newestAppCallIds: string
+}
+
+function isMcpAppFramePart(part: UIMessage["parts"][number]): part is DynamicToolUIPart {
+  return part.type === "dynamic-tool"
+    && (part.state === "output-available" || part.state === "output-error")
+    && hasPreservedMcpAppResult(part)
+    && !isNativeConnectionAppLaunch(part)
 }
 
 function collectMcpAppParts(items: UIMessageWithIndex[]): DynamicToolUIPart[] {
@@ -1239,26 +1303,39 @@ function collectMcpAppParts(items: UIMessageWithIndex[]): DynamicToolUIPart[] {
   for (const item of items) {
     if (item.message.role !== "assistant" || isSessionErrorMessage(item.message)) continue
     for (const part of item.message.parts) {
-      if (
-        part.type === "dynamic-tool"
-        && (part.state === "output-available" || part.state === "output-error")
-        && hasPreservedMcpAppResult(part)
-        && !isNativeConnectionAppLaunch(part)
-      ) {
-        parts.set(part.toolCallId, part)
-      }
+      if (isMcpAppFramePart(part)) parts.set(part.toolCallId, part)
     }
   }
   return [...parts.values()]
+}
+
+/**
+ * Every card of an App built in OpenWork opens the App's current revision, so
+ * only its newest card in the conversation stays live; earlier ones would load
+ * the same App again. A string keeps memoized groups stable while text streams.
+ */
+function newestBuiltAppCallIds(messages: UIMessage[]): string {
+  const newest = new Map<string, string>()
+  for (const message of messages) {
+    if (message.role !== "assistant" || isSessionErrorMessage(message)) continue
+    for (const part of message.parts) {
+      if (!isMcpAppFramePart(part)) continue
+      const appId = builtMcpAppId(part)
+      if (appId) newest.set(appId, part.toolCallId)
+    }
+  }
+  return [...newest.values()].sort().join("\n")
 }
 
 function MessageGroup({
   items,
   isLastGroup,
   isStreaming,
+  newestAppCallIds,
 }: AssistantMessageGroupProps) {
   const { onRevertToUserMessage, onForkAtMessage, forkingMessageId, showThinking, readOnly, getConnectionDecision } = useMessageList()
   const connectionCardParts = React.useMemo(() => connectionCardPartIds(items, getConnectionDecision), [items, getConnectionDecision])
+  const newestAppCalls = React.useMemo(() => new Set(newestAppCallIds.split("\n")), [newestAppCallIds])
   const lastItem = items[items.length - 1]
   // Branch/revert must target a real server-side message id. Synthetic
   // client-side messages (e.g. session errors) don't exist on the server and
@@ -1294,6 +1371,16 @@ function MessageGroup({
       proseItems = [{ index: firstProse.index, message: split.answer }, ...proseItems.slice(1)]
     }
   }
+  const appFrame = (part: DynamicToolUIPart) => (
+    <Message
+      key={`mcp-app-${part.toolCallId}`}
+      className="mx-auto flex w-full max-w-3xl flex-col px-2 empty:hidden md:px-10"
+    >
+      {builtMcpAppId(part) && !newestAppCalls.has(part.toolCallId)
+        ? <p className="mt-2 text-xs text-muted-foreground">This App has a newer version below.</p>
+        : <McpAppFrame part={part} />}
+    </Message>
+  )
   // How long the turn spent working, from the first step to when the answer
   // finished (or started, for older history without a completed timestamp).
   // Server timestamps, so this survives a reload.
@@ -1416,14 +1503,7 @@ function MessageGroup({
           </LiveSteps>
         )
       ) : null}
-      {mcpAppParts.map((part) => (
-        <Message
-          key={`mcp-app-${part.toolCallId}`}
-          className="mx-auto flex w-full max-w-3xl flex-col px-2 empty:hidden md:px-10"
-        >
-          <McpAppFrame part={part} />
-        </Message>
-      ))}
+      {mcpAppParts.map(appFrame)}
       {renderItems(proseItems, stepItems.length, collapseSteps)}
       {lastTextMessage && !isStreaming && (
         <div className={cn("mx-auto flex w-full max-w-3xl flex-wrap items-center gap-2 px-2 transition-opacity duration-150 group-hover/message-group:opacity-100 max-lg:opacity-100 pointer-coarse:opacity-100 md:px-8", forkingMessageId && forkingMessageId === lastRealItem?.message.id ? "opacity-100" : "opacity-0")}>
@@ -1471,6 +1551,7 @@ function MessageGroup({
 function sameMessageGroupProps(left: AssistantMessageGroupProps, right: AssistantMessageGroupProps): boolean {
   return left.isLastGroup === right.isLastGroup
     && left.isStreaming === right.isStreaming
+    && left.newestAppCallIds === right.newestAppCallIds
     && left.items.length === right.items.length
     && left.items.every((item, index) => (
       item.index === right.items[index]?.index
@@ -1533,6 +1614,7 @@ export function MessageList({ messages, messageIdReplacements, status, activityS
   const [stoppingBackground, setStoppingBackground] = React.useState(false)
   const workspace = useWorkspaceMaybe()
   const tasks = React.useMemo(() => activeDelegatedTasks(messages), [messages])
+  const newestAppCallIds = React.useMemo(() => newestBuiltAppCallIds(messages), [messages])
   const delegatedIds = React.useMemo(() => [...new Set(messages.flatMap(message => message.parts)
     .filter(isToolUIPart).filter(isTaskToolPart).map(taskChildSessionId).filter((id): id is string => Boolean(id)))], [messages])
   const backgroundCount = useSessionActivityStore(state => delegatedIds.filter(id =>
@@ -1639,6 +1721,7 @@ export function MessageList({ messages, messageIdReplacements, status, activityS
               items={item.messages}
               isLastGroup={item.messages.at(-1)?.index === messages.length - 1}
               isStreaming={isStreaming && item.messages.at(-1)?.index === messages.length - 1}
+              newestAppCallIds={newestAppCallIds}
             />
           )
         }

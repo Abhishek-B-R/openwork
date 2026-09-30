@@ -6,14 +6,20 @@ import {
   createV2EventTranslationState,
   mapV2McpStatuses,
   translateV2Event,
+  v2AcknowledgementText,
   v2PromptText,
   type V2MappedMessage,
 } from "../src/app/lib/opencode-v2-adapter";
+import { attachmentNoteText } from "../src/app/lib/v2-prompt-context";
+import { snapshotToUIMessages } from "../src/react-app/domains/session/sync/usechat-adapter";
+import { connectorPrompt } from "../src/react-app/domains/session/surface/composer/connector-token";
 import { parseDynamicToolUIPart } from "../src/react-app/domains/session/sync/parse-tool-parts";
 import { codeModeToolCalls } from "../src/lib/code-mode-tools";
+import { connectionFromChatToolPart } from "../src/components/tools/error-attribution";
+import type { ToolPart } from "@opencode-ai/sdk/v2/client";
 import { getModelBehaviorControls, getModelBehaviorOptions } from "../src/app/lib/model-behavior";
 import { catalogFastVariants, fastVariantId, nativeModelVariants } from "@openwork/types/cloud-model-fast";
-import { mentionPromptParts } from "../src/react-app/domains/session/sync/mention-parts";
+import { composerPillPromptParts } from "../src/react-app/domains/session/surface/composer/composer-pills";
 import { subscribeProviderCatalogChanges } from "../src/app/lib/provider-events";
 
 describe("MCP status", () => {
@@ -131,7 +137,7 @@ describe("explicit native skill attachments", () => {
     };
     try {
       const capability = "plugin:plg_cobalt:cob_release";
-      const parts = mentionPromptParts({ type: "connect-skill", slug: "cobalt", name: "Cobalt", marketplace: "Releases", capability })
+      const parts = composerPillPromptParts({ kind: "connect-skill", slug: "cobalt", name: "Cobalt", marketplace: "Releases", capability })
         .map(part => legacy && part.synthetic ? { ...part, metadata: { openworkSelectedSkill: { id: capability } } } : part);
       const result = await createClientV2("http://localhost:4096/opencode2", "/workspace", {}).session.promptAsync({ sessionID: "ses_cloud", model: { providerID: "witness", modelID: "model" }, parts });
       expect(result.error).toBeUndefined();
@@ -151,7 +157,7 @@ describe("explicit native skill attachments", () => {
       return jsonResponse({ data: request.url.endsWith("/skill") ? [{ id: "native-release", name: "release" }] : { effect: "allow" } });
     };
     try {
-      const selected = mentionPromptParts({ type: "skill", name: "release" });
+      const selected = composerPillPromptParts({ kind: "skill", name: "release" });
       expect(selected[1]).toMatchObject({ synthetic: true, text: "Load [skill release] and follow its instructions." });
       const parts = [{ type: "text", text: "Prepare a report " }, ...selected, selected[1]];
       expect(v2PromptText(parts)).toBe("Prepare a report [skill release]");
@@ -173,7 +179,7 @@ describe("explicit native skill attachments", () => {
     try {
       const result = await createClientV2("http://localhost:4096/opencode2", "/workspace", {}).session.promptAsync({
         sessionID: "ses_skills", model: { providerID: "witness", modelID: "model" },
-        parts: mentionPromptParts({ type: "skill", name: "release" }),
+        parts: composerPillPromptParts({ kind: "skill", name: "release" }),
       });
       expect(result.error).toMatchObject({ message: expect.stringContaining("Nothing was sent") });
       expect(methods).toEqual(["GET"]);
@@ -197,7 +203,7 @@ describe("explicit native skill attachments", () => {
     try {
       const result = await createClientV2("http://localhost:4096/opencode2", "/workspace", {}).session.promptAsync({
         sessionID: "ses_skills", model: { providerID: "witness", modelID: "model" },
-        parts: mentionPromptParts({ type: "skill", name: "release" }),
+        parts: composerPillPromptParts({ kind: "skill", name: "release" }),
       });
       expect(result.error).toMatchObject({ message: expect.stringContaining("Nothing was sent") });
       expect(paths).toEqual(["/opencode2/api/skill", "/opencode2/api/session/ses_skills/permission"]);
@@ -349,6 +355,11 @@ const capturedV2ToolEvents = [
 
 const delay = (milliseconds: number) =>
   new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
+
+function isToolPart(value: unknown): value is ToolPart {
+  return typeof value === "object" && value !== null && "type" in value && value.type === "tool"
+    && "callID" in value && typeof value.callID === "string" && "state" in value && typeof value.state === "object";
+}
 
 function jsonResponse(value: unknown, status = 200): Response {
   return new Response(JSON.stringify(value), {
@@ -1395,6 +1406,60 @@ describe("OpenCode v2 client compatibility", () => {
       expect(ui).toMatchObject({ output: "Combined result" });
     } finally { globalThis.fetch = originalFetch; }
   });
+  test("Code Mode connection reports become the tool parts v1 saves, so the connection card finds them", async () => {
+    // Shapes recorded from opencode2 beta-19086 with the openwork-mcp-results-v2 plugin: a
+    // connection_action result keeps its structuredContent; an isError call keeps its text.
+    const connection = {
+      schemaVersion: "1", connectionId: "conn_notion", connectionName: "Notion", state: "needs_connection", actor: "member",
+      message: "Connect Notion to continue.", action: { type: "connect", label: "Connect", surface: "openwork_your_connections" },
+    };
+    const openworkMcpResults = [
+      { tool: "openwork-cloud_connection_action", input: { connectionId: "conn_notion" }, status: "completed", output: connection },
+      { tool: "openwork-cloud_execute_capability", input: { name: "notion.search" }, status: "error",
+        error: JSON.stringify({ error: "needs_connection", connectionStatus: connection }) },
+    ];
+    const toolCalls = [
+      { tool: "openwork-cloud.connection_action", status: "completed", input: { connectionId: "conn_notion" } },
+      { tool: "openwork-cloud.execute_capability", status: "error", input: { name: "notion.search" } },
+    ];
+    const reported = (parts: readonly unknown[]) => parts.filter(isToolPart).flatMap((part) => {
+      const ui = parseDynamicToolUIPart(part);
+      const found = ui ? connectionFromChatToolPart(ui) : null;
+      return ui && found ? [[ui.toolCallId, ui.toolName, found.connection.connectionName, found.connection.state]] : [];
+    });
+    const expected = [
+      ["execute-notion:mcp:0", "openwork-cloud_connection_action", "Notion", "needs_connection"],
+      ["execute-notion:mcp:1", "openwork-cloud_execute_capability", "Notion", "needs_connection"],
+    ];
+
+    const state = createV2EventTranslationState();
+    const data = { sessionID: "ses_code", assistantMessageID: "msg_code", id: "execute-notion" };
+    translateV2Event({ type: "session.tool.input.started", data: { ...data, name: "execute" } }, state);
+    translateV2Event({ type: "session.tool.called", data: { ...data, input: { code: "recorded code" } } }, state);
+    const live = translateV2Event({ type: "session.tool.success", data: {
+      ...data, metadata: { toolCalls, openworkMcpResults }, content: [{ type: "text", text: "Combined result" }],
+    } }, state) ?? [];
+    expect(live.map((event) => event.type)).toEqual(["message.part.updated", "message.part.updated", "message.part.updated"]);
+    expect(reported(live.map((event) => typeof event.properties === "object" && event.properties !== null && "part" in event.properties
+      ? event.properties.part : null))).toEqual(expected);
+
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => jsonResponse({ data: [{
+      id: "msg_code", type: "assistant", time: { created: 1, completed: 2 },
+      content: [{ id: "execute-notion", type: "tool", name: "execute", time: { created: 1, completed: 2 }, state: {
+        status: "completed", input: { code: "recorded code" }, metadata: { toolCalls, openworkMcpResults },
+        content: [{ type: "text", text: "Combined result" }],
+      } }],
+    }] });
+    try {
+      const client = createClientV2("http://opencode.test/opencode2", "/workspace", {});
+      const result = await client.session.messages({ sessionID: "ses_code" });
+      const parts = result.data?.[0]?.parts ?? [];
+      expect(parts.map((part) => part.id)).toEqual(["execute-notion", "execute-notion:mcp:0", "execute-notion:mcp:1"]);
+      expect(reported(parts)).toEqual(expected);
+    } finally { globalThis.fetch = originalFetch; }
+  });
+
   test("hydrates mixed native content with the same text and reasoning IDs as streaming", async () => {
     const originalFetch = globalThis.fetch;
     // beta19086 schema: each kind has its own ordinal; reasoning time is optional.
@@ -2670,5 +2735,66 @@ describe("v2 question forms", () => {
       expect((await client.session.promptAsync(parameters)).response.status).toBe(503);
       expect(requests.map((item) => item.method)).toEqual(["POST", "PUT"]);
     } finally { globalThis.fetch = originalFetch; }
+  });
+});
+
+describe("sent user turns show what the person sent", () => {
+  const clip = {
+    filename: "clip.mp4", mime: "video/mp4", bytes: 19_293_798,
+    workspacePath: ".opencode/openwork/inbox/chat-attachments/ses_sent/a-clip.mp4",
+    url: "file:///workspace/.opencode/openwork/inbox/chat-attachments/ses_sent/a-clip.mp4",
+  };
+  const note = {
+    type: "text", synthetic: true, text: attachmentNoteText([clip]),
+    metadata: { openworkAttachments: [{ filename: clip.filename, mime: clip.mime, url: clip.url, bytes: clip.bytes }] },
+  };
+  const pasted = "first line\nsecond line\nthird line";
+
+  async function transcript(text: string) {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => jsonResponse({ data: [{ id: "msg_sent", type: "user", time: { created: 1 }, text }] });
+    try {
+      const result = await createClientV2("http://opencode.test/opencode2", "/workspace", {}).session.messages({ sessionID: "ses_sent" });
+      return snapshotToUIMessages({ messages: result.data ?? [] })[0]?.parts ?? [];
+    } finally { globalThis.fetch = originalFetch; }
+  }
+
+  test("the model prompt keeps the attachment note and pill instruction; the transcript shows only the words, chips and collapsed pasted text", async () => {
+    const parts = [note, { type: "text", text: "Summarize " }, ...composerPillPromptParts({ kind: "connector", name: "GitHub" }),
+      { type: "text", text: " using " }, { type: "text", text: pasted, metadata: { openworkPastedText: true } }];
+    const prompt = v2PromptText(parts);
+    expect(prompt.startsWith(`Summarize [connector GitHub] using <pasted-text>\n${pasted}\n</pasted-text>\n\n<openwork-context>\n`)).toBe(true);
+    expect(prompt).toContain(note.text);
+    expect(prompt).toContain(connectorPrompt("GitHub"));
+
+    const shown = await transcript(prompt);
+    const text = shown.flatMap((part) => part.type === "text" ? [part.text] : []).join("");
+    expect(text).toBe(`Summarize [connector GitHub] using ${pasted}`);
+    expect(text).not.toContain("Attached files were copied");
+    expect(text).not.toContain(connectorPrompt("GitHub"));
+    expect(shown.find((part) => part.type === "text" && part.text === pasted)).toMatchObject({ providerMetadata: { opencode: { pastedText: true } } });
+    expect(shown.filter((part) => part.type === "file")).toEqual([expect.objectContaining({
+      filename: "clip.mp4", url: clip.url, providerMetadata: { opencode: expect.objectContaining({ bytes: clip.bytes }) },
+    })]);
+    expect(v2AcknowledgementText(shown)).toBe(v2AcknowledgementText(parts));
+  });
+
+  test("an attachment-only turn has no visible text and still correlates with its send", async () => {
+    const shown = await transcript(v2PromptText([note]));
+    expect(shown.map((part) => part.type)).toEqual(["file"]);
+    expect(v2AcknowledgementText(shown)).toBe(v2AcknowledgementText([note]));
+    expect(v2AcknowledgementText([note]).trim()).not.toBe("");
+  });
+
+  test("a turn stored before the context block hides its inline note", async () => {
+    const shown = await transcript(`${note.text}Describe the clip.`);
+    expect(shown.flatMap((part) => part.type === "text" ? [part.text] : [])).toEqual(["Describe the clip."]);
+    expect(shown.filter((part) => part.type === "file")).toHaveLength(1);
+  });
+
+  test("words without hidden context are sent and shown unchanged", async () => {
+    const parts = [{ type: "text", text: "Plain request" }];
+    expect(v2PromptText(parts)).toBe("Plain request");
+    expect(await transcript("Plain request")).toEqual([expect.objectContaining({ type: "text", text: "Plain request" })]);
   });
 });
