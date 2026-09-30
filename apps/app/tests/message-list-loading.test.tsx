@@ -92,8 +92,10 @@ describe("message-list loading feedback", () => {
       expect(native).not.toBe(startup);
       expect(native?.getAttribute("aria-expanded")).toBe("true");
       expect(container.querySelector<HTMLElement>("[data-steps-rail]")?.hidden).toBe(false);
+      expect(container.querySelector("[data-current-step] .ow-text-shimmer"), "the opened rail owns the innermost live label").toBeNull();
       await act(async () => native?.click());
       expect(native?.getAttribute("aria-expanded")).toBe("false");
+      expect(container.querySelector("[data-current-step] .ow-text-shimmer"), "the compact shell owns the visible live label").not.toBeNull();
       await act(async () => root.render(list([userMessage, { ...assistant, parts: [...assistant.parts, { type: "text", text: "The fixture is ready." }] }], "streaming", undefined, "thinking", owner)));
       expect(container.querySelector("[data-steady-activity] > div > button")?.getAttribute("aria-expanded")).toBe("false");
       await act(async () => root.render(list([userMessage, assistant], "ready", undefined, "idle", owner)));

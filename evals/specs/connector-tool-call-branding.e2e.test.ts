@@ -41,12 +41,16 @@ test("connector-backed tool calls show first-class branding and human-readable l
     await user.click("Run task");
   };
   const openTurn = async (index: number) => {
-    const all = await probe.dom('[data-steady-activity] > div > button > span:first-of-type');
-    const closed = await probe.dom('[data-steady-activity] > div > button[aria-expanded="false"] > span:first-of-type');
-    const text = all.elements[index]?.text;
-    if (!text || !closed.elements.some(element => element.text === text)) return;
-    const label = text.includes("earlier steps") ? "Earlier steps" : text;
-    await user.click({ role: "button", label: `${label}. Show steps` });
+    // Two turns can legitimately have identical durations and step counts.
+    // Locate the chronological summary, and bring that turn into view even
+    // when it was already expanded before a reload.
+    const target = { role: "button" as const, label: /^(?:Earlier steps|Worked for|Stopped|Finished).*\. (?:Show|Hide) steps$/, nth: index };
+    await user.hover(target);
+    const all = await probe.dom('[data-steady-activity] > div > button');
+    const closed = await probe.dom('[data-steady-activity] > div > button[aria-expanded="false"]');
+    const turn = all.elements[index];
+    if (!turn) throw new Error(`Missing connector turn ${index + 1}`);
+    if (closed.elements.some(element => element.rect.top === turn.rect.top && element.rect.left === turn.rect.left)) await user.click(target);
   };
   const sinceIso = new Date().toISOString();
   await send(world.prompt);

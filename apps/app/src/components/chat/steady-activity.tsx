@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { Children, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { ChevronRight } from "lucide-react";
 import { formatElapsedSeconds } from "@/lib/tool-call-duration";
 import { cn } from "@/lib/utils";
@@ -10,6 +10,7 @@ export function SteadyActivity({ active, waiting, label, summary, count, elapsed
   elapsed: number; models?: string; children: ReactNode; disclosureKey?: string;
 }) {
   const [open, setOpen] = useWorkbenchDisclosure(disclosureKey);
+  const showLiveShimmer = !open || Children.count(children) === 0;
   const [reading, setReading] = useState(false);
   const wasActive = useRef(active);
   const terminalFoldPending = useRef(false);
@@ -72,7 +73,7 @@ export function SteadyActivity({ active, waiting, label, summary, count, elapsed
       {active ? <>
         <div data-current-step className="relative flex h-8 items-center text-sm text-muted-foreground">
           {outgoing ? <span aria-hidden className="absolute inset-y-0 flex items-center animate-out fade-out duration-150 motion-reduce:hidden">{outgoing}</span> : null}
-          <span key={displayed} className={cn("animate-in fade-in duration-150 motion-reduce:animate-none", !waiting && !displayed.startsWith("Starting") && "ow-text-shimmer")}>{displayed}</span>
+          <span key={displayed} className={cn("animate-in fade-in duration-150 motion-reduce:animate-none", showLiveShimmer && !waiting && !displayed.startsWith("Starting") && "ow-text-shimmer")}>{displayed}</span>
         </div>
         <div role="status" aria-live="off" data-loading-message={waiting ? "waiting" : "working"} data-working-line className="flex h-6 items-center text-xs tabular-nums text-muted-foreground/70">
           {waiting ? "Waiting for your action" : "Working"} {formatElapsedSeconds(elapsed)}
