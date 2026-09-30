@@ -12,8 +12,8 @@ import {
   type Tool,
 } from "@modelcontextprotocol/sdk/types.js"
 import { StreamableHTTPTransport } from "@hono/mcp"
-import { eq } from "@openwork-ee/den-db/drizzle"
-import { OrganizationTable } from "@openwork-ee/den-db/schema"
+import { and, eq, isNull } from "@openwork-ee/den-db/drizzle"
+import { ConfigObjectTable, MemberTable, OrganizationTable } from "@openwork-ee/den-db/schema"
 import { normalizeDenTypeId } from "@openwork-ee/utils/typeid"
 import {
   MCP_APP_LAUNCH_TOOL_NAME,
@@ -102,11 +102,45 @@ function requiredScope(binding: McpAppToolBinding): string {
   return binding.readOnly && binding.kind !== "mcp" ? DEN_MCP_READ_SCOPE : DEN_MCP_WRITE_SCOPE
 }
 
+type AppRefusal = "not_a_member" | "other_organization" | "apps_off" | "not_found"
+
+const REFUSAL_MESSAGES: Record<Exclude<AppRefusal, "other_organization">, string> = {
+  not_a_member: "The App is not available: this connection is not signed in to an organization you belong to.",
+  apps_off: "The App is not available: Apps built in OpenWork are turned off for this organization.",
+  not_found: "The App is not available.",
+}
+
+/**
+ * The organization an App belongs to, only when the user is also a member of
+ * it, so a refusal can name it without revealing Apps in other organizations.
+ */
+async function appOrganizationForMember(appId: string, userId: string) {
+  const [row] = await db.select({ id: OrganizationTable.id, name: OrganizationTable.name })
+    .from(ConfigObjectTable)
+    .innerJoin(OrganizationTable, eq(OrganizationTable.id, ConfigObjectTable.organizationId))
+    .innerJoin(MemberTable, and(eq(MemberTable.organizationId, ConfigObjectTable.organizationId), eq(MemberTable.userId, normalizeDenTypeId("user", userId))))
+    .where(and(eq(ConfigObjectTable.id, normalizeDenTypeId("configObject", appId)), eq(ConfigObjectTable.objectType, "app"), isNull(ConfigObjectTable.deletedAt)))
+    .limit(1)
+  return row ?? null
+}
+
+/**
+ * Logs why an App server refused a request and answers with the JSON-RPC error
+ * every MCP client can show, as pass-through connections do.
+ */
+async function refuseAppRequest(request: Request, input: { reason: AppRefusal; organizationId: string; appId: string; organizationName?: string }): Promise<Response> {
+  console.error("mcp_app_server_refused", { reason: input.reason, organizationId: input.organizationId, appId: input.appId })
+  const message = input.reason === "other_organization"
+    ? `This App belongs to ${input.organizationName ?? "another organization"}. Switch to ${input.organizationName ?? "that organization"} in OpenWork, then connect the App again.`
+    : REFUSAL_MESSAGES[input.reason]
+  return appUnavailableResponse(request, message, input.reason)
+}
+
 /**
  * A protocol-valid refusal for a member who cannot use this App, so every MCP
  * client sees the same JSON-RPC error rather than an HTTP failure.
  */
-async function appUnavailableResponse(request: Request): Promise<Response> {
+async function appUnavailableResponse(request: Request, message = REFUSAL_MESSAGES.not_found, reason: AppRefusal = "not_found"): Promise<Response> {
   let id: string | number | null = null
   try {
     const body: unknown = await request.clone().json()
@@ -117,7 +151,7 @@ async function appUnavailableResponse(request: Request): Promise<Response> {
   return new Response(JSON.stringify({
     jsonrpc: "2.0",
     id,
-    error: { code: ErrorCode.InvalidRequest, message: "The App is not available.", data: { error: "mcp_app_not_found" } },
+    error: { code: ErrorCode.InvalidRequest, message, data: { error: "mcp_app_not_found", reason } },
   }), { status: 200, headers: { "content-type": "application/json" } })
 }
 
@@ -209,12 +243,17 @@ export async function handleMcpAppServerRequest(input: {
   const { context, principal } = input
   if (context.req.method !== "POST") return new Response(null, { status: 405, headers: { allow: "POST" } })
   const organizationId = normalizeDenTypeId("organization", principal.organizationId)
+  const refuse = (reason: AppRefusal, organizationName?: string) =>
+    refuseAppRequest(context.req.raw, { reason, organizationId, appId: input.appId, organizationName })
   const member = await resolveMcpMemberIdentity({ userId: principal.userId, organizationId })
-  if (!member) return appUnavailableResponse(context.req.raw)
+  if (!member) return refuse("not_a_member")
+  // A client authorized for one organization cannot reach an App built in another.
+  const home = await appOrganizationForMember(input.appId, principal.userId)
+  if (home && home.id !== organizationId) return refuse("other_organization", home.name)
   const organization = await db.select({ metadata: OrganizationTable.metadata }).from(OrganizationTable)
     .where(eq(OrganizationTable.id, organizationId)).limit(1)
   // Building your own Apps is per-organization and default-off.
-  if (!appMcpServersEnabled(organization[0]?.metadata)) return appUnavailableResponse(context.req.raw)
+  if (!appMcpServersEnabled(organization[0]?.metadata)) return refuse("apps_off")
   const capabilityContext = createCapabilityRegistryContext({
     app: input.app,
     env: context.env,
@@ -232,7 +271,7 @@ export async function handleMcpAppServerRequest(input: {
   try {
     definition = await loadMcpAppServerDefinition({ ...access, appId: input.appId })
   } catch (error) {
-    if (error instanceof McpAppError) return appUnavailableResponse(context.req.raw)
+    if (error instanceof McpAppError) return refuse("not_found")
     throw error
   }
   const server = createMcpAppServer({
