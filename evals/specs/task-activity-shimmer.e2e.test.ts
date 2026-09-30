@@ -69,6 +69,7 @@ test("ACT-01 delegated-task activity stays with its original message after a fol
       titleStyle: { color: style.color, backgroundImage: style.backgroundImage, animationName: style.animationName },
       mutedColors: [getComputedStyle(suffix).color, getComputedStyle(status).color],
       reducedMotion: matchMedia("(prefers-reduced-motion: reduce)").matches,
+      hoverSupported: matchMedia("(hover: hover)").matches,
     };
   });
   await user.hover("composer");
@@ -87,6 +88,7 @@ test("ACT-01 delegated-task activity stays with its original message after a fol
     staysWithOriginalMessage: true,
     precedesFollowup: true,
     rawPromptVisible: false,
+    hoverSupported: true,
     messageId: native.messageId,
   });
   expect(rendered.childId).toBe(native.childId);

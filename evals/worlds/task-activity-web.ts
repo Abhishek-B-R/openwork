@@ -26,6 +26,13 @@ export async function taskActivityWeb(seed: Seed) {
       finalReplyInitiallyReleasedChunks: 1,
     }] }),
   } });
+  // This journey exercises mouse hover on the Desktop chat surface. Linux
+  // headless Chromium otherwise reports hover:none despite trusted mouse
+  // events, so declare the same fine-pointer capability as a desktop mouse.
+  await app.client.send("Emulation.setEmulatedMedia", { features: [
+    { name: "hover", value: "hover" }, { name: "any-hover", value: "hover" },
+    { name: "pointer", value: "fine" }, { name: "any-pointer", value: "fine" },
+  ] });
   const workspace = await seed.workspace(app, workspacePath);
   const mock = app.mocks.agent;
   if (!mock) throw new Error("Missing activity model witness");

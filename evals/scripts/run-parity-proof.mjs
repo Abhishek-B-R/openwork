@@ -27,6 +27,11 @@ const specs = new Set([
   "evals/specs/agent-connection-journey.e2e.test.ts",
   "evals/specs/sent-message-matches-composer.e2e.test.ts",
   "evals/specs/agent-connection-sign-in-journey.e2e.test.ts",
+  "evals/specs/agent-child-desktop.e2e.test.ts",
+  "evals/specs/agent-child-messaging.e2e.test.ts",
+  "evals/specs/agent-child-split-desktop.e2e.test.ts",
+  "evals/specs/task-activity-shimmer.e2e.test.ts",
+  "evals/specs/whole-activity-conversation.e2e.test.ts",
 ]);
 
 export function parityProofPlan(spec) {

@@ -42,6 +42,22 @@ test("a foreground child decision pauses the parent; a background decision does 
   expect(runElapsed(useSessionActivityStore.getState().recordsByWorkspaceId.w!.foreground!.runs.fg!, 8_000)).toBe(2_000);
 });
 
+test("a locally admitted steering prompt keeps the restored busy run and its elapsed time", () => {
+  const store = useSessionActivityStore.getState();
+  setSystemTime(1_000);
+  store.seedSessionRun("restored", "parent", { type: "busy" }, undefined, { snapshotStartedAt: 1_000 });
+  store.observeTranscript("restored", "parent", [{ id: "prompt", role: "user", parts: [], metadata: { opencode: { created: 1_000 } } }, task("child")]);
+  const before = useSessionActivityStore.getState().recordsByWorkspaceId.restored!.parent!;
+  setSystemTime(3_000);
+  store.beginRun("restored", "parent", "steer", 3_000);
+  store.observeTranscript("restored", "parent", [{ id: "prompt", role: "user", parts: [] }, task("child"), { id: "steer", role: "user", parts: [] }]);
+  const after = useSessionActivityStore.getState().recordsByWorkspaceId.restored!.parent!;
+  expect(after.currentRunId).toBe(before.currentRunId);
+  expect(after.runStartedAt).toBe(before.runStartedAt);
+  expect(runElapsed(after.runs[after.currentRunId!]!, 4_000)).toBe(3_000);
+  expect(after.runs[after.currentRunId!]!.promptIds).toContain("steer");
+});
+
 test("only allowlisted native notices appear and an idle-parent continuation anchors to its notice", () => {
   const native = { source: "subagent", childID: "child", state: "completed", description: "Inspect a fixture" };
   expect(sessionNotice({ source: "instruction", state: "completed" }, "hidden", 1_000)).toBeNull();

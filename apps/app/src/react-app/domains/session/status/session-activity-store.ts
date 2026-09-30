@@ -547,7 +547,12 @@ export const useSessionActivityStore = create<SessionActivityStore>((set, get) =
         }
       }
       const snapshotStartedAt = options.snapshotStartedAt;
-      const joinsBusyRun = record.runActive && Boolean(record.currentRunId);
+      const activeRun = record.currentRunId ? record.runs[record.currentRunId] : undefined;
+      // A live admission or native continuation owns its steering messages.
+      // A coarse restored busy status does not establish that association:
+      // newer transcript prompts must clear the previous turn's activity.
+      const joinsBusyRun = record.runActive && Boolean(record.currentRunId)
+        && (activeRun?.initiator !== "restored" || Boolean(progress.latestUserId && activeRun.promptIds?.includes(progress.latestUserId)));
       const turnChanged = !joinsBusyRun && record.transcriptActivity !== null
         && record.transcriptActivity.latestUserId !== progress.latestUserId;
       const progressChanged = record.progressRevision !== progress.revision;
