@@ -1,3 +1,4 @@
+import { startMcpAppTiming } from "@openwork/types/mcp-app-timing";
 import { EXTENSION_ID, RESOURCE_MIME_TYPE } from "@modelcontextprotocol/ext-apps/server"
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
 import {
@@ -234,7 +235,7 @@ export function createMcpAppServer(input: {
  * is rechecked on every request through its Plugin, and every bound tool runs
  * with the caller's own capability context.
  */
-export async function handleMcpAppServerRequest(input: {
+async function handleMcpAppServerRequestUntimed(input: {
   app: Hono
   context: Context
   principal: McpPrincipal
@@ -245,19 +246,22 @@ export async function handleMcpAppServerRequest(input: {
   const organizationId = normalizeDenTypeId("organization", principal.organizationId)
   const refuse = (reason: AppRefusal, organizationName?: string) =>
     refuseAppRequest(context.req.raw, { reason, organizationId, appId: input.appId, organizationName })
-  const member = await resolveMcpMemberIdentity({ userId: principal.userId, organizationId })
+  const [member, home, organization, catalog] = await Promise.all([
+    resolveMcpMemberIdentity({ userId: principal.userId, organizationId }),
+    appOrganizationForMember(input.appId, principal.userId),
+    db.select({ metadata: OrganizationTable.metadata }).from(OrganizationTable)
+      .where(eq(OrganizationTable.id, organizationId)).limit(1),
+    getCatalog(input.app, context.env),
+  ])
   if (!member) return refuse("not_a_member")
   // A client authorized for one organization cannot reach an App built in another.
-  const home = await appOrganizationForMember(input.appId, principal.userId)
   if (home && home.id !== organizationId) return refuse("other_organization", home.name)
-  const organization = await db.select({ metadata: OrganizationTable.metadata }).from(OrganizationTable)
-    .where(eq(OrganizationTable.id, organizationId)).limit(1)
   // Building your own Apps is per-organization and default-off.
   if (!appMcpServersEnabled(organization[0]?.metadata)) return refuse("apps_off")
   const capabilityContext = createCapabilityRegistryContext({
     app: input.app,
     env: context.env,
-    catalog: await getCatalog(input.app, context.env),
+    catalog,
     principal,
     organizationId,
     member,
@@ -266,7 +270,7 @@ export async function handleMcpAppServerRequest(input: {
     organizationMetadata: organization[0]?.metadata,
     mcpConnectionsGatingEnabled: env.mcpConnectionsGatingEnabled,
   })
-  const access = { organizationId, member, enabled: capabilityContext.externalMcpConnectionsEnabled }
+  const access = { organizationId, member, enabled: capabilityContext.externalMcpConnectionsEnabled, requestScope: {} }
   let definition: McpAppServerDefinition
   try {
     definition = await loadMcpAppServerDefinition({ ...access, appId: input.appId })
@@ -286,4 +290,21 @@ export async function handleMcpAppServerRequest(input: {
   const transport = new StreamableHTTPTransport()
   await server.connect(transport)
   return await transport.handleRequest(context) ?? new Response(null, { status: 204 })
+}
+
+export async function handleMcpAppServerRequest(input: Parameters<typeof handleMcpAppServerRequestUntimed>[0]) {
+  if (process.env.OPENWORK_MCP_APP_TIMINGS !== "1") return handleMcpAppServerRequestUntimed(input)
+  const body: unknown = await input.context.req.raw.clone().json().catch(() => null)
+  const method = typeof body === "object" && body !== null && "method" in body && typeof body.method === "string" ? body.method : "other"
+  const stage = ["initialize", "tools/list", "resources/read", "tools/call"].includes(method) ? method : "other"
+  const finish = startMcpAppTiming(`den.app-server.${stage}`)
+  try {
+    const response = await handleMcpAppServerRequestUntimed(input)
+    // Streamable HTTP returns its Response before a tool finishes. The profiling
+    // copy observes completion without delaying or changing the client's stream.
+    if (process.env.OPENWORK_MCP_APP_TIMINGS === "1" && response.body) {
+      void response.clone().arrayBuffer().then(finish, finish)
+    } else finish()
+    return response
+  } catch (cause) { finish(); throw cause }
 }
