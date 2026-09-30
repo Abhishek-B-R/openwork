@@ -137,7 +137,7 @@ export function fixtureInputFocus(seed: Seed, app: Surface) {
     activeTag: document.activeElement?.tagName ?? null,
     activeEditable: document.activeElement instanceof HTMLElement && document.activeElement.isContentEditable,
     editableFocused: Boolean(document.querySelector('[contenteditable="true"]:focus')),
-  })), { awaitPromise: true });
+  }), []), { awaitPromise: true });
 }
 
 export async function configureProvider(
