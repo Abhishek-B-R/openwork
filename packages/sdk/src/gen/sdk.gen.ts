@@ -297,6 +297,8 @@ import type {
   GetV1GatewayUsageLimitsMembersErrors,
   GetV1GatewayUsageLimitsMembersResponses,
   GetV1GatewayUsageLimitsMeResponses,
+  GetV1InferenceAccessErrors,
+  GetV1InferenceAccessResponses,
   GetV1InferenceAnalyticsActivityResponses,
   GetV1InferenceAnalyticsConsumptionResponses,
   GetV1InferenceAnalyticsSettingsResponses,
@@ -699,6 +701,8 @@ import type {
   PostV1InferenceAnalyticsLangfuseConnectResponses,
   PostV1InferenceAnalyticsLangfuseTestErrors,
   PostV1InferenceAnalyticsLangfuseTestResponses,
+  PostV1InferenceFreeCredentialErrors,
+  PostV1InferenceFreeCredentialResponses,
   PostV1InferenceProvidersByInferenceProviderIdAccessGrantsErrors,
   PostV1InferenceProvidersByInferenceProviderIdAccessGrantsResponses,
   PostV1InferenceProvidersByInferenceProviderIdCredentialSetsErrors,
@@ -4395,6 +4399,32 @@ export class DenClient extends HeyApiClient {
   }
 
   /**
+   * Get my free Auto allowance
+   *
+   * Returns the authenticated joined member's person-wide weekly Auto allowance without credentials.
+   */
+  public getV1InferenceAccess<ThrowOnError extends boolean = false>(options?: Options<never, ThrowOnError>) {
+    return (options?.client ?? this.client).get<
+      GetV1InferenceAccessResponses,
+      GetV1InferenceAccessErrors,
+      ThrowOnError
+    >({ url: "/v1/inference/access", ...options });
+  }
+
+  /**
+   * Get my free Auto credential
+   *
+   * Issues or reuses the member's OpenWork Models key for an organization without a Models subscription. Until the organization subscribes, the Gateway serves only free Auto on it, within the member's weekly allowance. Subscribed organizations and admin opt-outs are refused.
+   */
+  public postV1InferenceFreeCredential<ThrowOnError extends boolean = false>(options?: Options<never, ThrowOnError>) {
+    return (options?.client ?? this.client).post<
+      PostV1InferenceFreeCredentialResponses,
+      PostV1InferenceFreeCredentialErrors,
+      ThrowOnError
+    >({ url: "/v1/inference/free/credential", ...options });
+  }
+
+  /**
    * Get inference settings
    *
    * Returns OpenWork Models enablement and limit context for the active organization.
@@ -6654,7 +6684,7 @@ export class DenClient extends HeyApiClient {
   /**
    * Update inference gateway provider
    *
-   * Partially updates the provider name, model universe or status and returns management details. Provider identity and upstream destination are immutable; changing them requires a new provider. Legacy credential or audience fields are rejected with matrix_write_required: edit credential sets and access grants instead. Requires owner/admin permission and enabled Gateway management; session callers must recently reauthenticate.
+   * Partially updates the provider name, model universe or status and returns management details. A pin-only PATCH with pinnedModelIds replaces the ordered catalog-model pins without changing models, groups, credentials or grants; duplicates and unknown models are rejected. Pins do not grant access. Provider identity and upstream destination are immutable; changing them requires a new provider. Legacy credential or audience fields are rejected with matrix_write_required: edit credential sets and access grants instead. Requires owner/admin permission and enabled Gateway management; session callers must recently reauthenticate.
    */
   public patchV1InferenceProvidersByInferenceProviderId<ThrowOnError extends boolean = false>(
     parameters: {
@@ -6662,6 +6692,7 @@ export class DenClient extends HeyApiClient {
       name?: string;
       providerId?: string;
       modelIds?: Array<string>;
+      pinnedModelIds?: Array<string>;
       settings?: {
         project?: string;
         location?: string;
@@ -6696,6 +6727,7 @@ export class DenClient extends HeyApiClient {
             { in: "body", key: "name" },
             { in: "body", key: "providerId" },
             { in: "body", key: "modelIds" },
+            { in: "body", key: "pinnedModelIds" },
             { in: "body", key: "settings" },
             { in: "body", key: "status" },
             { in: "body", key: "credentialMode" },
