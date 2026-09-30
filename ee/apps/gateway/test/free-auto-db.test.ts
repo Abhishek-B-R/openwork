@@ -7,7 +7,7 @@ import {
   createDenDb, AuthUserTable, OrganizationTable, MemberTable, InferenceKeyTable, AnonymousInferenceIdentityTable,
   InferenceFreeUsageBucketTable as Bucket, InferenceFreeUsageTable as Usage,
   AnonymousInferenceUsageBucketTable as GuestBucket, AnonymousInferenceUsageTable as GuestUsage,
-  InferenceOrgUsageBucketTable, InferenceUsageLedgerEntryTable, OrgSubscriptionTable, DesktopPolicyTable,
+  InferenceOrgUsageBucketTable, InferenceUsageLedgerEntryTable, OrgSubscriptionTable, DesktopPolicyTable, DesktopPolicyMemberTable, TeamTable, TeamMemberTable,
 } from "@openwork-ee/den-db"
 import { and, eq, sql } from "@openwork-ee/den-db/drizzle"
 import { createDenTypeId } from "@openwork-ee/utils/typeid"
@@ -153,7 +153,7 @@ test("free Auto SQL and 0116 upgrade in an owned random database", { skip: !admi
     assert.ok(match)
     return match
   }
-  async function person(userId?: typeof AuthUserTable.$inferSelect.id, metadata: Record<string, unknown> = {}) {
+  async function person(userId?: typeof AuthUserTable.$inferSelect.id, metadata: Record<string, unknown> = { inferenceFree: { rolloutEnabled: true } }) {
     const organizationId = createDenTypeId("organization"), memberId = createDenTypeId("member")
     const user = userId ?? createDenTypeId("user")
     await db.insert(OrganizationTable).values({ id: organizationId, name: "Free SQL fixture", slug: randomUUID(), metadata })
@@ -246,6 +246,52 @@ test("free Auto SQL and 0116 upgrade in an owned random database", { skip: !admi
     assert.deepEqual([row.completion_id, row.amount, row.estimated], [usage.eventId, usage.amount, false])
   })
 
+  await t.test("SQL settlement failures recover the original real charge, including after a client disconnects", async () => {
+    const { dispatchFreeCompletion } = await import("../src/free/shared/dispatch.js")
+    for (const family of ["member", "anonymous"] as const) {
+      const principal: FreePrincipal = family === "member" ? (await person()).principal : { kind: "installation", id: "8".repeat(64) }
+      const original = family === "member" ? store : guests
+      const table = family === "member" ? "inference_free_usage" : "anonymous_inference_usage"
+      let sawFailure: () => void = () => {}
+      const failure = new Promise<void>((resolve) => { sawFailure = resolve })
+      let attempts = 0
+      const pool = { ...original, charge: async (input: Parameters<typeof original.charge>[0]) => {
+        attempts++
+        try { return await original.charge(input) } catch (error) { sawFailure(); throw error }
+      } }
+      await connection.query(`CREATE TRIGGER reject_free_settlement BEFORE INSERT ON ${table} FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='fixture settlement failure'`)
+      const controller = new AbortController()
+      const eventId = `chatcmpl-${id()}`
+      let consumed: Promise<unknown> | undefined
+      try {
+        const response = await dispatchFreeCompletion({ config, store: pool, principal, signal: controller.signal, controller,
+          prepared: { body: "{}", stream: false }, fetch: async () => Response.json({ id: eventId, model: config.upstreamModel,
+            choices: [{ index: 0, finish_reason: "stop", message: { role: "assistant", content: "fixture" } }],
+            usage: { prompt_tokens: 100, completion_tokens: 20 } }) })
+        consumed = response.json().then((value) => value, (error: unknown) => error)
+        await failure
+        assert.equal((await rows(`SELECT COUNT(*) AS amount FROM ${table} WHERE completion_id=?`, [eventId]))[0].amount, 0)
+        if (family === "anonymous") controller.abort()
+        await connection.query("DROP TRIGGER reject_free_settlement")
+        const result = await consumed
+        if (family === "member") assert.equal((result as { model: string }).model, INFERENCE_FREE_MODEL_ID)
+        else assert.ok(result instanceof Error, "the disconnected client does not receive a completed response")
+        let usage: Record<string, unknown>[] = []
+        for (let attempt = 0; attempt < 50; attempt++) {
+          usage = await rows(`SELECT amount, estimated FROM ${table} WHERE completion_id=?`, [eventId])
+          if (usage.length) break
+          await new Promise((resolve) => setTimeout(resolve, 10))
+        }
+        assert.deepEqual(usage, [{ amount: 4900, estimated: 0 }], "the known receipt is never replaced by an estimate")
+        assert.equal((await bucket(principal)).used_amount, 4900)
+        assert.ok(attempts >= 2)
+      } finally {
+        await connection.query("DROP TRIGGER IF EXISTS reject_free_settlement")
+        await consumed
+      }
+    }
+  })
+
   await t.test("a request whose usage never arrived is charged the fixed estimate", async () => {
     const member = await person(), windows = await admit(member.principal), requestId = id()
     assert.equal(await charge(member.principal, windows, null, requestId), true)
@@ -320,10 +366,43 @@ test("free Auto SQL and 0116 upgrade in an owned random database", { skip: !admi
     await db.insert(DesktopPolicyTable).values({ id: policyId, organizationId: member.input.organizationId, policyName: "Managed only",
       isDefault: true, isEnabled: true, policy: { allowCustomProviders: false, allowZenModel: false }, createdByOrgMemberId: member.input.memberId })
     assert.equal(await ensureMemberFreeInferenceCredential(member.input), null)
+    assert.equal(await findMemberFreePrincipal(member.key, db), null, "a key issued before the switch was turned off is refused")
+    assert.equal(await memberFreePrincipalAllowed(member.principal, replica.db), false)
+    assert.deepEqual(await otherStore.admit(member.principal), { ok: false, code: "free_principal_rejected" })
     assert.equal((await getMemberInferenceAccess(member.input)).reason, "admin_disabled")
     await db.update(DesktopPolicyTable).set({ policy: { allowCustomProviders: false, allowZenModel: true } }).where(eq(DesktopPolicyTable.id, policyId))
     assert.ok(await ensureMemberFreeInferenceCredential(member.input), "managed only with the free starter model on: Auto is offered again")
+    assert.ok(await findMemberFreePrincipal(member.key, replica.db))
+    assert.equal(await memberFreePrincipalAllowed(member.principal, db), true)
   })
+
+  for (const assignment of ["member", "team", "role"] as const) {
+    await t.test(`Gateway and Den honor the same ${assignment} assignment for an already-issued key`, async () => {
+      const member = await person(), defaultId = createDenTypeId("desktopPolicy"), assignedId = createDenTypeId("desktopPolicy")
+      const common = { organizationId: member.input.organizationId, isEnabled: true, createdByOrgMemberId: member.input.memberId }
+      await db.insert(DesktopPolicyTable).values([
+        { ...common, id: defaultId, isDefault: true, policyName: "Starter off", policy: { allowZenModel: false } },
+        { ...common, id: assignedId, isDefault: false, policyName: "Starter on", policy: { allowZenModel: true } },
+      ])
+      let teamId: typeof TeamTable.$inferSelect.id | null = null
+      if (assignment === "team") {
+        teamId = createDenTypeId("team")
+        await db.insert(TeamTable).values({ id: teamId, organizationId: member.input.organizationId, name: "Starter team" })
+        await db.insert(TeamMemberTable).values({ id: createDenTypeId("teamMember"), teamId, orgMembershipId: member.input.memberId })
+      }
+      if (assignment === "role") await db.update(MemberTable).set({ role: "owner" }).where(eq(MemberTable.id, member.input.memberId))
+      await db.insert(DesktopPolicyMemberTable).values({ id: createDenTypeId("desktopPolicyMember"), organizationId: member.input.organizationId,
+        desktopPolicyId: assignedId, orgMemberId: assignment === "member" ? member.input.memberId : null,
+        teamId, role: assignment === "role" ? "admin" : null })
+      assert.ok(await ensureMemberFreeInferenceCredential(member.input))
+      assert.ok(await findMemberFreePrincipal(member.key, replica.db))
+      assert.equal(await memberFreePrincipalAllowed(member.principal, db), true)
+      await db.update(DesktopPolicyTable).set({ isEnabled: false }).where(eq(DesktopPolicyTable.id, assignedId))
+      assert.equal(await ensureMemberFreeInferenceCredential(member.input), null)
+      assert.equal(await findMemberFreePrincipal(member.key, db), null)
+      assert.deepEqual(await otherStore.admit(member.principal), { ok: false, code: "free_principal_rejected" })
+    })
+  }
 
   await t.test("an organization Stripe still collects for is refused free Auto even when its Models flag is lost", async () => {
     const member = await person(), subscriptionId = createDenTypeId("orgSubscription")
@@ -335,6 +414,29 @@ test("free Auto SQL and 0116 upgrade in an owned random database", { skip: !admi
     assert.equal((await getMemberInferenceAccess(member.input)).reason, "not_eligible")
     await db.update(OrgSubscriptionTable).set({ status: "canceled" }).where(eq(OrgSubscriptionTable.id, subscriptionId))
     assert.ok(await findMemberFreePrincipal(member.key, db), "once Stripe gives up, the organization is unsubscribed")
+  })
+
+  await t.test("an organization rollout change blocks existing keys, status and admission without affecting another organization or guests", async () => {
+    const pilot = await person(), other = await person()
+    const guest: GuestPrincipal = { kind: "installation", id: "org-rollout-independent-guest" }
+    const windows = await admit(pilot.principal)
+    for (const metadata of [{}, { inferenceFree: { rolloutEnabled: false } }, { inferenceFree: { rolloutEnabled: "true" } }]) {
+      await db.update(OrganizationTable).set({ metadata }).where(eq(OrganizationTable.id, pilot.input.organizationId))
+      assert.equal(await ensureMemberFreeInferenceCredential(pilot.input), null)
+      assert.equal((await getMemberInferenceAccess(pilot.input)).reason, "free_disabled")
+      assert.equal(await findMemberFreePrincipal(pilot.key, replica.db), null)
+      assert.equal(await memberFreePrincipalAllowed(pilot.principal, replica.db), false)
+      assert.deepEqual(await otherStore.read(pilot.principal), { state: "unavailable", code: "free_principal_rejected", allowance: null })
+      assert.equal((await otherStore.admit(pilot.principal)).ok, false)
+      assert.equal((await otherStore.read(other.principal)).state, "ready")
+      assert.equal((await guests.read(guest)).state, "ready")
+    }
+    assert.equal(await charge(pilot.principal, windows, receipt()), true, "already admitted usage still settles")
+    await db.update(OrganizationTable).set({ metadata: { inferenceFree: { rolloutEnabled: true } } }).where(eq(OrganizationTable.id, pilot.input.organizationId))
+    assert.equal((await ensureMemberFreeInferenceCredential(pilot.input))?.apiKey, pilot.credential.apiKey)
+    assert.ok(await findMemberFreePrincipal(pilot.key, db))
+    assert.equal((await otherStore.read(pilot.principal)).state, "ready")
+    assert.equal((await bucket(pilot.principal)).used_amount, 100000, "reenabling does not reset spend")
   })
 
   await t.test("subscription, DPA and admin policy deny free Auto; a revoked key cannot start a request but a finished one is still charged", async () => {
@@ -350,7 +452,7 @@ test("free Auto SQL and 0116 upgrade in an owned random database", { skip: !admi
     }
     await db.update(OrganizationTable).set({ metadata: { inference: { enabled: true, tier: "tier1" } } }).where(eq(OrganizationTable.id, member.input.organizationId))
     assert.equal((await getMemberInferenceAccess(member.input)).kind, "paid")
-    await db.update(OrganizationTable).set({ metadata: {} }).where(eq(OrganizationTable.id, member.input.organizationId))
+    await db.update(OrganizationTable).set({ metadata: { inferenceFree: { rolloutEnabled: true } } }).where(eq(OrganizationTable.id, member.input.organizationId))
     await db.update(InferenceKeyTable).set({ status: "revoked", revoked_at: new Date() }).where(eq(InferenceKeyTable.id, member.key.id))
     assert.equal(await findMemberFreePrincipal(member.key, replica.db), null)
     assert.equal((await otherStore.admit(member.principal)).ok, false)

@@ -2,6 +2,15 @@ import { z } from "zod";
 
 export const INFERENCE_USAGE_CONVERSION_FACTOR = 100_000_000;
 
+// Den's web app loads this module from source, where a runtime relative import cannot resolve, so it keeps
+// its own copy of managed-models-policy's metadata reader instead of importing it.
+function readOrganizationMetadata(input: unknown): Record<string, unknown> {
+  if (input === null || input === undefined) return {};
+  const value: unknown = typeof input === "string" ? JSON.parse(input) : input;
+  if (typeof value !== "object" || value === null || Array.isArray(value)) throw new Error("Organization metadata must be a JSON object.");
+  return Object.fromEntries(Object.entries(value));
+}
+
 export const INFERENCE_WINDOW_TYPES = [
   "five_hour",
   "weekly",
@@ -123,11 +132,13 @@ export const INFERENCE_FREE_MODEL_ID = "openai/gpt-5.6-luna";
 export const INFERENCE_FREE_ENV = {
   enabled: "INFERENCE_FREE_ENABLED",
   weeklyBudgetUsd: "INFERENCE_FREE_WEEKLY_BUDGET_USD",
+  rolloutAllOrganizations: "INFERENCE_FREE_ROLLOUT_ALL_ORGS",
   modelID: "INFERENCE_FREE_MODEL_ID",
 } as const;
 
 export type FreeInferenceConfig = {
   enabled: boolean;
+  rolloutAllOrganizations: boolean;
   weeklyBudgetUsd: number;
   weeklyLimitAmount: number;
   modelID: typeof INFERENCE_FREE_MODEL_ID;
@@ -136,6 +147,8 @@ export type FreeInferenceConfig = {
 export function readFreeInferenceConfig(environment: Record<string, string | undefined>): FreeInferenceConfig {
   const enabled = environment[INFERENCE_FREE_ENV.enabled] ?? "false";
   if (!["true", "false", "1", "0"].includes(enabled)) throw new Error("Invalid INFERENCE_FREE_ENABLED");
+  const rollout = environment[INFERENCE_FREE_ENV.rolloutAllOrganizations] ?? "false";
+  if (!["true", "false", "1", "0"].includes(rollout)) throw new Error("Invalid INFERENCE_FREE_ROLLOUT_ALL_ORGS");
   const budget = environment[INFERENCE_FREE_ENV.weeklyBudgetUsd] ?? "5";
   const weeklyBudgetUsd = Number(budget);
   const weeklyLimitAmount = Math.floor(weeklyBudgetUsd * INFERENCE_USAGE_CONVERSION_FACTOR);
@@ -143,7 +156,7 @@ export function readFreeInferenceConfig(environment: Record<string, string | und
     || !Number.isSafeInteger(weeklyLimitAmount)) throw new Error("Invalid INFERENCE_FREE_WEEKLY_BUDGET_USD");
   const modelID = environment[INFERENCE_FREE_ENV.modelID] ?? INFERENCE_FREE_MODEL_ID;
   if (modelID !== INFERENCE_FREE_MODEL_ID) throw new Error("Unapproved free model");
-  return { enabled: enabled === "true" || enabled === "1", weeklyBudgetUsd: weeklyLimitAmount / INFERENCE_USAGE_CONVERSION_FACTOR, weeklyLimitAmount, modelID };
+  return { enabled: enabled === "true" || enabled === "1", rolloutAllOrganizations: rollout === "true" || rollout === "1", weeklyBudgetUsd: weeklyLimitAmount / INFERENCE_USAGE_CONVERSION_FACTOR, weeklyLimitAmount, modelID };
 }
 
 export function freeInferenceWindow(now = new Date()) {
@@ -172,7 +185,65 @@ export type InferenceAccess = {
   reason: InferenceAccessReason | null;
   canUpgrade?: boolean;
   catalog?: ManagedModelRecommendation[];
+  defaultPinned?: boolean;
 };
+
+export type FreeInferenceProviderSummary = {
+  state: "available" | "disabled" | "unavailable";
+  reason: InferenceAccessReason | null;
+  defaultPinned: boolean;
+  modelGroup: { id: "free"; name: "Free" };
+  catalog: ManagedModelRecommendation[];
+  allowance: {
+    usageScope: "organization";
+    allowanceScope: "person";
+    windowStartAt: string;
+    resetsAt: string;
+    weeklyLimitUsd: number;
+    joinedMembers: number;
+    eligibleMembers: number;
+    exhaustedMembers: number | null;
+    usedUsd: number | null;
+    requestCount: number | null;
+  };
+};
+
+export const freeInferenceProviderSummarySchema = z.object({
+  state: z.enum(["available", "disabled", "unavailable"]), reason: z.union([z.enum(INFERENCE_ACCESS_REASONS), z.null()]),
+  defaultPinned: z.boolean(), modelGroup: z.object({ id: z.literal("free"), name: z.literal("Free") }),
+  catalog: z.array(z.object({ modelID: z.string(), displayName: z.string(), providerName: z.string(), summary: z.string(), recommended: z.boolean(), rank: z.number(), capabilities: z.array(z.string()) })),
+  allowance: z.object({
+    usageScope: z.literal("organization"), allowanceScope: z.literal("person"),
+    windowStartAt: z.string().datetime(), resetsAt: z.string().datetime(), weeklyLimitUsd: z.number().finite().nonnegative(),
+    joinedMembers: z.number().int().nonnegative(), eligibleMembers: z.number().int().nonnegative(), exhaustedMembers: z.number().int().nonnegative().nullable().describe("Current eligible members whose recorded weekly usage has reached their person-wide limit; not a probe of Gateway request headroom. Null when accounting cannot be verified."),
+    usedUsd: z.number().finite().nonnegative().nullable(), requestCount: z.number().int().nonnegative().nullable(),
+  }),
+});
+
+export function freeInferenceDefaultPinned(metadata: unknown): boolean {
+  const free = readOrganizationMetadata(metadata).inferenceFree;
+  return !(typeof free === "object" && free !== null && "defaultPinned" in free && free.defaultPinned === false);
+}
+
+export function withFreeInferenceDefaultPinned(metadata: Record<string, unknown>, defaultPinned: boolean): Record<string, unknown> {
+  const free = metadata.inferenceFree;
+  return { ...metadata, inferenceFree: { ...(typeof free === "object" && free !== null && !Array.isArray(free) ? free : {}), defaultPinned } };
+}
+
+/** Platform-admin pilot enrollment; broad rollout changes only the default for organizations without an override. */
+export function freeInferenceRolloutEnabled(metadata: unknown, config: Pick<FreeInferenceConfig, "rolloutAllOrganizations">): boolean {
+  const free = readOrganizationMetadata(metadata).inferenceFree;
+  if (typeof free === "object" && free !== null && "rolloutEnabled" in free) return free.rolloutEnabled === true;
+  return config.rolloutAllOrganizations;
+}
+
+export function withFreeInferenceRollout(metadata: Record<string, unknown>, enabled: boolean | null): Record<string, unknown> {
+  const free = metadata.inferenceFree;
+  const next: Record<string, unknown> = { ...(typeof free === "object" && free !== null && !Array.isArray(free) ? free : {}) };
+  if (enabled === null) delete next.rolloutEnabled;
+  else next.rolloutEnabled = enabled;
+  return { ...metadata, inferenceFree: next };
+}
 
 export function managedModelCatalog(): ManagedModelRecommendation[] {
   return [{ modelID: INFERENCE_FREE_MODEL_ID, displayName: "Auto", providerName: "OpenWork",
@@ -190,14 +261,15 @@ export function inferenceSubscriptionLive(status: string | null | undefined): bo
 }
 
 /** Subscribed organizations use paid OpenWork Models; free Auto is only for unsubscribed members. */
-export function inferenceSubscribed(metadata: Record<string, unknown> | null): boolean {
-  const inference = metadata?.inference;
+export function inferenceSubscribed(metadata: unknown): boolean {
+  const inference = readOrganizationMetadata(metadata).inference;
   return typeof inference === "object" && inference !== null && "enabled" in inference && inference.enabled === true;
 }
 
-export function freeInferenceOrganizationAllowed(metadata: Record<string, unknown> | null): boolean {
-  const inference = metadata?.inference;
-  const free = metadata?.inferenceFree;
+export function freeInferenceOrganizationAllowed(metadata: unknown): boolean {
+  const parsed = readOrganizationMetadata(metadata);
+  const inference = parsed.inference;
+  const free = parsed.inferenceFree;
   if (typeof inference === "object" && inference !== null && "enabled" in inference && inference.enabled === false) return false;
   if (typeof free === "object" && free !== null && "offerAllowed" in free && free.offerAllowed === false) return false;
   return true;
