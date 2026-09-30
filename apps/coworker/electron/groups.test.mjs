@@ -767,8 +767,13 @@ test("turn submission preserves definitive refusal and generation checks without
       maintenanceAdmission: createMaintenanceAdmission(), resetInProgress: false,
       ipcMain: { handle: (_name, callback) => { invoke = (command, payload = {}) => callback(event, { command, payload }); } },
     };
-    const handlers = [["coworkers.update", "abilities.catalog"], ["settings.update", "shell.openExternal"], ["den.providers.sync", "voice.status"]]
-      .map(([first, next]) => source.slice(source.indexOf(`  "${first}":`), source.indexOf(`  "${next}":`))).join("\n");
+    const handlers = [["coworkers.update", "abilities.catalog"], ["settings.update", "shell.openExternal"], ["den.providers.sync", "calls.settings"]]
+      .map(([first, next]) => {
+        const start = source.indexOf(`  "${first}":`);
+        const end = source.indexOf(`  "${next}":`, start);
+        assert.ok(start >= 0 && end > start, `Missing command fixture boundary for ${first}`);
+        return source.slice(start, end);
+      }).join("\n");
     const readiness = runInNewContext(`${source.slice(source.indexOf("const warmedCoworkerWorkspaces ="), source.indexOf("\n// ---------------------------------------------------------------------------", source.indexOf("function warmCoworkerWorkspace(")))}
       ${source.slice(source.indexOf("function queueDenSessionHandoff("), source.indexOf("async function clearDenSession("))}
       const commands = {${handlers}};

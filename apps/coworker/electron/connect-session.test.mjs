@@ -38,7 +38,8 @@ function host() {
   });
   vm.runInContext(main.slice(main.indexOf("function queueDenSessionHandoff("), main.indexOf("function parseDenSessionPayload(")), context);
   const start = main.indexOf('  "den.session.set":');
-  const end = main.indexOf('  "voice.status":', start);
+  const end = main.indexOf('  "calls.settings":', start);
+  assert.ok(start >= 0 && end > start, "Connect fixture must stop before the call commands");
   vm.runInContext(`globalThis.handlers = {${main.slice(start, end)}}`, context);
   return { state, context, handlers: context.handlers };
 }
