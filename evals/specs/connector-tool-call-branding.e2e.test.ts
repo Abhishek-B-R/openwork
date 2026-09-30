@@ -16,9 +16,9 @@ test("connector-backed tool calls show first-class branding and human-readable l
   };
   const send = async (text: string) => {
     await probe.eventually(() => probe.composer(), { within: 30_000, label: "the connector fixture's composer and model have loaded",
-      until: state => state.route.includes(world.session.sessionId) && state.composerEditable && state.selectedModelLabel.includes("Connector display model"),
+      until: state => state.route.includes(world.session.sessionId) && state.composerEditable && state.draftText === "" && state.selectedModelLabel.includes("Connector display model"),
     });
-    await user.type("composer", text, { replace: true, verify: true });
+    await user.type("composer", text, { verify: true });
     await probe.eventually(() => probe.composer(), { within: 30_000, label: "the composer admits a connector turn", until: state => state.runTaskEnabled });
     await user.click("Run task");
   };
