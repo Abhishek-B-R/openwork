@@ -5,7 +5,7 @@ import type { OpenworkContextSnapshot } from "@openwork/types/openwork-context";
 declare global {
   interface Window {
     [key: `command-observer-${string}`]: { requests: { method: string; path: string }[]; stop(): void } | undefined;
-    [key: `activity-observer-${string}`]: { samples: { at: number; working: string | null; liveHeight: number | null; helperRow: boolean; rows: string[]; replacements: string[] }[]; stop(): void } | undefined;
+    [key: `activity-observer-${string}`]: { samples: { at: number; working: string | null; liveHeight: number | null; railHeight: number | null; railExpanded: boolean; helperRow: boolean; rows: string[]; visibleRows: string[]; replacements: string[] }[]; stop(): void } | undefined;
     __openworkControl: {
       listActions(): { id: string; disabled: boolean; args?: unknown; [key: string]: unknown }[];
       execute(action: string, args?: unknown): Promise<{ ok: boolean; error?: string; result?: unknown; value?: unknown }>;

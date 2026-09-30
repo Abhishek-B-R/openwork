@@ -5,11 +5,13 @@ import type { Probe } from "./spec/types.ts";
 export async function observeActivity(probe: Probe) {
   const key: `activity-observer-${string}` = `activity-observer-${crypto.randomUUID()}`;
   await probe.eval(browserScript((key: `activity-observer-${string}`) => {
-    const samples: { at: number; working: string | null; liveHeight: number | null; helperRow: boolean; rows: string[]; replacements: string[] }[] = [];
+    const samples: { at: number; working: string | null; liveHeight: number | null; railHeight: number | null; railExpanded: boolean; helperRow: boolean; rows: string[]; visibleRows: string[]; replacements: string[] }[] = [];
     const elements = new Map<string, Element>();
     const started = performance.now();
     const sample = () => {
       const shell = document.querySelector<HTMLElement>("[data-live-steps]");
+      const rail = shell?.querySelector<HTMLElement>("[data-steps-rail]");
+      const railExpanded = Boolean(rail && !rail.hidden && getComputedStyle(rail).display !== "none");
       const rows = [...(shell?.querySelectorAll<HTMLElement>("[data-step-identity], [data-code-mode-invocation]") ?? [])];
       const replacements: string[] = [];
       for (const row of rows) {
@@ -20,8 +22,11 @@ export async function observeActivity(probe: Probe) {
       if (samples.length < 3_600) samples.push({ at: Math.round(performance.now() - started),
         working: shell?.querySelector("[data-working-line]")?.textContent?.match(/Working\s*\d+(?:m\s*\d+)?s/)?.[0] ?? null,
         liveHeight: shell ? Math.round(shell.getBoundingClientRect().height) : null,
+        railHeight: railExpanded && rail ? Math.round(rail.getBoundingClientRect().height) : null, railExpanded,
         helperRow: Boolean(shell?.querySelector("[data-subagent-run]")),
-        rows: rows.map(row => row.dataset.stepIdentity ?? row.dataset.codeModeInvocation!), replacements });
+        rows: rows.map(row => row.dataset.stepIdentity ?? row.dataset.codeModeInvocation!),
+        visibleRows: rows.filter(row => row.getBoundingClientRect().height > 0 && row.getBoundingClientRect().width > 0)
+          .map(row => row.dataset.stepIdentity ?? row.dataset.codeModeInvocation!), replacements });
     };
     const interval = setInterval(sample, 50);
     const timeout = setTimeout(() => clearInterval(interval), 180_000);

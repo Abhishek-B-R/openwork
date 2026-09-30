@@ -60,6 +60,9 @@ test(`ACT-WHOLE ${resolveEvalEngine()}: a person follows a whole conversation fr
     const trace = (await activity.finish()).filter(sample => sample.liveHeight !== null);
     evidence.recordJsonArtifact("Native activity continuity sampled every 50 ms", trace);
     expect(trace.length).toBeGreaterThan(20);
+    expect(trace.every(sample => sample.railExpanded), "the startup disclosure stays visibly open after the first reply arrives").toBe(true);
+    expect(Math.max(...trace.map(sample => sample.visibleRows.length)), "multiple native steps are visible in the opened rail").toBeGreaterThanOrEqual(2);
+    expect(Math.max(...trace.map(sample => sample.railHeight ?? 0)), "the proof observes tool rows, not just the compact shell").toBeGreaterThan(48);
     expect(trace.flatMap(sample => sample.replacements), "native step rows stay mounted during streaming").toEqual([]);
     expect(trace.slice(1).filter((sample, index) => sample.liveHeight! < trace[index]!.liveHeight! - 1), "automatic updates do not shrink the opened rail").toEqual([]);
     await user.screenshot();

@@ -35,12 +35,13 @@ const userMessage: UIMessage = {
   parts: [{ type: "text", text: "Send this", state: "done" }],
 };
 
-function list(messages: UIMessage[], status: ThreadStatus, syncHealth?: RunSyncHealth, activityStatus: SessionActivityStatus = "thinking") {
+function list(messages: UIMessage[], status: ThreadStatus, syncHealth?: RunSyncHealth, activityStatus: SessionActivityStatus = "thinking", uiStateOwner?: string) {
   return (
     <PlatformProvider value={createDefaultPlatform()}>
     <MessageListProvider
       workspaceId="ws"
       sessionId="session"
+      uiStateOwner={uiStateOwner}
       showThinking={true}
       developerMode={false}
       displaySuggestions={false}
@@ -66,6 +67,49 @@ function renderList(messages: UIMessage[], status: ThreadStatus, syncHealth?: Ru
 }
 
 describe("message-list loading feedback", () => {
+  test("opening the startup rail survives its handoff to the first native assistant reply", async () => {
+    const ownedDom = typeof window === "undefined";
+    if (ownedDom) GlobalRegistrator.register({ url: "http://localhost/" });
+    const actEnvironment = Reflect.get(globalThis, "IS_REACT_ACT_ENVIRONMENT");
+    Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    const owner = "startup-rail-fixture";
+    const assistant: UIMessage = { id: "first-native-reply", role: "assistant", parts: [{
+      type: "dynamic-tool", toolName: "read", toolCallId: "first-native-read", state: "input-streaming",
+      input: { filePath: "/fixture.txt" },
+    }] };
+    try {
+      await act(async () => root.render(list([userMessage], "submitted", undefined, "thinking", owner)));
+      const startup = container.querySelector<HTMLButtonElement>("[data-steady-activity] > div > button");
+      if (!startup) throw new Error("Missing startup activity disclosure");
+      await act(async () => startup.click());
+      expect(startup.getAttribute("aria-expanded")).toBe("true");
+      await act(async () => root.render(list([userMessage, assistant], "streaming", undefined, "thinking", owner)));
+      const native = container.querySelector<HTMLButtonElement>("[data-steady-activity] > div > button");
+      expect(native).not.toBe(startup);
+      expect(native?.getAttribute("aria-expanded")).toBe("true");
+      expect(container.querySelector<HTMLElement>("[data-steps-rail]")?.hidden).toBe(false);
+      await act(async () => native?.click());
+      expect(native?.getAttribute("aria-expanded")).toBe("false");
+      await act(async () => root.render(list([userMessage, { ...assistant, parts: [...assistant.parts, { type: "text", text: "The fixture is ready." }] }], "streaming", undefined, "thinking", owner)));
+      expect(container.querySelector("[data-steady-activity] > div > button")?.getAttribute("aria-expanded")).toBe("false");
+      await act(async () => root.render(list([userMessage, assistant], "ready", undefined, "idle", owner)));
+      const finished = container.querySelector<HTMLButtonElement>("[data-steady-activity] > div > button");
+      await act(async () => finished?.click());
+      const shell = container.querySelector("[data-steady-activity]");
+      await act(async () => shell?.dispatchEvent(new MouseEvent("pointerover", { bubbles: true })));
+      await act(async () => shell?.dispatchEvent(new MouseEvent("pointerout", { bubbles: true, relatedTarget: document.body })));
+      expect(finished?.getAttribute("aria-expanded"), "explicitly reopened finished details stay open when the pointer moves").toBe("true");
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+      Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", actEnvironment);
+      if (ownedDom) await GlobalRegistrator.unregister();
+    }
+  });
+
   test("updates a live assistant group and its last-group props without resetting expanded tool details", async () => {
     const ownedDom = typeof window === "undefined";
     if (ownedDom) GlobalRegistrator.register({ url: "http://localhost/" });

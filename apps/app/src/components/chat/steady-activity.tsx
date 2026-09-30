@@ -2,14 +2,17 @@ import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "re
 import { ChevronRight } from "lucide-react";
 import { formatElapsedSeconds } from "@/lib/tool-call-duration";
 import { cn } from "@/lib/utils";
+import { useWorkbenchDisclosure } from "@/react-app/domains/session/chat/workbench-ui-state";
 
 /** One shell survives tool boundaries, waiting, and the terminal fold. */
-export function SteadyActivity({ active, waiting, label, summary, count, elapsed, models, children }: {
+export function SteadyActivity({ active, waiting, label, summary, count, elapsed, models, children, disclosureKey }: {
   active: boolean; waiting: boolean; label: string; summary: string; count: number;
-  elapsed: number; models?: string; children: ReactNode;
+  elapsed: number; models?: string; children: ReactNode; disclosureKey?: string;
 }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useWorkbenchDisclosure(disclosureKey);
   const [reading, setReading] = useState(false);
+  const wasActive = useRef(active);
+  const terminalFoldPending = useRef(false);
   const [displayed, setDisplayed] = useState(label);
   const [outgoing, setOutgoing] = useState<string | null>(null);
   const previous = useRef(label);
@@ -30,7 +33,15 @@ export function SteadyActivity({ active, waiting, label, summary, count, elapsed
     const timer = window.setTimeout(() => setOutgoing(null), 150);
     return () => window.clearTimeout(timer);
   }, [displayed, active, waiting]);
-  useEffect(() => { if (!active && !reading) setOpen(false); }, [active, reading]);
+  useEffect(() => {
+    if (wasActive.current && !active) terminalFoldPending.current = true;
+    wasActive.current = active;
+    if (active) terminalFoldPending.current = false;
+    else if (terminalFoldPending.current && !reading) {
+      terminalFoldPending.current = false;
+      setOpen(false);
+    }
+  }, [active, reading]);
   const rail = useRef<HTMLDivElement>(null);
   const tallest = useRef(0);
   useLayoutEffect(() => {
@@ -51,7 +62,7 @@ export function SteadyActivity({ active, waiting, label, summary, count, elapsed
     onPointerEnter={() => setReading(true)} onPointerLeave={() => setReading(false)}
     onFocusCapture={() => setReading(true)} onBlurCapture={event => { if (!event.currentTarget.contains(event.relatedTarget)) setReading(false); }}>
     <div className="mx-auto w-full max-w-3xl px-2 md:px-10">
-      <button type="button" onClick={() => { tallest.current = 0; setOpen(value => !value); }}
+      <button type="button" onClick={() => { tallest.current = 0; terminalFoldPending.current = false; setOpen(!open); }}
         className="group flex h-7 w-full items-center gap-1 text-start text-sm text-muted-foreground hover:text-foreground"
         aria-expanded={open} aria-label={`${active ? "Earlier steps" : summary}. ${open ? "Hide" : "Show"} steps`}>
         <ChevronRight className={cn("size-3.5 transition-transform duration-150 motion-reduce:transition-none", open && "rotate-90")} aria-hidden />

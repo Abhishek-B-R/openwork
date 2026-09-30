@@ -1454,7 +1454,8 @@ function MessageGroup({
           message use, so a step row is spaced identically whether or not a
           message boundary happens to fall between it and the previous row. */}
       {!hideRun ? <SteadyActivity active={isLiveGroup} waiting={waiting} label={currentLabel} summary={stepRunLabel}
-        count={stepRowCount} elapsed={elapsedSeconds} models={models}>
+        count={stepRowCount} elapsed={elapsedSeconds} models={models}
+        disclosureKey={JSON.stringify(["run", initiatingId ?? items[0]?.message.id])}>
         {renderItems(stepItems, 0)}
         {!runItems && foldedReasoning}
       </SteadyActivity> : null}
@@ -1734,7 +1735,8 @@ export function MessageList({ messages, messageIdReplacements, status, activityS
         )
         }}
       >
-        {showLoading && !activityOwner && !items.some(item => isMessageGroup(item) && item.messages.at(-1)?.index === messages.length - 1) ? <SteadyActivity active waiting={waiting} label={ownActivity?.assistantOutput || ownActivity?.latestActivity ? "Working…" : runElapsedSeconds >= 10 ? "Starting the engine…" : "Starting…"} summary="" count={0} elapsed={runElapsedSeconds}>{null}</SteadyActivity> : null}
+        {showLoading && !activityOwner && !items.some(item => isMessageGroup(item) && item.messages.at(-1)?.index === messages.length - 1) ? <SteadyActivity active waiting={waiting} label={ownActivity?.assistantOutput || ownActivity?.latestActivity ? "Working…" : runElapsedSeconds >= 10 ? "Starting the engine…" : "Starting…"} summary="" count={0} elapsed={runElapsedSeconds}
+          disclosureKey={JSON.stringify(["run", activeRun?.id ?? latestUserMessageId])}>{null}</SteadyActivity> : null}
         {showReconnecting && <ReconnectingMessage lastConfirmedAt={syncHealth?.lastConfirmedAt ?? null} />}
         {retryStatus ? <RetryMessage status={retryStatus} /> : null}
         {error && presentOpencodeSessionError(error).kind !== "aborted" && !hasSessionErrorMessage && !sessionErrorHandled ? <ErrorMessage error={error} /> : null}
