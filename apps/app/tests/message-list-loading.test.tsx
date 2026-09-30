@@ -81,6 +81,7 @@ describe("message-list loading feedback", () => {
       input: { filePath: "/fixture.txt" },
     }] };
     try {
+      useSessionActivityStore.getState().beginRun("ws", "session", userMessage.id, Date.now());
       await act(async () => root.render(list([userMessage], "submitted", undefined, "thinking", owner)));
       const startup = container.querySelector<HTMLButtonElement>("[data-steady-activity] > div > button");
       if (!startup) throw new Error("Missing startup activity disclosure");

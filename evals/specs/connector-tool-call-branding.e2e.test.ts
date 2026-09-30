@@ -13,6 +13,7 @@ test("connector-backed tool calls show first-class branding and human-readable l
       within: 60_000, label: "the final connector reply is visible outside the folded steps",
       until: result => result.elements.some(element => element.text.includes(text) && element.rect.width > 0 && element.rect.height > 0),
     }).catch(async error => {
+      evidence.recordJsonArtifact("Native tools before the missing connector reply", await world.nativeTools());
       evidence.recordJsonArtifact("Composer before the missing connector reply", await probe.composer());
       evidence.recordJsonArtifact("Activity before the missing connector reply", await probe.dom("[data-steady-activity], [data-message-role]"));
       await user.screenshot();

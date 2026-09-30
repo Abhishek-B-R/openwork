@@ -378,7 +378,7 @@ export async function connectorBranding(seed: Seed) {
     } },
   });
   await seed.session(app);
-  return { app, den, engine, prompt, failurePrompt, mutationPrompt, mutationProof, proof };
+  return { app, den, workspace, engine, prompt, failurePrompt, mutationPrompt, mutationProof, proof };
 }
 
 export async function connectorCatalogManagement(seed: Seed) {
