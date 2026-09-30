@@ -1,242 +1,94 @@
 /** @jsxImportSource react */
-import { useCallback, useEffect, useMemo, useState } from "react";
-import {
-  Bell,
-  CircleCheck,
-  Info,
-  OctagonX,
-  TriangleAlert,
-  type LucideIcon,
-} from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { Bell } from "lucide-react";
+import { useNavigate } from "react-router";
 
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTitle, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import { t } from "@/i18n";
-import {
-  useNotificationStore,
-  type AppNotification,
-  type NotificationSeverity,
-} from "@/react-app/kernel/notification-store";
-import { useNavigate } from "react-router";
-import { requestOpenModelPicker } from "./new-providers-listener";
+import { ActivityEmpty } from "@/react-app/domains/activity/activity-empty";
+import { ActivityRow } from "@/react-app/domains/activity/activity-row";
+import { ActivityLoading, ActivityRefreshError } from "@/react-app/domains/activity/activity-status";
+import { useActivityActions } from "@/react-app/domains/activity/use-activity-actions";
+import { useActivityFeed } from "@/react-app/domains/activity/use-activity-feed";
+import { useNotificationStore } from "@/react-app/kernel/notification-store";
 import { useControlAction, type OpenworkControlAction } from "./control/control-provider";
 import { openNotificationCenterEvent } from "./notifications";
-import { useReloadCoordinator } from "./reload-coordinator";
 import { useShellConfig } from "./shell-config";
 
-const SEVERITY_ICONS: Record<NotificationSeverity, LucideIcon> = {
-  info: Info,
-  success: CircleCheck,
-  warning: TriangleAlert,
-  error: OctagonX,
-};
-
-const SEVERITY_CLASSES: Record<NotificationSeverity, string> = {
-  info: "text-sky-11",
-  success: "text-emerald-11",
-  warning: "text-amber-11",
-  error: "text-red-11",
-};
-
-function formatTimeAgo(timestamp: number): string {
-  const elapsed = Date.now() - timestamp;
-  if (elapsed < 60_000) return t("notifications.just_now");
-  const minutes = Math.floor(elapsed / 60_000);
-  if (minutes < 60) return `${minutes}m`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h`;
-  const days = Math.floor(hours / 24);
-  if (days < 7) return `${days}d`;
-  return new Date(timestamp).toLocaleDateString();
-}
-
-/**
- * Notification bell with an unread dot. Opening the panel marks entries read.
- * Shared by the sidebar brand row, collapsed titlebar and settings header.
- */
+/** Shared Activity entry point. Opening it never changes persisted history. */
 export function NotificationBell({ align = "end" }: { align?: "start" | "end" }) {
   const { config } = useShellConfig();
   const [open, setOpen] = useState(false);
   const notifications = useNotificationStore((state) => state.notifications);
-  const markAllRead = useNotificationStore((state) => state.markAllRead);
-  const clearAll = useNotificationStore((state) => state.clearAll);
-  const reloadCoordinator = useReloadCoordinator();
+  const { items, context, refreshState, loading, now } = useActivityFeed(open && config.notifications);
+  const runAction = useActivityActions();
   const navigate = useNavigate();
 
   const notificationsListAction = useMemo<OpenworkControlAction>(() => ({
     id: "notifications.list",
     label: "List notifications",
-    description: "Return the current notification center entries.",
+    description: "Return the current background notification entries.",
     kind: "query",
     effects: { data: "read", ui: "none", external: false },
     sideEffect: "none",
-    execute: () => notifications.map((n) => ({
-      id: n.id,
-      kind: n.kind,
-      severity: n.severity,
-      title: n.title,
-      body: n.body,
-      count: n.count,
-      readAt: n.readAt,
-      actionType: n.action?.type ?? null,
-      actionLabel: n.actionLabel ?? null,
+    execute: () => notifications.map((notification) => ({
+      id: notification.id,
+      kind: notification.kind,
+      severity: notification.severity,
+      title: notification.title,
+      body: notification.body,
+      count: notification.count,
+      readAt: notification.readAt,
+      actionType: notification.action?.type ?? null,
+      actionLabel: notification.actionLabel ?? null,
     })),
   }), [notifications]);
   useControlAction(notificationsListAction);
-
-  const unreadCount = useMemo(
-    () => notifications.filter((notification) => notification.readAt === null).length,
-    [notifications],
-  );
-  const label = unreadCount > 0
-    ? `${t("notifications.title")} (${unreadCount})`
-    : t("notifications.title");
-
-  const handleOpenChange = useCallback(
-    (next: boolean) => {
-      setOpen(next);
-      if (next) markAllRead();
-    },
-    [markAllRead],
-  );
+  const activityListAction = useMemo<OpenworkControlAction>(() => ({
+    id: "activity.list",
+    label: "List activity",
+    description: "Read this member's device-observed activity and verification status.",
+    kind: "query",
+    effects: { data: "read", ui: "none", external: false },
+    sideEffect: "none",
+    execute: () => ({ entries: context.entries, verifiedAt: context.verifiedAt, refreshState }),
+  }), [context, refreshState]);
+  useControlAction(activityListAction);
 
   useEffect(() => {
     if (!config.notifications) return;
-    const handler = () => handleOpenChange(true);
+    const handler = () => setOpen(true);
     window.addEventListener(openNotificationCenterEvent, handler);
     return () => window.removeEventListener(openNotificationCenterEvent, handler);
-  }, [config.notifications, handleOpenChange]);
-
-  const runAction = useCallback(
-    (notification: AppNotification) => {
-      const action = notification.action;
-      if (!action) return;
-      setOpen(false);
-      markAllRead();
-      if (action.type === "open-model-picker") {
-        requestOpenModelPicker(action.providerIds);
-      } else if (action.type === "reload-engine") {
-        void reloadCoordinator.reloadWorkspaceEngine();
-      } else if (action.type === "open-extensions-marketplace") {
-        navigate("/extensions");
-      } else if (action.type === "install-marketplace-plugin") {
-        navigate("/extensions");
-      }
-    },
-    [markAllRead, navigate, reloadCoordinator],
-  );
+  }, [config.notifications]);
 
   if (!config.notifications) return null;
 
   return (
-    <Popover open={open} onOpenChange={handleOpenChange}>
-      <PopoverTrigger
-        render={
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            data-notification-bell
-            className="rounded-lg text-muted-foreground transition-colors hover:bg-muted aria-expanded:bg-muted titlebar-no-drag"
-            title={t("notifications.title")}
-            aria-label={label}
-          >
-            <Bell strokeWidth={1.5} />
-            {unreadCount > 0 ? (
-              <span data-notification-unread aria-hidden="true" className="absolute right-1 top-1 size-1.5 rounded-full bg-sidebar-primary" />
-            ) : null}
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger render={
+        <Button variant="ghost" size="icon-sm" data-notification-bell className="rounded-lg titlebar-no-drag" title={t("activity.title")} aria-label={t("activity.title")}>
+          <Bell strokeWidth={1.5} />
+        </Button>
+      } />
+      <PopoverContent align={align} side="bottom" sideOffset={4} data-notification-panel className={cn("max-w-[calc(100vw-1rem)] gap-0 overflow-hidden rounded-xl p-0 data-open:animate-none motion-reduce:animate-none!", items.length === 0 ? "w-95" : "w-85")}>
+        <div className="flex h-10 items-center justify-between gap-3 px-3.5">
+          <PopoverTitle className="text-sm font-semibold">{t("activity.title")}</PopoverTitle>
+          <Button variant="ghost" size="xs" onClick={() => { setOpen(false); navigate("/activity"); }}>
+            {t("activity.view_all")}
           </Button>
-        }
-      />
-      <PopoverContent
-        align={align}
-        side="bottom"
-        sideOffset={4}
-        data-notification-panel
-        className="w-96 max-w-[calc(100vw-1rem)] gap-0 rounded-xl p-0 duration-180 ease-out data-closed:duration-120 motion-reduce:animate-none!"
-      >
-        <div className="flex items-center justify-between border-b border-border px-4 py-2.5">
-          <PopoverTitle className="text-sm font-semibold">{t("notifications.title")}</PopoverTitle>
-          {notifications.length > 0 ? (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="text-xs text-muted-foreground"
-              onClick={clearAll}
-            >
-              {t("notifications.clear_all")}
-            </Button>
-          ) : null}
         </div>
-        {notifications.length === 0 ? (
-          <div className="flex flex-col items-center gap-1 px-6 py-10 text-center">
-            <Bell className="mb-2 size-5 text-muted-foreground/60" />
-            <p className="text-sm font-medium">{t("notifications.empty")}</p>
-            <p className="text-xs text-muted-foreground">{t("notifications.empty_hint")}</p>
-          </div>
-        ) : (
-          <div className="max-h-96 overflow-y-auto py-1">
-            {notifications.map((notification) => (
-              <NotificationRow
-                key={notification.id}
-                notification={notification}
-                onAction={runAction}
-              />
+        {refreshState === "error" ? <ActivityRefreshError verifiedAt={context.verifiedAt} now={now} /> : null}
+        {loading ? <ActivityLoading compact /> : items.length === 0 ? (refreshState === "error" ? null : <ActivityEmpty compact />) : (
+          <div role="list" className="px-1.5 pb-1.5">
+            {items.slice(0, 5).map((item) => (
+              <ActivityRow key={item.id} item={item} now={now} compact onResourceOpen={() => setOpen(false)} onSystemAction={(notification) => { setOpen(false); runAction(notification); }} />
             ))}
           </div>
         )}
       </PopoverContent>
     </Popover>
-  );
-}
-
-function NotificationRow({
-  notification,
-  onAction,
-}: {
-  notification: AppNotification;
-  onAction: (notification: AppNotification) => void;
-}) {
-  const Icon = SEVERITY_ICONS[notification.severity];
-  const unread = notification.readAt === null;
-  const showCount =
-    notification.count > 1 &&
-    (notification.severity === "warning" || notification.severity === "error");
-
-  return (
-    <div
-      className={cn(
-        "flex items-start gap-3 px-4 py-3",
-        unread ? "bg-primary/5" : "opacity-80",
-      )}
-    >
-      <Icon className={cn("mt-0.5 size-4 shrink-0", SEVERITY_CLASSES[notification.severity])} />
-      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <div className="flex items-baseline justify-between gap-2">
-          <p className="min-w-0 truncate text-sm font-medium">
-            {notification.title}
-            {showCount ? (
-              <span className="ml-1.5 text-xs font-normal text-muted-foreground">
-                ×{notification.count}
-              </span>
-            ) : null}
-          </p>
-          <span className="flex shrink-0 items-center gap-1.5 text-[11px] text-muted-foreground">
-            {formatTimeAgo(notification.updatedAt)}
-            {unread ? <span className="size-1.5 rounded-full bg-primary" /> : null}
-          </span>
-        </div>
-        {notification.body ? (
-          <p className="line-clamp-2 text-xs text-muted-foreground">{notification.body}</p>
-        ) : null}
-        {notification.action && notification.actionLabel ? (
-          <div className="mt-1.5">
-            <Button variant="outline" size="sm" onClick={() => onAction(notification)}>
-              {notification.actionLabel}
-            </Button>
-          </div>
-        ) : null}
-      </div>
-    </div>
   );
 }
