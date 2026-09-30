@@ -1,0 +1,20 @@
+{
+  "chat": {
+    "fixture": "Deterministic local sample responses; real Den routes, native engine, filesystem writes and conversation persistence.",
+    "chat": true,
+    "draftOpen": true,
+    "followUpEdit": true,
+    "original": "# A plan for today\n\n- Finish the first draft.\n- Review it with the team.\n- Pick the next step together.\n\nKeep the afternoon free for focused work.\n",
+    "revised": "# A plan for today\n\nFinish the draft, get feedback, and decide what comes next.\n",
+    "replies": [
+      "Here\u2019s a first pass. I kept it short and saved **daily-brief.md** for us to edit together.",
+      "Here\u2019s the shorter version. I updated **daily-brief.md** so we can keep working on it together."
+    ]
+  },
+  "stop": {
+    "fixture": "Native engine and isolated Den routes with a deterministic local model.",
+    "stopped": true,
+    "lateResultSuppressed": true
+  },
+  "visualReview": "Pending browser handoff; these results do not claim a screenshot comparison."
+}

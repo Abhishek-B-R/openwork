@@ -25,8 +25,11 @@ and schedules. Scheduled output goes into conversation history as a draft.
 
 Open `/workbot` in Den after signing in. When both `headlessAutomation` and
 `workbot` are enabled, the existing workspace navigation also offers Workbot.
-One member conversation holds chat and scheduled drafts. Apps shows actual
-persistent files, available team tools and the unavailable takeover state.
+One member conversation holds chat and scheduled drafts. Replies use conversation
+bubbles and Markdown. Saved drafts offer Open and Edit together; Open reads the
+actual member file, and Edit together continues the same conversation. Tool calls,
+activity logs, token counts and completion timing are absent from this screen.
+Apps shows persistent files and links to the existing team connections controls.
 Calendar asks the agent for connected data; it renders only returned events and
 shows an explicit blocked state when no approved calendar is connected.
 
@@ -80,7 +83,7 @@ on the deployed host instead of `/tmp`.
    the same environment as the API.
 6. Sign in and open `/workbot`. Ask it to save a preference to `memory.md`,
    read that file, and draft a note. Schedule work, edit it, pause/resume it,
-   run it now, and inspect the returned draft and activity.
+   run it now, and open or edit the returned draft in chat.
 
 Use an absolute storage path when launching API and worker from different
 folders. Keep it private and mount it durably; it contains member prompts,
@@ -147,3 +150,25 @@ retains its unverified state rather than inventing meetings. Production readines
 still requires a hosted lifecycle run, process-death supervision, backups,
 retention policy and a durable multi-host queue if deployment grows beyond one
 host.
+
+## Conversation design correction
+
+The chat layout follows the supplied Paper v3 Home and Messages artboards: a
+60-pixel quiet navigation bar, a 620-pixel conversation column, a dark member
+bubble, a soft assistant bubble, a pill composer, and a 420-pixel supporting views
+panel at the reference desktop width. The web page does not imitate OS chrome.
+The right panel uses actual member drafts, schedules and returned calendar data.
+It does not turn failed runs into team inbox items or invent connected app data.
+
+`pnpm --filter @openwork-ee/den-web test:workbot` verifies conversational replies,
+typing, recovery, Markdown safety, and usable saved-draft actions. A labeled
+local model fixture also passed native chat → file write/read → follow-up edit
+and cancellation with late-result suppression. These are protocol and interaction
+checks, not genuine inference or a screenshot comparison. The production web
+build and web type check passed after the revision.
+
+The updated visual comparison and screenshots are pending: the existing browser
+tab was on an internal connection-error page and its URL policy blocked further
+automation. Existing evidence screenshots above predate this design correction.
+The local preview is running at http://127.0.0.1:18995/workbot. It still uses the
+existing labeled sample-response fixture; no model access grant was changed.
