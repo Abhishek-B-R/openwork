@@ -113,6 +113,8 @@ import {
   type SessionPagePaneRuntime,
 } from "@/react-app/domains/session/chat/session-page";
 import { ActivityPage } from "@/react-app/domains/activity/activity-page";
+import type { ActivityResource } from "@/react-app/kernel/activity-types";
+import { encodeConnectSkillToken } from "@/react-app/domains/session/surface/composer/connect-skill-token";
 import { AutomationsPage } from "@/react-app/domains/automations/automations-page";
 import { AppsPage } from "@/react-app/domains/apps/apps-page";
 import { DashboardPage } from "@/react-app/domains/dashboard/dashboard-page";
@@ -2178,6 +2180,31 @@ export function SessionRoute() {
   ) : null;
   const gatedRouteNotFoundMessage = cloudWorkspaceReadyForRouteErrors ? routeNotFoundMessage : null;
 
+  // Activity "Try it": put the newly shared skill in the New session composer,
+  // after anything already drafted there, and open it. Nothing is sent.
+  const trySkillInNewSession = useCallback((resource: ActivityResource) => {
+    if (!selectedWorkspaceId || !resource.skillSlug || !resource.capability) return;
+    const destination = { workspaceId: selectedWorkspaceId };
+    const ownerKey = newSessionDraftOwnerKey(sessionDraftScope, destination);
+    const token = encodeConnectSkillToken({
+      slug: resource.skillSlug,
+      name: resource.label,
+      marketplace: resource.marketplaceName ?? "Library",
+      capability: resource.capability,
+    });
+    const composer = useComposerStateStore.getState();
+    const existing = (ownerKey ? composer.sessions[ownerKey]?.draft : undefined)
+      || getSessionDraft(sessionDraftScope, selectedWorkspaceId, newSessionDraftSlot(destination))?.text
+      || "";
+    const draft = existing.includes(token)
+      ? existing
+      : `${existing}${existing && !/\s$/.test(existing) ? " " : ""}${token} `;
+    saveSessionDraft(sessionDraftScope, selectedWorkspaceId, newSessionDraftSlot(destination), { text: persistableComposerDraftText(draft), mode: "prompt" });
+    if (ownerKey) composer.setDraft(ownerKey, draft);
+    openNewSessionDraft(destination, navigate);
+    focusPromptSoon();
+  }, [navigate, selectedWorkspaceId, sessionDraftScope]);
+
   // Workspace-scoped wiring for the empty-state hero's full composer. Unlike
   // `surfaceProps` this exists without a selected session, so the hero offers
   // the same skills/commands/agent/model controls before the session is
@@ -3801,7 +3828,7 @@ export function SessionRoute() {
       }
       primaryTitle={activityRouteActive ? t("activity.title") : appsRouteActive ? "Dashboard" : automationsRouteActive ? "Automations" : dashboardRouteActive ? "Dashboard" : undefined}
       primarySurface={activityRouteActive ? "flat" : undefined}
-      primarySlot={activityRouteActive ? <ActivityPage /> : pendingConversation ? <PendingConversationView conversation={pendingConversation} composer={newTaskComposerContext} /> : appsRouteActive ? (
+      primarySlot={activityRouteActive ? <ActivityPage onTrySkill={trySkillInNewSession} /> : pendingConversation ? <PendingConversationView conversation={pendingConversation} composer={newTaskComposerContext} /> : appsRouteActive ? (
         <WorkspaceProvider
           client={opencodeClient}
           opencodeBaseUrl={opencodeBaseUrl}

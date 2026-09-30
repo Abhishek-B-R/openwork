@@ -15,6 +15,7 @@ import {
 export const PERSISTED_ACTIVITY_STORE_KEY = "openwork:member-activity:v1";
 
 const SOURCES: ActivitySource[] = ["providers", "capabilities", "connections"];
+const BASELINE_LABEL_LIMIT = 50;
 const timestampSchema = z.number().int().nonnegative().refine((value) => value <= Date.now());
 const resourceSchema = z.object({
   id: z.string().min(1).max(512),
@@ -25,6 +26,14 @@ const resourceSchema = z.object({
     href.startsWith("/") && !href.startsWith("//") && !/[\\\u0000-\u0020\u007f]/.test(href)),
   serviceId: z.string().min(1).max(256).optional(),
   pluginName: z.string().min(1).max(512).optional(),
+  marketplaceName: z.string().min(1).max(512).optional(),
+  skillCount: z.number().int().nonnegative().max(10_000).optional(),
+  skillSlug: z.string().min(1).max(256).optional(),
+  capability: z.string().min(1).max(1024).optional(),
+});
+const baselineSchema = z.object({
+  observedAt: timestampSchema,
+  labels: z.array(z.string().min(1).max(512)).max(BASELINE_LABEL_LIMIT),
 });
 const entrySchema = z.object({
   id: z.string().min(1).max(512),
@@ -40,13 +49,18 @@ const contextSchema = z.object({
     connections: z.unknown().optional(),
   }).catch({}),
   verifiedAt: z.unknown(),
+  seenAt: z.unknown().optional(),
+  baseline: z.unknown().optional(),
 });
 const persistedSchema = z.object({ contexts: z.record(z.string(), z.unknown()) });
+const persistedNoticesSeenSchema = z.object({ noticesSeenAt: timestampSchema });
 const scopeKeySchema = z.tuple([z.string().url(), z.string().min(1), z.string().min(1)]);
 
 export type ActivityStoreState = {
   activeScopeKey: string | null;
   contexts: Record<string, ActivityContext>;
+  /** Device notices are not member-scoped, so their seen time is device-wide. */
+  noticesSeenAt: number | null;
   refreshState: "idle" | "refreshing" | "error";
   setScope: (scope: ActivityScope | null) => void;
   /** Feed only successful, complete inventories; failed syncs must not become empty snapshots. */
@@ -57,13 +71,24 @@ export type ActivityStoreState = {
     observedAt?: number;
   }) => void;
   setRefreshState: (scope: ActivityScope, state: ActivityStoreState["refreshState"]) => void;
+  /** Closing the Activity popover marks everything observed so far as seen for the active member. */
+  markSeen: (seenAt?: number) => void;
 };
 
 export const EMPTY_ACTIVITY_CONTEXT: ActivityContext = {
   entries: [],
   snapshots: {},
   verifiedAt: null,
+  seenAt: null,
+  baseline: null,
 };
+
+/** A plugin that carries skills is represented by those skills, not counted twice. */
+function baselineLabels(resources: ActivityResource[]) {
+  return resources
+    .filter((resource) => resource.kind !== "plugin" || !resource.skillCount)
+    .map((resource) => resource.label);
+}
 
 export function selectActivityContext(state: ActivityStoreState): ActivityContext {
   return (state.activeScopeKey ? state.contexts[state.activeScopeKey] : undefined)
@@ -105,7 +130,15 @@ function sanitizeContexts(value: unknown): Record<string, ActivityContext> {
       }
     }
     const verifiedAt = timestampSchema.safeParse(context.data.verifiedAt);
-    contexts[key] = { entries, snapshots, verifiedAt: verifiedAt.success ? verifiedAt.data : null };
+    const seenAt = timestampSchema.safeParse(context.data.seenAt);
+    const baseline = baselineSchema.safeParse(context.data.baseline);
+    contexts[key] = {
+      entries,
+      snapshots,
+      verifiedAt: verifiedAt.success ? verifiedAt.data : null,
+      seenAt: seenAt.success ? seenAt.data : null,
+      baseline: baseline.success ? baseline.data : null,
+    };
   }
   return contexts;
 }
@@ -133,7 +166,7 @@ export function createActivityStore(storage?: StateStorage) {
   // Defer observations and writes until their persisted baselines are available.
   let hydrated = false;
   const pending: Parameters<ActivityStoreState["observe"]>[0][] = [];
-  const jsonStorage = createJSONStorage<{ contexts: Record<string, ActivityContext> }>(() => {
+  const jsonStorage = createJSONStorage<{ contexts: Record<string, ActivityContext>; noticesSeenAt: number | null }>(() => {
     const target = storage ?? localStorage;
     return {
       getItem: (name) => target.getItem(name),
@@ -167,6 +200,7 @@ export function createActivityStore(storage?: StateStorage) {
   return create<ActivityStoreState>()(persist((set) => ({
     activeScopeKey: null,
     contexts: {},
+    noticesSeenAt: null,
     refreshState: "idle",
     setScope: (scope) => set((state) => {
       const key = scope ? activityScopeKey(scope) : null;
@@ -208,11 +242,20 @@ export function createActivityStore(storage?: StateStorage) {
           }
         }
       }
+      // The first complete inventory stays silent, but is kept as one summary
+      // ("4 things were already shared with you") instead of disappearing.
+      const baseline = previous === undefined
+        ? {
+          observedAt: context.baseline?.observedAt ?? observedAt,
+          labels: [...(context.baseline?.labels ?? []), ...baselineLabels(inventory)].slice(0, BASELINE_LABEL_LIMIT),
+        }
+        : context.baseline ?? null;
       return {
         contexts: pruneContexts({
           ...state.contexts,
           [key]: {
             ...context,
+            baseline,
             entries: [...changes, ...context.entries],
             snapshots: { ...context.snapshots, [source]: inventory },
             verifiedAt: observedAt,
@@ -224,6 +267,14 @@ export function createActivityStore(storage?: StateStorage) {
       activityScopeKey(scope) === state.activeScopeKey
         ? { refreshState, contexts: pruneContexts(state.contexts) }
         : state),
+    markSeen: (seenAt = Date.now()) => set((state) => {
+      if (!hydrated || !timestampSchema.safeParse(seenAt).success) return state;
+      const noticesSeenAt = Math.max(state.noticesSeenAt ?? 0, seenAt);
+      const key = state.activeScopeKey;
+      const context = key ? state.contexts[key] : undefined;
+      if (!key || !context || (context.seenAt ?? 0) >= seenAt) return { noticesSeenAt };
+      return { noticesSeenAt, contexts: { ...state.contexts, [key]: { ...context, seenAt } } };
+    }),
   }), {
     name: PERSISTED_ACTIVITY_STORE_KEY,
     version: 1,
@@ -232,11 +283,13 @@ export function createActivityStore(storage?: StateStorage) {
       hydrated = true;
       for (const input of pending.splice(0)) state?.observe(input);
     },
-    partialize: (state) => ({ contexts: state.contexts }),
+    partialize: (state) => ({ contexts: state.contexts, noticesSeenAt: state.noticesSeenAt }),
     merge: (persistedState, currentState) => {
+      const notices = persistedNoticesSeenSchema.safeParse(persistedState);
       return {
         ...currentState,
         contexts: pruneContexts(sanitizeContexts(persistedState), currentState.activeScopeKey),
+        noticesSeenAt: notices.success ? notices.data.noticesSeenAt : null,
       };
     },
   }));

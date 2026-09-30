@@ -99,6 +99,22 @@ describe("member sync to Activity", () => {
     expect(selectActivityContext(store.getState()).entries.some((entry) => entry.change === "unavailable")).toBe(false);
   });
 
+  test("shared skills and plugins carry the marketplace, skill count and the exact capability used by Try it", async () => {
+    const store = feedStore();
+    const { state, client } = source();
+    const refresh = () => refreshMemberActivity({ scope, client, feed: store.getState(), isCurrent: () => true });
+    expect(await refresh()).toBe("updated");
+    expect(selectActivityContext(store.getState()).baseline?.labels).toEqual([]);
+    state.plugin = true;
+    expect(await refresh()).toBe("updated");
+    const resources = Object.fromEntries(selectActivityContext(store.getState()).entries.map((entry) => [entry.resource.kind, entry.resource]));
+    expect(resources.plugin).toMatchObject({ label: "Team toolkit", marketplaceName: "Team", skillCount: 1 });
+    expect(resources.skill).toMatchObject({
+      label: "Team briefing", pluginName: "Team toolkit", marketplaceName: "Team",
+      skillSlug: "team-briefing", capability: "plugin:plugin-278:skill-278",
+    });
+  });
+
   test("a newly shared plugin appears even when it contains only a Workflow", async () => {
     const store = feedStore();
     const { state, client } = source();

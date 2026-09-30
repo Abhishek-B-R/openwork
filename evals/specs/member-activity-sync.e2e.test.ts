@@ -8,7 +8,7 @@ const test = spec.world(memberActivity, {
   timeout: 900_000,
 });
 
-const bell: Target = { role: "button", label: "Activity" };
+const bell: Target = { role: "button", label: /^Activity/ };
 const retry: Target = { role: "button", label: "Retry" };
 const inventoryPaths = [
   "/v1/llm-providers",
@@ -24,7 +24,13 @@ type ActivityEntry = {
   observedAt: number;
   resource: { id: string; kind: string; label: string; href: string };
 };
-type Activity = { entries: ActivityEntry[]; verifiedAt: number | null; refreshState: string };
+type Activity = {
+  entries: ActivityEntry[];
+  verifiedAt: number | null;
+  refreshState: string;
+  unreadCount: number;
+  baseline: string[] | null;
+};
 
 function record(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -45,7 +51,13 @@ function activity(value: unknown): Activity {
       resource: { id: entry.resource.id, kind: entry.resource.kind, label: entry.resource.label, href: entry.resource.href },
     };
   });
-  return { entries, verifiedAt: value.verifiedAt, refreshState: value.refreshState };
+  const baseline = record(value.baseline) && Array.isArray(value.baseline.labels)
+    ? value.baseline.labels.filter((label): label is string => typeof label === "string")
+    : null;
+  return {
+    entries, verifiedAt: value.verifiedAt, refreshState: value.refreshState,
+    unreadCount: typeof value.unreadCount === "number" ? value.unreadCount : 0, baseline,
+  };
 }
 
 function signedInAs(value: unknown, email: string): boolean {
@@ -58,7 +70,10 @@ function successfulInventoryReads(requests: Array<{ method: string; path: string
 
 test("a member discovers newly shared tools in Activity without seeing another member's history", async ({ world, user, agent, probe, step, evidence }) => {
   const feed = async () => activity(await agent.run("activity.list"));
-  const available = (name: string): Target => ({ text: `${name} is now available` });
+  // Actorless design copy (Paper A1/A2): compact rows in the popover, full sentences on the page.
+  const compact = (name: string): Target => ({ text: new RegExp(`^${name} (?:ready to use|shared with you|added to .+)$`) });
+  const available = (name: string): Target => ({ text: new RegExp(`^${name} (?:is ready to use|was shared with you|was added to the .+ marketplace)$`) });
+  const alreadyShared: Target = { text: /^\d+ things? (?:was|were) already shared with you$/ };
   const baseline = () => probe.eventually(feed, {
     within: 60_000, label: "member inventory has been verified", until: (value) => value.verifiedAt !== null && value.refreshState === "idle",
   });
@@ -71,7 +86,8 @@ test("a member discovers newly shared tools in Activity without seeing another m
     await user.press("Escape");
     await waitForPopoverClosed();
   };
-  const noReadControls = async () => {
+  /** Closing the popover marked everything seen: a quiet bell, no dot, no mark-all control. */
+  const caughtUp = async () => {
     await user.see(bell);
     expect((await probe.dom("[data-notification-bell][aria-label='Activity']")).elements).toHaveLength(1);
     expect((await probe.dom("[data-notification-unread]")).elements).toHaveLength(0);
@@ -82,33 +98,36 @@ test("a member discovers newly shared tools in Activity without seeing another m
   let providerId = "";
   let pluginId = "";
 
-  await step("before: existing access is a quiet baseline with an invitation to browse the Library", async () => {
+  await step("before: existing access is one quiet summary row, not a burst of changes", async () => {
     const state = await baseline();
     const remote = await world.inventory("recipient");
     expect(remote.connections).toContain(world.baselineId);
     expect(state.entries).toEqual([]);
+    expect(state.baseline).toContain(world.names.baseline);
     const reads = successfulInventoryReads(await world.requests());
     expect(reads).toHaveLength(inventoryPaths.length);
+    await caughtUp();
     await user.click(bell);
-    await user.see({ text: "Nothing new" });
-    await user.see({ text: "When something is shared with you or changes, it shows here." });
-    await noReadControls();
-    evidence.recordAssertionEvidence("The first successful inventory is silent", `5 member inventory endpoints returned 200; ${remote.connections.length} existing connections; 0 Activity entries; no unread indicator`, true);
+    await user.see({ text: "You’re caught up" });
+    await user.see(alreadyShared);
+    evidence.recordAssertionEvidence("The first successful inventory is silent", `5 member inventory endpoints returned 200; ${remote.connections.length} existing connections; 0 Activity entries; ${state.baseline?.length} things summarized in one row; no unread indicator`, true);
     await user.screenshot();
     await closePopover();
   });
 
-  await step("Browse Library takes the member from empty Activity to their available tools", async () => {
+  await step("Open Library takes the member from the summary to their available tools", async () => {
     await user.click(bell);
     await user.click({ role: "button", label: "View all" });
     await waitForPopoverClosed();
-    await user.click({ role: "button", label: "Browse Library" });
+    await user.see(alreadyShared);
+    await user.see({ text: /\band \d+ more$|^[^,]+(?:, [^,]+){0,2}$/ });
+    await user.click({ role: "link", label: "Open Library" });
     await probe.eventually(() => world.location(), {
-      within: 10_000, label: "Library opens from empty Activity", until: (path) => path.endsWith("/extensions"),
+      within: 10_000, label: "Library opens from the Activity summary", until: (path) => path.endsWith("/extensions"),
     });
     await user.see({ text: "Library" });
     expect((await feed()).entries).toEqual([]);
-    evidence.recordAssertionEvidence("The empty-state action has a useful destination", `Browse Library opens ${await world.location()}; initial access still creates 0 Activity entries`, true);
+    evidence.recordAssertionEvidence("The summary row has a useful destination", `Open Library opens ${await world.location()}; initial access still creates 0 Activity entries`, true);
     await user.screenshot();
     await user.navigate(`${world.app.webUrl}/workspace/${world.workspace.workspaceId}/session`);
   });
@@ -154,12 +173,13 @@ test("a member discovers newly shared tools in Activity without seeing another m
     const reads = successfulInventoryReads(requests);
     expect(reads).toHaveLength(inventoryPaths.length);
     expect(requests.some((request) => request.path.endsWith(`/v1/plugins/${pluginId}/resolved`) && request.status === 200)).toBe(true);
-    for (const name of [world.names.provider, world.names.skill, world.names.plugin, world.names.connection]) await user.see(available(name));
+    for (const name of [world.names.provider, world.names.skill, world.names.plugin, world.names.connection]) await user.see(compact(name));
     await user.notSee(retry);
-    await noReadControls();
-    expect((await probe.dom("[data-notification-panel] [data-activity-row] a")).elements).toHaveLength(4);
+    expect(synced.unreadCount).toBe(4);
+    expect((await probe.dom("[data-notification-panel] [data-activity-unread]")).elements).toHaveLength(4);
+    expect((await probe.dom("[data-notification-panel] [data-activity-row] a")).elements).toHaveLength(5);
     expect((await probe.dom("[data-notification-panel] [data-activity-row] a button")).elements).toHaveLength(0);
-    evidence.recordAssertionEvidence("Real sync, not injected history, adds the four changes", `${reads.length} inventory endpoints and the shared plugin detail returned 200 after Retry; ${observed.length} compact rows match the member's Den grants; 4 whole-row links with no nested action buttons`, true);
+    evidence.recordAssertionEvidence("Real sync, not injected history, adds the four changes", `${reads.length} inventory endpoints and the shared plugin detail returned 200 after Retry; ${observed.length} unread compact rows match the member's Den grants, above the summary row; whole-row links with no nested action buttons`, true);
     await user.screenshot();
   });
 
@@ -171,7 +191,9 @@ test("a member discovers newly shared tools in Activity without seeing another m
     });
     await user.see({ text: world.names.plugin });
     await waitForPopoverClosed();
-    evidence.recordAssertionEvidence("The compact row is a working destination, not just a receipt", `The whole-row link opens the shared plugin in Library; the Activity popover is closed; all ${(await feed()).entries.length} observations remain`, true);
+    await caughtUp();
+    expect((await feed()).unreadCount).toBe(0);
+    evidence.recordAssertionEvidence("The compact row is a working destination, not just a receipt", `The whole-row link opens the shared plugin in Library; closing Activity marked 4 rows read; all ${(await feed()).entries.length} observations remain`, true);
     await user.screenshot();
     await user.click(bell);
   });
@@ -185,27 +207,29 @@ test("a member discovers newly shared tools in Activity without seeing another m
     expect(await world.location()).toBe("/activity");
     await waitForPopoverClosed();
     for (const name of [world.names.provider, world.names.skill, world.names.plugin, world.names.connection]) await user.see(available(name));
+    await user.see({ role: "button", label: `Try ${world.names.skill} in a new session` });
     expect((await feed()).entries).toEqual(observed);
-    await noReadControls();
-    evidence.recordAssertionEvidence("The full page keeps the normal sidebar and unchanged history", `/activity; 4 changes; conversation sidebar visible; opening the page does not mark or remove entries`, true);
+    expect((await probe.dom("[data-notification-bell][aria-current='page']")).elements.length).toBeGreaterThan(0);
+    await caughtUp();
+    evidence.recordAssertionEvidence("The full page keeps the normal sidebar and unchanged history", `/activity; 4 changes with Try it, Browse and Open actions; conversation sidebar visible; the bell shows the current page`, true);
     await user.screenshot();
   });
 
   const filters = [
-    { label: "Models", kind: "provider", name: world.names.provider },
-    { label: "Skills", kind: "skill", name: world.names.skill },
-    { label: "Plugins", kind: "plugin", name: world.names.plugin },
-    { label: "Connections", kind: "connection", name: world.names.connection },
+    { label: "Skills", kind: "skill", name: world.names.skill, action: { role: "button", label: `Try ${world.names.skill} in a new session` } satisfies Target },
+    { label: "Plugins", kind: "plugin", name: world.names.plugin, action: { role: "link", label: `Open ${world.names.plugin}` } satisfies Target },
+    { label: "Connections", kind: "connection", name: world.names.connection, action: { role: "link", label: `Open ${world.names.connection}` } satisfies Target },
   ];
+  const allNames = [world.names.provider, ...filters.map((filter) => filter.name)];
   for (const filter of filters) {
     await step(`the member narrows Activity to ${filter.label.toLowerCase()}`, async () => {
       await user.click({ role: "button", label: filter.label });
       await user.see(available(filter.name));
-      await user.see({ role: "link", label: `Open ${filter.name}` });
-      for (const other of filters.filter((candidate) => candidate.kind !== filter.kind)) await user.notSee(available(other.name));
+      await user.see(filter.action);
+      for (const other of allNames.filter((name) => name !== filter.name)) await user.notSee(available(other));
       const rows = (await probe.dom("[data-activity-page] [data-activity-row]")).elements;
       expect(rows).toHaveLength(1);
-      evidence.recordAssertionEvidence(`${filter.label} shows only that kind of change`, `${rows.length} matching row, an Open action, and 0 rows from the other 3 categories; history still has ${(await feed()).entries.length} entries`, true);
+      evidence.recordAssertionEvidence(`${filter.label} shows only that kind of change`, `${rows.length} matching row with its design action, and 0 rows from other kinds; history still has ${(await feed()).entries.length} entries`, true);
       await user.screenshot();
     });
   }
@@ -220,7 +244,7 @@ test("a member discovers newly shared tools in Activity without seeing another m
     });
     observed = synced.entries;
     await user.click({ role: "button", label: "Skills" });
-    await user.see({ text: `${world.names.skill} was updated` });
+    await user.see({ text: `A new version of ${world.names.skill} was published` });
     await user.see(available(world.names.skill));
     const requests = (await world.requests()).slice(beforeRequests);
     expect(requests.some((request) => request.path.endsWith(`/v1/plugins/${pluginId}/resolved`) && request.status === 200)).toBe(true);
@@ -229,7 +253,7 @@ test("a member discovers newly shared tools in Activity without seeing another m
     await user.screenshot();
   });
 
-  await step("removed connection access stays visible with a lock and no action", async () => {
+  await step("removed connection access stays visible with a lock and who can change it", async () => {
     const beforeRequests = (await world.requests()).length;
     expect(await world.removeConnectionAccess()).toBe(200);
     await user.reload();
@@ -239,17 +263,18 @@ test("a member discovers newly shared tools in Activity without seeing another m
     });
     observed = synced.entries;
     await user.click({ role: "button", label: "Connections" });
-    await user.see({ text: `${world.names.connection} is no longer available to you` });
+    await user.see({ text: `${world.names.connection} is no longer shared with you` });
+    await user.see({ text: "Ask an admin" });
     await user.notSee({ role: "link", label: `Open ${world.names.connection}` });
     const unavailable = (await probe.dom('[data-activity-page] [data-activity-kind="connection"][data-unavailable="true"]')).elements;
-    const locks = (await probe.dom('[data-activity-page] [data-activity-kind="connection"] svg[aria-label="No longer available to you"]')).elements;
-    expect(unavailable).toHaveLength(2);
-    expect(locks).toHaveLength(2);
+    const askAdmin = (await probe.dom('[data-activity-page] [data-activity-kind="connection"] [data-activity-ask-admin]')).elements;
+    expect(unavailable).toHaveLength(1);
+    expect(askAdmin).toHaveLength(1);
     expect((await probe.dom('[data-activity-page] [data-activity-kind="connection"] a, [data-activity-page] [data-activity-kind="connection"] button')).elements).toHaveLength(0);
     expect((await world.inventory("recipient")).connections).not.toContain(connectionId);
     const requests = (await world.requests()).slice(beforeRequests);
     expect(requests.some((request) => request.path.endsWith("/v1/mcp-connections?scope=usable") && request.status === 200)).toBe(true);
-    evidence.recordAssertionEvidence("Revocation is visible without a dead-end action", `Den's usable inventory no longer includes the connection; 2 historical rows stay visible with 2 locks and 0 actions`, true);
+    evidence.recordAssertionEvidence("Revocation is visible without a dead-end action", `Den's usable inventory no longer includes the connection; the removal row is muted with a lock and Ask an admin; the earlier share stays readable; 0 links or buttons`, true);
     await user.screenshot();
   });
 
@@ -257,15 +282,16 @@ test("a member discovers newly shared tools in Activity without seeing another m
     expect(observed.length).toBeGreaterThan(5);
     await user.click(bell);
     await user.see({ text: `${world.names.connection} removed` });
-    const compact = (await probe.dom("[data-notification-panel] [data-activity-row]")).elements;
-    expect(compact).toHaveLength(5);
-    expect(compact[0]?.text).toContain(`${world.names.connection} removed`);
+    const rows = (await probe.dom("[data-notification-panel] [data-activity-row]")).elements;
+    expect(rows).toHaveLength(5);
+    expect(rows[0]?.text).toContain(`${world.names.connection} removed`);
     await user.screenshot();
     await user.click({ role: "button", label: "View all" });
     await waitForPopoverClosed();
     await user.click({ role: "button", label: "All" });
     const full = (await probe.dom("[data-activity-page] [data-activity-row]")).elements;
-    expect(full).toHaveLength(observed.length);
+    // Every change plus the one summary of what was already shared.
+    expect(full).toHaveLength(observed.length + 1);
     evidence.recordAssertionEvidence("The compact view does not discard older changes", `5 latest popover rows, newest first; View all retains all ${full.length} rows`, true);
     await user.screenshot();
   });
@@ -279,7 +305,7 @@ test("a member discovers newly shared tools in Activity without seeing another m
     });
     expect(state.entries).toEqual(observed);
     expect(state.verifiedAt).not.toBeNull();
-    await user.see({ text: /Couldn’t verify activity\. Last verified/ });
+    await user.see({ text: /^Couldn’t refresh\. Showing activity from .+\.$/ });
     await user.see(available(world.names.provider));
     expect((await probe.dom('[role="dialog"]')).elements).toHaveLength(0);
     const failures = (await world.requests()).filter((request) => request.status === 503 && request.path.endsWith("/v1/llm-providers"));
@@ -287,7 +313,7 @@ test("a member discovers newly shared tools in Activity without seeing another m
     await user.screenshot();
   });
 
-  await step("Retry and reload preserve history without duplicates or read state", async () => {
+  await step("Retry and reload preserve history and read state without duplicates", async () => {
     await world.recoverInventory();
     await user.click(retry);
     expect((await baseline()).entries).toEqual(observed);
@@ -295,11 +321,12 @@ test("a member discovers newly shared tools in Activity without seeing another m
     await user.reload();
     expect((await baseline()).entries).toEqual(observed);
     await user.see(available(world.names.provider));
-    await noReadControls();
+    await caughtUp();
     const persisted = JSON.stringify(await probe.storage("openwork:member-activity:v1"));
     expect(persisted).toContain(connectionId);
+    expect(persisted).toContain('"seenAt"');
     expect(persisted).not.toMatch(/"(?:readAt|unread|activeScopeKey)"/);
-    evidence.recordAssertionEvidence("Device history persists, not a read/unread inbox", `${observed.length} entries retain their IDs after Retry and reload; 0 duplicates; persisted member history has no readAt, unread, or active identity`, true);
+    evidence.recordAssertionEvidence("Device history and its seen time persist per member", `${observed.length} entries retain their IDs after Retry and reload; 0 duplicates; one member seen time, no per-entry read flags or active identity`, true);
     await user.screenshot();
   });
 
@@ -309,14 +336,16 @@ test("a member discovers newly shared tools in Activity without seeing another m
       within: 60_000, label: "second member is signed in", until: (value) => signedInAs(value, world.emails.other),
     });
     await user.navigate(`${world.app.webUrl}/activity`);
-    expect((await baseline()).entries).toEqual([]);
+    const otherState = await baseline();
+    expect(otherState.entries).toEqual([]);
+    expect(otherState.baseline).toContain(world.names.baseline);
     const remote = await world.inventory("other");
     expect(remote.providers).not.toContain(providerId);
     expect(JSON.stringify(remote.library)).not.toContain(pluginId);
     expect(remote.connections).not.toContain(connectionId);
-    await user.see({ text: "Nothing new" });
-    await user.see({ role: "button", label: "Browse Library" });
-    for (const filter of filters) await user.notSee(available(filter.name));
+    await user.see(alreadyShared);
+    await user.see({ role: "link", label: "Open Library" });
+    for (const name of allNames) await user.notSee(available(name));
     evidence.recordAssertionEvidence("History is scoped to the signed-in member, not the device", `Same browser profile, second verified member; 0 Activity entries and no private model, plugin, or connection in their Den inventory`, true);
     await user.screenshot();
   });
@@ -328,10 +357,10 @@ test("a member discovers newly shared tools in Activity without seeing another m
     });
     await user.navigate(`${world.app.webUrl}/activity`);
     expect((await baseline()).entries).toEqual([]);
-    await user.see({ text: "Nothing new" });
+    await user.see(alreadyShared);
     await user.notSee({ role: "tab", label: /Organization/i });
     await user.notSee({ role: "button", label: /Organization activity/i });
-    for (const filter of filters) await user.notSee(available(filter.name));
+    for (const name of allNames) await user.notSee(available(name));
     evidence.recordAssertionEvidence("Administrative access does not reveal another member's local history", `Third verified identity on the same device; 0 entries on its first inventory; no organization Activity switch`, true);
     await user.screenshot();
   });
@@ -344,8 +373,8 @@ test("a member discovers newly shared tools in Activity without seeing another m
     await user.navigate(`${world.app.webUrl}/activity`);
     expect((await baseline()).entries).toEqual(observed);
     await user.see(available(world.names.provider));
-    await user.see({ text: `${world.names.connection} is no longer available to you` });
-    await noReadControls();
+    await user.see({ text: `${world.names.connection} is no longer shared with you` });
+    await caughtUp();
     evidence.recordAssertionEvidence("Returning to an account restores only its history", `The original ${observed.length} entry IDs return after two other identities used the same profile; unavailable access remains locked`, true);
     await user.screenshot();
   });

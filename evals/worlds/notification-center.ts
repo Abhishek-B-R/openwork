@@ -29,7 +29,7 @@ export async function notificationCenter(seed: Seed) {
       }));
       return providers.length;
     }, [providers])),
-    /** Read-only witness: Activity has a stable name and never an unread dot. */
+    /** Read-only witness: the bell name and whether it carries the unread dot. */
     bell: () => seed.evalIn(world.app, () => {
       const button = document.querySelector<HTMLButtonElement>('[data-notification-bell]');
       return { label: button?.getAttribute("aria-label") ?? null, unread: Boolean(button?.querySelector("[data-notification-unread]")) };

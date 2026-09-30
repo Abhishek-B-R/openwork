@@ -9,7 +9,7 @@ const test = spec.world(notificationCenter, {
   resources: { surfaces: ["desktop"], services: [], nativeReason: "Preserves the existing desktop archive confirmation and background-event integration regression." },
 });
 
-const bell: Target = { role: "button", label: "Activity" };
+const bell: Target = { role: "button", label: /^Activity/ };
 const emptyTitle: Target = { text: "Nothing new" };
 const undoButton: Target = { role: "button", label: "Undo" };
 
@@ -47,15 +47,22 @@ test("a member keeps background updates in Activity and their own action confirm
     await user.notSee({ role: "button", label: /Mark all.*read/i });
     return state;
   };
+  const unreadBell = async (count: number) => {
+    const state = await probe.eventually(() => world.bell(), {
+      within: 10_000, label: "the bell shows unread Activity", until: (value) => value.unread,
+    });
+    expect(state).toEqual({ label: `Activity, ${count} unread`, unread: true });
+    return state;
+  };
 
   await step("before: Activity shows the quiet bell empty state without an unread count", async () => {
     expect(await center()).toEqual([]);
     await user.click(bell);
     await user.see(emptyTitle);
     await user.see({ text: "When something is shared with you or changes, it shows here." });
-    await user.see({ role: "button", label: "View all" });
+    await user.notSee({ role: "button", label: "View all" });
     const state = await quietBell();
-    evidence.recordAssertionEvidence("An empty Activity stays quiet", `0 entries; bell “${state.label}”; unread indicator ${state.unread}; Nothing new and View all are visible`, true);
+    evidence.recordAssertionEvidence("An empty Activity stays quiet", `0 entries; bell “${state.label}”; unread indicator ${state.unread}; Nothing new is visible and there is no View all (Paper A4)`, true);
     await user.screenshot();
     await closeCenter();
   });
@@ -94,27 +101,31 @@ test("a member keeps background updates in Activity and their own action confirm
     expect(merged).toHaveLength(1);
     expect(merged[0]).toMatchObject({ kind: "providers", actionType: "open-model-picker" });
     await user.notSee({ text: "2 new providers available" });
-    await quietBell();
+    const unread = await unreadBell(1);
     await world.providerSync([{ id: "eng-278-sync-a", name: "Activity provider A", providerId: "eng-278-a" }]);
     expect(await center()).toEqual(merged);
     await user.click(bell);
     await user.see({ text: "2 new providers available" });
     await user.see({ role: "button", label: "Select a model" });
-    evidence.recordAssertionEvidence("Background notices are preserved without unread state", `3 deliveries produce ${merged.length} entry for 2 providers; bell “Activity” has no dot`, true);
+    expect((await probe.dom("[data-notification-panel] [data-activity-unread]")).elements).toHaveLength(1);
+    evidence.recordAssertionEvidence("Background notices arrive quietly with an unread dot", `3 deliveries produce ${merged.length} entry for 2 providers; nothing pops up; bell “${unread.label}”; the row carries the dot`, true);
     await user.screenshot();
     await closeCenter();
   });
 
-  await step("opening Activity and reloading keeps the same history without marking anything read", async () => {
+  await step("closing Activity marks it read, and reloading keeps the same history and read state", async () => {
     const before = await center();
+    await quietBell();
     await user.reload();
     await probe.eventually(center, {
       within: 30_000, label: "background history restores", until: (value) => value.length === before.length,
     });
-    await user.click(bell);
-    await user.see({ text: "2 new providers available" });
-    expect(await center()).toEqual(before);
     await quietBell();
+    await user.click(bell);
+    await user.see({ text: "You’re caught up" });
+    await user.see({ text: "2 new providers available" });
+    expect((await probe.dom("[data-notification-panel] [data-activity-unread]")).elements).toHaveLength(0);
+    expect((await center()).map(({ readAt: _readAt, ...entry }) => entry)).toEqual(before.map(({ readAt: _readAt, ...entry }) => entry));
     await closeCenter();
     await user.reload();
     await probe.eventually(center, {
@@ -122,9 +133,8 @@ test("a member keeps background updates in Activity and their own action confirm
     });
     await user.click(bell);
     await user.see({ text: "2 new providers available" });
-    expect(await center()).toEqual(before);
     await quietBell();
-    evidence.recordAssertionEvidence("Viewing never changes history", `1 background entry is unchanged across 2 reloads and 2 openings; no unread indicator or mark-all-read control`, true);
+    evidence.recordAssertionEvidence("Read state survives reloads without changing history", `1 background entry is unchanged across 2 reloads; closing the popover cleared the dot; it shows You’re caught up; no mark-all-read control`, true);
     await user.screenshot();
   });
 
@@ -133,14 +143,14 @@ test("a member keeps background updates in Activity and their own action confirm
     await user.see({ role: "button", label: "All" });
     await user.see({ text: "2 new providers available" });
     await user.see({ role: "button", label: "New session" });
-    for (const label of ["All", "Models", "Skills", "Plugins", "Connections"]) {
+    for (const label of ["All", "Skills", "Plugins", "Connections"]) {
       await user.see({ role: "button", label });
     }
     const route = await probe.hash();
     expect(route).toMatch(/\/activity\/?$/);
     expect((await probe.dom("[data-notification-panel]")).elements).toHaveLength(0);
     await quietBell();
-    evidence.recordAssertionEvidence("Activity has a full page, not a settings sheet", `Route ${route}; 5 filters; conversation sidebar visible; 0 open popovers`, true);
+    evidence.recordAssertionEvidence("Activity has a full page, not a settings sheet", `Route ${route}; 4 filters (Paper A2); conversation sidebar visible; 0 open popovers`, true);
     await user.screenshot();
   });
 

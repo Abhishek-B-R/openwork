@@ -185,7 +185,7 @@ describe("member Activity store", () => {
     expect(store.getState().refreshState).toBe("idle");
     store.getState().setScope(scope);
     expect(selectActivityContext(store.getState())).toEqual({
-      entries: [valid], snapshots: { capabilities: [plugin] }, verifiedAt: null,
+      entries: [valid], snapshots: { capabilities: [plugin] }, verifiedAt: null, seenAt: null, baseline: null,
     });
     expect(Object.keys(store.getState().contexts)).toEqual([activityScopeKey(scope)]);
     expect(storage.getItem(PERSISTED_ACTIVITY_STORE_KEY)).not.toContain("must-not-persist");
@@ -286,7 +286,7 @@ describe("member Activity store", () => {
     expect(selectActivityContext(restored.getState()).snapshots.providers).toEqual([]);
   });
 
-  test("reload restores only scoped history and baselines, never active identity, status or unread state", () => {
+  test("reload restores only scoped history and baselines, never active identity or status", () => {
     const storage = memoryStorage();
     const original = createActivityStore(storage);
     original.getState().setScope(scope);
@@ -305,7 +305,7 @@ describe("member Activity store", () => {
     expect(selectActivityContext(restored.getState()).entries).toEqual(history);
 
     expect(JSON.parse(storage.getItem(PERSISTED_ACTIVITY_STORE_KEY) ?? "null")).toEqual({
-      state: { contexts: restored.getState().contexts },
+      state: { contexts: restored.getState().contexts, noticesSeenAt: null },
       version: 1,
     });
     expect(history[0]).not.toHaveProperty("readAt");
@@ -452,6 +452,48 @@ describe("member Activity store", () => {
       entries: [],
       snapshots: { providers: [provider] },
       verifiedAt: observedAt,
+      seenAt: null,
+      baseline: { observedAt, labels: [provider.label] },
     });
+  });
+
+  test("the silent first inventory is summarized once across sources, counting plugin skills rather than their plugin", () => {
+    const store = createActivityStore(memoryStorage());
+    store.getState().setScope(scope);
+    const observedAt = Date.now() - 1_000;
+    const plugin: ActivityResource = { id: "plugin_one", kind: "plugin", label: "Team toolkit", revision: null, href: "/extensions", skillCount: 1 };
+    const workflowPlugin: ActivityResource = { id: "plugin_two", kind: "plugin", label: "Workflows", revision: null, href: "/extensions", skillCount: 0 };
+    const skill: ActivityResource = { id: "skill_one", kind: "skill", label: "Briefing", revision: "1", href: "/extensions", pluginName: "Team toolkit" };
+    store.getState().observe({ scope, source: "providers", resources: [provider], observedAt });
+    store.getState().observe({ scope, source: "capabilities", resources: [plugin, workflowPlugin, skill], observedAt: observedAt + 1 });
+    store.getState().observe({ scope, source: "capabilities", resources: [plugin, skill], observedAt: observedAt + 2 });
+    expect(selectActivityContext(store.getState()).baseline).toEqual({
+      observedAt, labels: [provider.label, "Workflows", "Briefing"],
+    });
+    expect(selectActivityContext(store.getState()).entries.map((entry) => entry.change)).toEqual(["unavailable"]);
+  });
+
+  test("closing Activity marks the active member's history seen without touching entries, and survives reload", () => {
+    const storage = memoryStorage();
+    const store = createActivityStore(storage);
+    store.getState().markSeen();
+    // Signed out, only the device-wide notice time moves.
+    expect(store.getState().contexts).toEqual({});
+    expect(store.getState().noticesSeenAt).not.toBeNull();
+    store.getState().setScope(scope);
+    store.getState().observe({ scope, source: "providers", resources: [] });
+    store.getState().observe({ scope, source: "providers", resources: [provider] });
+    const entries = selectActivityContext(store.getState()).entries;
+    const seenAt = Date.now();
+    store.getState().markSeen(seenAt);
+    store.getState().markSeen(seenAt - 10);
+    expect(selectActivityContext(store.getState()).seenAt).toBe(seenAt);
+    expect(selectActivityContext(store.getState()).entries).toEqual(entries);
+    const restored = createActivityStore(storage);
+    restored.getState().setScope(scope);
+    expect(selectActivityContext(restored.getState()).seenAt).toBe(seenAt);
+    expect(restored.getState().noticesSeenAt).toBe(seenAt);
+    restored.getState().setScope({ ...scope, memberId: "member_other" });
+    expect(selectActivityContext(restored.getState()).seenAt ?? null).toBeNull();
   });
 });

@@ -1,5 +1,6 @@
 /** @jsxImportSource react */
-import { LockKeyhole, Minus, Plus, RefreshCw } from "lucide-react";
+import { LayoutGrid, LockKeyhole, Minus, Package, Plug, Plus, RefreshCw, ScrollText, type LucideIcon } from "lucide-react";
+import type { ReactNode } from "react";
 import { Link } from "react-router";
 
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -9,14 +10,47 @@ import { cn } from "@/lib/utils";
 import { resolveExtensionIconUrl } from "@/react-app/design-system/extension-icon-src";
 import { IconImage } from "@/react-app/design-system/icon-image";
 import { ProviderIcon } from "@/react-app/design-system/provider-icon";
-import type { ActivityResource, MemberActivityEntry } from "@/react-app/kernel/activity-types";
+import type { ActivityBaseline, ActivityResource, MemberActivityEntry } from "@/react-app/kernel/activity-types";
 import type { AppNotification } from "@/react-app/kernel/notification-store";
 import type { ActivityFeedItem } from "./use-activity-feed";
 
-function activityLabel(entry: MemberActivityEntry, compact: boolean) {
-  if (entry.change === "available") return t("activity.available", { label: entry.resource.label });
-  if (entry.change === "updated") return t(compact ? "activity.compact_updated" : "activity.updated", { label: entry.resource.label });
-  return t(compact ? "activity.compact_unavailable" : "activity.unavailable", { label: entry.resource.label });
+/** Shared, actorless copy: Activity only knows what this device observed, never who did it. */
+export function activityLabel(entry: MemberActivityEntry, compact: boolean) {
+  const { resource } = entry;
+  const label = resource.label;
+  if (entry.change === "unavailable") return t(compact ? "activity.compact_unavailable" : "activity.unavailable", { label });
+  if (entry.change === "updated") {
+    if (compact) return t("activity.compact_updated", { label });
+    return t(resource.kind === "skill" ? "activity.new_version" : "activity.updated", { label });
+  }
+  if (resource.kind === "connection" || resource.kind === "provider") {
+    return t(compact ? "activity.compact_ready" : "activity.ready_to_use", { label });
+  }
+  if (resource.kind === "plugin" && resource.marketplaceName) {
+    return t(compact ? "activity.compact_added_to" : "activity.added_to_marketplace", { label, marketplace: resource.marketplaceName });
+  }
+  return t(compact ? "activity.compact_shared" : "activity.shared_with_you", { label });
+}
+
+function activityDetail(entry: MemberActivityEntry) {
+  const { resource } = entry;
+  if (entry.change !== "unavailable") {
+    if (resource.kind === "skill" && resource.pluginName) return t("activity.skill_in_plugin", { plugin: resource.pluginName });
+    if (resource.kind === "plugin" && resource.skillCount) return t("activity.plugin_skills", { count: resource.skillCount });
+    if (resource.kind === "connection" && entry.change === "available") return t("activity.connected_by_org");
+  }
+  return t(RESOURCE_KIND[resource.kind]);
+}
+
+export function baselineLabel(baseline: ActivityBaseline) {
+  return t("activity.baseline", { count: baseline.labels.length });
+}
+
+function baselineDetail(baseline: ActivityBaseline) {
+  const shown = baseline.labels.slice(0, 3);
+  const items = shown.join(t("activity.list_separator"));
+  const more = baseline.labels.length - shown.length;
+  return more > 0 ? t("activity.baseline_list_more", { items, count: more }) : items;
 }
 
 export function formatActivityTime(timestamp: number, now: number) {
@@ -46,45 +80,107 @@ function ObservedTime({ timestamp, now, compact = false }: { timestamp: number; 
   );
 }
 
+/** Fixed slot so times align whether or not a row is unread (A1). */
+function UnreadDot({ unread }: { unread: boolean }) {
+  return (
+    <span className="flex size-1.5 shrink-0 items-center justify-center">
+      {unread ? <span data-activity-unread aria-label={t("activity.unread")} role="img" className="size-1.5 rounded-full bg-sidebar-primary" /> : null}
+    </span>
+  );
+}
+
+const KIND_ICON: Record<ActivityResource["kind"], LucideIcon> = {
+  provider: Plug,
+  skill: ScrollText,
+  plugin: Package,
+  connection: Plug,
+};
+
 function ResourceMark({ entry, compact }: { entry: MemberActivityEntry; compact: boolean }) {
   const { resource } = entry;
-  const initial = <span className="text-xs font-medium">{resource.label.slice(0, 1).toLocaleUpperCase()}</span>;
+  const removed = entry.change === "unavailable";
   const ChangeIcon = entry.change === "available" ? Plus : entry.change === "updated" ? RefreshCw : Minus;
-  if (compact && (!resource.serviceId || entry.change === "unavailable")) {
+  if (compact && (!resource.serviceId || removed)) {
     return <ChangeIcon aria-hidden="true" className="size-3.5 shrink-0 text-muted-foreground/70" strokeWidth={1.5} />;
   }
+  const KindIcon = removed ? LockKeyhole : KIND_ICON[resource.kind];
+  const fallback = <KindIcon className="size-3.5" strokeWidth={1.5} />;
   return (
-    <span aria-hidden="true" className={cn("flex shrink-0 items-center justify-center text-muted-foreground", compact ? "size-3.5" : "size-6 rounded-full", !compact && !resource.serviceId && "bg-muted")}>
-      {resource.kind === "provider" && resource.serviceId ? (
+    <span aria-hidden="true" className={cn("flex shrink-0 items-center justify-center text-muted-foreground", compact ? "size-3.5" : "size-6 rounded-full", !compact && (removed || !resource.serviceId) && "bg-muted")}>
+      {removed ? fallback : resource.kind === "provider" && resource.serviceId ? (
         <ProviderIcon providerId={resource.serviceId} providerName={resource.label} />
-      ) : (
-        <IconImage src={resolveExtensionIconUrl({ iconSlug: resource.serviceId })} size={compact ? 14 : 16} fallback={initial} />
-      )}
+      ) : resource.serviceId ? (
+        <IconImage src={resolveExtensionIconUrl({ iconSlug: resource.serviceId })} size={compact ? 14 : 16} fallback={fallback} />
+      ) : fallback}
     </span>
   );
 }
 
 const RESOURCE_ACTION: Record<ActivityResource["kind"], string> = {
-  provider: "activity.open_models",
-  skill: "activity.open_skill",
-  plugin: "activity.open_plugin",
-  connection: "activity.open_connection",
+  provider: "activity.open",
+  skill: "activity.open",
+  plugin: "activity.browse",
+  connection: "activity.open",
 };
 
 const RESOURCE_KIND: Record<ActivityResource["kind"], string> = {
   provider: "activity.kind_provider", skill: "activity.kind_skill", plugin: "activity.kind_plugin", connection: "activity.kind_connection",
 };
 
-const ACTION_LAYOUT = "w-18 shrink-0 justify-end px-0";
+const ACTION_LAYOUT = "min-w-18 shrink-0 justify-end px-0 font-medium";
 
-export function ActivityRow({ item, now, compact = false, onResourceOpen, onSystemAction }: {
+/** A newly shared skill with a known Connect capability can be tried in a new session. */
+export function canTrySkill(entry: MemberActivityEntry) {
+  return entry.resource.kind === "skill" && entry.change === "available"
+    && Boolean(entry.resource.skillSlug && entry.resource.capability);
+}
+
+export type ActivityRowProps = {
   item: ActivityFeedItem;
   now: number;
   compact?: boolean;
   onResourceOpen?: () => void;
+  onTrySkill?: (resource: ActivityResource) => void;
   onSystemAction: (notification: AppNotification) => void;
-}) {
+};
+
+export function ActivityRow({ item, now, compact = false, onResourceOpen, onTrySkill, onSystemAction }: ActivityRowProps) {
   const rowLayout = cn("flex min-w-0 items-center rounded-lg", compact ? "h-8.5 gap-2.5 px-2" : "min-h-13 gap-3 px-3 py-2 hover:bg-muted/40");
+  const titleClass = "block truncate text-sm font-normal leading-4.5";
+  const detailClass = "mt-0.5 block truncate text-xs leading-4 text-muted-foreground/70";
+
+  if (item.type === "baseline") {
+    const label = baselineLabel(item.baseline);
+    const content = (
+      <>
+        <span aria-hidden="true" className={cn("flex shrink-0 items-center justify-center text-muted-foreground", compact ? "size-3.5" : "size-6")}>
+          <LayoutGrid className="size-3.5" strokeWidth={1.5} />
+        </span>
+        <span className="min-w-0 flex-1 text-start" title={label}>
+          <span className={titleClass}>{label}</span>
+          {!compact ? <span className={detailClass}>{baselineDetail(item.baseline)}</span> : null}
+        </span>
+        <ObservedTime timestamp={item.timestamp} now={now} compact={compact} />
+      </>
+    );
+    if (compact) {
+      return (
+        <div role="listitem" data-activity-row="baseline" data-activity-kind="baseline">
+          <Link to="/extensions" onClick={onResourceOpen} className={cn(buttonVariants({ variant: "ghost" }), rowLayout, "w-full justify-start")} aria-label={t("activity.open_library")} aria-description={label}>
+            {content}
+            <UnreadDot unread={false} />
+          </Link>
+        </div>
+      );
+    }
+    return (
+      <div role="listitem" data-activity-row="baseline" data-activity-kind="baseline" className={rowLayout}>
+        {content}
+        <Link to="/extensions" className={cn(buttonVariants({ variant: "ghost", size: "xs" }), ACTION_LAYOUT)}>{t("activity.open_library")}</Link>
+      </div>
+    );
+  }
+
   if (item.type === "system") {
     const notice = item.notification;
     const detail = notice.body ? `${notice.title}\n${notice.body}` : notice.title;
@@ -96,6 +192,7 @@ export function ActivityRow({ item, now, compact = false, onResourceOpen, onSyst
           {!compact && notice.body ? <span className="block truncate text-xs text-muted-foreground/70">{notice.body}</span> : null}
         </span>
         <ObservedTime timestamp={item.timestamp} now={now} compact={compact} />
+        {compact ? <UnreadDot unread={item.unread} /> : null}
       </>
     );
     if (compact && notice.action) {
@@ -110,30 +207,29 @@ export function ActivityRow({ item, now, compact = false, onResourceOpen, onSyst
     return (
       <div role="listitem" data-activity-row={notice.id} data-activity-kind="system" className={rowLayout}>
         {content}
-        {!compact && notice.action && notice.actionLabel ? (
-          <Button variant="ghost" size="xs" className="min-w-18 shrink-0 justify-end px-0" onClick={() => onSystemAction(notice)}>{notice.actionLabel}</Button>
-        ) : null}
+        {!compact ? (notice.action && notice.actionLabel ? (
+          <Button variant="ghost" size="xs" className={ACTION_LAYOUT} onClick={() => onSystemAction(notice)}>{notice.actionLabel}</Button>
+        ) : <span className="w-18 shrink-0" />) : null}
       </div>
     );
   }
 
   const { entry, unavailable } = item;
+  const removed = entry.change === "unavailable";
   const label = activityLabel(entry, compact);
-  const detail = entry.resource.pluginName
-    ? t("activity.skill_in_plugin", { plugin: entry.resource.pluginName })
-    : t(RESOURCE_KIND[entry.resource.kind]);
-  const hasDestination = entry.resource.href.startsWith("/") && !entry.resource.href.startsWith("//");
+  const hasDestination = !unavailable && entry.resource.href.startsWith("/") && !entry.resource.href.startsWith("//");
   const content = (
     <>
       <ResourceMark entry={entry} compact={compact} />
       <span className="min-w-0 flex-1 text-start" title={label}>
-        <span className="block truncate text-sm font-normal leading-4.5">{label}</span>
-        {!compact ? <span className="mt-0.5 block truncate text-xs leading-4 text-muted-foreground/70">{detail}</span> : null}
+        <span className={titleClass}>{label}</span>
+        {!compact ? <span className={detailClass}>{activityDetail(entry)}</span> : null}
       </span>
       <ObservedTime timestamp={item.timestamp} now={now} compact={compact} />
+      {compact ? <UnreadDot unread={item.unread} /> : null}
     </>
   );
-  if (compact && !unavailable && hasDestination) {
+  if (compact && hasDestination) {
     return (
       <div role="listitem" data-activity-row={entry.id} data-activity-kind={entry.resource.kind}>
         <Link to={entry.resource.href} onClick={onResourceOpen} className={cn(buttonVariants({ variant: "ghost" }), rowLayout, "w-full justify-start")} aria-label={t("activity.open_resource", { label: entry.resource.label })} aria-description={label}>
@@ -142,14 +238,38 @@ export function ActivityRow({ item, now, compact = false, onResourceOpen, onSyst
       </div>
     );
   }
-  return (
-    <div role="listitem" data-activity-row={entry.id} data-activity-kind={entry.resource.kind} data-unavailable={unavailable || undefined} className={cn(rowLayout, unavailable && "text-muted-foreground/70")}>
-      {content}
-      {!compact && !unavailable && hasDestination ? (
+  let action: ReactNode = null;
+  if (!compact) {
+    if (removed) {
+      // P4/C5: the lock and who can change it, never a dead action.
+      action = (
+        <Tooltip>
+          <TooltipTrigger render={<span tabIndex={0} />} className="min-w-18 shrink-0 rounded-sm text-right text-xs font-medium text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring" data-activity-ask-admin>
+            {t("activity.ask_admin")}
+          </TooltipTrigger>
+          <TooltipContent>{t("activity.ask_admin_hint")}</TooltipContent>
+        </Tooltip>
+      );
+    } else if (hasDestination && onTrySkill && canTrySkill(entry)) {
+      action = (
+        <Button variant="ghost" size="xs" className={ACTION_LAYOUT} aria-label={t("activity.try_resource", { label: entry.resource.label })} onClick={() => onTrySkill(entry.resource)}>
+          {t("activity.try_it")}
+        </Button>
+      );
+    } else if (hasDestination) {
+      action = (
         <Link to={entry.resource.href} className={cn(buttonVariants({ variant: "ghost", size: "xs" }), ACTION_LAYOUT)} aria-label={t("activity.open_resource", { label: entry.resource.label })}>
           {t(RESOURCE_ACTION[entry.resource.kind])}
         </Link>
-      ) : !compact ? <span className="flex w-18 shrink-0 justify-end">{unavailable ? <LockKeyhole aria-label={t("activity.resource_unavailable")} className="size-3.5" strokeWidth={1.5} /> : null}</span> : null}
+      );
+    } else {
+      action = <span className="w-18 shrink-0" />;
+    }
+  }
+  return (
+    <div role="listitem" data-activity-row={entry.id} data-activity-kind={entry.resource.kind} data-unavailable={removed || undefined} className={cn(rowLayout, removed && "text-muted-foreground/70")}>
+      {content}
+      {action}
     </div>
   );
 }

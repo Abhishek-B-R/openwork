@@ -1,12 +1,22 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { selectActivityContext, useActivityStore } from "@/react-app/kernel/activity-store";
-import type { ActivitySource, MemberActivityEntry } from "@/react-app/kernel/activity-types";
+import type { ActivityBaseline, ActivitySource, MemberActivityEntry } from "@/react-app/kernel/activity-types";
 import { useNotificationStore, type AppNotification } from "@/react-app/kernel/notification-store";
 
 export type ActivityFeedItem =
-  | { type: "member"; id: string; timestamp: number; entry: MemberActivityEntry; unavailable: boolean }
-  | { type: "system"; id: string; timestamp: number; notification: AppNotification };
+  | {
+    type: "member";
+    id: string;
+    timestamp: number;
+    entry: MemberActivityEntry;
+    /** The resource is not in the member's current inventory, so it has no destination. */
+    unavailable: boolean;
+    unread: boolean;
+  }
+  | { type: "system"; id: string; timestamp: number; notification: AppNotification; unread: boolean }
+  /** Access that already existed when this device first verified the member. Never unread. */
+  | { type: "baseline"; id: string; timestamp: number; baseline: ActivityBaseline; unread: false };
 
 const RESOURCE_SOURCE: Record<MemberActivityEntry["resource"]["kind"], ActivitySource> = {
   provider: "providers",
@@ -21,6 +31,7 @@ export function useActivityFeed(active = true) {
   const activeScopeKey = useActivityStore((state) => state.activeScopeKey);
   const refreshState = useActivityStore((state) => state.refreshState);
   const notifications = useNotificationStore((state) => state.notifications);
+  const noticesSeenAt = useActivityStore((state) => state.noticesSeenAt);
   const [now, setNow] = useState(Date.now);
 
   useEffect(() => {
@@ -31,21 +42,34 @@ export function useActivityFeed(active = true) {
   }, [active]);
 
   const items = useMemo(() => {
+    const seenAt = context.seenAt ?? 0;
     const result: ActivityFeedItem[] = context.entries.map((entry) => {
       const snapshot = context.snapshots[RESOURCE_SOURCE[entry.resource.kind]];
       const unavailable = entry.change === "unavailable" || snapshot?.every(
         (resource) => resource.kind !== entry.resource.kind || resource.id !== entry.resource.id,
       ) === true;
-      return { type: "member", id: `member:${entry.id}`, timestamp: entry.observedAt, entry, unavailable };
+      return { type: "member", id: `member:${entry.id}`, timestamp: entry.observedAt, entry, unavailable, unread: entry.observedAt > seenAt };
     });
     result.push(...notifications.map((notification): ActivityFeedItem => ({
-      type: "system", id: `system:${notification.id}`, timestamp: notification.updatedAt, notification,
+      type: "system",
+      id: `system:${notification.id}`,
+      timestamp: notification.updatedAt,
+      notification,
+      unread: notification.updatedAt > (noticesSeenAt ?? 0),
     })));
+    if (activeScopeKey && context.baseline && context.baseline.labels.length > 0) {
+      result.push({ type: "baseline", id: "baseline", timestamp: context.baseline.observedAt, baseline: context.baseline, unread: false });
+    }
     return result.sort((left, right) => right.timestamp - left.timestamp || left.id.localeCompare(right.id));
-  }, [context, notifications]);
+  }, [activeScopeKey, context, notifications, noticesSeenAt]);
+
+  const unreadCount = useMemo(() => items.filter((item) => item.unread).length, [items]);
+  /** First verification found nothing shared: the first-week state replaces "Nothing new". */
+  const nothingSharedYet = activeScopeKey !== null && context.baseline?.labels.length === 0
+    && items.length === 0;
 
   const loading = activeScopeKey !== null && refreshState === "refreshing"
     && items.length === 0 && Object.keys(context.snapshots).length === 0;
 
-  return { items, context, activeScopeKey, refreshState, loading, now };
+  return { items, context, activeScopeKey, refreshState, loading, now, unreadCount, nothingSharedYet };
 }

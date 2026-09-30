@@ -1,6 +1,7 @@
 import type { createDenClient, DenExternalMcpConnection } from "@/app/lib/den";
 import type { ActivityResource, ActivityScope, ActivitySource } from "@/react-app/kernel/activity-types";
 import { libraryPluginFileFallbackDetailId } from "@/react-app/domains/settings/library";
+import { skillSlashCommandName } from "@/react-app/domains/session/surface/composer/slash-command";
 import {
   listAssignedConnectCapabilities,
   type ConnectCapabilityClient,
@@ -60,23 +61,39 @@ async function connectionResources(inventory: ConnectCapabilityInventory, connec
 }
 
 function capabilityResources(inventory: ConnectCapabilityInventory): ActivityResource[] {
-  return inventory.plugins.flatMap((plugin): ActivityResource[] => [
-    {
-      id: plugin.pluginId,
-      kind: "plugin",
-      label: plugin.name,
-      revision: null,
-      href: plugin.files.length > 0 ? extensionHref(`plugin:${plugin.pluginId}`) : "/extensions",
-    },
-    ...plugin.files.filter((file) => file.objectType === "skill").map((file): ActivityResource => ({
-      id: file.configObjectId,
-      kind: "skill",
-      label: file.title,
-      pluginName: plugin.name,
-      revision: file.versionId,
-      href: extensionHref(libraryPluginFileFallbackDetailId(plugin.pluginId, file)),
-    })),
-  ]);
+  const skillCards = new Map(inventory.skills.flatMap((skill) =>
+    skill.connectCapabilityName ? [[skill.connectCapabilityName, skill] as const] : []));
+  return inventory.plugins.flatMap((plugin): ActivityResource[] => {
+    const skills = plugin.files.filter((file) => file.objectType === "skill");
+    // Items shared into the member's own Library have no marketplace to name.
+    const marketplaceName = plugin.marketplaceId === "me-library" ? undefined : plugin.marketplaceName.trim() || undefined;
+    return [
+      {
+        id: plugin.pluginId,
+        kind: "plugin",
+        label: plugin.name,
+        revision: null,
+        href: plugin.files.length > 0 ? extensionHref(`plugin:${plugin.pluginId}`) : "/extensions",
+        skillCount: skills.length,
+        ...(marketplaceName ? { marketplaceName } : {}),
+      },
+      ...skills.map((file): ActivityResource => {
+        const card = file.connectCapabilityName ? skillCards.get(file.connectCapabilityName) : undefined;
+        return {
+          id: file.configObjectId,
+          kind: "skill",
+          label: file.title,
+          pluginName: plugin.name,
+          revision: file.versionId,
+          href: extensionHref(libraryPluginFileFallbackDetailId(plugin.pluginId, file)),
+          ...(marketplaceName ? { marketplaceName } : {}),
+          ...(card && file.connectCapabilityName
+            ? { skillSlug: skillSlashCommandName(card), capability: file.connectCapabilityName }
+            : {}),
+        };
+      }),
+    ];
+  });
 }
 
 /**
