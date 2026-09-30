@@ -39,6 +39,12 @@ test(`ACT-WHOLE ${resolveEvalEngine()}: a person follows a whole conversation fr
     await user.see({ text: "Confirm fixture format" }, { timeoutMs: 90_000 });
     const delegation = await probe.eventually(async () => ({ failures: (await world.nativeTools()).filter(tool => tool.state?.status === "error"), needs: (await probe.dom("[data-agent-tray]")).elements.some(element => element.text.includes("needs you")) }), {
       within: 60_000, label: "the native child reaches its decision", until: state => state.needs || state.failures.length > 0,
+    }).catch(async error => {
+      evidence.recordJsonArtifact("Native tools before the missing child decision", await world.nativeTools());
+      evidence.recordJsonArtifact("Child rows before the missing decision", await probe.dom("[data-subagent-run], [data-agent-tray]"));
+      evidence.recordJsonArtifact("Composer before the missing decision", await probe.composer());
+      await user.screenshot();
+      throw error;
     });
     evidence.recordJsonArtifact("Native fixture delegation", delegation);
     expect(delegation.failures).toEqual([]);
