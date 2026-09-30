@@ -21,6 +21,7 @@ export interface BrowserOptions {
   host?: Host;
   startUrl?: string;
   headless?: boolean;
+  desktopPointer?: boolean;
   timeoutMs?: number;
 }
 
@@ -39,6 +40,7 @@ export async function chrome(opts: BrowserOptions = {}): Promise<AttachedSurface
     profile: "fresh",
     startUrl: opts.startUrl,
     headless: opts.headless,
+    desktopPointer: opts.desktopPointer,
   });
 
   let surface: AttachedSurface;

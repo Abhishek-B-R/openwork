@@ -395,7 +395,7 @@ test("spawnChrome launches Chromium with Daytona CDP flags and allocates a secon
   });
 
   const first = await host.spawnChrome("browser");
-  const second = await host.spawnChrome("oauth", { startUrl: "https://app.example.test" });
+  const second = await host.spawnChrome("oauth", { startUrl: "https://app.example.test", desktopPointer: true });
 
   assert.equal(first.meta?.cdpPort, "9222");
   assert.equal(second.meta?.cdpPort, "9230");
@@ -407,6 +407,8 @@ test("spawnChrome launches Chromium with Daytona CDP flags and allocates a secon
   const secondLaunch = argsText(launchCalls[1]);
   assert(firstLaunch.includes("command -v chromium || command -v google-chrome || command -v google-chrome-stable"));
   assert(firstLaunch.includes("--headless=new"));
+  assert(!firstLaunch.includes("--blink-settings="));
+  assert(secondLaunch.includes("--blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4"));
   assert(firstLaunch.includes("--window-size=1280,900"));
   assert(firstLaunch.includes("--no-sandbox"));
   assert(firstLaunch.includes("--disable-dev-shm-usage"));

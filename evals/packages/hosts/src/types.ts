@@ -50,6 +50,8 @@ export interface ChromeSurfaceOptions {
   profile?: "fresh" | "shared";
   startUrl?: string;
   headless?: boolean;
+  /** Give an input-specific fixture a fine pointer with hover even on a headless host. */
+  desktopPointer?: boolean;
 }
 
 export interface DenServiceOptions {

@@ -12,7 +12,7 @@ export async function taskActivityWeb(seed: Seed) {
   const modelId = "activity-model";
   const marker = "ACTIVITY_CHILD_HOLD";
   const prompt = "Delegate building the isolated reproduction, then report the result.";
-  const app = await seed.appWeb({ name: "task-activity-web", workspacePath, mocks: {
+  const app = await seed.appWeb({ name: "task-activity-web", workspacePath, desktopPointer: true, mocks: {
     agent: seed.mock({ isolatedProcessEnv: true, agentWorkloads: [{
       promptMarker: prompt, latestUserTurn: true, finalReply: "Delegation finished.",
       steps: [{ tool: engine === "v2" ? "subagent" : "task", arguments: {
@@ -29,10 +29,6 @@ export async function taskActivityWeb(seed: Seed) {
   // This journey exercises mouse hover on the Desktop chat surface. Linux
   // headless Chromium otherwise reports hover:none despite trusted mouse
   // events, so declare the same fine-pointer capability as a desktop mouse.
-  await app.client.send("Emulation.setEmulatedMedia", { features: [
-    { name: "hover", value: "hover" }, { name: "any-hover", value: "hover" },
-    { name: "pointer", value: "fine" }, { name: "any-pointer", value: "fine" },
-  ] });
   const workspace = await seed.workspace(app, workspacePath);
   const mock = app.mocks.agent;
   if (!mock) throw new Error("Missing activity model witness");

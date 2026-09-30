@@ -37,6 +37,7 @@ export interface SeedAppWebOptions {
   name?: string;
   mocks?: Record<string, MockBoot>;
   headless?: boolean;
+  desktopPointer?: boolean;
 }
 
 /** A test-owned real app-web stack. This is distinct from seed.web(), which drives Den. */
@@ -224,6 +225,7 @@ export async function appWeb(options: SeedAppWebOptions & { place: Place }): Pro
         host: options.place.host(),
         startUrl: "about:blank",
         headless: options.headless ?? true,
+        desktopPointer: options.desktopPointer,
       });
       if (browser.handle.kind !== "chrome") throw new Error("App-web requires a chrome handle.");
       const sandbox = browser.handle.sandboxId;
@@ -269,6 +271,7 @@ export async function appWeb(options: SeedAppWebOptions & { place: Place }): Pro
         host: options.place.host(),
         startUrl: "about:blank",
         headless: options.headless ?? true,
+        desktopPointer: options.desktopPointer,
       });
       if (browser.handle.kind !== "chrome") throw new Error("App-web requires a chrome handle.");
       browser.handle.meta = { ...browser.handle.meta, actualSourceSha: localSourceSha };

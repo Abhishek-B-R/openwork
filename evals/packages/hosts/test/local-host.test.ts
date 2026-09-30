@@ -7,7 +7,15 @@ import { join, resolve } from "node:path";
 import test from "node:test";
 
 import { allocateFreePort } from "@openwork/cdp";
-import { electronLaunchEnv, electronProfilePaths, electronSurfaceEnv, freePort, pruneStaleSurfaceProfiles, registerLiveProfileRoot, resolveChromeBinary, stopOwnedElectronSurface, unregisterLiveProfileRoot } from "../src/local.ts";
+import { chromeArgs, electronLaunchEnv, electronProfilePaths, electronSurfaceEnv, freePort, pruneStaleSurfaceProfiles, registerLiveProfileRoot, resolveChromeBinary, stopOwnedElectronSurface, unregisterLiveProfileRoot } from "../src/local.ts";
+
+test("a desktop pointer is opt-in for Chrome fixtures", () => {
+  const defaults = chromeArgs(9222, "/tmp/fixture-profile", "about:blank", true);
+  assert(defaults.includes("--headless=new"));
+  assert(!defaults.some(arg => arg.startsWith("--blink-settings=")));
+  const desktop = chromeArgs(9222, "/tmp/fixture-profile", "about:blank", true, true);
+  assert(desktop.includes("--blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4"));
+});
 
 const ENV_KEYS = [
   "APPDATA",
