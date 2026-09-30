@@ -1,4 +1,7 @@
 /** @jsxImportSource react */
+import { AgentTray } from "@/components/chat/agent-tray";
+import { agentInventory } from "@/lib/agent-inventory";
+import { taskChildSessionId } from "@/lib/build-in-tools";
 import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { UIMessage } from "ai";
 import { hashKey, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -2424,8 +2427,30 @@ export function SessionSurface(props: SessionSurfaceProps) {
     const stopClient = isOpencodeV2BaseUrl(props.opencodeBaseUrl) ? opencodeClient
       : createClient(props.opencodeBaseUrl, props.workspaceRoot.trim() || undefined,
         { token: props.openworkToken, mode: "openwork" }, { desktopTransport: "main" });
-    await abortSession(stopClient, childSessionId, props.workspaceRoot.trim() || undefined);
-  }, [opencodeClient, props.opencodeBaseUrl, props.openworkToken, props.workspaceRoot]);
+    const inventory = agentInventory(props.sessionId, baseRenderedMessages,
+      useSessionActivityStore.getState().recordsByWorkspaceId[props.workspaceId]);
+    if (!inventory.some(part => taskChildSessionId(part) === childSessionId)) throw new Error("This agent is no longer associated with this conversation.");
+    const directory = props.workspaceRoot.trim() || undefined;
+    const child = unwrap(await stopClient.session.get({ sessionID: childSessionId, directory }));
+    // Verify the ancestry at the same endpoint before issuing any interruption.
+    const visited = new Set<string>();
+    let ancestor = child.parentID;
+    while (ancestor && ancestor !== props.sessionId && !visited.has(ancestor)) {
+      visited.add(ancestor);
+      ancestor = unwrap(await stopClient.session.get({ sessionID: ancestor, directory })).parentID;
+    }
+    if (ancestor !== props.sessionId) throw new Error("The agent's parent could not be verified.");
+    const composer = useComposerStateStore.getState();
+    const queue = getComposerQueuedDrafts(composer, childSessionId);
+    if (queue.length) {
+      composer.setDraft(childSessionId, [getComposerDraft(composer, childSessionId), ...queue.map(item => item.draft.resolvedText ?? item.draft.text)].filter(Boolean).join("\n\n"));
+      composer.setAttachments(childSessionId, [...getComposerAttachments(composer, childSessionId), ...queue.flatMap(item => item.draft.attachments)]);
+      composer.clearQueuedDrafts(childSessionId);
+    }
+    dispatchQueuedDrain(childSessionId, { type: "queue_cleared" });
+    await interruptSessionTurn(props.opencodeBaseUrl, stopClient, childSessionId, directory,
+      { onStopped: () => { useSessionActivityStore.getState().markRunStopped(props.workspaceId, childSessionId); dispatchQueuedDrain(childSessionId, { type: "stop_confirmed" }); } });
+  }, [baseRenderedMessages, opencodeClient, props.workspaceId, props.sessionId, props.opencodeBaseUrl, props.openworkToken, props.workspaceRoot]);
 
   const handleAbort = useCallback(async () => {
     if (pendingStopsRef.current.has(sessionOwner)) return;
@@ -3640,8 +3665,11 @@ export function SessionSurface(props: SessionSurfaceProps) {
           onUploadInboxFiles={props.onUploadInboxFiles ?? handleUploadInboxFiles}
           compactTopSpacing={Boolean(composerQuestion || (props.todos ?? []).some((todo) => todo.content.trim()) || props.activePermission || queuedItems.length > 0)}
           topAccessory={
-            composerQuestion || (props.todos ?? []).some((todo) => todo.content.trim()) || props.activePermission || queuedItems.length > 0 ? (
+            (
               <div>
+                <AgentTray workspaceId={props.workspaceId} sessionId={props.sessionId} owner={props.draftScope ? sessionOwner : null}
+                  messages={baseRenderedMessages} syncDegraded={runSyncHealth.degraded} onOpen={props.onOpenSubagentSession}
+                  onStop={handleStopSubagentSession} />
                 {queuedItems.length > 0 ? (
                   <QueuedMessagesPanel
                     items={queuedItems}
@@ -3676,7 +3704,7 @@ export function SessionSurface(props: SessionSurfaceProps) {
                   />
                 ) : null}
               </div>
-            ) : null
+            )
           }
         />
         </>}
