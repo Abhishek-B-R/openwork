@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { resolveEvalEngine, type Seed } from "@openwork/env";
 import { browserScript } from "@openwork/cdp";
 import { connectorBranding } from "./library.ts";
-import { configureProvider } from "./chat.ts";
+import { configureProvider, fixtureInputFocus } from "./chat.ts";
 
 /** Anonymous fixture covering one conversation, with native engine differences. */
 export async function wholeActivity(seed: Seed) {
@@ -92,6 +92,7 @@ export async function wholeActivity(seed: Seed) {
   });
   const session = await seed.session(base.app, { title: "Whole fixture conversation" });
   return { ...base, workspace, session, shortPrompt, prompt, childPrompt, followup, answer, stopPrompt, continuePrompt,
+    inputFocus: () => fixtureInputFocus(seed, base.app),
     backgroundPrompt, backgroundStopPrompt, backgroundWake,
     childState: () => base.den.mocks.connector.agentReplyState(childPrompt),
     finishChild: () => base.den.mocks.connector.releaseAgentReply(childPrompt),

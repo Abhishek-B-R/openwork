@@ -12,6 +12,7 @@ test(`AGENT-CHILD-SPLIT ${resolveEvalEngine()}: returning from a helper restores
     await probe.eventually(() => probe.composer(), { within: 30_000, label: "the independent main chat is mounted",
       until: state => state.route.includes(world.primary.sessionId) && state.composerEditable,
     });
+    await user.screenshot();
     await user.type("composer", "Keep this main-pane draft", { verify: true });
     await user.press(process.platform === "darwin" ? "Meta+K" : "Control+K");
     await user.type({ placeholder: "Search actions and settings…" }, "Open as side chat");

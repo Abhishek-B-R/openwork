@@ -6,10 +6,17 @@ const test = spec.world(wholeActivity, { timeout: 600_000, resources: { surfaces
   nativeReason: "One native Desktop conversation exercises composer keys, child navigation, connected results and the tray above the editor." } });
 
 test(`ACT-WHOLE ${resolveEvalEngine()}: a person follows a whole conversation from a short reply through tools, decisions, children and Stop`, async ({ world, user, probe, step, evidence }) => {
+  let firstSend = true;
   const send = async (text: string) => {
+    if (firstSend) {
+      evidence.recordJsonArtifact("Initial native input focus", await world.inputFocus());
+      await user.screenshot();
+      firstSend = false;
+    }
     try { await user.type("composer", text, { verify: true }); }
     catch (error) {
       evidence.recordJsonArtifact("Fixture composer after typing", await probe.composer());
+      evidence.recordJsonArtifact("Native focus after typing", await world.inputFocus());
       await user.screenshot();
       throw error;
     }

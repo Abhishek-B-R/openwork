@@ -14,13 +14,20 @@ test("connector-backed tool calls show first-class branding and human-readable l
       until: result => result.elements.some(element => element.text.includes(text) && element.rect.width > 0 && element.rect.height > 0),
     });
   };
+  let firstSend = true;
   const send = async (text: string) => {
     await probe.eventually(() => probe.composer(), { within: 30_000, label: "the connector fixture's composer and model have loaded",
       until: state => state.route.includes(world.session.sessionId) && state.composerEditable && state.draftText === "" && state.selectedModelLabel.includes("Connector display model"),
     });
+    if (firstSend) {
+      evidence.recordJsonArtifact("Initial native input focus", await world.inputFocus());
+      await user.screenshot();
+      firstSend = false;
+    }
     try { await user.type("composer", text, { verify: true }); }
     catch (error) {
       evidence.recordJsonArtifact("Fixture composer after typing", await probe.composer());
+      evidence.recordJsonArtifact("Native focus after typing", await world.inputFocus());
       await user.screenshot();
       throw error;
     }

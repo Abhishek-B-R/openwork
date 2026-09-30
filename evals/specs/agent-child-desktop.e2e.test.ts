@@ -10,6 +10,7 @@ test(`AGENT-CHILD-DESKTOP ${resolveEvalEngine()}: a person messages a busy child
     await probe.eventually(() => probe.composer(), { within: 30_000, label: "the fixture chat is mounted before typing",
       until: state => state.route.includes(world.session.sessionId) && state.composerEditable && state.selectedModelLabel.includes("Split send model"),
     });
+    await user.screenshot();
     try { await user.type("composer", world.prompt, { replace: true, verify: true }); }
     catch (error) { evidence.recordJsonArtifact("Initial fixture composer", await probe.composer()); throw error; }
     await probe.eventually(() => probe.composer(), { within: 30_000, label: "the configured engine admits the first prompt", until: state => state.runTaskEnabled });

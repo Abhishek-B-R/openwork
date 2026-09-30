@@ -130,6 +130,16 @@ function sendStream(response: ServerResponse, chunks: unknown[], intervalMs = 0)
   writeNext();
 }
 
+/** Read only DOM focus; never include credentials or private prompt content. */
+export function fixtureInputFocus(seed: Seed, app: Surface) {
+  return seed.evalIn(app, browserScript(() => ({
+    documentFocused: document.hasFocus(), visibility: document.visibilityState,
+    activeTag: document.activeElement?.tagName ?? null,
+    activeEditable: document.activeElement instanceof HTMLElement && document.activeElement.isContentEditable,
+    editableFocused: Boolean(document.querySelector('[contenteditable="true"]:focus')),
+  })), { awaitPromise: true });
+}
+
 export async function configureProvider(
   seed: Seed,
   app: Surface,
