@@ -28,6 +28,7 @@ import {
 import { TEAM_ROSTER_FILE, refreshTeamRosters, roleById, writeTeamRoster } from "./team.mjs";
 import { effortStopOf } from "../src/lib/effort.ts";
 import { normalizeModelSelectionPreferences } from "../src/lib/model-intelligence-index.ts";
+import { CALL_VOICES } from "../src/lib/call.ts";
 import { coworkerAbilitiesSchema, readCoworkerAbilities } from "../src/lib/abilities.ts";
 import { DEFAULT_FEATURES } from "../src/lib/features.ts";
 
@@ -624,6 +625,7 @@ async function readCoworkerRecord(coworkersDir, slug) {
     avatarGlasses: avatarGlasses(data.avatarGlasses),
     /** Voice for the working state only; see src/lib/personalities.ts. */
     personality: personality(data.personality),
+    realtimeVoice: CALL_VOICES.includes(data.realtimeVoice) ? data.realtimeVoice : "",
     /** The catalog role this coworker was created from; "" when the person shaped it by hand. */
     roleId: roleIdOf(data.roleId),
     /** The teammate who proposed this coworker and why; null when the person added it themselves. */
@@ -787,6 +789,11 @@ async function updateCoworkerRecord(coworkersDir, slug, patch) {
   const configPath = path.join(root, COWORKER_CONFIG_FILE);
   const { data, body } = parseFrontmatter(await readFile(configPath, "utf8"));
   const before = { role: data.role, mission: data.mission };
+  if (Object.hasOwn(patch ?? {}, "realtimeVoice")) {
+    if (patch.realtimeVoice !== "" && !CALL_VOICES.includes(patch.realtimeVoice)) throw new Error("Choose an available voice.");
+    if (patch.createdAt !== data.createdAt) throw new Error("This coworker was replaced. Reopen its voice settings.");
+    data.realtimeVoice = patch.realtimeVoice;
+  }
   if (typeof patch?.workspaceId === "string") data.workspaceId = patch.workspaceId.trim();
   if (typeof patch?.conversationThreadId === "string") data.conversationThreadId = patch.conversationThreadId.trim();
   if (Array.isArray(patch?.automations)) {

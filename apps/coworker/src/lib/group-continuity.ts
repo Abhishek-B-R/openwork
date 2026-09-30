@@ -61,7 +61,7 @@ export function subscribeGroupSends(listener: () => void): () => void {
 
 const submissions = new Map<string, symbol>();
 
-function waitForSends(groupId: string, ready: (items: readonly GroupSend[]) => boolean): Promise<void> {
+export function waitForSends(groupId: string, ready: (items: readonly GroupSend[]) => boolean): Promise<void> {
   return new Promise((resolve) => {
     const check = () => { if (ready(groupSends(groupId))) { unsubscribe(); resolve(); } };
     const unsubscribe = subscribeGroupSends(check);

@@ -1,5 +1,6 @@
 import { coworkerBridge, type CoworkerSummary } from "./bridge";
-import { callUpdates, confirmsStop, voiceObservation, EMPTY_CALL_OBSERVATION, type CallObservation, type CallPhase, type CallTarget } from "./call";
+import { callUpdates, confirmsStop, voiceObservation, EMPTY_CALL_OBSERVATION, type CallObservation, type CallPhase, type CallTarget, type VoiceTurn } from "./call";
+import { VoiceCapture } from "./voice-capture";
 
 export type CallAdapter = {
   prepare: () => void;
@@ -12,9 +13,9 @@ export type CallAdapter = {
 export type CallState = {
   phase: CallPhase; target: CallTarget | null; person: CoworkerSummary | null;
   startedAt: number; muted: boolean; captions: boolean; subtitles: Array<{ id: string; speaker: "you" | "coworker"; text: string }>; error: string;
-  visible: boolean; observation: CallObservation; retained: CallTarget[];
+  visible: boolean; observation: CallObservation; retained: CallTarget[]; turns: VoiceTurn[];
 };
-const initial: CallState = { phase: "idle", target: null, person: null, startedAt: 0, muted: false, captions: true, subtitles: [], error: "", visible: false, observation: EMPTY_CALL_OBSERVATION, retained: [] };
+const initial: CallState = { phase: "idle", target: null, person: null, startedAt: 0, muted: false, captions: true, subtitles: [], error: "", visible: false, observation: EMPTY_CALL_OBSERVATION, retained: [], turns: [] };
 const keyOf = (target: CallTarget) => `${target.slug}:${target.createdAt}:${target.threadId}`;
 function record(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null && !Array.isArray(value); }
 
@@ -47,6 +48,12 @@ class CoworkerCall {
   private toolResponsePending = false;
   private pendingTools = 0;
   private unsubscribeNative: (() => void) | null = null;
+  private inputCapture: VoiceCapture | null = null;
+  private outputCapture: VoiceCapture | null = null;
+  private inputId = "";
+  private outputId = "";
+  private durableTurns = new Map<string, VoiceTurn>();
+  private clips = new Map<string, string>();
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
   snapshot = () => this.state;
   private set(patch: Partial<CallState>) { this.state = { ...this.state, ...patch }; for (const listener of this.listeners) listener(); }
@@ -63,11 +70,47 @@ class CoworkerCall {
     const retained = this.state.retained.filter((target) => (this.isActive() && this.state.target && keyOf(target) === keyOf(this.state.target)) || this.adapters.get(keyOf(target))?.observation.working);
     if (retained.length !== this.state.retained.length) this.set({ retained });
   }
-  private subtitle(id: string, speaker: "you" | "coworker", text: string, append = false) {
+  private turnId(id: string, speaker: "you" | "coworker") { return `${this.callId}:${speaker}:${id}`; }
+  private subtitle(id: string, speaker: "you" | "coworker", text: string, append = false, final = false) {
     if (!id) return;
     const previous = this.state.subtitles.find((line) => line.id === id);
     const line = { id, speaker, text: ((append ? previous?.text ?? "" : "") + text).slice(-12000) };
     this.set({ subtitles: [...this.state.subtitles.filter((item) => item.id !== id), line].slice(-4) });
+    const key = this.turnId(id, speaker);
+    const before = this.state.turns.find((turn) => turn.id === key);
+    const turn: VoiceTurn = { ...before, id: key, callId: this.callId, speaker, name: speaker === "you" ? "You" : this.state.person?.name.slice(0, 80), text: line.text, at: before?.at ?? Date.now(), final: final || before?.final === true };
+    this.durableTurns.set(key, turn);
+    this.set({ turns: [...this.state.turns.filter((item) => item.id !== key), turn].sort((a, b) => a.at - b.at).slice(-500) });
+    if (final) this.save(turn, this.clips.get(key));
+  }
+  private save(turn: VoiceTurn, audioData?: string, target = this.state.target) {
+    if (!target || (!turn.text.trim() && !audioData)) return;
+    const clips = this.clips; const turns = this.durableTurns;
+    void coworkerBridge.calls.record(target.slug, target.threadId, { ...turn, kind: "transcript", ...(audioData ? { audioData } : {}) }, target.createdAt).then(() => {
+      if (audioData) {
+        clips.delete(turn.id); const latest = turns.get(turn.id); if (latest) turns.set(turn.id, { ...latest, audio: true });
+        if (turn.callId === this.callId) this.set({ turns: this.state.turns.map((item) => item.id === turn.id ? { ...item, audio: true } : item) });
+      }
+      window.dispatchEvent(new Event("coworker:call-history"));
+    }).catch(() => { if (turn.callId === this.callId) this.set({ error: "Some voice history could not be saved. Your conversation and work are kept." }); });
+  }
+  private finishAudio(speaker: "you" | "coworker", interrupted = false) {
+    const id = speaker === "you" ? this.inputId : this.outputId;
+    const capture = speaker === "you" ? this.inputCapture : this.outputCapture;
+    if (!id) return;
+    const key = this.turnId(id, speaker); const target = this.state.target;
+    // A transcript may finish before playout. Capture the spoken clip at the playout boundary.
+    const turns = this.durableTurns; const clips = this.clips;
+    const before = turns.get(key);
+    if (interrupted && before) {
+      const ended = { ...before, final: true, interrupted: true };
+      turns.set(key, ended); this.set({ turns: this.state.turns.map((turn) => turn.id === key ? ended : turn) }); this.save(ended, undefined, target);
+    }
+    void (capture?.finish() ?? Promise.resolve(undefined)).then((audioData) => {
+      if (audioData) { clips.set(key, audioData); while (clips.size > 8) { const oldest = clips.keys().next().value; if (oldest) clips.delete(oldest); } }
+      const turn = turns.get(key);
+      if (turn) this.save({ ...turn, interrupted: interrupted || turn.interrupted }, audioData, target);
+    });
   }
   private send(event: Record<string, unknown>) { if (this.channel?.readyState === "open") this.channel.send(JSON.stringify(event)); }
   private respond(instructions?: string) {
@@ -85,16 +128,18 @@ class CoworkerCall {
       this.idle = setTimeout(() => this.end(), 12_000);
     }, 5 * 60_000);
   }
-  async start(person: CoworkerSummary, threadId: string, microphonePermission: Promise<{ granted: boolean }>): Promise<void> {
-    if (this.isActive()) { this.show(); return; }
+  async start(person: CoworkerSummary, threadId: string, microphonePermission: Promise<{ granted: boolean }>, options: { inline?: boolean; groupId?: string } = {}): Promise<void> {
+    if (this.isActive()) { if (!options.inline) this.show(); return; }
     const config = await coworkerBridge.calls.settings();
     if (!config.keySet || !config.enabled) return;
     if (this.isActive()) { this.show(); return; }
-    const target = { slug: person.slug, createdAt: person.createdAt, threadId };
+    const target = { slug: person.slug, createdAt: person.createdAt, threadId, ...(options.groupId ? { groupId: options.groupId } : {}) };
     const serial = ++this.serial;
     this.callId = crypto.randomUUID(); this.seenTools.clear(); this.seenUpdates.clear(); this.updates.clear();
     this.humanSpeaking = false; this.responding = false; this.speaking = false; this.finishAfterSpeech = false; this.stopRequestedAt = 0; this.lastSpoken = { text: "", at: 0 }; this.toolResponsePending = false;
-    this.set({ phase: "calling", target, person, visible: true, error: "", subtitles: [], muted: false, startedAt: 0,
+    this.inputId = ""; this.outputId = "";
+    this.durableTurns = new Map(); this.clips = new Map();
+    this.set({ phase: "calling", target, person, visible: !options.inline, error: "", subtitles: [], turns: [], muted: false, startedAt: 0,
       observation: this.adapters.get(keyOf(target))?.observation ?? EMPTY_CALL_OBSERVATION,
       retained: [...this.state.retained.filter((item) => keyOf(item) !== keyOf(target)), target] });
     this.adapter()?.prepare();
@@ -108,12 +153,15 @@ class CoworkerCall {
       const microphone = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true }, video: false });
       if (serial !== this.serial) { microphone.getTracks().forEach((track) => track.stop()); return; }
       this.microphone = microphone;
+      this.inputCapture = new VoiceCapture(); await this.inputCapture.connect(microphone);
+      if (serial !== this.serial) return;
       for (const track of microphone.getAudioTracks()) track.addEventListener("ended", () => { if (serial === this.serial) this.fail("Your microphone disconnected. Choose an available microphone and call again."); });
       const peer = new RTCPeerConnection(); this.peer = peer;
       const audio = new Audio(); audio.autoplay = true; this.audio = audio;
       peer.addEventListener("track", ({ streams, track }) => {
         if (serial !== this.serial) return;
         const remote = streams[0] ?? new MediaStream([track]); audio.srcObject = remote;
+        this.outputCapture = new VoiceCapture(); void this.outputCapture.connect(remote);
         void audio.play().catch(() => { this.set({ error: "Select Audio output to enable sound." }); });
         const context = new AudioContext(); this.audioContext = context;
         const source = context.createMediaStreamSource(remote); this.analyser = context.createAnalyser(); this.analyser.fftSize = 256; source.connect(this.analyser);
@@ -126,7 +174,7 @@ class CoworkerCall {
       channel.addEventListener("message", ({ data }) => { if (serial === this.serial) { try { const event: unknown = JSON.parse(data); if (record(event)) this.event(event); } catch { /* Ignore an invalid transport event; never log call contents. */ } } });
       channel.addEventListener("close", () => { if (serial === this.serial && this.isActive()) this.fail("The call disconnected. Your work continues in text."); });
       const offer = await peer.createOffer(); await peer.setLocalDescription(offer);
-      const secret = await coworkerBridge.calls.secret(person.slug, person.createdAt);
+      const secret = await coworkerBridge.calls.secret(person.slug, person.createdAt, options.groupId);
       if (serial !== this.serial) return;
       const response = await fetch("https://api.openai.com/v1/realtime/calls", { method: "POST", redirect: "error", signal,
         headers: { Authorization: `Bearer ${secret.value}`, "Content-Type": "application/sdp" }, body: offer.sdp });
@@ -150,24 +198,31 @@ class CoworkerCall {
         this.respond(); break;
       case "response.created": this.responding = true; this.set({ phase: "thinking" }); break;
       case "input_audio_buffer.speech_started":
+        this.inputId = typeof event.item_id === "string" ? event.item_id : "input";
+        this.inputCapture?.begin(2);
+        if (this.speaking) this.finishAudio("coworker", true);
         this.humanSpeaking = true; this.touch();
         // GA WebRTC interrupts and truncates automatically. Clear its playout buffer immediately too.
         this.send({ type: "output_audio_buffer.clear" });
         if (this.audio) this.audio.muted = true;
         this.speaking = false; this.set({ phase: "listening" }); break;
-      case "input_audio_buffer.speech_stopped": this.humanSpeaking = false; this.touch(); if (this.audio) this.audio.muted = false; break;
+      case "input_audio_buffer.speech_stopped": this.finishAudio("you"); this.humanSpeaking = false; this.touch(); if (this.audio) this.audio.muted = false; break;
       case "conversation.item.input_audio_transcription.completed":
-        if (typeof event.transcript === "string") { this.lastSpoken = { text: event.transcript, at: Date.now() }; this.subtitle(String(event.item_id ?? "input"), "you", event.transcript); if (/^(no|don't|do not)\b/i.test(event.transcript.trim())) this.stopRequestedAt = 0; } break;
+        if (typeof event.transcript === "string") { this.lastSpoken = { text: event.transcript, at: Date.now() }; this.subtitle(String(event.item_id ?? "input"), "you", event.transcript, false, true); if (/^(no|don't|do not)\b/i.test(event.transcript.trim())) this.stopRequestedAt = 0; } break;
       case "conversation.item.input_audio_transcription.delta":
         if (typeof event.delta === "string") this.subtitle(String(event.item_id ?? "input"), "you", event.delta, true); break;
       case "response.output_audio_transcript.delta":
         if (typeof event.delta === "string") {
           const item = typeof event.item_id === "string" ? event.item_id : "";
+          this.outputId = item;
           this.subtitle(item, "coworker", event.delta, true);
         } break;
-      case "output_audio_buffer.started": this.speaking = true; if (!this.humanSpeaking) this.set({ phase: "speaking" }); break;
+      case "response.output_audio_transcript.done":
+        if (typeof event.item_id === "string" && typeof event.transcript === "string") { this.outputId = event.item_id; this.subtitle(event.item_id, "coworker", event.transcript, false, true); } break;
+      case "output_audio_buffer.started": this.outputCapture?.begin(); this.speaking = true; if (!this.humanSpeaking) this.set({ phase: "speaking" }); break;
       case "output_audio_buffer.stopped":
       case "output_audio_buffer.cleared":
+        this.finishAudio("coworker", event.type === "output_audio_buffer.cleared");
         this.speaking = false; this.set({ phase: "listening" });
         if (this.finishAfterSpeech && !this.humanSpeaking) this.end(); else this.flush(); break;
       case "response.done":
@@ -243,6 +298,9 @@ class CoworkerCall {
     await coworkerBridge.appWindow.bubble(true, this.state.person);
   }
   private cleanup() {
+    this.finishAudio("you", this.humanSpeaking); this.finishAudio("coworker", this.speaking);
+    for (const turn of this.state.turns) if (!turn.final) this.save({ ...turn, final: true, interrupted: true });
+    void this.inputCapture?.close(); void this.outputCapture?.close(); this.inputCapture = null; this.outputCapture = null;
     ++this.serial; this.controller?.abort(); this.controller = null;
     for (const timer of [this.debounce, this.idle, this.connectTimer]) if (timer) clearTimeout(timer);
     this.debounce = null; this.idle = null; this.connectTimer = null;
@@ -256,7 +314,7 @@ class CoworkerCall {
     const { target, person, startedAt } = this.state; const id = this.callId;
     if (!this.isActive()) { this.set({ visible: false }); return; }
     this.cleanup(); this.set({ phase: "ended", visible: false, subtitles: [], startedAt: 0 }); this.releaseSettled();
-    if (target && person && startedAt) void coworkerBridge.calls.record(target.slug, target.threadId, { kind: "call", id, name: person.name.slice(0, 80), startedAt, endedAt: Date.now() }).then(() => window.dispatchEvent(new Event("coworker:call-history"))).catch(() => this.set({ error: "The call ended, but its duration could not be saved." }));
+    if (target && person && startedAt) void coworkerBridge.calls.record(target.slug, target.threadId, { kind: "call", id, name: person.name.slice(0, 80), startedAt, endedAt: Date.now() }, target.createdAt).then(() => window.dispatchEvent(new Event("coworker:call-history"))).catch(() => this.set({ error: "The call ended, but its duration could not be saved." }));
   };
   private fail(message: string) { this.end(); this.set({ phase: "error", visible: true, error: message }); }
 }

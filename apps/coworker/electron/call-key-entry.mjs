@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 
 /** The long-lived key is typed into an OS-owned masked field, never a web renderer or IPC. */
 export function requestCallKey(platform = process.platform) {
-  const prompt = "OpenAI API key for Voice calls. Audio usage bills your OpenAI account.";
+  const prompt = "OpenAI API key for Voice mode and calls. Audio usage bills your OpenAI account.";
   let file, args;
   if (platform === "darwin") {
     file = "/usr/bin/osascript";

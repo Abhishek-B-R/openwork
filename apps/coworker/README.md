@@ -602,99 +602,57 @@ are independent and unchanged.
 
 **Voice**
 
-| Choice | Where | Rule | Override / explanation | Coverage / verification |
-|---|---|---|---|---|
-| Voice access | Composer; `ui/use-voice.ts` | Off on launch; enable only after native `voice.status` confirms Models membership and availability. Never infer membership from the selected answer model | Voice toggle; signed-out and unpaid members see inline membership discovery; unavailable is not an upsell | Focused `conversation.test.ts`; native journey proof remains separate |
-| Dictation and spoken preview | `lib/voice.ts`, `ui/voice.tsx` | Audio-only recording, then editable text; only a final visible reply to a message sent while voice is enabled can speak. No history playback, reasoning, tool payloads, or new answer engine | Explicit Record / Finish / Cancel and normal Send; Stop audio never stops the coworker's work | Focused selection, draft, format and packet-limit tests; native lifecycle proof required |
-
 ### Voice mode
 
-Voice lives inside private-discussion and group-chat composers, not model
-settings or read-only Worker threads. Click **Voice mode** to check access.
-It requires an active **OpenWork Models** membership. Signed-out or unpaid
-people see *Voice mode, with OpenWork Models*, with a route to the existing
-global membership screen and the normal sign-in flow. No checkout opens
-automatically. A temporarily unavailable service is named separately from
-missing membership. The coworker's answer model, tools and session stay unchanged.
+Voice mode in private and group composers and the header’s Call button share
+`lib/realtime-call.ts`. Set up **Settings → OpenAI**: add an OpenAI API key,
+then enable **Voice mode and calls**. Both entry points require that saved key
+and switch before requesting microphone access. No Models subscription check
+is used. The full key stays encrypted in the main process; only a short-lived
+Realtime client secret reaches the renderer.
 
-- Enabling does not request microphone permission. Click the microphone to
-  record and click again to finish, or hold Space while the voice panel has
-  focus and release to finish. Space in text fields, buttons, menus and dialogs
-  (or on the page body) keeps its normal behavior. Escape discards recording or
-  stops speech. A late access check focuses the panel only if the original
-  toggle still has focus; it never takes focus away from a draft being typed.
-- On the welcome composer, confirmed membership first prepares a real empty
-  discussion. Its current draft and one account-scoped activation request move
-  into that thread, where access is checked again. No microphone permission or
-  audio is retained across this handoff. Record, review and Send then all happen
-  in the same thread, so the first dictated message can receive a spoken reply.
-  Typing or changing focus during preparation is preserved; cancelling or leaving
-  the view cannot activate a late-created discussion.
-- Recordings are audio only, with echo cancellation and noise suppression.
-  A real microphone-level trace and elapsed timer show capture. The limit is
-  60 seconds / 3 MiB; reaching the time limit finishes for review, exceeding
-  the byte limit discards the recording. WebM/Opus is preferred, with supported
-  MP4/M4A recording as the fallback. Unsupported recording stays text-only.
-- This is **record-then-transcribe, not live STT**. Transcription appends to the
-  current draft without erasing typed words and returns focus to that draft.
-  Review and press the normal Send button explicitly. Recording never sends
-  a message or executes work automatically.
-- Newly completed visible replies can be read aloud. Private playback requires
-  an idle, successful turn with the exact user-message parent, excluding
-  intermediate tool messages. Group playback waits for the persisted successful
-  replies of the person's exact submitted turn; briefings and previous history
-  never start playback. Private **Next** replies remain text-only because the
-  native queue does not expose an exact queued-ID-to-message-ID handoff here.
-- Explicit **Retry / Continue** arms playback on that gesture. Native admission
-  may give a continuation a new message ID; voice follows it only when the exact
-  original ID and voice generation still match. Turning voice off, changing
-  accounts, recording again or sending another message invalidates that handoff.
-  Group Continue reads only new successful replies, not earlier replies from
-  the same turn. Automatic activity and recovered history do not opt into voice.
-- Spoken previews use OpenRouter Mini STT and Mini TTS through the native bridge,
-  with no direct OpenAI fallback or separate answer generation. Speech is
-  requested and played sequentially, one packet at a time, at most 450 characters
-  per packet and 2,400 characters / 12 packets per reply. Code blocks and URLs
-  are not read out. Longer replies show *Read the rest in the transcript*.
-- **Sentence captions** advance when each audio packet begins. Long sentences
-  may be split at the packet limit. They are not word timestamps, live captions
-  from STT, or forced alignment. The existing streamed transcript is unchanged;
-  captions and microphone levels do not create streaming screen-reader chatter.
-- Voice activation is ephemeral to the current discussion view. Other new
-  discussions start with voice off; only the explicit welcome preparation above
-  transfers the pending activation request.
-  Leaving the view, opening settings, changing accounts (including token or
-  organization), or disabling voice releases capture and playback. A hidden or
-  unfocused window cancels current media and forgets its pending spoken reply;
-  returning never replays it. Record or send again to continue.
-- A new recording or user send stops previous audio. **Stop audio** stops local
-  playback and suppresses late results, never agent work. One already-dispatched
-  bounded packet may finish server-side solely to settle usage; it is never
-  regenerated. Streams, audio contexts, sources, timers and
-  listeners are cleaned up; cancelled or late permission/transcription results
-  cannot insert text into another discussion. An exhausted voice allowance is
-  named separately from missing membership. Voice errors keep typing usable.
+The composer button starts a live conversation inside the chat. The phone
+button opens the same session in Call mode; **Call view** and **Type** move
+between the two presentations. A single WebRTC session uses `gpt-realtime-2.1`
+through the Realtime calls endpoint. Voice handles greetings, clarification and
+short acknowledgements; substantive work is admitted through the existing
+private composer/queue or group admission path. The conversation retains its
+chosen answer model and tools. A sent receipt is not a completed result.
 
-Voice admission reserves a small estimated amount against the shared Models
-allowance while a request is outstanding. Concurrent members do not wait behind
-one organization's unfinished audio request. Actual provider receipts replace
-the reservation through the existing usage ledger; estimates are never billed
-as actual usage and are not hard provider spend ceilings.
+- Live user and coworker transcripts appear as chat messages. Completed turns
+  persist in `call-history.json`; captured audio is replayed only on **Play
+  audio**, with ordinary playback and seek controls. A failed capture leaves
+  the words readable. Interrupted output is labelled because a generated
+  transcript can contain words whose audio was not played.
+- Local replay uses mono PCM WAV clips, capped at one minute per turn, at most
+  50 recordings per conversation. Older audio is pruned while words remain;
+  the most recent 500 voice turns and 100 call durations are retained. These
+  are local limits, not provider usage limits. Audio goes to OpenAI during the
+  session and OpenAI bills usage to the saved key. Replay sends no API request.
+- Choose **Voice** in a coworker’s Settings when voice is enabled. The ten
+  supported built-in Realtime voices are offered, plus **App default**.
+  Its saved choice is used by both entry points on the next session; active
+  sessions keep the voice they started with. This setting is independent of
+  personality and model choice.
+- Group voice uses its first available member as the voice host and that
+  coworker’s voice choice. All work goes through the group’s existing
+  facilitator and participants. Group voice history lives in the group home
+  under `.groups/<id>/`, so changing the host does not move its history.
+- Navigation retains the originating private or group adapter while voice or
+  admitted work needs it. **End voice**, hangup and interruptions release or
+  interrupt audio without stopping native work. Stop-work requests still
+  require the existing confirmation; permissions remain on-screen actions.
+- Account changes, key removal, disabling voice and native window teardown
+  end the session. The legacy Models/OpenRouter voice IPC commands are no
+  longer exposed by this client.
 
-If a process or provider response is lost, the receipt stays explicitly unpriced.
-Its reservation applies only to its original allowance windows, not future ones;
-receipt reconciliation, authorized usage reset, or those windows ending can
-restore capacity without regenerating audio. Outstanding reservations are bounded
-to four per member and 32 per organization, subject to the available allowance.
-Late or duplicate receipts cannot recharge usage that was already settled or
-intentionally forgiven. Provider interoperability and acoustic quality still
-require a real-provider check; fixture-based native playback does not prove them.
-
-Privacy disclosure shown before recording: **AI-generated voice. Audio and reply
-text are processed through OpenRouter.** Recording audio is held in memory for
-transcription, not saved as an attachment by this UI. Transcribed drafts and sent
-text use the existing draft and discussion storage. This does not promise a
-provider retention policy; the existing Models service terms still apply.
+`electron/voice-calls.mjs` owns secure session creation and bounded durable
+history. `ui/voice.tsx` owns inline controls, `ui/voice-message.tsx` owns
+transcript/replay rows, and `ui/coworker-voice-settings.tsx` owns the per-person
+selection. `lib/voice-capture.ts` and its AudioWorklet capture bounded local
+replay clips; they do not upload recordings or request microphone permission.
+Real-provider connection, speech recognition and acoustic quality require a
+separate live check; local fixtures cannot establish them.
 
 ### Workers
 
@@ -1458,6 +1416,20 @@ create-skill, and the organization's Apps (discovered through the gateway's
 connection index and rendered with the standard MCP App host). Signing out
 removes the gateway again. The packaged app ships the engine's OpenWork plugins
 under `Resources/opencode-plugins`, as the desktop does.
+
+In private conversations, native MCP results retain their standard envelope as
+host metadata, including `openwork/mcpApp` launch references. Native Code Mode
+keeps bounded App receipts independently of its returned prose, so composing a
+result does not discard the interactive view. The conversation mounts these in
+the existing sandbox with the originating native session and App lease. Only
+the newest card of an App built in OpenWork remains live; its older cards show
+a newer-version receipt, and an older launch may resolve the current revision
+of that same App. Authored Apps follow Den's `appMcpServers` organization
+capability; connected provider Apps do not require that capability.
+
+Native tool status `streaming` means the model is still generating call
+arguments. Activity identifies that preparation separately from a queued or
+running tool; completed earlier steps do not establish that the new call ran.
 
 ## Connect cards in the conversation
 

@@ -44,7 +44,7 @@ const SECTIONS: Array<{ id: SettingsSection; label: string; detail: string; help
   { id: "general", label: "My coworkers", detail: "Personal choices for each coworker", wide: true },
   { id: "features", label: "Features", detail: "Start simple and turn on what you need. Turning one off keeps its data for later.", wide: true },
   { id: "model-defaults", label: "Shared AI models", detail: "Starting models for everyone. Personal choices still win.", wide: true },
-  { id: "voice-calls", label: "OpenAI", detail: "Voice calls and Luna group routing" },
+  { id: "voice-calls", label: "OpenAI", detail: "Voice mode, calls and Luna group routing" },
   { id: "account", label: "Account", detail: "OpenWork account and organization" },
   { id: "models", label: "Available models", detail: "AI models your coworkers can choose", help: "These models are connected for your team. Availability here does not confirm a paid account with every provider. Choose a shared model in Shared AI models, or choose one for a coworker." },
   { id: "engine", label: "This Mac", detail: "AI service and files on this Mac", wide: true },

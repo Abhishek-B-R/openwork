@@ -19,6 +19,8 @@ import {
 } from "@/lib/conversation";
 import {
   createCoworkerMcpClient,
+  builtMcpAppId,
+  codeModeMcpAppCalls,
   gatewayMcpAppLaunch,
   preservedMcpAppResult,
   type CoworkerMcpAppResource,
@@ -142,6 +144,7 @@ import { CallButton, useCallState } from "@/ui/voice-call";
 import { coworkerCall } from "@/lib/realtime-call";
 import { callDuration, type CallHistory, type CallObservation } from "@/lib/call";
 import { VoicePanel, VoiceToggle } from "@/ui/voice";
+import { VoiceMessage, useVoiceTurns } from "@/ui/voice-message";
 
 // Computer, browser and interactive app hosts are discussion-time features;
 // their views (and the MCP app bridge) load when a discussion first needs them.
@@ -719,7 +722,7 @@ export function ThreadsPanel({
   }
 
   const displayedId = openThreadId || discussionThreadId;
-  const kept = callState.retained.filter((target) => target.slug === coworker.slug && target.createdAt === coworker.createdAt).map((target) => target.threadId);
+  const kept = callState.retained.filter((target) => !target.groupId && target.slug === coworker.slug && target.createdAt === coworker.createdAt).map((target) => target.threadId);
   const displayed = [...new Set([displayedId, ...kept].filter(Boolean))];
   return <>
     {!displayedId ? (<DiscussionWelcome
@@ -901,6 +904,7 @@ function DiscussionWelcome({
   useEffect(() => () => { startCancelled.current = true; startController.current?.abort(); }, []);
   const voice = useVoice({
     active: active && !assignmentMode && !busy,
+    person: coworker, prepare: onPrepareCall,
     scope: `${coworker.slug}:new`,
     onTranscript: (text) => setMessage((draft) => appendVoiceDraft(draft, text)),
     onReady: async (request) => {
@@ -1244,7 +1248,6 @@ function ThreadView({
   const workerFeed = useWorkerFeed(coworker, threadId, { enabled: kind === "discussion" && browserEligible });
   const [openWorkerId, setOpenWorkerId] = useState("");
   const workerLinks = useMemo(() => ({ workers: workerFeed.workers ?? [], open: setOpenWorkerId }), [workerFeed.workers]);
-  const transcriptAppContext = useMemo<CoworkerMcpAppContext>(() => ({ sessionId: threadId, engine: "v2", readOnly: !active || kind !== "discussion" }), [threadId, active, kind]);
   const trayActive = browserEligible && (Boolean(openWorkerId) || (workerFeed.workers ?? []).some((worker) => isLiveWorker(worker) || recentlyEnded(worker, workerFeed.now)));
   // Entrances belong to what arrives after the conversation first paints: a message
   // already on screen when it loads, or handed over from a new discussion, stays still.
@@ -2410,6 +2413,7 @@ function ThreadView({
   const voiceReply = useMemo(() => privateVoiceReply(messages, voiceSettled && !failure && (!outcome || outcome.kind === "replied")), [messages, voiceSettled, failure, outcome?.kind]);
   const voice = useVoice({
     active: active && kind === "discussion" && !assignmentMode && !assignmentBusy,
+    person: coworker, threadId,
     scope: `${coworker.slug}:${threadId}`,
     onTranscript: (text) => setReply((draft) => appendVoiceDraft(draft, text)),
     reply: voiceReply,
@@ -2440,6 +2444,15 @@ function ThreadView({
     }
     return visible;
   }, [timedMessages, pendingTurn, liveStream]);
+  const newestAppCallIds = useMemo(() => {
+    const newest = new Map<string, string>();
+    for (const message of visibleMessages) for (const call of message.toolCalls.flatMap(transcriptMcpAppCalls)) {
+      const id = builtMcpAppId(preservedMcpAppResult(call));
+      if (id) newest.set(id, call.partId);
+    }
+    return new Set(newest.values());
+  }, [visibleMessages]);
+  const transcriptAppContext = useMemo<CoworkerMcpAppContext & { newestAppCallIds: ReadonlySet<string> }>(() => ({ sessionId: threadId, engine: "v2", readOnly: !active || kind !== "discussion", newestAppCallIds }), [threadId, active, kind, newestAppCallIds]);
   const messagePositions = useMemo(() => new Map(visibleMessages.map((message, index) => [message.id, index])), [visibleMessages]);
   const lastAssistantIndex = visibleMessages.findLastIndex((message) => message.role === "assistant");
   /** A team tile's pills stay open only until the person writes again. */
@@ -2448,15 +2461,26 @@ function ThreadView({
   const currentExecution = currentMessageId ? executionsByMessage.get(currentMessageId) : undefined;
   const currentReplies = useMemo(() => visibleMessages.filter((message) => message.role === "assistant" && message.parentId === currentMessageId), [visibleMessages, currentMessageId]);
   const activeReply = currentReplies.at(-1) ?? null;
-  const activeCall = currentReplies.flatMap((message) => message.toolCalls).findLast((call) => ["running", "pending"].includes(executionState(call.status)))
-    ?? currentExecution?.tools.findLast((call) => ["running", "pending"].includes(executionState(call.status))) ?? null;
+  const activeCall = currentReplies.flatMap((message) => message.toolCalls).findLast((call) => ["running", "pending", "preparing"].includes(executionState(call.status)))
+    ?? currentExecution?.tools.findLast((call) => ["running", "pending", "preparing"].includes(executionState(call.status))) ?? null;
   const activeToolLabel = activeCall ? EXECUTION_KINDS[executionMetadata(activeCall).kind] : null;
-  const activeStep = activeToolLabel ? { doing: activeToolLabel } : null;
+  const activeStep = activeToolLabel && executionState(activeCall?.status) !== "preparing" ? { doing: activeToolLabel } : null;
   const correlatedStream = streamTurn.current === currentMessageId ? liveStream : null;
   const currentWords = useMemo(() => writingText(correlatedStream, activeReply), [correlatedStream, activeReply]);
   const streamingMessageIds = useMemo(() => new Set(correlatedStream?.parts.filter((part) => part.type === "text").map((part) => part.messageId)), [correlatedStream]);
   const blocks = useMemo(() => conversationBlocks(visibleMessages, (message, index) => working && message.role === "assistant" && (index === lastAssistantIndex || streamingMessageIds.has(message.id))), [visibleMessages, working, lastAssistantIndex, streamingMessageIds]);
   const callAnchors = callHistory.calls.map((call) => ({ call, before: blocks.find((block) => (block.kind === "message" || block.kind === "ended") && block.message.createdAt !== null && block.message.createdAt > call.endedAt) }));
+  const voiceTurns = useVoiceTurns(coworker.slug, threadId, callHistory.transcripts ?? []);
+  const spokenMatches = new Map<string, import("@/lib/call").VoiceTurn>();
+  const matchedVoiceIds = new Set<string>();
+  for (const request of callHistory.spoken) {
+    const turn = voiceTurns.filter((turn) => turn.speaker === "you" && !matchedVoiceIds.has(turn.id) && turn.text.trim() === request.text.trim()).sort((a, b) => Math.abs(a.at - request.at) - Math.abs(b.at - request.at))[0];
+    if (turn) { spokenMatches.set(request.id, turn); matchedVoiceIds.add(turn.id); }
+  }
+  const spokenFor = (messageId: string) => spokenMatches.get(messageId);
+  const voicedIds = new Set(blocks.flatMap((block) => block.kind === "message" && block.message.role === "user" ? spokenFor(block.message.id)?.id ?? [] : []));
+  const voiceAnchors = voiceTurns.filter((turn) => !voicedIds.has(turn.id)).map((turn) => ({ turn, before: blocks.find((block) => (block.kind === "message" || block.kind === "ended") && block.message.createdAt !== null && block.message.createdAt > turn.at) }));
+  const voiceLines = (messageId?: string) => voiceAnchors.filter(({ before }) => before && (before.kind === "message" || before.kind === "ended") ? before.message.id === messageId : messageId === undefined).map(({ turn }) => <VoiceMessage key={turn.id} turn={turn} slug={coworker.slug} threadId={threadId} name={coworker.name} active={active} />);
   const callLines = (messageId?: string) => callAnchors.filter(({ before }) => before && (before.kind === "message" || before.kind === "ended") ? before.message.id === messageId : messageId === undefined).map(({ call }) => <p key={call.id} className="py-1 text-center text-[11px] text-mist" data-testid="coworker-call-history">Call with {call.name} · {callDuration(call.endedAt - call.startedAt)}</p>);
   const conversationWindow = useConversationWindow(scrollRef, blocks, (block) => block.kind === "actions" || block.kind === "documents" || block.kind === "connect" ? block.id : block.message.id);
   useLayoutEffect(() => registerVirtualAnchors(conversationWindow.enabled ? {
@@ -2513,7 +2537,7 @@ function ThreadView({
       if (spokenSeen.current.has(itemId)) return true;
       if (admissionBlocked.current) return false;
       const id = newMessageId();
-      const history = await coworkerBridge.calls.record(coworker.slug, threadId, { kind: "spoken", id, text, at: Date.now() });
+      const history = await coworkerBridge.calls.record(coworker.slug, threadId, { kind: "spoken", id, text, at: Date.now() }, coworker.createdAt);
       setCallHistory(history); spokenSeen.current.add(itemId);
       voice.stop("");
       return sendText(text, undefined, id);
@@ -2621,7 +2645,7 @@ function ThreadView({
 
   const currentDiscussion: ThreadListItem = discussions.find((item) => item.id === threadId)
     ?? { id: threadId, title, createdAt: 0, updatedAt: 0, status: "idle" };
-  const freshDiscussion = transcriptLoaded && turnsLoaded && kind === "discussion" && visibleMessages.length === 0 && !working && !needsYou && !error && !outcome;
+  const freshDiscussion = transcriptLoaded && turnsLoaded && kind === "discussion" && visibleMessages.length === 0 && voiceTurns.length === 0 && !working && !needsYou && !error && !outcome;
   const composerWorking = Boolean(stopAttempt) || turnRunning || admissionInFlight || acceptedObservationUnavailable || activeTurn !== null || (engineRunning && !needsYou);
   const statusState = stopAttempt ? stopPending ? "stopping" : "stop-unconfirmed" : needsYou ? "needs-you" : working ? "working" : unconfirmedAdmission || refusedAdmission || acceptedObservationUnavailable ? "unknown" : workspacePreparation.state === "error" ? "unavailable" : workspacePreparation.state === "starting" ? "preparing" : "idle";
   const stoppable = Boolean(working || needsYou || stopAttempt || unconfirmedAdmission || refusedAdmission || acceptedObservationUnavailable);
@@ -2728,13 +2752,14 @@ function ThreadView({
             // unresolved is told by the outcome below instead, with its actions.
             if (block.kind === "ended") {
               if (block.message.parentId === pendingTurn?.messageId) return null;
-              return <div key={block.message.id}>{callLines(block.message.id)}<QuietLine outcome={block.ended} text={block.ended === "stopped" ? "Stopped." : describeTurnFailure(block.message.error ? failureText(block.message.error) : "", coworker.name).headline} /></div>;
+              return <div key={block.message.id}>{voiceLines(block.message.id)}{callLines(block.message.id)}<QuietLine outcome={block.ended} text={block.ended === "stopped" ? "Stopped." : describeTurnFailure(block.message.error ? failureText(block.message.error) : "", coworker.name).headline} /></div>;
             }
             const hasTeamCards = kind === "discussion" && teamCardsFromCalls(block.calls).length > 0;
             return (
               <div key={block.message.id} data-scroll-anchor={block.message.id}>
                 {callLines(block.message.id)}
-                {block.message.role === "user" && callHistory.spoken.some((item) => item.id === block.message.id) ? <span className="mb-0.5 block text-right text-[10px] text-mist" aria-label="Spoken request">♩ Voice</span> : null}
+                {voiceLines(block.message.id)}
+                {block.message.role === "user" && spokenFor(block.message.id) ? <VoiceMessage turn={spokenFor(block.message.id)!} slug={coworker.slug} threadId={threadId} name={coworker.name} compact active={active} /> : null}
                 <TimeLabel label={timeLabelBetween(block.previous?.createdAt, block.message.createdAt)} />
                 <MessageBubble
                   message={block.message}
@@ -2764,6 +2789,7 @@ function ThreadView({
           </TranscriptAppContext.Provider>
           </WorkerLinksContext.Provider>
           {callLines()}
+          {voiceLines()}
           <CollaborationReceipts receipts={collaborationReceipts} />
           <InteractionCards
             coworker={coworker}
@@ -3567,16 +3593,28 @@ function ToolAttachments({ calls, client }: { calls: TranscriptToolCall[]; clien
         </div>
       ) : null}
       {/* The coworker's own tools — documents, assignments, memory — answer in the bubble or the panel, never as an App. */}
-      {calls.filter((call) => !isDocumentTool(call.tool) && !coworkerToolName(call.tool)).map((call) => <ToolAppFrame key={call.partId} call={call} client={client} />)}
+      {calls.flatMap(transcriptMcpAppCalls).filter((call) => !isDocumentTool(call.tool) && !coworkerToolName(call.tool)).map((call) => <ToolAppFrame key={call.partId} call={call} client={client} />)}
     </>
   );
 }
 
 /** The standard MCP App a tool call returned, mounted in the existing sandboxed host. */
-const TranscriptAppContext = createContext<CoworkerMcpAppContext>({ sessionId: null, engine: "v2", readOnly: true });
+const TranscriptAppContext = createContext<CoworkerMcpAppContext & { newestAppCallIds?: ReadonlySet<string> }>({ sessionId: null, engine: "v2", readOnly: true });
+
+function transcriptMcpAppCalls(call: TranscriptToolCall): TranscriptToolCall[] {
+  return [call, ...codeModeMcpAppCalls(call.metadata).map((entry) => ({
+    partId: `${call.partId}:mcp-app:${entry.index}`,
+    tool: entry.tool,
+    status: "completed",
+    input: entry.input,
+    output: entry.result,
+    error: null,
+    metadata: { openworkMcpResult: entry.result },
+  }))];
+}
 
 function ToolAppFrame({ call, client }: { call: TranscriptToolCall; client: CoworkerMcpClient }) {
-  const { sessionId, engine, readOnly } = useContext(TranscriptAppContext);
+  const { sessionId, engine, readOnly, newestAppCallIds } = useContext(TranscriptAppContext);
   const nextResult = preservedMcpAppResult({ output: call.output, metadata: call.metadata });
   const resultSignature = JSON.stringify(nextResult);
   const resultRef = useRef<{ signature: string; value: PreservedMcpAppResult | null }>({
@@ -3587,6 +3625,7 @@ function ToolAppFrame({ call, client }: { call: TranscriptToolCall; client: Cowo
     resultRef.current = { signature: resultSignature, value: nextResult };
   }
   const result = resultRef.current.value;
+  const superseded = Boolean(builtMcpAppId(result) && newestAppCallIds && !newestAppCallIds.has(call.partId));
   const launch = useMemo(() => gatewayMcpAppLaunch(result?._meta), [result]);
   const inputSignature = JSON.stringify(launch?.arguments ?? call.input);
   const inputRef = useRef<{ signature: string; value: Record<string, unknown> }>({
@@ -3615,7 +3654,7 @@ function ToolAppFrame({ call, client }: { call: TranscriptToolCall; client: Cowo
     releaseRef.current = release;
     setApp(null);
     setAppError("");
-    if (!result || !complete) return;
+    if (!result || !complete || superseded) return;
     void client.resolveApp(call.tool, { sessionId, engine, readOnly }, launch ?? undefined)
       .then(({ app: resolved }) => {
         launchId = resolved?.launchId;
@@ -3630,7 +3669,9 @@ function ToolAppFrame({ call, client }: { call: TranscriptToolCall; client: Cowo
       release();
       if (releaseRef.current === release) releaseRef.current = null;
     };
-  }, [call.tool, client, complete, launch, result, sessionId, engine, readOnly]);
+  }, [call.tool, client, complete, launch, result, sessionId, engine, readOnly, superseded]);
+
+  if (superseded) return <p className="mt-1 text-[10px] text-mist">This App has a newer version below.</p>;
 
   if (app && result) {
     return (

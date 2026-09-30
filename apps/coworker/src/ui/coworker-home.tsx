@@ -46,6 +46,7 @@ import type { WorkerSummary } from "@/lib/workers";
 import type { CoworkerDocumentSummary } from "@/lib/documents";
 import { Row, RowList, useReturnFocus } from "@/ui/rows";
 import type { SettingsSection } from "@/ui/openwork-settings";
+import { CoworkerVoiceSettings } from "@/ui/coworker-voice-settings";
 
 // Connected apps and tools open on request; the panel loads the first time it is shown.
 const CapabilitiesPanel = lazy(() => import("@/ui/capabilities").then((module) => ({ default: module.CapabilitiesPanel })));
@@ -857,6 +858,7 @@ export function CoworkerHome({
             <PanelLevel key="settings" direction={nav.direction}>
               <CoworkerSettings
                 coworker={coworker}
+                onCoworkerChanged={onCoworkerChanged}
                 onCustomize={() => { if (allowDocumentNavigation()) onCustomize(); }}
                 onCoworkerRemoved={onCoworkerRemoved}
                 onOpenAppsTools={features.appsTools ? () => nav.push(APPS_TOOLS_CRUMB, APPS_TOOLS_CRUMB.id) : undefined}
@@ -1143,12 +1145,14 @@ function AiUnavailableNote({
  */
 function CoworkerSettings({
   coworker,
+  onCoworkerChanged,
   onCustomize,
   onCoworkerRemoved,
   onOpenAppsTools,
   onOpenAbilities,
 }: {
   coworker: CoworkerSummary;
+  onCoworkerChanged: (person: CoworkerSummary) => void;
   onCustomize: () => void;
   onCoworkerRemoved: (slug: string) => void;
   /** Present only while Apps & tools is turned on. */
@@ -1215,6 +1219,8 @@ function CoworkerSettings({
           ) : null}
         </RowList>
       ) : null}
+
+      <CoworkerVoiceSettings person={coworker} onChanged={onCoworkerChanged} />
 
       <section className="flex items-center justify-between gap-3 border-t border-line/60 pt-4">
         <div className="min-w-0">

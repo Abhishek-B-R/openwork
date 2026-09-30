@@ -23,6 +23,7 @@ import {
 import { ENGINE_GLOBAL_RUNTIME_CONFIG_ID, readRuntimeOpencodeConfig, runtimeMcpMap, writeRuntimeOpencodeConfig, writeGlobalRuntimeOpencodeConfig } from "./runtime-opencode-config-store.js";
 import {
   callMcpAppTool,
+  advertisesLaunchedResource,
   listMcpAppCatalog,
   listMcpServerTools,
   searchWorkspaceCapabilities,
@@ -43,6 +44,16 @@ const UPDATED_RESOURCE_URI = "ui://fixture/v2/view.html";
 const RESOURCE_HTML = "<!doctype html><html><head></head><body>Fixture</body></html>";
 const UPDATED_RESOURCE_HTML = "<!doctype html><html><head></head><body>Updated fixture</body></html>";
 const stops: Array<() => void | Promise<void>> = [];
+
+test("only the same authored App may advance its launched revision", () => {
+  const app = "cob_01arz3ndektsv4rrffq69g5fav";
+  const oldUri = `ui://openwork/apps/${app}/revisions/cov_01arz3ndektsv4rrffq69g5faw/index.html`;
+  const newUri = oldUri.replace("5faw", "5fax");
+  expect(advertisesLaunchedResource(oldUri, newUri, app)).toBe(true);
+  expect(advertisesLaunchedResource(oldUri, newUri)).toBe(false);
+  expect(advertisesLaunchedResource(oldUri, newUri.replace(app, "cob_01arz3ndektsv4rrffq69g5fay"), app)).toBe(false);
+  expect(advertisesLaunchedResource(RESOURCE_URI, UPDATED_RESOURCE_URI, app)).toBe(false);
+});
 
 afterEach(async () => {
   while (stops.length) await stops.pop()?.();

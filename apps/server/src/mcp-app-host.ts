@@ -137,6 +137,15 @@ export type SameServerMcpAppLaunchReference = {
   resourceUri: string;
 };
 
+// Match the shared mcpAppResourceUri format without loading TypeScript in the packaged server.
+const BUILT_APP_REVISION_URI = /^ui:\/\/openwork\/apps\/(cob_[0-7][0-9a-hjkmnp-tv-z]{25})\/revisions\/cov_[0-7][0-9a-hjkmnp-tv-z]{25}\/index\.html$/u;
+
+export function advertisesLaunchedResource(launchedUri: string, advertisedUri: string, connectionId?: string): boolean {
+  if (advertisedUri === launchedUri) return true;
+  const launched = BUILT_APP_REVISION_URI.exec(launchedUri)?.[1];
+  return launched !== undefined && connectionId === launched && launched === BUILT_APP_REVISION_URI.exec(advertisedUri)?.[1];
+}
+
 export class McpAppHostError extends Error {
   constructor(
     readonly code: string,
@@ -786,7 +795,7 @@ export async function resolveConnectMcpAppResource(input: {
       throw new McpAppHostError("tool_not_visible", "The originating MCP App tool is not visible to apps.");
     }
     const resourceUri = toolUiResourceUri(tool);
-    if (resourceUri !== input.launch.resourceUri) {
+    if (!resourceUri || !advertisesLaunchedResource(input.launch.resourceUri, resourceUri, input.launch.connectionId)) {
       throw new McpAppHostError("tool_resource_mismatch", "The originating MCP App tool now advertises a different resource.");
     }
     const projectedName = projectedMcpToolName(serverName, tool.name);

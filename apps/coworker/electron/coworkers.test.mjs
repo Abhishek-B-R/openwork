@@ -231,6 +231,11 @@ test("createCoworker rejects duplicate slugs", async () => {
 test("updateCoworker patches profile and platform references", async () => {
   const coworkersDir = await tempCoworkersDir();
   const created = await createCoworker(coworkersDir, { name: "Ops" });
+  assert.equal(created.realtimeVoice, "");
+  await assert.rejects(updateCoworker(coworkersDir, "ops", { realtimeVoice: "cedar", createdAt: "replaced-identity" }), /replaced/);
+  await assert.rejects(updateCoworker(coworkersDir, "ops", { realtimeVoice: "unavailable-voice", createdAt: created.createdAt }), /available voice/);
+  await updateCoworker(coworkersDir, "ops", { realtimeVoice: "cedar", createdAt: created.createdAt });
+  assert.equal((await getCoworker(coworkersDir, "ops")).realtimeVoice, "cedar");
   assert.equal(created.model, "");
   const defaults = { priority: "balanced", preferred: { quick: [], deep: [] }, avoided: [] };
   assert.deepEqual(created.modelSelectionPreferences, defaults);

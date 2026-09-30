@@ -393,6 +393,7 @@ export const EXECUTION_KINDS = {
 };
 export type ExecutionKind = keyof typeof EXECUTION_KINDS;
 export const EXECUTION_STATES = {
+  preparing: "Preparing tool call",
   pending: "Queued",
   running: "Running",
   completed: "Completed",
@@ -448,6 +449,7 @@ export function executionKind(tool: string): ExecutionKind {
 
 export function executionState(status: string | null | undefined): ExecutionState {
   switch (status) {
+    case "streaming": case "preparing": return "preparing";
     case "pending": case "queued": return "pending";
     case "running": return "running";
     case "completed": case "success": case "succeeded": return "completed";

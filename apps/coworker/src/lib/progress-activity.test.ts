@@ -36,6 +36,11 @@ test("activity reads native v2 history with verified attribution, bounded visibl
   assert.equal(activity.tools[0]?.completedAt, 4);
   assert.ok(!JSON.stringify(activity).includes("Must not appear"));
   assert.ok(!JSON.stringify(activity).includes("private"));
+  history = [user, { ...reply, content: [{ type: "tool", id: "call_generating", name: "execute", time: { created: 5 }, state: { status: "streaming", input: "" } }] }];
+  const generating = await readExecutionActivity(input);
+  assert.equal(generating.tools[0]?.status, "preparing");
+  assert.equal(generating.tools[0]?.completedAt, null);
+  assert.equal(generating.completedSteps, 0);
   history = [user, { ...reply, content: [{ type: "text", text: "x".repeat(PROGRESS_LIMITS.maxReplyChars + 1) }] }];
   assert.equal((await readExecutionActivity(input)).replies[0]?.parts[0]?.text.length, PROGRESS_LIMITS.maxReplyChars);
   history = [{ ...user, metadata: {} }, reply];

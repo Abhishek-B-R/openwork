@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { createCoworkerMcpClient, createCoworkerMcpAppActions, mcpFailureMessage, preservedMcpAppResult, type CoworkerMcpAppContext } from "./mcp.ts";
+import { builtMcpAppId, codeModeMcpAppCalls, createCoworkerMcpClient, createCoworkerMcpAppActions, mcpFailureMessage, preservedMcpAppResult, type CoworkerMcpAppContext } from "./mcp.ts";
 import { parseSearchMatches } from "./connect-catalog.ts";
 
 const options = { serverUrl: "http://fixture.invalid", workspaceId: "ws_fixture", token: "fixture" };
@@ -96,4 +96,10 @@ test("native content alone cannot manufacture a preserved MCP App envelope", () 
   assert.equal(preservedMcpAppResult({ output: content, metadata: {} }), null);
   const envelope = { content, _meta: { "openwork/mcpApp": { toolName: "view", resourceUri: "ui://fixture/view", arguments: {} } } };
   assert.deepEqual(preservedMcpAppResult({ output: content, metadata: { openworkMcpResult: envelope } }), envelope);
+  const appId = "cob_01arz3ndektsv4rrffq69g5fav";
+  const result = { content, _meta: { "openwork/mcpApp": { connectionId: appId, toolName: "open_app", resourceUri: `ui://openwork/apps/${appId}/revisions/cov_01arz3ndektsv4rrffq69g5faw/index.html`, arguments: { order: "fixture" } } } };
+  const receipt = { index: 2, tool: "openwork-cloud_execute_capability", input: { identifier: "fixture" }, result };
+  assert.deepEqual(codeModeMcpAppCalls({ openworkMcpAppCalls: [receipt, { ...receipt, input: "invented" }, { ...receipt, result: content }] }), [receipt]);
+  assert.equal(builtMcpAppId(result), appId);
+  assert.equal(builtMcpAppId({ ...result, _meta: { "openwork/mcpApp": { ...result._meta["openwork/mcpApp"], connectionId: "another-app" } } }), null);
 });

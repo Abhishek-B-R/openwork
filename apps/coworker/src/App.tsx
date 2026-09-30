@@ -448,7 +448,7 @@ export default function App() {
   }, []);
   useEffect(() => { const open = () => openGlobalSettings("voice-calls"); window.addEventListener("coworker:call-settings", open); return () => window.removeEventListener("coworker:call-settings", open); }, [openGlobalSettings]);
   useEffect(() => {
-    const type = () => { const target = coworkerCall.snapshot().target; if (!target) return; setGlobalSettings(null); if (visitCoworker(target.slug)) setHomeRequest({ id: nextRequestId(), slug: target.slug, kind: "discussion", threadId: target.threadId }); };
+    const type = () => { const target = coworkerCall.snapshot().target; if (!target) return; setGlobalSettings(null); if (target.groupId) { openGroupChat(target.groupId); return; } if (visitCoworker(target.slug)) setHomeRequest({ id: nextRequestId(), slug: target.slug, kind: "discussion", threadId: target.threadId }); };
     window.addEventListener("coworker:call-type", type); return () => window.removeEventListener("coworker:call-type", type);
   });
 
@@ -1530,19 +1530,19 @@ export default function App() {
             >
             {navigationNotice ? <NavigationNoticeDialog message={navigationNotice} onReturn={() => navigate("chat", true)} onDismiss={() => setNavigationNotice("")} /> : null}
             <div className={!calendarVisible ? "flex min-h-0 min-w-0 flex-1" : "hidden"} data-testid="chat-main-content" data-active={chatActive}>
-            {selectedGroup ? (
+            {groups.filter((group) => group.id === selectedGroup?.id || callState.retained.some((target) => target.groupId === group.id)).map((shownGroup) => (
+              <div key={`${shownGroup.id}:${shownGroup.createdAt}`} className={shownGroup.id === selectedGroup?.id ? "flex min-h-0 min-w-0 flex-1" : "hidden"}>
               <GroupChat
-                key={`${selectedGroup.id}:${selectedGroup.createdAt}`}
-                group={selectedGroup}
+                group={shownGroup}
                 session={session}
                 onOpenAccount={() => openGlobalSettings("account")}
                 navigationGuard={readerNavigation}
-                active={chatActive && !groupDetailsOpen && !creatingGroup}
+                active={shownGroup.id === selectedGroup?.id && chatActive && !groupDetailsOpen && !creatingGroup}
                 onExitActivity={activityVisible ? exitActivity : undefined}
-                activityRequest={activityGroupRequest?.groupId === selectedGroup.id ? activityGroupRequest : null}
-                event={selectedEventLink}
+                activityRequest={activityGroupRequest?.groupId === shownGroup.id ? activityGroupRequest : null}
+                event={shownGroup.id === selectedGroup?.id ? selectedEventLink : undefined}
                 onOpenEvent={openEvent}
-                documentRequest={groupDocumentRequest?.groupId === selectedGroup.id ? groupDocumentRequest : null}
+                documentRequest={groupDocumentRequest?.groupId === shownGroup.id ? groupDocumentRequest : null}
                 documentsApi={coworkerBridge.groups.documents}
                 coworkers={coworkers}
                 runtime={runtime}
@@ -1551,15 +1551,16 @@ export default function App() {
                   replaceGroup(group);
                   setSelectedGroupId("");
                 }}
-                onActivityLine={setGroupLine}
+                onActivityLine={shownGroup.id === selectedGroup?.id ? setGroupLine : () => {}}
                 onChooseModel={(slug) => openCustomize(slug, "model")}
                 onOpenAssignment={(slug, threadId) => {
                   if (visitCoworker(slug)) setHomeRequest({ id: nextRequestId(), slug, kind: "thread", threadId });
                 }}
                 onOpenDetails={() => setGroupDetailsOpen(true)}
               />
-            ) : null}
-            {coworkers.filter((person) => person.slug === selected?.slug || callState.retained.some((target) => target.slug === person.slug && target.createdAt === person.createdAt)).map((shown) => (
+              </div>
+            ))}
+            {coworkers.filter((person) => person.slug === selected?.slug || callState.retained.some((target) => !target.groupId && target.slug === person.slug && target.createdAt === person.createdAt)).map((shown) => (
               <div key={`${shown.slug}:${shown.createdAt}`} className={shown.slug === selected?.slug && !selectedGroup ? "flex min-h-0 min-w-0 flex-1" : "hidden"}>
                 <CoworkerHome
               key={`${shown.slug}:${shown.createdAt}`}

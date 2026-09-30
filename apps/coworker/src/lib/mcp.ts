@@ -156,6 +156,29 @@ export function gatewayMcpAppLaunch(meta: unknown): CoworkerMcpAppLaunchReferenc
   };
 }
 
+/** Actual completed MCP calls retained by native Code Mode, never reconstructed from its prose. */
+export function codeModeMcpAppCalls(metadata: Record<string, unknown>): Array<{
+  index: number;
+  tool: string;
+  input: Record<string, unknown>;
+  result: PreservedMcpAppResult;
+}> {
+  if (!Array.isArray(metadata.openworkMcpAppCalls)) return [];
+  return metadata.openworkMcpAppCalls.slice(0, 16).flatMap((call) => {
+    if (!isRecord(call) || !Number.isSafeInteger(call.index) || typeof call.index !== "number" || call.index < 0
+      || typeof call.tool !== "string" || !call.tool || !isRecord(call.input)) return [];
+    const result = preservedResult(call.result);
+    return result ? [{ index: call.index, tool: call.tool, input: call.input, result }] : [];
+  });
+}
+
+/** An authored App is identified by both its connection and its immutable revision URI. */
+export function builtMcpAppId(result: PreservedMcpAppResult | null): string | null {
+  const launch = gatewayMcpAppLaunch(result?._meta);
+  const appId = launch?.resourceUri.match(/^ui:\/\/openwork\/apps\/(cob_[0-7][0-9a-hjkmnp-tv-z]{25})\/revisions\/cov_[0-7][0-9a-hjkmnp-tv-z]{25}\/index\.html$/u)?.[1];
+  return appId && launch?.connectionId === appId && launch.toolName === "open_app" ? appId : null;
+}
+
 export function createCoworkerMcpClient(input: {
   serverUrl: string;
   workspaceId: string;

@@ -71,7 +71,7 @@ export async function readExecutionActivity(input: {
       if (part.type === "tool") {
         const metadata = executionMetadata({
           tool: part.tool ?? "",
-          status: part.toolStatus === "streaming" ? "pending" : part.toolStatus ?? "unknown",
+          status: part.toolStatus ?? "unknown",
           startedAt: executionTimestamp(part.toolStartedAt),
           completedAt: executionTimestamp(part.toolCompletedAt),
         });
@@ -107,10 +107,10 @@ export function pendingAdmissionState(input: {
 }
 
 export function executionProgress(activity: ExecutionActivity, hasText = false): ProgressObservation {
-  const tool = activity.tools.findLast((call) => call.status === "running" || call.status === "pending") ?? null;
+  const tool = activity.tools.findLast((call) => call.status === "running" || call.status === "pending" || call.status === "preparing") ?? null;
   return {
     executionId: activity.executionId,
-    status: activity.state === "succeeded" ? "completed" : activity.state === "failed" ? "failed" : activity.state === "cancelled" ? "cancelled" : activity.state === "waiting-person" ? "waiting" : activity.available && !activity.admission?.confirmed && activity.admission?.inFlight ? activity.admission.inFlight : activity.state === "queued" ? "sending" : !activity.available || activity.nativeStatus === "unknown" ? "unknown" : activity.nativeStatus === "retry" ? "retrying" : activity.nativeStatus === "idle" ? "waiting" : tool ? "tool" : hasText ? "streaming" : activity.continuation ? "resuming" : "preparing",
+    status: activity.state === "succeeded" ? "completed" : activity.state === "failed" ? "failed" : activity.state === "cancelled" ? "cancelled" : activity.state === "waiting-person" ? "waiting" : activity.available && !activity.admission?.confirmed && activity.admission?.inFlight ? activity.admission.inFlight : activity.state === "queued" ? "sending" : !activity.available || activity.nativeStatus === "unknown" ? "unknown" : activity.nativeStatus === "retry" ? "retrying" : activity.nativeStatus === "idle" ? "waiting" : tool?.status === "preparing" ? "preparing" : tool ? "tool" : hasText ? "streaming" : activity.continuation ? "resuming" : "preparing",
     startedAt: activity.startedAt,
     completedAt: activity.completedAt,
     tool,

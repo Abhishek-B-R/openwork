@@ -1,0 +1,76 @@
+.voice-message-player {
+  min-width: min(15rem, 100%);
+}
+
+.voice-message-play:focus-visible,
+.voice-message-replay:focus-visible,
+.voice-message-seek:focus-visible {
+  outline: 2px solid var(--color-spark);
+  outline-offset: 3px;
+}
+
+.voice-message-replay {
+  opacity: .65;
+}
+
+.voice-message-replay:hover,
+.voice-message-replay:focus-visible {
+  opacity: 1;
+}
+
+.voice-message-seek {
+  height: 24px;
+  appearance: none;
+  background: transparent;
+  cursor: pointer;
+  border-radius: 6px;
+}
+
+.voice-message-seek:disabled {
+  cursor: default;
+}
+
+.voice-message-seek::-webkit-slider-runnable-track {
+  height: 4px;
+  background: transparent;
+}
+
+.voice-message-seek::-webkit-slider-thumb {
+  width: 10px;
+  height: 10px;
+  margin-top: -3px;
+  appearance: none;
+  border: none;
+  border-radius: 50%;
+  background: var(--color-spark);
+  box-shadow: 0 0 0 3px var(--color-panel);
+}
+
+.voice-message-seek:disabled::-webkit-slider-thumb {
+  opacity: 0;
+}
+
+.voice-message-seek::-moz-range-track {
+  height: 4px;
+  background: transparent;
+}
+
+.voice-message-seek::-moz-range-thumb {
+  width: 10px;
+  height: 10px;
+  border: none;
+  border-radius: 50%;
+  background: var(--color-spark);
+  box-shadow: 0 0 0 3px var(--color-panel);
+}
+
+.voice-message-seek:disabled::-moz-range-thumb {
+  opacity: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .voice-message-play,
+  .voice-message-replay {
+    transition: none;
+  }
+}

@@ -119,6 +119,7 @@ import {
   beginGroupTurn,
   createGroup,
   getGroup,
+  GROUPS_DIR,
   listGroups,
   readGroupTimeline,
   reconcileInterruptedGroupTurns,
@@ -273,9 +274,18 @@ const openaiCredential = createOpenAICredential({ directory: userDataDir, safeSt
 const voiceCalls = createVoiceCalls({ directory: userDataDir, credential: openaiCredential });
 const fastDecisions = createFastDecisions({ directory: userDataDir, ready: readyFastDecisionTransport });
 openaiCredential.onChange(endVoiceCall);
-const callHistory = createCallHistory(async (slug) => (await getCoworker(coworkersDir, slug)).path);
+const callHistory = createCallHistory(async (slug, threadId, createdAt) => {
+  if (typeof threadId === "string" && threadId.startsWith("group:")) {
+    const group = await getGroup(coworkersDir, threadId.slice(6));
+    return path.join(coworkersDir, GROUPS_DIR, group.id);
+  }
+  const person = await getCoworker(coworkersDir, slug);
+  if (createdAt !== undefined && person.createdAt !== createdAt) throw new Error("This coworker changed. Its previous voice history was kept.");
+  return person.path;
+});
 function endVoiceCall() {
   voiceCalls.cancel();
+  voice.reset();
   bubbleWindow.callStatus(null);
   if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.webContents.isDestroyed()) mainWindow.webContents.send("coworker:call-end");
 }
@@ -3668,20 +3678,25 @@ const commands = {
   "fastDecisions.test": () => fastDecisions.test(),
   "calls.voice": ({ voice }) => voiceCalls.voice(voice),
   "calls.test": () => voiceCalls.test(),
-  "calls.secret": async ({ slug, createdAt }) => {
+  "calls.personVoice": ({ slug, createdAt, voice }) => updateCoworker(coworkersDir, slug, { createdAt, realtimeVoice: voice }),
+  "calls.secret": async ({ slug, createdAt, groupId }) => {
     const person = await getCoworker(coworkersDir, slug);
     if (person.createdAt !== createdAt) throw new Error("This coworker changed. Open the conversation again.");
+    if (groupId) {
+      const group = await getGroup(coworkersDir, groupId);
+      if (!group.participantSlugs.includes(slug) || group.archivedAt) throw new Error("Reopen the group conversation before starting voice.");
+      return voiceCalls.clientSecret({ ...person, role: `Voice host for ${group.name}`, mission: "Relay requests to the existing group conversation. Its facilitator and members own all work." });
+    }
     return voiceCalls.clientSecret(person);
   },
-  "calls.cancel": () => voiceCalls.cancel(),
+  "calls.cancel": () => { voiceCalls.cancel(); voice.reset(); },
   "calls.history": ({ slug, threadId }) => callHistory.read(slug, threadId),
-  "calls.record": ({ slug, threadId, entry }) => callHistory.append(slug, threadId, entry),
+  "calls.record": ({ slug, threadId, entry, createdAt }) => {
+    if (typeof createdAt !== "string" || !createdAt) throw new Error("Reopen the conversation before saving voice history.");
+    return callHistory.append(slug, threadId, entry, createdAt);
+  },
+  "calls.audio": ({ slug, threadId, id }) => callHistory.audio(slug, threadId, id),
   "window.callStatus": ({ startedAt } = {}) => { bubbleWindow.callStatus(Number.isFinite(startedAt) ? startedAt : null); return { ok: true }; },
-  "voice.status": () => voice.status(),
-  "voice.transcribe": (input) => voice.transcribe(input),
-  "voice.speech": (input) => voice.speech(input),
-  "voice.cancel": ({ requestId }) => voice.cancel(requestId),
-  "voice.microphone": () => voice.microphone(),
   /** Focus mode on a desktop docks the window as a small conversation beside your work; leaving it puts the window back. */
   "window.focusMode": ({ on } = {}) => focusWindow.set(mainWindow, on === true),
   /** The coworker as a floating bubble (on), or back in its window (off). */

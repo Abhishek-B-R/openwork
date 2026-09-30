@@ -2,8 +2,18 @@
 export const CALL_MODEL = "gpt-realtime-2.1";
 export const CALL_VOICES = ["marin", "cedar", "alloy", "ash", "ballad", "coral", "echo", "sage", "shimmer", "verse"];
 export type CallPhase = "idle" | "calling" | "listening" | "thinking" | "speaking" | "ended" | "error";
-export type CallTarget = { slug: string; createdAt: string; threadId: string };
-export type CallHistory = { spoken: Array<{ id: string; text: string; at: number }>; calls: Array<{ id: string; name: string; startedAt: number; endedAt: number }> };
+export type CallTarget = { slug: string; createdAt: string; threadId: string; groupId?: string };
+export type VoiceTurn = { id: string; callId: string; speaker: "you" | "coworker"; name?: string; text: string; at: number; final: boolean; interrupted?: boolean; audio?: boolean };
+export type VoiceTurnEntry = VoiceTurn & { kind: "transcript"; audioData?: string };
+export function mergeVoiceTurns(saved: readonly VoiceTurn[], live: readonly VoiceTurn[]): VoiceTurn[] {
+  const turns = new Map(saved.map((turn) => [turn.id, turn]));
+  for (const turn of live) {
+    const before = turns.get(turn.id);
+    turns.set(turn.id, { ...before, ...turn, final: turn.final || before?.final === true, audio: turn.audio || before?.audio === true });
+  }
+  return [...turns.values()].sort((a, b) => a.at - b.at);
+}
+export type CallHistory = { spoken: Array<{ id: string; text: string; at: number }>; calls: Array<{ id: string; name: string; startedAt: number; endedAt: number }>; transcripts?: VoiceTurn[] };
 export type CallObservation = {
   working: boolean; phase: string; doing: string; failure: string; attention: string;
   reply: { id: string; text: string } | null;

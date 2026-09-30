@@ -1793,3 +1793,161 @@ index 4213dc0..bd6d260 100644
    cache_control: cacheControl(breakpoints, tool.cache),
  })
  
+diff --git a/packages/core/src/codemode/tool.ts b/packages/core/src/codemode/tool.ts
+index 74742f6..6860ca8 100644
+--- a/packages/core/src/codemode/tool.ts
++++ b/packages/core/src/codemode/tool.ts
+@@ -82,6 +82,7 @@ export const create = (
+         const callIndex = yield* Ref.make(0)
+         const files = yield* Ref.make<Array<CollectedFiles>>([])
+         const calls = yield* Ref.make<Array<ExecuteCall>>([])
++        const appCalls = yield* Ref.make<{ bytes: number; calls: Array<{ index: number; tool: string; input: unknown; result: unknown }> }>({ bytes: 0, calls: [] })
+         const lock = Semaphore.makeUnsafe(1)
+         const record = (update: (items: Array<ExecuteCall>) => Array<ExecuteCall>) =>
+           lock.withPermit(
+@@ -93,6 +94,13 @@ export const create = (
+             Effect.gen(function* () {
+               const index = yield* Ref.getAndUpdate(callIndex, (index) => index + 1)
+               const executed = yield* executeTool(name, tool, input, context)
++              const appResult = executed.metadata?.openworkMcpApp
++              if (appResult !== undefined) {
++                const receipt = { index, tool: name, input, result: appResult }
++                const bytes = new TextEncoder().encode(JSON.stringify(receipt)).byteLength
++                yield* Ref.update(appCalls, (kept) => kept.calls.length < 16 && kept.bytes + bytes <= 1_048_576
++                  ? { bytes: kept.bytes + bytes, calls: [...kept.calls, receipt] } : kept)
++              }
+               const content =
+                 typeof executed.content === "string"
+                   ? [{ type: "text" as const, text: executed.content }]
+@@ -107,6 +115,7 @@ export const create = (
+           progressHooks(record),
+         ).execute(code)
+         const toolCalls = yield* Ref.get(calls)
++        const apps = (yield* Ref.get(appCalls)).calls.toSorted((a, b) => a.index - b.index)
+         const collected = (yield* Ref.get(files))
+           .toSorted((left, right) => left.index - right.index)
+           .flatMap((item) => item.files)
+@@ -128,6 +137,7 @@ export const create = (
+         ]
+         const metadata: Metadata = {
+           toolCalls: value.toolCalls,
++          ...(apps.length ? { openworkMcpAppCalls: apps } : {}),
+           ...(value.error ? { error: true } : {}),
+         }
+         return {
+diff --git a/packages/core/src/mcp/client.ts b/packages/core/src/mcp/client.ts
+index 0b4c4af..da66549 100644
+--- a/packages/core/src/mcp/client.ts
++++ b/packages/core/src/mcp/client.ts
+@@ -64,6 +64,8 @@ export interface CallToolResult {
+   readonly isError: boolean
+   readonly structured?: unknown
+   readonly content: ReadonlyArray<CallToolContent>
++  /** The standard result is host data; normalized content alone loses App launch metadata. */
++  readonly mcpResult?: SdkCallToolResult
+ }
+
+ export type ElicitationFormParams = ElicitRequestFormParams
+@@ -318,6 +320,7 @@ function negotiation(protocol: ConfigMCP.Protocol | undefined): VersionNegotiati
+
+ function toCallToolResult(result: SdkCallToolResult): CallToolResult {
+   return {
++    mcpResult: result,
+     isError: result.isError === true,
+     structured: result.structuredContent,
+     content: result.content.flatMap((part): CallToolContent[] => {
+diff --git a/packages/core/src/tool/mcp.ts b/packages/core/src/tool/mcp.ts
+index 5274e55..9e69a6c 100644
+--- a/packages/core/src/tool/mcp.ts
++++ b/packages/core/src/tool/mcp.ts
+@@ -107,6 +107,14 @@ export const layer = Layer.effect(
+                     return {
+                       output: output(),
+                       ...(content.length === 0 ? {} : { content }),
++                      // Keep host-only data out of model output while retaining the exact result of this call.
++                      ...(result.mcpResult && new TextEncoder().encode(JSON.stringify(result.mcpResult)).byteLength <= 1_048_576
++                        ? { metadata: {
++                            openworkMcpResult: result.mcpResult,
++                            ...(tool._meta?.ui || tool._meta?.["ui/resourceUri"] || result.mcpResult._meta?.["openwork/mcpApp"]
++                              ? { openworkMcpApp: result.mcpResult } : {}),
++                          } }
++                        : {}),
+                     }
+                   }).pipe(
+                     Effect.mapError((error) =>
+diff --git a/packages/core/test/mcp.test.ts b/packages/core/test/mcp.test.ts
+index fec4994..11f7c94 100644
+--- a/packages/core/test/mcp.test.ts
++++ b/packages/core/test/mcp.test.ts
+@@ -83,6 +83,7 @@ function resourceServer(
+     listChanged?: boolean
+     emptyElicitation?: boolean
+     urlElicitation?: boolean
++    appResult?: boolean
+     respond?: (request: Request) => Response | undefined | Promise<Response | undefined>
+   } = {},
+ ) {
+@@ -177,7 +178,7 @@ function resourceServer(
+               sessionID: request.params._meta?.["ai.opencode/sessionID"],
+               progressToken: request.params._meta?.progressToken,
+             })
+-            return Promise.resolve({ content: [] })
++            return Promise.resolve(input.appResult ? { content: [{ type: "text", text: "Opened fixture" }], _meta: { "openwork/mcpApp": { toolName: "view", resourceUri: "ui://fixture/view", arguments: {} } } } : { content: [] })
+           })
+         }
+         protocol.setRequestHandler("prompts/list", () => Promise.resolve({ prompts: [{ name: "greet" }] }))
+@@ -463,6 +464,7 @@ const mcp = Layer.mock(Mcp.Service, {
+         isError: false,
+         structured: { ok: true },
+         content: [],
++        mcpResult: { content: [{ type: "text", text: "Opened fixture" }], _meta: { "openwork/mcpApp": { toolName: "view", resourceUri: "ui://fixture/view", arguments: {} } } },
+       } satisfies Mcp.ToolResult
+     }),
+ })
+@@ -537,6 +539,16 @@ test("passes session IDs as MCP request metadata", async () => {
+   )
+ })
+
++test("preserves an MCP App launch from the actual server response", async () => {
++  await Effect.runPromise(Effect.scoped(Effect.gen(function* () {
++    const server = yield* resourceServer({ appResult: true })
++    const connection = yield* connect("app-result", new ConfigMCP.Remote({ type: "remote", url: server.url, oauth: false }), import.meta.dir)
++    const result = yield* connection.callTool({ name: "echo" })
++    expect(result.mcpResult?._meta?.["openwork/mcpApp"]).toEqual({ toolName: "view", resourceUri: "ui://fixture/view", arguments: {} })
++    expect(server.state.toolCalls).toHaveLength(1)
++  })))
++})
++
+ test("preserves output schema validation across paginated tool discovery", async () => {
+   const server = new Server({ name: "pagination", version: "1.0.0" }, { capabilities: { tools: {} } })
+   server.setRequestHandler("tools/list", ({ params }) =>
+@@ -2171,7 +2183,7 @@ it.effect("forwards the invoking session through direct and Code Mode MCP tools"
+     )
+
+     const directSessionID = Session.ID.make("ses_mcp_direct")
+-    yield* toolSet.execute({
++    const direct = yield* toolSet.execute({
+       sessionID: directSessionID,
+       ...toolIdentity,
+       call: { type: "tool-call", id: "call_mcp_direct", name: "direct_lookup", input: {} },
+@@ -2182,9 +2194,10 @@ it.effect("forwards the invoking session through direct and Code Mode MCP tools"
+       args: {},
+       sessionID: directSessionID,
+     })
++    expect(direct.metadata?.openworkMcpResult?._meta?.["openwork/mcpApp"].resourceUri).toBe("ui://fixture/view")
+
+     const codeModeSessionID = Session.ID.make("ses_mcp_codemode")
+-    yield* toolSet.execute({
++    const codeMode = yield* toolSet.execute({
+       sessionID: codeModeSessionID,
+       ...toolIdentity,
+       call: {
+@@ -2200,6 +2213,8 @@ it.effect("forwards the invoking session through direct and Code Mode MCP tools"
+       args: {},
+       sessionID: codeModeSessionID,
+     })
++    expect(codeMode.metadata?.openworkMcpAppCalls).toMatchObject([{ index: 0, tool: "demo_search", input: {}, result: { _meta: { "openwork/mcpApp": { resourceUri: "ui://fixture/view" } } } }])
++    expect(JSON.stringify(codeMode.output)).not.toContain("openwork/mcpApp")
+   }),
+ )
+

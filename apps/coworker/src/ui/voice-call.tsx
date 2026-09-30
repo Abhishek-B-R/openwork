@@ -29,7 +29,7 @@ export function CallButton({ person, threadId, prepare, active = true }: { perso
   action.current = () => void start();
   useEffect(() => active ? onSuperAction((action) => { if (action.kind === "call") actionRef(); }) : undefined, [active]);
   function actionRef() { action.current(); }
-  const hint = keySet === null ? "Checking Voice calls settings…" : !keySet ? "Add an OpenAI key in Settings › Voice calls to enable calling" : "Start a call · ⌥⌘C";
+  const hint = keySet === null ? "Checking voice settings…" : !keySet ? "Add an OpenAI key and enable voice in Settings › OpenAI" : "Start a call · ⌥⌘C";
   return <span className="relative inline-flex" title={!keySet ? hint : undefined}><IconButton label="Start a call" tooltip={error || hint} tooltipSide="bottom" disabled={busy || !keySet} aria-keyshortcuts={keySet ? superKeyShortcut("C") : undefined} onClick={() => void start()} data-testid="coworker-start-call" className={state.target?.slug === person.slug && coworkerCall.isActive() ? "text-spark" : ""}><PhoneIcon /></IconButton>{superKey.active && keySet ? <span className="absolute -bottom-1 right-0 text-[8px]">C</span> : null}</span>;
 }
 export function CallScreen() {

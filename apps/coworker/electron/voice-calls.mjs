@@ -1,6 +1,6 @@
 import { chmod, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { createOpenAICredential } from "./openai-credential.mjs";
 import { CALL_MODEL, CALL_TOOLS, CALL_VOICES, callInstructions } from "../src/lib/call.ts";
 
@@ -57,7 +57,7 @@ export function createVoiceCalls({ directory, credential, safeStorage, requestKe
           body: JSON.stringify({ expires_after: { anchor: "created_at", seconds: 60 }, session: {
             type: "realtime", model: CALL_MODEL, instructions: callInstructions(person), tools: CALL_TOOLS,
             output_modalities: ["audio"], max_output_tokens: 512, tracing: null,
-            audio: { input: { transcription: { model: "gpt-4o-mini-transcribe" }, noise_reduction: { type: "near_field" }, turn_detection: { type: "semantic_vad", eagerness: "low", create_response: true, interrupt_response: true } }, output: { voice: config.voice } },
+            audio: { input: { transcription: { model: "gpt-4o-mini-transcribe" }, noise_reduction: { type: "near_field" }, turn_detection: { type: "semantic_vad", eagerness: "low", create_response: true, interrupt_response: true } }, output: { voice: CALL_VOICES.includes(person.realtimeVoice) ? person.realtimeVoice : config.voice } },
           } }),
         });
         if (!response.ok) { await response.body?.cancel(); throw failure(response.status === 401 || response.status === 403 ? "key" : response.status === 429 ? "quota" : "network"); }
@@ -90,25 +90,55 @@ export function createVoiceCalls({ directory, credential, safeStorage, requestKe
 
 export function createCallHistory(getDirectory) {
   let writes = Promise.resolve();
-  async function read(slug, threadId) {
-    const directory = await getDirectory(slug); let records = {};
+  const audioFile = (directory, threadId, id) => path.join(directory, "call-audio", `${createHash("sha256").update(`${threadId}\0${id}`).digest("hex")}.wav`);
+  async function read(slug, threadId, createdAt) {
+    const directory = await getDirectory(slug, threadId, createdAt); let records = {};
     try { records = JSON.parse(await readFile(path.join(directory, "call-history.json"), "utf8")); } catch (error) { if (error.code !== "ENOENT") throw new Error("Call history could not be read. The saved record is kept."); }
-    return { directory, records, history: records[threadId] ?? { spoken: [], calls: [] } };
+    const history = records[threadId] ?? { spoken: [], calls: [] };
+    history.transcripts ??= [];
+    return { directory, records, history };
   }
   return {
     async read(slug, threadId) { await writes; return (await read(slug, threadId)).history; },
-    append(slug, threadId, entry) {
+    async audio(slug, threadId, id) {
+      await writes;
+      const { directory, history } = await read(slug, threadId);
+      if (!history.transcripts.some((turn) => turn.id === id && turn.audio)) throw new Error("This audio recording is no longer available. The transcript is kept.");
+      const bytes = await readFile(audioFile(directory, threadId, id));
+      if (bytes.length > 3 * 1024 * 1024) throw new Error("This recording is too large to play.");
+      return { data: bytes.toString("base64"), mimeType: "audio/wav" };
+    },
+    append(slug, threadId, entry, createdAt) {
       if (typeof threadId !== "string" || !threadId || threadId.length > 256 || typeof entry?.id !== "string" || !entry.id || entry.id.length > 256) throw new Error("Invalid call record.");
       const operation = writes.catch(() => {}).then(async () => {
-        const { directory, records, history } = await read(slug, threadId);
+        const { directory, records, history } = await read(slug, threadId, createdAt);
         if (entry.kind === "spoken") {
           if (typeof entry.text !== "string" || !entry.text.trim() || entry.text.length > 16000 || !Number.isFinite(entry.at)) throw new Error("Invalid spoken request.");
           if (!history.spoken.some((item) => item.id === entry.id)) history.spoken.push({ id: entry.id, text: entry.text, at: entry.at });
+        } else if (entry.kind === "transcript") {
+          if (!["you", "coworker"].includes(entry.speaker) || typeof entry.callId !== "string" || !entry.callId || entry.callId.length > 256 || typeof entry.text !== "string" || entry.text.length > 16000 || !Number.isFinite(entry.at) || typeof entry.final !== "boolean") throw new Error("Invalid voice transcript.");
+          const previous = history.transcripts.find((turn) => turn.id === entry.id);
+          if (previous && (previous.callId !== entry.callId || previous.speaker !== entry.speaker)) throw new Error("Invalid voice transcript.");
+          const turn = { id: entry.id, callId: entry.callId, speaker: entry.speaker, name: typeof entry.name === "string" ? entry.name.slice(0, 80) : previous?.name, text: previous?.final && !entry.final ? previous.text : entry.text, at: previous?.at ?? entry.at, final: entry.final || previous?.final === true, interrupted: entry.interrupted === true || previous?.interrupted === true, audio: previous?.audio === true };
+          if (entry.audioData !== undefined) {
+            if (typeof entry.audioData !== "string" || entry.audioData.length > 4 * 1024 * 1024 || !/^[A-Za-z0-9+/]*={0,2}$/.test(entry.audioData)) throw new Error("Invalid audio recording.");
+            const bytes = Buffer.from(entry.audioData, "base64");
+            if (bytes.length < 44 || bytes.length > 3 * 1024 * 1024 || bytes.toString("ascii", 0, 4) !== "RIFF" || bytes.toString("ascii", 8, 12) !== "WAVE") throw new Error("Invalid audio recording.");
+            await atomic(audioFile(directory, threadId, entry.id), bytes);
+            turn.audio = true;
+          }
+          history.transcripts = [...history.transcripts.filter((item) => item.id !== turn.id), turn].sort((a, b) => a.at - b.at);
+          // At most 50 one-minute clips per discussion; keep older words after pruning audio.
+          const recordings = history.transcripts.filter((item) => item.audio);
+          for (const old of recordings.slice(0, Math.max(0, recordings.length - 50))) {
+            await rm(audioFile(directory, threadId, old.id), { force: true }); old.audio = false;
+          }
         } else if (entry.kind === "call") {
           if (typeof entry.name !== "string" || entry.name.length > 80 || !Number.isFinite(entry.startedAt) || !Number.isFinite(entry.endedAt) || entry.endedAt < entry.startedAt) throw new Error("Invalid call record.");
           if (!history.calls.some((item) => item.id === entry.id)) history.calls.push({ id: entry.id, name: entry.name, startedAt: entry.startedAt, endedAt: entry.endedAt });
         } else throw new Error("Invalid call record.");
-        records[threadId] = { spoken: history.spoken.slice(-500), calls: history.calls.slice(-100) };
+        for (const old of history.transcripts.slice(0, Math.max(0, history.transcripts.length - 500))) if (old.audio) await rm(audioFile(directory, threadId, old.id), { force: true });
+        records[threadId] = { spoken: history.spoken.slice(-500), calls: history.calls.slice(-100), transcripts: history.transcripts.slice(-500) };
         await atomic(path.join(directory, "call-history.json"), JSON.stringify(records)); return records[threadId];
       });
       writes = operation.then(() => undefined, () => undefined); return operation;

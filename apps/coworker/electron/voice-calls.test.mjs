@@ -28,11 +28,39 @@ test("call credentials stay main-only and failures never expose provider bodies"
     await calls.test();
     assert.equal(requests[0].url, "https://api.openai.com/v1/realtime/client_secrets");
     const config = JSON.parse(requests[0].input.body); assert.equal(config.session.model, "gpt-realtime-2.1"); assert.equal(config.session.audio.input.turn_detection.type, "semantic_vad");
+    await calls.voice("cedar");
+    await calls.clientSecret({ name: "Mira", role: "", mission: "", personality: "warm", realtimeVoice: "coral" });
+    assert.equal(JSON.parse(requests.at(-1).input.body).session.audio.output.voice, "coral");
+    await calls.clientSecret({ name: "Mira", role: "", mission: "", personality: "warm", realtimeVoice: "" });
+    assert.equal(JSON.parse(requests.at(-1).input.body).session.audio.output.voice, "cedar");
     status = 401; await assert.rejects(calls.test(), (error) => error.message.includes("not accepted") && !error.message.includes(key));
     status = 429; await assert.rejects(calls.test(), /quota or rate limit/);
     assert.equal((await calls.remove()).keySet, false);
     await assert.rejects(calls.microphone(requestPermission), /Add an OpenAI key/);
     assert.equal(permissions, 1);
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test("spoken transcripts survive reload, attach bounded replay audio and stay scoped", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "coworker-voice-transcripts-"));
+  const store = createCallHistory(async () => directory);
+  const wav = Buffer.alloc(46); wav.write("RIFF"); wav.write("WAVE", 8);
+  const entry = { kind: "transcript", id: "voice-one", callId: "call-one", speaker: "coworker", text: "Your answer is ready.", at: 10, final: true };
+  try {
+    await store.append("mira", "thread", entry);
+    await store.append("mira", "thread", { ...entry, audioData: wav.toString("base64") });
+    await store.append("mira", "thread", { ...entry, text: "Your", final: false });
+    const history = await createCallHistory(async () => directory).read("mira", "thread");
+    assert.equal(history.transcripts.length, 1); assert.equal(history.transcripts[0].text, entry.text); assert.equal(history.transcripts[0].audio, true);
+    assert.equal((await store.audio("mira", "thread", entry.id)).data, wav.toString("base64"));
+    await assert.rejects(store.audio("mira", "other-thread", entry.id), /no longer available/);
+    await assert.rejects(store.append("mira", "thread", { ...entry, audioData: "not-an-audio-file" }), /Invalid audio/);
+    await assert.rejects(store.append("mira", "thread", { ...entry, audioData: "A".repeat(4 * 1024 * 1024 + 1) }), /Invalid audio/);
+    for (let i = 0; i < 50; i++) await store.append("mira", "thread", { ...entry, id: `clip-${i}`, at: 20 + i, audioData: wav.toString("base64") });
+    const kept = await store.read("mira", "thread");
+    assert.equal(kept.transcripts.filter((turn) => turn.audio).length, 50);
+    assert.equal(kept.transcripts.find((turn) => turn.id === entry.id).text, entry.text);
+    await assert.rejects(store.audio("mira", "thread", entry.id), /no longer available/);
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
 

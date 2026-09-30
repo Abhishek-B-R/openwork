@@ -162,6 +162,8 @@ export type CoworkerSummary = {
   avatarGlasses: AvatarGlasses;
   /** Voice for the working state only; never changes how the coworker works. */
   personality: Personality;
+  /** Realtime speech voice; empty inherits the app default. */
+  realtimeVoice?: string;
   /** The catalog role this coworker was created from; "" when the person shaped it by hand. */
   roleId: string;
   /** Where a coworker came from when it was not made here: an organization template, or `featured:<id>` from the Marketplace. */
@@ -599,23 +601,18 @@ export const coworkerBridge = {
     setVoice: (voice: string) => invoke<{ keySet: boolean; voice: string; model: string; enabled: boolean }>("calls.voice", { voice }),
     setEnabled: (enabled: boolean) => invoke<{ keySet: boolean; voice: string; model: string; enabled: boolean }>("calls.enabled", { enabled }),
     test: () => invoke<{ ok: boolean; message: string }>("calls.test"),
-    secret: (slug: string, createdAt: string) => invoke<{ value: string; expiresAt: number }>("calls.secret", { slug, createdAt }),
+    secret: (slug: string, createdAt: string, groupId?: string) => invoke<{ value: string; expiresAt: number }>("calls.secret", { slug, createdAt, groupId }),
     cancel: () => invoke<void>("calls.cancel"),
     history: (slug: string, threadId: string) => invoke<import("./call").CallHistory>("calls.history", { slug, threadId }),
-    record: (slug: string, threadId: string, entry: { kind: "spoken"; id: string; text: string; at: number } | { kind: "call"; id: string; name: string; startedAt: number; endedAt: number }) => invoke<import("./call").CallHistory>("calls.record", { slug, threadId, entry }),
+    record: (slug: string, threadId: string, entry: { kind: "spoken"; id: string; text: string; at: number } | { kind: "call"; id: string; name: string; startedAt: number; endedAt: number } | import("./call").VoiceTurnEntry, createdAt: string) => invoke<import("./call").CallHistory>("calls.record", { slug, threadId, entry, createdAt }),
+    audio: (slug: string, threadId: string, id: string) => invoke<{ data: string; mimeType: string }>("calls.audio", { slug, threadId, id }),
+    personVoice: (slug: string, createdAt: string, voice: string) => invoke<CoworkerSummary>("calls.personVoice", { slug, createdAt, voice }),
     onEnd: (listener: () => void) => { const host: BridgeWindow = window; return host.__COWORKER__?.onCallEnd?.(listener) ?? (() => undefined); },
   },
   fastDecisions: {
     settings: () => invoke<FastDecisionSettings>("fastDecisions.settings"),
     configure: (value: Pick<FastDecisionSettings, "enabled" | "deadlineMs">) => invoke<FastDecisionSettings>("fastDecisions.configure", value),
     test: () => invoke<{ ok: boolean; message: string } & FastDecisionSettings>("fastDecisions.test"),
-  },
-  voice: {
-    status: () => invoke<{ access: "ready" | "sign_in" | "membership_required" | "unavailable"; message?: string }>("voice.status"),
-    transcribe: (input: { requestId: string; data: string; format: "webm" | "wav" | "mp3" | "m4a" | "ogg" }) => invoke<{ text: string }>("voice.transcribe", input),
-    speech: (input: { requestId: string; text: string }) => invoke<{ data: string; mimeType: "audio/mpeg" }>("voice.speech", input),
-    cancel: (requestId: string) => invoke<void>("voice.cancel", { requestId }),
-    microphone: () => invoke<{ granted: boolean }>("voice.microphone"),
   },
   appWindow: {
     /** Dock the window as a small conversation at the right of the screen (hiding the macOS window buttons), or put it back where it was. */

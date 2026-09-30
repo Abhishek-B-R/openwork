@@ -50,6 +50,10 @@ import { ConversationWindow, useConversationWindow } from "@/ui/conversation-win
 import { appendVoiceDraft, groupVoiceReply, type VoiceExpectation } from "@/lib/voice";
 import { useVoice } from "@/ui/use-voice";
 import { VoicePanel, VoiceToggle } from "@/ui/voice";
+import { VoiceMessage, useVoiceTurns } from "@/ui/voice-message";
+import { coworkerCall, type CallAdapter } from "@/lib/realtime-call";
+import { EMPTY_CALL_OBSERVATION, type CallHistory } from "@/lib/call";
+import { waitForSends } from "@/lib/group-continuity";
 import { useLayout } from "@/ui/use-layout";
 import { FocusToggle, TeamButton } from "@/ui/layout-controls";
 
@@ -357,6 +361,17 @@ function GroupChatView({
   );
   const membersRef = useRef(members);
   membersRef.current = members;
+  const voiceHost = members[0];
+  const voiceThread = `group:${group.id}`;
+  const [voiceHistory, setVoiceHistory] = useState<CallHistory>({ spoken: [], calls: [] });
+  useEffect(() => {
+    if (!voiceHost) return;
+    let current = true;
+    const read = () => void coworkerBridge.calls.history(voiceHost.slug, voiceThread).then((history) => { if (current) setVoiceHistory(history); }).catch(() => {});
+    read(); window.addEventListener("coworker:call-history", read);
+    return () => { current = false; window.removeEventListener("coworker:call-history", read); };
+  }, [voiceHost?.slug, voiceHost?.createdAt, voiceThread]);
+  const voiceTurns = useVoiceTurns(voiceHost?.slug ?? "", voiceThread, voiceHistory.transcripts ?? []);
   const holdings = useGroupHoldings(members, runtime, active);
   const nameFor = useCallback((slug: string) => coworkers.find((coworker) => coworker.slug === slug)?.name ?? slug, [coworkers]);
 
@@ -678,11 +693,32 @@ function GroupChatView({
   const voiceTurn = !live && !activityError && latestTurn && (!voiceBaseline || latestTurn.clientMessageId !== voiceBaseline.clientMessageId || latestTurn.updatedAt > voiceBaseline.updatedAt) ? latestTurn : null;
   const spokenReply = useMemo(() => groupVoiceReply(voiceTurn, events, nameFor, voiceBaseline?.eventIds), [voiceTurn, events, nameFor, voiceBaseline?.eventIds]);
   const voice = useVoice({
+    person: voiceHost, threadId: voiceThread, groupId: group.id,
     active: active && !assignmentMode && !sharedDocumentVisible && !group.archivedAt,
     scope: `group:${group.id}`,
     onTranscript: (text) => { setMessage((draft) => appendVoiceDraft(draft, text)); setMention(null); },
     reply: spokenReply,
     endedTurn: voiceTurn && (["failed", "stopped"].includes(voiceTurn.status) || (["succeeded", "partial"].includes(voiceTurn.status) && (!voiceTurn.speakers.some((speaker) => speaker.status === "succeeded") || (!spokenReply && groupVoiceReply(voiceTurn, events, nameFor))))) ? voiceTurn.clientMessageId : null,
+  });
+  const voiceAdapter = useRef<CallAdapter | null>(null);
+  voiceAdapter.current = {
+    prepare: () => {},
+    observation: { ...EMPTY_CALL_OBSERVATION, working: live || queue.length > 0 || localSends.some((item) => ["pending", "sending", "uncertain"].includes(item.state)), phase: live ? "Working" : "Ready",
+      failure: activityError, attention: interactions.length ? "A group question or permission needs an on-screen response." : "",
+      reply: spokenReply ? { id: spokenReply.id, text: spokenReply.text } : null },
+    send: async (text, itemId) => {
+      if (!runtime.engineManaged || group.archivedAt || members.length < (eventId ? 1 : 2)) return false;
+      const id = `voice:${itemId}`;
+      startTurn(text, id);
+      await waitForGroup(waitForSends(group.id, (items) => items.some((item) => item.clientMessageId === id && ["accepted", "failed", "uncertain", "cancelled"].includes(item.state)) || groupRef.current.turns.some((turn) => turn.clientMessageId === id)));
+      return groupSends(group.id).some((item) => item.clientMessageId === id && item.state === "accepted") || groupRef.current.turns.some((turn) => turn.clientMessageId === id);
+    },
+    stop: async () => { await stopGroupRun(group.id); return true; },
+    answer: async () => false,
+    type: () => { window.dispatchEvent(new Event("coworker:call-type")); window.setTimeout(() => composerRef.current?.focus(), 0); },
+  };
+  useEffect(() => {
+    if (voiceHost && voiceAdapter.current) return coworkerCall.bind({ slug: voiceHost.slug, createdAt: voiceHost.createdAt, threadId: voiceThread, groupId: group.id }, voiceAdapter.current);
   });
   const stopAllLabel = busyActions.includes("stop") ? "Stopping…" : actionAttempts.current.get("stop")?.state === "retryable" ? "Retry stop" : "Stop all";
   function stopGroup() { voice.stop("Audio stopped. Your text conversation is kept."); void runAction("stop", () => stopGroupRun(group.id)); }
@@ -711,7 +747,7 @@ function GroupChatView({
     indexFor: (anchor) => rows.findIndex((row) => "event" in row && groupMessageKey(row.event) === anchor),
     scrollToIndex: (index) => conversationWindow.virtualizer.scrollToIndex(index, { align: "center" }),
   } : null), [conversationWindow.enabled, conversationWindow.virtualizer, registerVirtualAnchors, rows]);
-  const renderRow = (row: ReturnType<typeof groupConversationRows>[number], index: number) => {
+  const renderNativeRow = (row: ReturnType<typeof groupConversationRows>[number], index: number) => {
             if ("execution" in row) {
               const execution = row.execution;
               const member = coworkers.find((coworker) => coworker.slug === execution.slug);
@@ -832,6 +868,9 @@ function GroupChatView({
             );
 
   };
+  const voiceAnchors = voiceTurns.map((turn) => ({ turn, before: rows.find((row) => "event" in row && row.event.at > turn.at) }));
+  const voiceLines = (key?: string) => voiceHost ? voiceAnchors.filter(({ before }) => before && "event" in before ? groupMessageKey(before.event) === key : key === undefined).map(({ turn }) => <VoiceMessage key={turn.id} turn={turn} slug={voiceHost.slug} threadId={voiceThread} name={voiceHost.name} active={active} />) : null;
+  const renderRow = (row: ReturnType<typeof groupConversationRows>[number], index: number) => <>{"event" in row ? voiceLines(groupMessageKey(row.event)) : null}{renderNativeRow(row, index)}</>;
   // Notices sit below the floating header; without one, the conversation starts beneath it itself.
   const groupNotice = Boolean(event || group.eventId || documentNotice || activityNotice);
   return (
@@ -928,6 +967,7 @@ function GroupChatView({
             </div>
           ) : null}
           <ConversationWindow items={rows} {...conversationWindow} render={renderRow} />
+          {voiceLines()}
           <CollaborationReceipts receipts={receipts} canRetry={(receipt) => !receipt.eventRunId && !events.some((entry) => entry.executionId === receipt.id && isEventPhaseRequest(entry.clientMessageId, entry.turnId))} retryUnavailable={viewEvent} />
           {interactions.map((entry) => {
             const member = members.find((member) => member.slug === entry.slug);
