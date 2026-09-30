@@ -3052,10 +3052,14 @@ export function SessionSurface(props: SessionSurfaceProps) {
         .some(element => element.getClientRects().length > 0 && !element.hasAttribute("data-closed")
           && element.getAttribute("data-state") !== "closed")) return;
       event.preventDefault();
+      event.stopPropagation();
       returnToParent();
     };
-    document.addEventListener("keydown", handler);
-    return () => document.removeEventListener("keydown", handler);
+    // Inspect open menus before their dismissal handlers run. Once a menu has
+    // closed, its lingering focus/exit handlers must not swallow the next
+    // Escape or pass it to the parent's Escape-to-stop handler after return.
+    document.addEventListener("keydown", handler, true);
+    return () => document.removeEventListener("keydown", handler, true);
   }, [parentID, props.onReturnToParent, props.isControlTarget, returnToParent]);
   useEffect(() => {
     const restore = consumeChildReturn(childNavigationScope, props.sessionId);

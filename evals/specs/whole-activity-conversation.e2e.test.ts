@@ -95,7 +95,7 @@ test(`ACT-WHOLE ${resolveEvalEngine()}: a person follows a whole conversation fr
       within: 5_000, label: "Escape closes the model menu before returning", until: value => value.elements.every(element => element.rect.width === 0 || element.rect.height === 0),
     });
     await world.finishChild();
-    await user.press(process.platform === "darwin" ? "Meta+[" : "Escape");
+    await user.press("Escape");
     await user.see({ text: world.answer }, { timeoutMs: 90_000 });
     await user.see("Run task");
     evidence.recordAssertionEvidence("The correct child accepts a busy follow-up without interruption", "Answer opens the child's original brief and decision; the follow-up is visible with 0 aborts, Escape closes its model menu first, and return exposes the parent answer.", true);
