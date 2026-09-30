@@ -1,8 +1,10 @@
 "use client"
 
-import { useState } from "react"
+import { ToolResultPreview } from "./tool-result-preview";
+
+import { useEffect, useState } from "react"
 import type { DynamicToolUIPart } from "ai"
-import { Ellipsis, ExternalLink, LoaderCircle, RefreshCcw } from "lucide-react"
+import { Ellipsis, ExternalLink, LoaderCircle, RefreshCcw, Wrench, Copy } from "lucide-react"
 
 import { describeChatToolFailure } from "@/components/tools/error-attribution"
 import {
@@ -16,10 +18,10 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible"
 import { getCapabilityCallQuote, getCapabilityCallSentence } from "@/lib/capability-call"
-import { trackToolCallDuration } from "@/lib/tool-call-duration"
+import { formatElapsedSeconds, getToolCallStartedAt, trackToolCallDuration } from "@/lib/tool-call-duration"
 import { isToolPartInFlight } from "@/lib/tool-activity"
 import { cn } from "@/lib/utils"
-import type { ConnectorToolIdentity } from "@/react-app/domains/connections/connector-tool-identity"
+import { connectorToolExecutionSource, type ConnectorToolIdentity } from "@/react-app/domains/connections/connector-tool-identity"
 
 type CapabilityCallLineProps = ChatToolReconnectCallbacks & {
   part: DynamicToolUIPart
@@ -82,19 +84,25 @@ function failureInstruction(part: DynamicToolUIPart, reconnectName: string | nul
 }
 
 export function TechnicalDetailsPanel({ part, resultUnavailable = false }: { part: DynamicToolUIPart; resultUnavailable?: boolean }) {
+  const details = { input: part.input,
+    ...(part.callProviderMetadata?.openwork?.codeMode ? { calls: part.callProviderMetadata.openwork.codeMode } : {}),
+    ...("output" in part ? { output: part.output } : {}),
+    ...(part.state === "output-error" ? { error: part.errorText } : {}) };
   return (
     <div className="mt-2 flex flex-col gap-2 rounded-lg bg-muted p-2 text-xs">
       <div className="font-mono text-[11px] text-muted-foreground">
         {part.toolName} · {part.toolCallId}
+        <Button variant="ghost" size="xs" aria-label="Copy technical details" onClick={() => void navigator.clipboard.writeText(formatTechnicalValue(details))}><Copy className="size-3" />Copy</Button>
       </div>
       {part.input !== undefined && part.input !== null ? (
         <pre className="max-h-40 overflow-auto whitespace-pre-wrap wrap-break-word">
-          {formatTechnicalValue(part.input)}
+          {part.toolName === "execute" ? "Script" : "Calls"}{"\n"}{formatTechnicalValue(part.input)}
         </pre>
       ) : null}
+      {part.callProviderMetadata?.openwork?.codeMode ? <pre className="max-h-40 overflow-auto whitespace-pre-wrap wrap-break-word">Calls{"\n"}{formatTechnicalValue(part.callProviderMetadata.openwork.codeMode)}</pre> : null}
       {"output" in part && part.output !== undefined ? (
         <pre className="max-h-60 overflow-auto whitespace-pre-wrap wrap-break-word opacity-80">
-          {formatTechnicalValue(part.output)}
+          Output{"\n"}{formatTechnicalValue(part.output)}
         </pre>
       ) : null}
       {resultUnavailable ? (
@@ -134,7 +142,17 @@ export function CapabilityCallLine({
   const [detailsOpen, setDetailsOpen] = useState(false)
   const inFlight = !statusUnknown && isToolPartInFlight(part)
   const isFailed = part.state === "output-error"
-  const duration = statusUnknown ? null : trackToolCallDuration(part)
+  const [now, setNow] = useState(Date.now())
+  const startedAt = inFlight ? getToolCallStartedAt(part) : null
+  useEffect(() => {
+    if (!inFlight || startedAt === null) return
+    const timer = window.setInterval(() => setNow(Date.now()), 1_000)
+    return () => window.clearInterval(timer)
+  }, [inFlight, startedAt])
+  const duration = statusUnknown ? null : inFlight && startedAt !== null
+    ? formatElapsedSeconds(Math.max(0, Math.floor((now - startedAt) / 1_000))) : trackToolCallDuration(part)
+  const route = connectorToolExecutionSource(part, connector)
+  const routeLabel = route === "cloud" ? "via OpenWork Cloud" : route === "local" ? "on this computer" : null
   const { reconnectAction, reconnectState, reconnectError, reconnectPresentation, handleReconnect } =
     useChatToolReconnect(part, { onReconnect, onReopenAuthorization })
   const ReconnectIcon = reconnectState === "opening"
@@ -150,10 +168,10 @@ export function CapabilityCallLine({
     const label = sentence.failure ?? `Couldn't complete ${sentence.past.toLowerCase()}`
     return (
       <Collapsible data-capability-call={part.toolName} open={open} onOpenChange={setOpen} className={className}>
-        <CollapsibleTrigger className="flex min-w-0 items-center gap-2 text-start text-sm text-muted-foreground hover:text-foreground" aria-label={`${label}. ${open ? "Hide" : "Show"} technical details`}>
-          {connector ? <ConnectorMark connector={connector} /> : null}
+        <CollapsibleTrigger className="group flex min-h-8 min-w-0 items-center gap-2 text-start text-sm text-muted-foreground hover:text-foreground" aria-label={`${label}. ${open ? "Hide" : "Show"} technical details`}>
+          {connector ? <ConnectorMark connector={connector} /> : <span className="flex size-5 shrink-0 items-center justify-center"><Wrench className="size-4" aria-hidden /></span>}
           <span className="min-w-0 truncate">{label}</span>
-          {duration ? <span className="shrink-0 text-xs tabular-nums text-muted-foreground/70">{duration}</span> : null}
+          {duration ? <span className="shrink-0 text-xs tabular-nums text-muted-foreground/70 opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100">{duration}</span> : null}
         </CollapsibleTrigger>
         <CollapsibleContent><TechnicalDetailsPanel part={part} /></CollapsibleContent>
       </Collapsible>
@@ -176,14 +194,14 @@ export function CapabilityCallLine({
         className={className}
       >
         <CollapsibleTrigger
-          className="group flex min-w-0 max-w-full cursor-pointer items-center gap-2 text-start text-sm text-muted-foreground transition-colors hover:text-foreground"
+          className="group flex min-h-8 min-w-0 max-w-full cursor-pointer items-center gap-2 text-start text-sm text-muted-foreground transition-colors hover:text-foreground"
           aria-label={open ? `${failureLabel}. Hide failure details` : `${failureLabel}. Show what to do next`}
         >
-          {connector ? <ConnectorMark connector={connector} /> : null}
+          {connector ? <ConnectorMark connector={connector} /> : <span className="flex size-5 shrink-0 items-center justify-center"><Wrench className="size-4" aria-hidden /></span>}
           <span className="min-w-0 truncate">{sentence.failure ?? sentence.past}</span>
           {!sentence.failure ? <span className="shrink-0 text-xs text-dls-secondary">failed</span> : null}
           {duration ? (
-            <span className="shrink-0 text-xs tabular-nums text-muted-foreground/70">{duration}</span>
+            <span className="shrink-0 text-xs tabular-nums text-muted-foreground/70 opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100">{duration}</span>
           ) : null}
         </CollapsibleTrigger>
         <CollapsibleContent className="h-(--collapsible-panel-height) overflow-hidden transition-[height] duration-150 ease-out data-starting-style:h-0 data-ending-style:h-0 [&[hidden]:not([hidden='until-found'])]:hidden">
@@ -258,25 +276,24 @@ export function CapabilityCallLine({
     <Collapsible data-capability-call={part.toolName} open={open} onOpenChange={setOpen} className={className}>
       <div className="flex min-w-0 items-center gap-2">
         <CollapsibleTrigger
-          className="group flex min-w-0 flex-1 cursor-pointer items-center gap-2 text-start text-sm text-muted-foreground transition-colors hover:text-foreground"
+          className="group flex min-h-8 min-w-0 flex-1 cursor-pointer items-center gap-2 text-start text-sm text-muted-foreground transition-colors hover:text-foreground"
           aria-label={open ? `${line}. Hide technical details` : `${line}. Show technical details`}
         >
           {connector ? (
             <ConnectorMark connector={connector} />
-          ) : inFlight ? (
-            <span className="flex size-3.5 shrink-0 items-center justify-center">
-              {shimmer ? <span aria-hidden="true" className="size-1 rounded-full bg-muted-foreground" />
-                : <LoaderCircle aria-hidden="true" className="size-3.5 animate-spin text-muted-foreground" />}
-            </span>
-          ) : null}
+          ) : <span className="flex size-5 shrink-0 items-center justify-center"><Wrench className="size-4" aria-hidden /></span>}
           <span className={cn("min-w-0 truncate", shimmer && inFlight && "ow-text-shimmer motion-reduce:animate-none")}>{line}</span>
           {duration ? (
-            <span className="shrink-0 text-xs tabular-nums text-muted-foreground/70">{duration}</span>
+            <span className="shrink-0 text-xs tabular-nums text-muted-foreground/70 opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100">{duration}</span>
           ) : null}
         </CollapsibleTrigger>
+        <span aria-hidden className="w-4 shrink-0" />
       </div>
+      {routeLabel ? <p className="ms-7 text-xs text-muted-foreground/60">{routeLabel}</p> : null}
+      <ToolResultPreview part={part} />
+      {part.callProviderMetadata?.openwork?.resultTruncated ? <p className="ms-7 text-xs text-muted-foreground">Result truncated by OpenWork</p> : null}
       <CollapsibleContent className="h-(--collapsible-panel-height) overflow-hidden transition-[height] duration-150 ease-out data-starting-style:h-0 data-ending-style:h-0 [&[hidden]:not([hidden='until-found'])]:hidden">
-        <TechnicalDetailsPanel part={part} resultUnavailable={resultUnavailable} />
+        <span className="sr-only">Technical details</span><TechnicalDetailsPanel part={part} resultUnavailable={resultUnavailable} />
       </CollapsibleContent>
     </Collapsible>
   )

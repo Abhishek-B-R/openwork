@@ -16,6 +16,8 @@ export type ConnectorToolIdentity = {
   serviceUrl: string | null;
   toolNamespace: string | null;
   connectionId: string | null;
+  /** Recorded catalog origin, independent of the service's name or icon. */
+  executionSource?: "cloud";
 };
 
 const NATIVE_CONNECTOR_IDENTITIES: ConnectorToolIdentity[] = [
@@ -91,6 +93,7 @@ function identityFromConnection(connection: DenExternalMcpConnection): Connector
     : null;
   return {
     id: `connection:${connection.id}`,
+    executionSource: "cloud",
     name: native?.name ?? connection.name,
     iconUrl: native?.iconUrl ?? iconFor({
       name: connection.name,
@@ -101,6 +104,17 @@ function identityFromConnection(connection: DenExternalMcpConnection): Connector
     toolNamespace: null,
     connectionId: connection.id,
   };
+}
+
+export function connectorToolExecutionSource(part: DynamicToolUIPart, connector?: ConnectorToolIdentity | null): "cloud" | "local" | null {
+  const recorded = part.callProviderMetadata?.openwork?.executionSource;
+  if (recorded === "cloud" || recorded === "local") return recorded;
+  // A Cloud-owned connection AND its explicit gateway invocation establish the
+  // route. A similarly named service, remote MCP URL or tool prefix alone does not.
+  const capability = capabilityName(part);
+  return connector?.executionSource === "cloud" && connector.connectionId
+    && capability?.startsWith(`mcp:${connector.connectionId}:`)
+    && /^(?:openwork|openwork-cloud)_execute_capability$/.test(part.toolName) ? "cloud" : null;
 }
 
 /**

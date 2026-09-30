@@ -262,10 +262,11 @@ export function ToolAggregateGroup({ parts, messageId, thoughts = [], className 
     return (
       <div
         className={className}
+        data-step-identity={groupKey}
         data-tool-aggregate={latestToolCallId}
         data-tool-lifecycle={status}
       >
-        <div className="flex min-w-0 items-center gap-2 text-sm text-muted-foreground">
+        <div className="group flex min-w-0 items-center gap-2 text-sm text-muted-foreground">
           <span className={cn("shrink-0", status === "running" && "text-foreground ow-text-shimmer")}>
             {status === "unknown" ? "Status unknown for" : soloFile.verb}
           </span>
@@ -276,7 +277,7 @@ export function ToolAggregateGroup({ parts, messageId, thoughts = [], className 
             </span>
           ) : null}
           {durations[soloRow.lastIndex] ? (
-            <span className="shrink-0 tabular-nums text-xs text-muted-foreground/70">
+            <span className="shrink-0 tabular-nums text-xs text-muted-foreground/70 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100">
               {durations[soloRow.lastIndex]}
             </span>
           ) : null}
@@ -297,6 +298,7 @@ export function ToolAggregateGroup({ parts, messageId, thoughts = [], className 
   return (
     <div
       className={className}
+      data-step-identity={groupKey}
       data-tool-aggregate={latestToolCallId}
       data-tool-lifecycle={aggregateLifecycle}
     >
@@ -313,7 +315,7 @@ export function ToolAggregateGroup({ parts, messageId, thoughts = [], className 
           </span>
         ) : null}
         {singleCommandDuration ? (
-          <span className="shrink-0 tabular-nums text-xs text-muted-foreground/70">
+          <span className="shrink-0 tabular-nums text-xs text-muted-foreground/70 opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100">
             {singleCommandDuration}
           </span>
         ) : null}

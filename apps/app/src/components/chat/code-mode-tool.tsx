@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { DynamicToolUIPart } from "ai";
 import { ChevronRight } from "lucide-react";
 import { CapabilityCallLine, TechnicalDetailsPanel } from "./capability-call-line";
+import { ToolResultPreview } from "./tool-result-preview";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { getCapabilityCallSentence } from "@/lib/capability-call";
 import { codeModeSummary } from "@/lib/code-mode-summary";
@@ -24,7 +25,8 @@ export function CodeModeTool({ part, calls, lifecycle, connectors, parentActive 
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [now, setNow] = useState(Date.now());
   const [lastActivityAt, setLastActivityAt] = useState(Date.now());
-  const activityKey = calls.map(call => `${call.toolCallId}:${call.state}`).join("|");
+  const activityKey = JSON.stringify(calls.map(call => [call.toolCallId, call.state, call.input,
+    call.state === "output-available" ? call.output : null, call.state === "output-error" ? call.errorText : null]));
   useEffect(() => setLastActivityAt(Date.now()), [activityKey]);
   const inFlight = isToolPartInFlight(part);
   const waiting = inFlight && lifecycle === "waiting";
@@ -35,7 +37,8 @@ export function CodeModeTool({ part, calls, lifecycle, connectors, parentActive 
     const interval = window.setInterval(() => setNow(Date.now()), 1_000);
     return () => window.clearInterval(interval);
   }, [running]);
-  const open = userOpen ?? (inFlight || parentActive);
+  const grouped = calls.length >= 2;
+  const open = !grouped || (userOpen ?? (inFlight || parentActive));
   const failedCalls = calls.filter(call => call.state === "output-error");
   const failed = part.state === "output-error";
   const startedAt = running ? getToolCallStartedAt(part) : null;
@@ -66,6 +69,7 @@ export function CodeModeTool({ part, calls, lifecycle, connectors, parentActive 
   return (
     <Collapsible open={open} onOpenChange={setUserOpen} data-code-mode-call={part.toolCallId}>
       <CollapsibleTrigger
+        hidden={!grouped}
         className="group flex min-w-0 max-w-full items-center gap-2 text-start text-sm text-muted-foreground hover:text-foreground"
         aria-label={`${label}. ${open ? "Hide steps" : "Show steps"}`}
       >
@@ -74,22 +78,27 @@ export function CodeModeTool({ part, calls, lifecycle, connectors, parentActive 
         {calls.length > 0 ? <span className="shrink-0 text-xs">{calls.length} {calls.length === 1 ? "step" : "steps"}</span> : null}
         {waitingOn ? <span className="shrink-0 text-xs">Waiting on {waitingOn}</span> : null}
         {failedCalls.length > 0 ? <span className="shrink-0 text-xs">{failedCalls.length} {failedCalls.length === 1 ? "failed call" : "failed calls"}</span> : null}
-        {duration ? <span className="ms-auto shrink-0 text-xs tabular-nums text-muted-foreground/70">{duration}</span> : null}
+        {duration ? <span className="ms-auto shrink-0 text-xs tabular-nums text-muted-foreground/70 opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100">{duration}</span> : null}
       </CollapsibleTrigger>
       <CollapsibleContent className="h-(--collapsible-panel-height) overflow-hidden transition-[height] duration-180 ease-out data-starting-style:h-0 data-ending-style:h-0 motion-reduce:transition-none [&[hidden]:not([hidden='until-found'])]:hidden">
-        <div className="mt-2 flex flex-col gap-2 border-s border-border ps-3">
+        <div className={cn("flex flex-col gap-2", grouped && "mt-2 border-s border-border ps-3")}>
+          {calls.length === 0 ? <>
+            <span className="text-sm text-muted-foreground">{label}</span>
+            <ToolResultPreview part={part} />
+          </> : null}
           {calls.map(call => (
+            <div key={call.toolCallId} data-code-mode-invocation={call.toolCallId}>
             <CapabilityCallLine
-              key={call.toolCallId}
               part={call}
               connector={resolveConnectorToolIdentity(call, connectors)}
-              resultUnavailable={call.state === "output-available"}
+              resultUnavailable={call.state === "output-available" && call.output === undefined}
               statusUnknown={isToolPartInFlight(call) && (!running || !inFlight)}
               quietFailure
               shimmer={running && call.toolCallId === current?.toolCallId}
             />
+            </div>
           ))}
-          {calls.length === 0 && running ? <span className="text-xs text-muted-foreground">Starting…</span> : null}
+          {!grouped && waitingOn ? <p className="text-xs text-muted-foreground">Waiting on {waitingOn}</p> : null}
           <Collapsible open={detailsOpen} onOpenChange={setDetailsOpen}>
             <CollapsibleTrigger className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
               <ChevronRight aria-hidden="true" className={cn("size-3 transition-transform duration-150 ease-out motion-reduce:transition-none", detailsOpen && "rotate-90")} />
