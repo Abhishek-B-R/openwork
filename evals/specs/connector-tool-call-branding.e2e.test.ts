@@ -63,6 +63,7 @@ test("connector-backed tool calls show first-class branding and human-readable l
     await user.see({ text: /"limit":\s*3/ });
     await user.screenshot();
     await user.reload();
+    await user.see({ text: world.proof }, { timeoutMs: 30_000 });
     await openTurn(0);
     if (world.engine === "v2" && (await probe.dom('[data-code-mode-call] > button[aria-expanded="false"]')).elements.length) await user.click({ role: "button", label: /Looked up.*Show steps/ });
     await user.see({ text: /^Listed channels$/ }, { timeoutMs: 30_000 });
@@ -82,7 +83,8 @@ test("connector-backed tool calls show first-class branding and human-readable l
 
   await step("a member sees the note being created rather than the last lookup", async () => {
     await send(world.mutationPrompt);
-    await user.see({ role: "button", label: /Earlier steps.*Show steps/ });
+    await user.see({ text: world.mutationProof }, { timeoutMs: 60_000 });
+    await user.see("Run task");
     await openTurn(1);
     if (world.engine === "v2") {
       await user.see({ role: "button", label: /(?:Creating|Created) a note in Slack/ }, { timeoutMs: 60_000 });
@@ -114,7 +116,8 @@ test("connector-backed tool calls show first-class branding and human-readable l
 
   await step("a failed connector action stays identifiable and is not shown as successful", async () => {
     await send(world.failurePrompt);
-    await user.see({ role: "button", label: /Earlier steps.*Show steps/ });
+    await user.see({ text: "The history lookup failed." }, { timeoutMs: 60_000 });
+    await user.see("Run task");
     await openTurn(2);
     if (world.engine === "v2") {
       await user.see({ role: "button", label: /Reading history|Couldn.t finish this step/ }, { timeoutMs: 30_000 });
@@ -132,6 +135,7 @@ test("connector-backed tool calls show first-class branding and human-readable l
     evidence.recordAssertionEvidence("history lookup failed without claiming success", "read_history received limit 3; the reply says the lookup failed", true);
     await user.screenshot();
     await user.reload();
+    await user.see({ text: "The history lookup failed." }, { timeoutMs: 30_000 });
     await openTurn(2);
     if (world.engine === "v2") {
       await user.notSee({ text: /Completed with errors|Tool activity/ });
