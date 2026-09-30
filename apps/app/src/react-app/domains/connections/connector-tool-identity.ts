@@ -64,6 +64,12 @@ function iconFor(input: { name: string; url: string | null; nativeProviderKey?: 
     : null;
   if (native?.iconUrl) return native.iconUrl;
 
+  const bundled: Record<string, string> = {
+    slack: "/ext-slack.svg", linear: "/ext-linear.svg", notion: "/ext-notion.svg",
+  };
+  const icon = bundled[normalized(input.name)];
+  if (icon) return resolveExtensionIconSrc(icon);
+
   const quickConnect = quickConnectFor(input);
   return resolveExtensionIconUrl({
     iconSrc: quickConnect?.iconSrc,

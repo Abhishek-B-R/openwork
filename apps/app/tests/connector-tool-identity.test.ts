@@ -32,6 +32,17 @@ const granolaConnection: DenExternalMcpConnection = {
 };
 
 describe("connector tool identity", () => {
+  test.each(["Slack", "Linear", "Notion"])("uses the bundled %s asset for an explicit connection identity", (name) => {
+    const inventory = buildConnectorToolIdentities({ mcpServers: [], orgConnections: [{
+      ...granolaConnection, name, url: "https://fixture.invalid/mcp",
+    }] });
+    const identity = resolveConnectorToolIdentity(completedPart("openwork-cloud_execute_capability", {
+      name: "mcp:emc_granola:fixture_action",
+    }), inventory);
+    expect(identity?.name).toBe(name);
+    expect(identity?.iconUrl).toEndWith(`/ext-${name.toLowerCase()}.svg`);
+  });
+
   test("uses only trusted inventory for probe identity even with a valid payload", () => {
     const part: DynamicToolUIPart = {
       ...completedPart("openwork-cloud_execute_capability", { name: "mcp:emc_granola:*" }),
