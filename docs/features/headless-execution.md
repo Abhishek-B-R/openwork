@@ -11,8 +11,10 @@ worker disk is required.
 - Existing Den sessions and organization membership resolve the actor on the
   server. Request bodies cannot choose organization or member identities.
 - Existing organization capabilities gate `headlessAutomation` plus `workbot`,
-  independently of Web subscriptions. Both flags are off by default. Slack can
-  consume the same execution port behind its separate `slackAssistant` flag.
+  independently of Web subscriptions. Both flags are off by default. The existing
+  Slack integration keeps its separate `slackAssistant` / `slackAssistantHeadless`
+  switches and runner; this PR does not change Slack routing. The execution port
+  can support additional callers without coupling their rollout to Workbot.
 - Existing `gatewaySummary` supplies only models granted to this member. The
   native adapters are the same OpenAI, OpenAI-compatible, Anthropic and OpenRouter
   adapters used by the desktop. There is no direct-provider fallback. By default,

@@ -22,6 +22,7 @@ export * from "./temp-files"
 export * from "./workers"
 export * from "./system"
 export * from "./telemetry"
+export * from "./slack-assistant"
 export * from "./web-origins"
 
 export * from "./headless"

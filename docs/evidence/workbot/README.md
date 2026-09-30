@@ -39,7 +39,10 @@ with an ES2024 library override. Production web/API builds pass.
 The real-inference checks used the initial Linux image; its exact identity is
 recorded separately. The final image includes the additional exact-session
 revocation check and schedule bounds, passes its full build, and was verified
-for production-mode startup and restart. These are distinct verification steps.
+for production-mode startup and restart. The latest final image was rebuilt after
+merging the Slack work from `dev`; 95 combined Workbot, organization-capability
+and Slack regression checks passed. The Workbot migration is now 0116 and
+preserves the existing Slack migration. These are distinct verification steps.
 
 The deployment now includes an opt-in Helm worker and an image target in the
 existing EE publishing workflow. **No hosted deployment or existing organization's

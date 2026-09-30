@@ -18,7 +18,7 @@
     "failed": 0
   },
   "workerImage": {
-    "id": "sha256:92c00c29000a7c5249f3718a725a175cc2c70e4a6e100bed6752ccd42b927d3a",
+    "id": "sha256:d720539d4b4c54245e48057b4d5a71097d79b8caa964c0385587aa58ea38e94f",
     "platform": "linux/arm64",
     "user": "node",
     "build": "passed",
@@ -34,12 +34,27 @@
     "runtimeLimits": {
       "cpus": 1,
       "memoryGiB": 2
-    },
-    "observedActiveMemoryMiB": 665.1
+    }
   },
   "helmWorkerChecks": "passed",
   "denApiBuild": "passed",
   "denWebBuild": "passed",
   "desktopCheck": "Passed with ES2024 library override; normal typecheck has a pre-existing Promise.withResolvers lib-target error in mcp-app-frame.tsx",
-  "deployedCloudWorkspaceAcceptance": "not run; no existing cloud member Gateway session provided"
+  "deployedCloudWorkspaceAcceptance": "not run; no existing cloud member Gateway session provided",
+  "nativeInferenceResourceObservation": {
+    "image": "sha256:715dad52214324c25beda4db8f1903c14f9264a336e9105b8ad7bcf9927bab47",
+    "observedActiveMemoryMiB": 665.1
+  },
+  "mergeValidation": {
+    "baseCommit": "f3e8d8c11f870c5c1eee6a5029a97c77e8d7229a",
+    "passedTests": 95,
+    "workbotTests": 26,
+    "organizationAndSlackRegressionTests": 69,
+    "gatewayAndSlackRolloutFlags": "independent, default-off",
+    "migration": "0116_workbot_headless; all previous migration journal entries preserved",
+    "sdkGeneration": "regenerated from merged routes; typecheck passed",
+    "apiBuild": "passed",
+    "webBuild": "passed",
+    "workerImage": "rebuilt; production-mode startup and restart passed"
+  }
 }

@@ -137,6 +137,8 @@ type AdminOrganizationCapabilities = {
   appMcpServers: boolean;
   headlessAutomation: boolean;
   workbot: boolean;
+  slackAssistant: boolean;
+  slackAssistantHeadless: boolean;
   modelsAnalytics: boolean;
   installLinks: boolean;
   mcpConnections: boolean;
@@ -464,6 +466,8 @@ function parseAdminPayload(payload: unknown): AdminPayload | null {
             appMcpServers: capabilities.appMcpServers === true,
             headlessAutomation: capabilities.headlessAutomation === true,
             workbot: capabilities.workbot === true,
+            slackAssistant: capabilities.slackAssistant === true,
+            slackAssistantHeadless: capabilities.slackAssistantHeadless === true,
             modelsAnalytics: capabilities.modelsAnalytics === true,
             installLinks: capabilities.installLinks === true,
             mcpConnections: capabilities.mcpConnections === true
@@ -837,7 +841,7 @@ function buildFixtureOrganization(index: number): AdminOrganization {
     freeSeatCount: target ? 25 : DEFAULT_FREE_SEAT_COUNT,
     seatsFreeAdditional: target ? 20 : 0,
     billableSeatCount: target ? 103 : 0,
-    capabilities: { auditLogs: false, orgManagedDashboards: false, appMcpServers: false, headlessAutomation: false, workbot: false, installLinks: target, mcpConnections: target, modelsAnalytics: false },
+    capabilities: { auditLogs: false, orgManagedDashboards: false, appMcpServers: false, headlessAutomation: false, workbot: false, slackAssistant: false, slackAssistantHeadless: false, installLinks: target, mcpConnections: target, modelsAnalytics: false },
     openworkWebAccess: {
       hasAccess: target,
       accessSource: target ? "complimentary" : null,
@@ -2788,6 +2792,32 @@ export function DenAdminPanel() {
                         />
                         Apps built in OpenWork
                       </label>
+                      <label className="inline-flex items-center gap-2 text-sm text-slate-700">
+                        <input
+                          type="checkbox"
+                          data-testid="admin-capability-slackAssistant"
+                          checked={org.capabilities.slackAssistant}
+                          disabled={savingCapabilityOrgId === org.id}
+                          onChange={(event) => {
+                            void saveOrganizationCapability(org, "slackAssistant", event.target.checked);
+                          }}
+                          className="h-4 w-4 rounded-sm border-slate-300"
+                        />
+                        Slack Assistant
+                      </label>
+                      <label className="inline-flex items-center gap-2 text-sm text-slate-700">
+                        <input
+                          type="checkbox"
+                          data-testid="admin-capability-slackAssistantHeadless"
+                          checked={org.capabilities.slackAssistantHeadless}
+                          disabled={savingCapabilityOrgId === org.id}
+                          onChange={(event) => {
+                            void saveOrganizationCapability(org, "slackAssistantHeadless", event.target.checked);
+                          }}
+                          className="h-4 w-4 rounded-sm border-slate-300"
+                        />
+                        Slack Assistant: headless runtime
+                      </label>
                     </div>
                     <div className="mt-3 divide-y divide-[var(--dls-border)]">
                       {([{key:"headlessAutomation",label:"Headless automations"},{key:"workbot",label:"Workbot"}] satisfies Array<{key:"headlessAutomation"|"workbot";label:string}>).map(item => (
@@ -2810,6 +2840,8 @@ export function DenAdminPanel() {
                     ) : null}
                     <p className="mt-1 text-xs text-slate-400">On by default. Turn off to stop workspace admins from minting desktop install links for this organization.</p>
                     <p className="mt-1 text-xs text-slate-400">On by default. Turn off to hide member-facing org connections, marketplace capabilities on the agent rail, and the desktop Connect tab.</p>
+                    <p className="mt-1 text-xs text-slate-400">Slack Assistant is off by default. Enables Slack mentions and DMs for this organization after Slack connector setup. Turn off to stop new requests and further replies; no redeploy is needed.</p>
+                    <p className="mt-1 text-xs text-slate-400">Slack Assistant: headless runtime is off by default. Answers Slack requests on the shared headless runner instead of each member&apos;s OpenWork Web computer, so no Web seat is needed. Requires the deployment&apos;s headless runner to be configured.</p>
                     <p className="mt-1 text-xs text-slate-400">Confined multi-tool scripts run server-side for this organization.</p>
                     <p className="mt-1 text-xs text-slate-400">Off by default. Requires the deployment master switch and exposes native provider MCP Apps and imported Apps for this organization.</p>
                   </div>

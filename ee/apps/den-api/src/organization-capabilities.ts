@@ -11,7 +11,7 @@ import { z } from "zod"
  * Storage rides the existing organization metadata JSON column — the same
  * home as `limits`, `plan`, and `requireSso` — so no schema change is needed.
  */
-export const ORGANIZATION_CAPABILITY_KEYS = ["installLinks", "mcpConnections", "modelsAnalytics", "auditLogs", "orgManagedDashboards", "appMcpServers", "headlessAutomation", "workbot"] as const
+export const ORGANIZATION_CAPABILITY_KEYS = ["installLinks", "mcpConnections", "modelsAnalytics", "auditLogs", "orgManagedDashboards", "appMcpServers", "headlessAutomation", "workbot", "slackAssistant", "slackAssistantHeadless"] as const
 
 export const organizationCapabilityKeySchema = z.enum(ORGANIZATION_CAPABILITY_KEYS)
 
@@ -56,6 +56,8 @@ export function normalizeOrganizationCapabilities(metadata: MetadataInput): Orga
     appMcpServers: raw.appMcpServers === true,
     headlessAutomation: raw.headlessAutomation === true,
     workbot: raw.workbot === true,
+    slackAssistant: raw.slackAssistant === true,
+    slackAssistantHeadless: raw.slackAssistantHeadless === true,
   }
 }
 
@@ -79,6 +81,8 @@ export function readOrganizationCapabilityOverrides(metadata: MetadataInput): Pa
 
   if (typeof raw.headlessAutomation === "boolean") capabilities.headlessAutomation = raw.headlessAutomation
   if (typeof raw.workbot === "boolean") capabilities.workbot = raw.workbot
+  if (typeof raw.slackAssistant === "boolean") capabilities.slackAssistant = raw.slackAssistant
+  if (typeof raw.slackAssistantHeadless === "boolean") capabilities.slackAssistantHeadless = raw.slackAssistantHeadless
 
   return capabilities
 }
