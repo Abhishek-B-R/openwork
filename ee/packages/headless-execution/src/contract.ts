@@ -42,10 +42,12 @@ export interface HeadlessExecution {
 /** Check at admission, claim, during execution and before output. */
 export interface HeadlessAuthority {
   authorize(actor: HeadlessActor, surface: HeadlessSurface): Promise<void>
+  validateCredentials?(actor: HeadlessActor, credentials: Awaited<ReturnType<HeadlessAuthority["credentials"]>>): Promise<void>
   credentials(actor: HeadlessActor): Promise<{
     mcpUrl: string
     mcpToken: string
-    model: { providerId: string; modelId: string; baseUrl: string; apiKey: string }
+    readCapabilities?: string[]
+    model: { providerId: string; modelId: string; baseUrl: string; apiKey: string; package?: string }
   }>
 }
 export interface HeadlessEngine {
@@ -55,6 +57,7 @@ export interface HeadlessEngine {
     directory: string
     credentials: Awaited<ReturnType<HeadlessAuthority["credentials"]>>
     signal: AbortSignal
+    authorize?: () => Promise<void>
     activity: (text: string) => Promise<void>
   }): Promise<{ text: string; inputTokens: number; outputTokens: number }>
 }

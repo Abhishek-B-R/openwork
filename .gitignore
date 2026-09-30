@@ -81,3 +81,6 @@ evals/results/
 
 # Warden local run logs
 .warden/logs/
+
+# Private headless execution state and member files
+.headless-data/
