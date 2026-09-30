@@ -3,9 +3,6 @@ import { useCallback, useLayoutEffect, useRef, useState } from "react";
 type ReadingPosition = { top: number; pinned: boolean; anchor: string | null; offset: number };
 const positions = new Map<string, ReadingPosition>();
 const SLACK_PX = 48;
-/** New content glides into view instead of jumping; the first restore of a view stays instant. */
-const GLIDE_MS = 220;
-const reducedMotion = () => typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
 
 /** Reading belongs to the conversation, not its mount. Only a gesture repins it. */
 export function useConversationScroll(scope: string, active: boolean, ready: boolean) {
@@ -14,6 +11,7 @@ export function useConversationScroll(scope: string, active: boolean, ready: boo
   const position = useRef<ReadingPosition>(positions.get(scope) ?? { top: 0, pinned: true, anchor: null, offset: 0 });
   const [away, setAway] = useState(!position.current.pinned);
   const follow = useRef<() => void>(() => {});
+  const reconcile = useRef<() => void>(() => {});
   const revealAnchor = useRef<(anchor: string) => boolean>(() => false);
   const virtualAnchors = useRef<{ indexFor: (anchor: string) => number; scrollToIndex: (index: number) => void } | null>(null);
   const reveal = useCallback((anchor: string) => revealAnchor.current(anchor), []);
@@ -35,12 +33,7 @@ export function useConversationScroll(scope: string, active: boolean, ready: boo
     if (!box || !content || !active || !ready) return;
     position.current = positions.get(scope) ?? { top: 0, pinned: true, anchor: null, offset: 0 };
     let frame = 0;
-    let glide = 0;
-    let glidingUntil = 0;
-    let restored = false;
     let writtenTop: number | null = null;
-    let height = box.scrollHeight;
-    let viewport = box.clientHeight;
     let gestureUntil = 0;
     const anchors = () => Array.from(content.querySelectorAll<HTMLElement>("[data-scroll-anchor]"));
     const remember = () => {
@@ -54,30 +47,13 @@ export function useConversationScroll(scope: string, active: boolean, ready: boo
       const anchor = saved.anchor ? anchors().find((node) => node.dataset.scrollAnchor === saved.anchor) : null;
       const virtualIndex = saved.anchor && !anchor ? virtualAnchors.current?.indexFor(saved.anchor) ?? -1 : -1;
       if (saved.pinned) {
-        const target = box.scrollHeight - box.clientHeight;
-        const from = box.scrollTop;
-        const distance = target - from;
-        cancelAnimationFrame(glide);
-        // Following the latest: grow smoothly into new content once the view has settled.
-        if (restored && distance > 1 && distance < box.clientHeight * 1.5 && !reducedMotion()) {
-          const start = performance.now();
-          glidingUntil = start + GLIDE_MS + 50;
-          const step = (now: number) => {
-            const t = Math.min(1, (now - start) / GLIDE_MS);
-            box.scrollTop = from + distance * (1 - (1 - t) ** 3);
-            writtenTop = box.scrollTop;
-            if (t < 1 && position.current.pinned) glide = requestAnimationFrame(step);
-          };
-          glide = requestAnimationFrame(step);
-        } else box.scrollTop = box.scrollHeight;
+        // Streaming and row measurements must not repeatedly restart a scroll animation.
+        box.scrollTop = box.scrollHeight;
       }
       else if (anchor) box.scrollTop += anchor.getBoundingClientRect().top - box.getBoundingClientRect().top - saved.offset;
       else if (virtualIndex >= 0) virtualAnchors.current?.scrollToIndex(virtualIndex);
       else box.scrollTop = saved.top;
       writtenTop = box.scrollTop;
-      height = box.scrollHeight;
-      viewport = box.clientHeight;
-      restored = true;
       setAway(!saved.pinned);
     };
     const schedule = () => {
@@ -86,17 +62,18 @@ export function useConversationScroll(scope: string, active: boolean, ready: boo
     };
     const scrolled = () => {
       if (writtenTop === box.scrollTop) return;
-      // Our own glide is not a reading gesture.
-      if (performance.now() < glidingUntil && performance.now() > gestureUntil) return;
-      // Layout can clamp scrollTop without a reading gesture. It cannot repin us.
-      if (performance.now() > gestureUntil && (height !== box.scrollHeight || viewport !== box.clientHeight)) { schedule(); return; }
+      // Native clamping and virtual row measurements can scroll without a gesture,
+      // even when the outer dimensions stay the same. Keep the saved position.
+      if (performance.now() > gestureUntil) { restore(); return; }
+      // Touch and wheel momentum can outlast the last input event.
+      gestureUntil = performance.now() + 200;
       writtenTop = null;
       cancelAnimationFrame(frame);
       position.current.pinned = box.scrollHeight - box.scrollTop - box.clientHeight <= SLACK_PX;
       remember();
       setAway(!position.current.pinned);
     };
-    const reading = () => { gestureUntil = performance.now() + 200; glidingUntil = 0; cancelAnimationFrame(frame); cancelAnimationFrame(glide); };
+    const reading = () => { gestureUntil = performance.now() + 200; cancelAnimationFrame(frame); };
     const pointer = (event: PointerEvent) => { if (event.target === box) reading(); };
     const wheel = (event: WheelEvent) => {
       reading();
@@ -107,6 +84,7 @@ export function useConversationScroll(scope: string, active: boolean, ready: boo
       if (["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "].includes(event.key)) reading();
     };
     follow.current = schedule;
+    reconcile.current = restore;
     revealAnchor.current = (anchor) => {
       const node = anchors().find((entry) => entry.dataset.scrollAnchor === anchor);
       if (!node) {
@@ -134,14 +112,14 @@ export function useConversationScroll(scope: string, active: boolean, ready: boo
     box.addEventListener("touchmove", reading, { passive: true });
     box.addEventListener("pointerdown", pointer, { passive: true });
     box.addEventListener("keydown", key);
-    const observer = new ResizeObserver(schedule);
+    // A reading anchor must be corrected before paint, not one frame after reflow.
+    const observer = new ResizeObserver(restore);
     observer.observe(content);
     observer.observe(box);
     return () => {
       // Hidden views may already measure zero here; keep the last visible anchor.
       if (box.clientHeight > 0) remember();
       cancelAnimationFrame(frame);
-      cancelAnimationFrame(glide);
       observer.disconnect();
       box.removeEventListener("scroll", scrolled);
       box.removeEventListener("wheel", wheel);
@@ -149,9 +127,13 @@ export function useConversationScroll(scope: string, active: boolean, ready: boo
       box.removeEventListener("pointerdown", pointer);
       box.removeEventListener("keydown", key);
       follow.current = () => {};
+      reconcile.current = () => {};
       revealAnchor.current = () => false;
     };
   }, [active, ready, scope]);
+
+  // React can replace or resize rows without changing the content's outer size.
+  useLayoutEffect(() => { reconcile.current(); });
 
   return { scrollRef, contentRef, away, jumpToLatest, reveal, registerVirtualAnchors };
 }

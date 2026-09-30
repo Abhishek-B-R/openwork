@@ -915,7 +915,7 @@ function GroupChatView({
       {documentNotice ? <p role="alert" className="border-b border-line px-5 py-2 text-xs text-mist">{documentNotice}<button type="button" className="ml-2 underline" onClick={() => setDocumentNotice("")}>Dismiss</button></p> : null}
       {activityNotice ? <p role="status" className="border-b border-line px-5 py-2 text-xs text-mist">{activityNotice}<button type="button" className="ml-2 underline" onClick={() => setActivityNotice("")}>Dismiss</button></p> : null}
       <div className="relative flex min-h-0 flex-1 flex-col">
-      <div ref={scrollRef} style={{ overflowAnchor: "none", paddingBottom: dockHeight + 20 }} className="min-h-0 flex-1 overflow-y-auto px-5 pt-[calc(var(--conversation-top,0px)+1.25rem)]">
+      <div ref={scrollRef} style={{ overflowAnchor: "none", paddingBottom: dockHeight + 20 }} className="min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable] px-5 pt-[calc(var(--conversation-top,0px)+1.25rem)]">
         <div ref={contentRef} className="mx-auto max-w-3xl space-y-3">
           {introduction}
           {observed.groupId !== group.id && !activityError ? <p role="status" className="text-xs text-mist">Loading conversation…</p> : null}

@@ -11,6 +11,7 @@ export function useConversationWindow<T>(
 ) {
   const enabled = items.length > WINDOW_THRESHOLD;
   const virtualizer = useVirtualizer({
+    enabled,
     count: enabled ? items.length : 0,
     getScrollElement: () => scrollRef.current,
     getItemKey: (index) => keyFor(items[index]!, index),

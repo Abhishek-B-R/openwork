@@ -1289,7 +1289,7 @@ function ThreadView({
   const observedTurn = useRef("");
   const observedTurnAt = useRef(0);
   const streamTurn = useRef("");
-  const { scrollRef, contentRef, away, jumpToLatest } = useConversationScroll(`${coworker.slug}:${coworker.createdAt}:${threadId}`, active, transcriptLoaded);
+  const { scrollRef, contentRef, away, jumpToLatest, registerVirtualAnchors } = useConversationScroll(`${coworker.slug}:${coworker.createdAt}:${threadId}`, active, transcriptLoaded);
   // The floating composer's height, so the conversation always ends just above it.
   const [dock, setDock] = useState<HTMLDivElement | null>(null);
   const [dockHeight, setDockHeight] = useState(0);
@@ -2459,6 +2459,10 @@ function ThreadView({
   const callAnchors = callHistory.calls.map((call) => ({ call, before: blocks.find((block) => (block.kind === "message" || block.kind === "ended") && block.message.createdAt !== null && block.message.createdAt > call.endedAt) }));
   const callLines = (messageId?: string) => callAnchors.filter(({ before }) => before && (before.kind === "message" || before.kind === "ended") ? before.message.id === messageId : messageId === undefined).map(({ call }) => <p key={call.id} className="py-1 text-center text-[11px] text-mist" data-testid="coworker-call-history">Call with {call.name} · {callDuration(call.endedAt - call.startedAt)}</p>);
   const conversationWindow = useConversationWindow(scrollRef, blocks, (block) => block.kind === "actions" || block.kind === "documents" || block.kind === "connect" ? block.id : block.message.id);
+  useLayoutEffect(() => registerVirtualAnchors(conversationWindow.enabled ? {
+    indexFor: (anchor) => blocks.findIndex((block) => "message" in block && block.message.id === anchor),
+    scrollToIndex: (index) => conversationWindow.virtualizer.scrollToIndex(index, { align: "center" }),
+  } : null), [blocks, conversationWindow.enabled, conversationWindow.virtualizer, registerVirtualAnchors]);
   // Connect cards read the person's live OpenWork connections, once for the whole conversation.
   const connectCatalog = useConnectorCatalog(session, blocks.some((block) => block.kind === "connect"));
   const latestRequestId = lastPersonIndex >= 0 ? visibleMessages[lastPersonIndex]?.id ?? "" : "";
@@ -2671,7 +2675,7 @@ function ThreadView({
       <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
       <div
         ref={scrollRef}
-        className="min-h-0 flex-1 overflow-y-auto px-5 pt-[calc(var(--conversation-top,0px)+1.25rem)]"
+        className="min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable] px-5 pt-[calc(var(--conversation-top,0px)+1.25rem)]"
         style={{ overflowAnchor: "none", paddingBottom: dockHeight + 20 }}
       >
         <div ref={contentRef} className="mx-auto max-w-3xl space-y-3">
