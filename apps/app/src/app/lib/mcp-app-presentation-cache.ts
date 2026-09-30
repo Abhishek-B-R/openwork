@@ -3,7 +3,7 @@ import { readDenSettings } from "./den";
 import { scheduleMcpAppDiscovery } from "./mcp-app-discovery-scheduler";
 import type { OpenworkMcpAppLaunchReference, OpenworkMcpAppResource } from "./openwork-server";
 import type { McpAppOrigin } from "../../components/chat/mcp-app-origin";
-import { readDashboardTileCache, removeDashboardTileCache, writeDashboardTileCache } from "../../react-app/domains/dashboard/dashboard-tile-cache";
+import { createPresentationCacheStore } from "../../react-app/domains/dashboard/dashboard-tile-cache";
 import { DASHBOARD_TILE_CACHE_STORAGE_PREFIX } from "./dashboard-cache-storage";
 
 async function digest(value: string) {
@@ -12,6 +12,14 @@ async function digest(value: string) {
 }
 const resourceDigest = (app: OpenworkMcpAppResource) => digest(JSON.stringify([app.html, app.csp, app.prefersBorder]));
 type Scope = { key: string; current: () => boolean };
+
+// Every account and workspace shares one storage key with a smaller budget than
+// Dashboard tiles. Per-scope keys would add up to several full budgets (and orphan
+// one per token rotation), exhausting localStorage for settings and Dashboard.
+const CHAT_PRESENTATION_STORAGE_KEY = `${DASHBOARD_TILE_CACHE_STORAGE_PREFIX}.chat`;
+const CHAT_PRESENTATION_MAX_BYTES = 1_500_000;
+const chatPresentationStore = createPresentationCacheStore(CHAT_PRESENTATION_MAX_BYTES);
+const entryId = (scope: Scope, resourceUri: string) => `${scope.key}\n${resourceUri}`;
 
 /** The account credential is hashed in memory; neither its value nor a lease goes into storage. */
 export async function mcpAppPresentationScope(origin: McpAppOrigin): Promise<Scope | null> {
@@ -22,16 +30,16 @@ export async function mcpAppPresentationScope(origin: McpAppOrigin): Promise<Sco
   };
   const snapshot = identity();
   if (!snapshot) return null;
-  return { key: `${DASHBOARD_TILE_CACHE_STORAGE_PREFIX}.chat.${await digest(snapshot)}`, current: () => identity() === snapshot };
+  return { key: await digest(snapshot), current: () => identity() === snapshot };
 }
 
-/** Reuse the existing bounded, 24-hour presentation store and its authority-stripping parser. */
+/** Reuse the bounded, 24-hour presentation store format and its authority-stripping parser. */
 export function createMcpAppPresentationCache(scope: Scope, workspaceId: string) {
   return {
     async read(launch: OpenworkMcpAppLaunchReference): Promise<OpenworkMcpAppResource | null> {
       const revision = parseMcpAppResourceUri(launch.resourceUri);
       if (!scope.current() || !revision || !("connectionId" in launch) || revision.appId !== launch.connectionId) return null;
-      const stored = readDashboardTileCache(scope.key, launch.resourceUri);
+      const stored = chatPresentationStore.read(CHAT_PRESENTATION_STORAGE_KEY, entryId(scope, launch.resourceUri));
       if (!stored || stored.workspaceId !== workspaceId || stored.app.toolName !== launch.toolName
         || stored.app.resourceUri !== launch.resourceUri || stored.argumentsSignature !== await resourceDigest(stored.app)
         || !scope.current()) return null;
@@ -42,15 +50,15 @@ export function createMcpAppPresentationCache(scope: Scope, workspaceId: string)
       if (!revision || app.resourceUri !== launch.resourceUri || app.toolName !== launch.toolName
         || !("connectionId" in launch) || revision.appId !== launch.connectionId
         || !app.serverName.startsWith("openwork-app-host-connect-")) {
-        removeDashboardTileCache(scope.key, launch.resourceUri);
+        chatPresentationStore.remove(CHAT_PRESENTATION_STORAGE_KEY, entryId(scope, launch.resourceUri));
         return;
       }
       const checksum = await resourceDigest(app);
-      if (scope.current()) writeDashboardTileCache(scope.key, app.resourceUri, {
+      if (scope.current()) chatPresentationStore.write(CHAT_PRESENTATION_STORAGE_KEY, entryId(scope, app.resourceUri), {
         workspaceId, app, argumentsSignature: checksum, cachedAt: Date.now(), result: { content: [] },
       });
     },
-    remove(launch: OpenworkMcpAppLaunchReference) { removeDashboardTileCache(scope.key, launch.resourceUri); },
+    remove(launch: OpenworkMcpAppLaunchReference) { chatPresentationStore.remove(CHAT_PRESENTATION_STORAGE_KEY, entryId(scope, launch.resourceUri)); },
   };
 }
 

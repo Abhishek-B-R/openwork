@@ -18,13 +18,20 @@ const digest = (resource: CachedMcpAppResource) => createHash("sha256").update(J
 /** Content only: credentials, tool definitions, permissions and launch leases are never cached. */
 export function createMcpAppResourceCache(directory: string, now = Date.now) {
   const memory = new Map<string, z.infer<typeof storedSchema>>();
+  // Sized once on insert: a hit must not re-serialize every cached App.
+  const sizes = new Map<string, number>();
+  const remember = (key: string, value: z.infer<typeof storedSchema>) => {
+    memory.delete(key); memory.set(key, value);
+    if (!sizes.has(key)) sizes.set(key, Buffer.byteLength(JSON.stringify(value)));
+    trimMemory();
+  };
   const pending = new Map<string, Promise<CachedMcpAppResource>>();
   let maintenance = Promise.resolve();
   const trimMemory = () => {
     let bytes = 0;
     for (const [key, value] of [...memory].reverse()) {
-      bytes += Buffer.byteLength(JSON.stringify(value));
-      if (bytes > MAX_BYTES || now() - value.savedAt >= TTL_MS) memory.delete(key);
+      bytes += sizes.get(key) ?? 0;
+      if (bytes > MAX_BYTES || now() - value.savedAt >= TTL_MS) { memory.delete(key); sizes.delete(key); }
     }
   };
   const trimDisk = async () => {
@@ -49,12 +56,12 @@ export function createMcpAppResourceCache(directory: string, now = Date.now) {
           if (parsed.success) stored = parsed.data;
         }
         if (stored && now() - stored.savedAt < TTL_MS && digest(stored.resource) === stored.digest) {
-          memory.delete(key); memory.set(key, stored); trimMemory();
+          remember(key, stored);
           return stored.resource;
         }
         const resource = resourceSchema.parse(await load());
         const value = { savedAt: now(), digest: digest(resource), resource };
-        memory.set(key, value); trimMemory();
+        sizes.delete(key); remember(key, value);
         // A full disk, corrupt entry or failed cache write must never prevent an App opening.
         maintenance = maintenance.then(async () => {
           await mkdir(directory, { recursive: true, mode: 0o700 });

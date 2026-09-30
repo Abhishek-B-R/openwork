@@ -845,6 +845,9 @@ function EmbeddedMcpAppFrame({ part }: { part: DynamicToolUIPart }) {
   connectionController?.observeBinding()
   const [app, setApp] = useState<OpenworkMcpAppResource | null>(null)
   const [previewActions, setPreviewActions] = useState<(() => Promise<{ origin: McpAppOrigin; app: OpenworkMcpAppResource }>) | undefined>()
+  // The sandbox rebuilds whenever its origin identity changes; keep the inert
+  // preview origin stable across unrelated re-renders.
+  const previewOrigin = useMemo(() => origin ? { ...origin, readOnly: true } : origin, [origin])
   const [error, setError] = useState<McpAppDiagnostic | null>(null)
   const [resolveToken, setResolveToken] = useState(0)
   const consumedRetryToken = useRef(0)
@@ -950,7 +953,7 @@ function EmbeddedMcpAppFrame({ part }: { part: DynamicToolUIPart }) {
     ? <p role="status">Opening App…</p> : null
   return (
     <McpAppSandboxView
-      origin={previewActions ? { ...origin, readOnly: true } : origin}
+      origin={previewActions && previewOrigin ? previewOrigin : origin}
       resolveLiveActions={previewActions && !origin.readOnly ? previewActions : undefined}
       app={app}
       toolName={part.toolName}

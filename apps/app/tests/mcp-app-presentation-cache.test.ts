@@ -5,7 +5,7 @@ import { createMcpAppPresentationCache, mcpAppPresentationScope, scheduleCachedM
 import { createOpenworkServerClient, type OpenworkMcpAppResource } from "../src/app/lib/openwork-server";
 import { setDenBootstrapConfig, writeDenSettings } from "../src/app/lib/den";
 import { flushDashboardTileCacheStorage, resetDashboardTileCacheMemory } from "../src/app/lib/dashboard-cache-storage";
-import { writeDashboardTileCache } from "../src/react-app/domains/dashboard/dashboard-tile-cache";
+import { createPresentationCacheStore } from "../src/react-app/domains/dashboard/dashboard-tile-cache";
 
 GlobalRegistrator.register({ url: "http://localhost/" });
 afterAll(() => GlobalRegistrator.unregister());
@@ -17,7 +17,8 @@ const app: OpenworkMcpAppResource = { launchId: "private-live-lease", refresh: {
   serverName: "openwork-app-host-connect-fixture", toolName: "open_app", resourceUri: uri, html: "<main>Cached App</main>",
   csp: { connectDomains: [], resourceDomains: [], frameDomains: [], baseUriDomains: [] }, prefersBorder: false };
 const launch = { connectionId: appId, toolName: app.toolName, resourceUri: uri, arguments: {} };
-const scope = { key: "openwork.react.dashboardTileCache.v1.chat.user-a", current: () => true };
+const scope = { key: "user-a", current: () => true };
+const CHAT_STORAGE_KEY = "openwork.react.dashboardTileCache.v1.chat";
 const origin = { client: createOpenworkServerClient({ baseUrl: "http://localhost:8787" }), workspaceId: "workspace-a", sessionId: "session-a", readOnly: false };
 
 test("miss, hit and device reload retain immutable HTML but never authority", async () => {
@@ -47,9 +48,22 @@ test("principals and workspaces never share presentation content; a changed acco
   expect(await createMcpAppPresentationCache({ ...scope, current: () => false }, origin.workspaceId).read(launch)).toBeNull();
 });
 test("corrupt HTML cannot paint under a previous digest", async () => {
-  writeDashboardTileCache(scope.key, uri, { workspaceId: origin.workspaceId, cachedAt: Date.now(), app,
-    argumentsSignature: "wrong-digest", result: { content: [] } });
+  createPresentationCacheStore(1_500_000).write(CHAT_STORAGE_KEY, `${scope.key}\n${uri}`, { workspaceId: origin.workspaceId,
+    cachedAt: Date.now(), app, argumentsSignature: "wrong-digest", result: { content: [] } });
+  flushDashboardTileCacheStorage(); resetDashboardTileCacheMemory();
   expect(await createMcpAppPresentationCache(scope, origin.workspaceId).read(launch)).toBeNull();
+});
+test("every account and workspace shares one bounded storage entry", async () => {
+  const html = `<main>${"x".repeat(400_000)}</main>`;
+  for (const [index, workspaceId] of ["workspace-a", "workspace-b", "workspace-c", "workspace-d", "workspace-e"].entries()) {
+    const revisionUri = mcpAppResourceUri(appId, `cov_01mcpapp${String(index).repeat(18)}`);
+    await createMcpAppPresentationCache({ ...scope, key: `user-${index}` }, workspaceId).write(
+      { ...launch, resourceUri: revisionUri }, { ...app, resourceUri: revisionUri, html: `${html}${index}` });
+  }
+  flushDashboardTileCacheStorage();
+  const keys = Object.keys(window.localStorage).filter(key => key.startsWith("openwork.react.dashboardTileCache.v1."));
+  expect(keys).toEqual([CHAT_STORAGE_KEY]);
+  expect(window.localStorage.getItem(CHAT_STORAGE_KEY)!.length).toBeLessThanOrEqual(1_500_000);
 });
 test("account scopes contain no credential and rotate with user, organization and endpoint", async () => {
   const desktop = window.__OPENWORK_ELECTRON__;
