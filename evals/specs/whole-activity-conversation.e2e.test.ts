@@ -7,7 +7,12 @@ const test = spec.world(wholeActivity, { timeout: 600_000, resources: { surfaces
 
 test(`ACT-WHOLE ${resolveEvalEngine()}: a person follows a whole conversation from a short reply through tools, decisions, children and Stop`, async ({ world, user, probe, step, evidence }) => {
   const send = async (text: string) => {
-    await user.type("composer", text, { verify: true });
+    try { await user.type("composer", text, { verify: true }); }
+    catch (error) {
+      evidence.recordJsonArtifact("Fixture composer after typing", await probe.composer());
+      await user.screenshot();
+      throw error;
+    }
     await probe.eventually(() => probe.composer(), { within: 30_000, label: "the composer admits this turn", until: state => state.runTaskEnabled });
     await user.press("Enter");
   };
