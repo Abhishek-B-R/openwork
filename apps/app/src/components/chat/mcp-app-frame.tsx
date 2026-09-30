@@ -868,7 +868,11 @@ function EmbeddedMcpAppFrame({ part }: { part: DynamicToolUIPart }) {
   useEffect(() => {
     let cancelled = false
     let previewActive = true
-    const live = Promise.withResolvers<{ origin: McpAppOrigin; app: OpenworkMcpAppResource }>()
+    type ResolvedApp = { origin: McpAppOrigin; app: OpenworkMcpAppResource }
+    let resolveLive!: (value: ResolvedApp) => void
+    let rejectLive!: (reason: unknown) => void
+    const livePromise = new Promise<ResolvedApp>((resolve, reject) => { resolveLive = resolve; rejectLive = reject })
+    const live = { promise: livePromise, resolve: resolveLive, reject: rejectLive }
     // Discovery failure retires the preview through the existing error state.
     void live.promise.catch(() => undefined)
     let launchId: string | undefined

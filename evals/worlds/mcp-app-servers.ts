@@ -513,7 +513,8 @@ export const buildReply = "The Quick order pricer is ready in this conversation.
  * create_app and opens an existing one with launch input, both through
  * Connect, and each App's own tools run in the conversation.
  */
-export async function mcpAppServersChat(seed: Seed, benchmark = false) {
+export async function mcpAppServersChat(seed: Seed, benchmarkOrContext: boolean | { place: Place } = false) {
+  const benchmark = benchmarkOrContext === true;
   const den = await seed.den({
     env: { DEN_GENERATED_ARTIFACT_VIEWS_ENABLED: "true", DEN_APP_MCP_SERVERS_ENABLED: "true", ...(benchmark ? { OPENWORK_MCP_APP_TIMINGS: "1" } : {}) },
     org: { name: `App servers chat ${Date.now()}` },
