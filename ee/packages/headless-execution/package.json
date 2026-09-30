@@ -3,10 +3,26 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts",
-    "./contract": "./src/contract.ts",
-    "./schema": "./src/schema.ts",
-    "./files": "./src/files.ts"
+    ".": {
+      "types": "./dist/index.d.ts",
+      "development": "./src/index.ts",
+      "default": "./dist/index.js"
+    },
+    "./contract": {
+      "types": "./dist/contract.d.ts",
+      "development": "./src/contract.ts",
+      "default": "./dist/contract.js"
+    },
+    "./schema": {
+      "types": "./dist/schema.d.ts",
+      "development": "./src/schema.ts",
+      "default": "./dist/schema.js"
+    },
+    "./files": {
+      "types": "./dist/files.d.ts",
+      "development": "./src/files.ts",
+      "default": "./dist/files.js"
+    }
   },
   "engines": {
     "node": ">=24"
@@ -14,7 +30,8 @@
   "scripts": {
     "test": "tsx --test test/*.test.ts",
     "typecheck": "tsc --noEmit",
-    "test:engine": "tsx test/engine-witness.ts"
+    "test:engine": "tsx test/engine-witness.ts",
+    "build": "tsc -p tsconfig.build.json"
   },
   "dependencies": {
     "zod": "4.3.6"
@@ -23,5 +40,7 @@
     "@types/node": "24.13.3",
     "tsx": "4.23.1",
     "typescript": "5.9.3"
-  }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts"
 }
