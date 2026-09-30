@@ -1,4 +1,4 @@
-import { browserScript, locate } from "@openwork/cdp";
+import { browserScript, locate, type Surface } from "@openwork/cdp";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { rm } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
@@ -318,6 +318,30 @@ export async function preseededConnect(seed: Seed) {
   };
 }
 
+export async function waitForCloudMcp(seed: Seed, app: Surface, workspaceId: string) {
+  // Model readiness precedes MCP registration after an engine reload. This
+  // fixture proves the chat presentation, so admit its first tool call only
+  // once the real selected engine reports its Cloud connection as usable.
+  const connected = await seed.evalIn(app, browserScript(async (workspaceId) => {
+    const deadline = Date.now() + 90_000;
+    let observed = { phase: "unavailable", status: "unknown" };
+    while (Date.now() < deadline) {
+      try {
+        const response = await fetch("http://127.0.0.1:" + localStorage.getItem("openwork.server.port") + "/workspace/" + encodeURIComponent(workspaceId)
+          + "/mcp/openwork-cloud/health?probe=1", { headers: { Authorization: "Bearer " + localStorage.getItem("openwork.server.token") } });
+        if (response.ok) {
+          const health = await response.json();
+          observed = { phase: health.phase ?? "unavailable", status: health.engine?.status ?? "unknown" };
+          if (health.phase === "ready" && health.usable === true && health.engine?.status === "connected") return true;
+        }
+      } catch {}
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
+    return observed;
+  }, [workspaceId]), { awaitPromise: true, timeoutMs: 100_000 });
+  if (connected !== true) throw new Error(`The connector fixture's Cloud MCP did not become ready: ${JSON.stringify(connected)}`);
+}
+
 export async function connectorBranding(seed: Seed) {
   const engine = resolveEvalEngine();
   const proof = `Channel list ${crypto.randomUUID()}`;
@@ -377,6 +401,7 @@ export async function connectorBranding(seed: Seed) {
       models: { [modelId]: { name: "Connector display model" } },
     } },
   });
+  await waitForCloudMcp(seed, app, workspace.workspaceId);
   await seed.session(app);
   return { app, den, workspace, engine, prompt, failurePrompt, mutationPrompt, mutationProof, proof };
 }

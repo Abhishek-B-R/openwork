@@ -2,7 +2,7 @@ import { mkdir, realpath, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { resolveEvalEngine, type Seed } from "@openwork/env";
 import { browserScript } from "@openwork/cdp";
-import { connectorBranding } from "./library.ts";
+import { connectorBranding, waitForCloudMcp } from "./library.ts";
 import { configureProvider, fixtureInputFocus } from "./chat.ts";
 
 /** Anonymous fixture covering one conversation, with native engine differences. */
@@ -90,6 +90,7 @@ export async function wholeActivity(seed: Seed) {
       models: { [firstModel]: { name: "First fixture model" }, [secondModel]: { name: "Second fixture model" } },
     } },
   });
+  await waitForCloudMcp(seed, base.app, workspace.workspaceId);
   const session = await seed.session(base.app, { title: "Whole fixture conversation" });
   return { ...base, workspace, session, shortPrompt, prompt, childPrompt, followup, answer, stopPrompt, continuePrompt,
     inputFocus: () => fixtureInputFocus(seed, base.app),
