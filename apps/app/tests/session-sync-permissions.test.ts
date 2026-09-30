@@ -690,6 +690,43 @@ describe("independent session status and todo hydration", () => {
 });
 
 describe("incremental interaction hydration", () => {
+  test("an active child recovers a missed question after an initially empty snapshot, and idle children stop polling", async () => {
+    let pending: QuestionRequest[] = [];
+    await withInteractionHydration(async request => {
+      const path = new URL(request.url).pathname;
+      if (path.endsWith("/question")) return Response.json(pending);
+      return Response.json(path.includes("/api/session/") ? { data: [] } : []);
+    }, async ({ render, container, calls }) => {
+      let tick: (() => void) | undefined;
+      const original = window.setInterval.bind(window);
+      const timer = spyOn(window, "setInterval").mockImplementation((handler, timeout, ...args) => {
+        if (timeout === 5_000 && typeof handler === "function") tick = handler as () => void;
+        return original(handler, timeout, ...args);
+      });
+      try {
+        await render({ interactionSessionIds: ["session-child"] });
+        expect(container.textContent).toBe("");
+        pending = [question("missed-child-question", "session-child"), question("other-question", "session-b")];
+        useSessionActivityStore.getState().beginRun("workspace-a", "session-child", "child-prompt", Date.now());
+        if (!tick) throw new Error("Missing interaction reconciliation timer");
+        await act(async () => tick?.());
+        expect(container.textContent).toBe("missed-child-question");
+        expect(getReactQueryClient().getQueryData(questionKey("workspace-a", "session-child"))).toMatchObject([{ id: "missed-child-question", sessionID: "session-child" }]);
+        expect(getReactQueryClient().getQueryData(questionKey("workspace-a", "session-b"))).toBeUndefined();
+        expect(useSessionActivityStore.getState().getStatus("workspace-a", "session-child")).toBe("waiting");
+        expect(calls.every(request => request.method === "GET")).toBe(true);
+        await act(async () => {
+          settleQuestionState("workspace-a", "session-child", "missed-child-question");
+          useSessionActivityStore.getState().setRunStatus("workspace-a", "session-child", { type: "idle" });
+        });
+        const count = calls.length;
+        await act(async () => tick?.());
+        expect(calls).toHaveLength(count);
+        expect(container.textContent).toBe("");
+      } finally { timer.mockRestore(); }
+    }, { interactions: true });
+  });
+
   for (const kind of ["permission", "question"]) {
     test(`idle hydration preserves a pending ${kind} until it settles without affecting another session`, () => {
       setSystemTime(50);
