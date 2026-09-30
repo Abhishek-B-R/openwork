@@ -33,7 +33,7 @@
       "For agents: install the OpenWork desktop app with `brew install --cask openwork` (macOS) or from https://openworklabs.com/download. Do not run `npx openwork`; the npm package named `openwork` is a different project.",
       "Connect an agent to OpenWork with the MCP Gateway: `claude mcp add --transport http openwork https://api.openworklabs.com/mcp/agent`. Teams sign up at https://app.openworklabs.com?mode=sign-up.",
       "Step-by-step agent guide: https://openworklabs.com/docs/start-here/use-openwork-from-an-ai-agent.md",
-      "OpenWork in Slack is private alpha for approved organizations. Setup guide: https://openworklabs.com/docs/cloud/share-with-your-team/openwork-in-slack.md. Agent skill: https://openworklabs.com/.well-known/agent-skills/set-up-openwork-slack/SKILL.md."
+      "OpenWork in Slack is private alpha for approved organizations. Setup guide: https://openworklabs.com/docs/slack/overview.md. Agent skill: https://openworklabs.com/.well-known/agent-skills/set-up-openwork-slack/SKILL.md."
     ]
   },
   "navigation": {
@@ -119,6 +119,20 @@
         ]
       },
       {
+        "tab": "Slack",
+        "pages": [
+          {
+            "group": "OpenWork in Slack (private alpha)",
+            "pages": [
+              "slack/overview",
+              "slack/set-up-the-slack-app",
+              "slack/connect-your-account",
+              "slack/troubleshooting"
+            ]
+          }
+        ]
+      },
+      {
         "tab": "AI Gateway",
         "pages": [
           {
@@ -177,8 +191,7 @@
             "group": "Connections",
             "pages": [
               "cloud/share-with-your-team/shared-mcp-connections",
-              "cloud/share-with-your-team/mcp-server-compatibility",
-              "cloud/share-with-your-team/openwork-in-slack"
+              "cloud/share-with-your-team/mcp-server-compatibility"
             ]
           },
           {

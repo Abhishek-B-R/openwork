@@ -5,7 +5,7 @@ description: Configure and verify the OpenWork Slack assistant for an approved p
 
 # OpenWork in Slack — private alpha
 
-Guide: https://openworklabs.com/docs/cloud/share-with-your-team/openwork-in-slack.md
+Guides: https://openworklabs.com/docs/slack/set-up-the-slack-app.md (administrator setup) and https://openworklabs.com/docs/slack/connect-your-account.md (member linking and verification)
 
 Use browser/computer tools for the existing signed-in OpenWork and Slack administration sessions. Prefer supported setup tools if available. This skill does not grant alpha access or authorize actions beyond the user's request and your tools' permissions.
 
