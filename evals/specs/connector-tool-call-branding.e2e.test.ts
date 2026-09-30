@@ -6,6 +6,14 @@ import { connectorActivity } from "../worlds/connector-activity.ts";
 const test = spec.world(connectorActivity, { timeout: 420_000, resources: { surfaces: ["desktop"], services: ["den", "mock"], nativeReason: "The connector fixture uses a native Desktop conversation and Den connection catalog to verify service assets and exact MCP results." } });
 
 test("connector-backed tool calls show first-class branding and human-readable labels", async ({ world, user, probe, step, evidence }) => {
+  const seeReply = async (text: string) => {
+    // Recorded results may repeat the answer inside a retained, collapsed rail.
+    // Wait for the visible reply rather than the first matching hidden preview.
+    await probe.eventually(() => probe.dom('[data-message-role="assistant"] p'), {
+      within: 60_000, label: "the final connector reply is visible outside the folded steps",
+      until: result => result.elements.some(element => element.text.includes(text) && element.rect.width > 0 && element.rect.height > 0),
+    });
+  };
   const send = async (text: string) => {
     await probe.eventually(() => probe.composer(), { within: 30_000, label: "the connector fixture's composer and model have loaded",
       until: state => state.route.includes(world.session.sessionId) && state.composerEditable && state.selectedModelLabel.includes("Connector display model"),
@@ -26,7 +34,7 @@ test("connector-backed tool calls show first-class branding and human-readable l
   await send(world.prompt);
 
   await step("before: the search and connector action stay readable", async () => {
-    await user.see({ text: world.proof }, { timeoutMs: 60_000 });
+    await seeReply(world.proof);
     await user.see("Run task");
     await openTurn(0);
     if (world.engine === "v2" && (await probe.dom('[data-code-mode-call] > button[aria-expanded="false"]')).elements.length) await user.click({ role: "button", label: /(?:Looking|Looked) up.*Show steps/ });
@@ -38,7 +46,7 @@ test("connector-backed tool calls show first-class branding and human-readable l
   });
 
   await step("the completed connector action exposes its arguments and survives reload", async () => {
-    await user.see({ text: world.proof }, { timeoutMs: 60_000 });
+    await seeReply(world.proof);
     await user.see("Run task");
     await openTurn(0);
     if (world.engine === "v2" && (await probe.dom('[data-code-mode-call] > button[aria-expanded="false"]')).elements.length) await user.click({ role: "button", label: /Looked up.*Show steps/ });
@@ -63,7 +71,7 @@ test("connector-backed tool calls show first-class branding and human-readable l
     await user.see({ text: /"limit":\s*3/ });
     await user.screenshot();
     await user.reload();
-    await user.see({ text: world.proof }, { timeoutMs: 30_000 });
+    await seeReply(world.proof);
     await openTurn(0);
     if (world.engine === "v2" && (await probe.dom('[data-code-mode-call] > button[aria-expanded="false"]')).elements.length) await user.click({ role: "button", label: /Looked up.*Show steps/ });
     await user.see({ text: /^Listed channels$/ }, { timeoutMs: 30_000 });
@@ -83,7 +91,7 @@ test("connector-backed tool calls show first-class branding and human-readable l
 
   await step("a member sees the note being created rather than the last lookup", async () => {
     await send(world.mutationPrompt);
-    await user.see({ text: world.mutationProof }, { timeoutMs: 60_000 });
+    await seeReply(world.mutationProof);
     await user.see("Run task");
     await openTurn(1);
     if (world.engine === "v2") {
@@ -97,7 +105,7 @@ test("connector-backed tool calls show first-class branding and human-readable l
   });
 
   await step("after: the created note is visible and the result survives reload", async () => {
-    await user.see({ text: world.mutationProof }, { timeoutMs: 60_000 });
+    await seeReply(world.mutationProof);
     await user.see("Run task");
     expect(await world.den.mocks.connector.toolCalls({ name: "create_note", sinceIso, atLeast: 1 }))
       .toMatchObject([{ name: "create_note", args: { limit: 3 } }]);
@@ -109,14 +117,14 @@ test("connector-backed tool calls show first-class branding and human-readable l
     }
     await user.screenshot();
     await user.reload();
-    await user.see({ text: world.mutationProof }, { timeoutMs: 30_000 });
+    await seeReply(world.mutationProof);
     evidence.recordAssertionEvidence("created note after reload", `create_note received limit 3; ${world.mutationProof} remains visible`, true);
     await user.screenshot();
   });
 
   await step("a failed connector action stays identifiable and is not shown as successful", async () => {
     await send(world.failurePrompt);
-    await user.see({ text: "The history lookup failed." }, { timeoutMs: 60_000 });
+    await seeReply("The history lookup failed.");
     await user.see("Run task");
     await openTurn(2);
     if (world.engine === "v2") {
@@ -127,7 +135,7 @@ test("connector-backed tool calls show first-class branding and human-readable l
       await user.see({ role: "button", label: /Read history failed/ }, { timeoutMs: 60_000 });
     }
     await user.see("Run task");
-    await user.see({ text: "The history lookup failed." });
+    await seeReply("The history lookup failed.");
     await user.notSee({ role: "button", label: "Read history. Show technical details" });
     await user.notSee({ role: "button", label: /^Ran(?:\s|\.|[0-9]|$)/ });
     expect(await world.den.mocks.connector.toolCalls({ name: "read_history", sinceIso, atLeast: 1 }))
@@ -135,14 +143,14 @@ test("connector-backed tool calls show first-class branding and human-readable l
     evidence.recordAssertionEvidence("history lookup failed without claiming success", "read_history received limit 3; the reply says the lookup failed", true);
     await user.screenshot();
     await user.reload();
-    await user.see({ text: "The history lookup failed." }, { timeoutMs: 30_000 });
+    await seeReply("The history lookup failed.");
     await openTurn(2);
     if (world.engine === "v2") {
       await user.notSee({ text: /Completed with errors|Tool activity/ });
     } else {
       await user.see({ role: "button", label: /Read history failed/ }, { timeoutMs: 30_000 });
     }
-    await user.see({ text: "The history lookup failed." });
+    await seeReply("The history lookup failed.");
     await user.notSee({ role: "button", label: "Read history. Show technical details" });
     await user.notSee({ role: "button", label: /^Ran(?:\s|\.|[0-9]|$)/ });
   });
