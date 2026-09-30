@@ -690,7 +690,7 @@ describe("independent session status and todo hydration", () => {
 });
 
 describe("incremental interaction hydration", () => {
-  test("an active child recovers a missed question after an initially empty snapshot, and idle children stop polling", async () => {
+  test("a child discovered through task activity recovers a missed question, and idle children stop polling", async () => {
     let pending: QuestionRequest[] = [];
     await withInteractionHydration(async request => {
       const path = new URL(request.url).pathname;
@@ -703,9 +703,19 @@ describe("incremental interaction hydration", () => {
         if (timeout === 5_000 && typeof handler === "function") tick = handler as () => void;
         return original(handler, timeout, ...args);
       });
+      const task = {
+        type: "dynamic-tool", toolName: "task", toolCallId: "task-child", state: "input-available",
+        input: { description: "Inspect a fixture", prompt: "Read the fixture", subagent_type: "general" },
+        callProviderMetadata: { openwork: { childSessionId: "session-child", toolStartedAt: Date.now() } },
+      } as const;
       try {
-        await render({ interactionSessionIds: ["session-child"] });
+        await render();
         expect(container.textContent).toBe("");
+        await act(async () => {
+          useSessionActivityStore.getState().observeTranscript("workspace-a", "session-a", [{
+            id: "delegation", role: "assistant", parts: [task],
+          }]);
+        });
         pending = [question("missed-child-question", "session-child"), question("other-question", "session-b")];
         useSessionActivityStore.getState().beginRun("workspace-a", "session-child", "child-prompt", Date.now());
         if (!tick) throw new Error("Missing interaction reconciliation timer");
@@ -718,6 +728,9 @@ describe("incremental interaction hydration", () => {
         await act(async () => {
           settleQuestionState("workspace-a", "session-child", "missed-child-question");
           useSessionActivityStore.getState().setRunStatus("workspace-a", "session-child", { type: "idle" });
+          useSessionActivityStore.getState().observeTranscript("workspace-a", "session-a", [{
+            id: "delegation", role: "assistant", parts: [{ ...task, state: "output-available", output: "Finished" }],
+          }]);
         });
         const count = calls.length;
         await act(async () => tick?.());

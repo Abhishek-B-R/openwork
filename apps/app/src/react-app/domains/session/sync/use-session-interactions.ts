@@ -11,7 +11,7 @@ import { t } from "@/i18n";
 import { useQueryCacheArrayState, useQueryCacheState } from "@/react-app/infra/query-cache-state";
 import { getReactQueryClient } from "@/react-app/infra/query-client";
 import { describeRouteError } from "@/react-app/shell/route-workspaces";
-import { useSessionActivityStore } from "../status/session-activity-store";
+import { createSessionChildIdsSelector, useSessionActivityStore } from "../status/session-activity-store";
 import {
   permissionKey,
   questionKey,
@@ -329,11 +329,21 @@ export function useSessionInteractions(input: UseSessionInteractionsInput) {
   const questionReplyBusyRef = useRef(false);
 
   const requestedSessionIdsKey = (input.interactionSessionIds ?? []).join("\u0000");
+  const selectChildIds = useMemo(createSessionChildIdsSelector, []);
+  const childrenBySession = useSessionActivityStore(selectChildIds)[workspaceId ?? ""];
   const interactionSessionIds = useMemo(() => {
     if (!sessionId) return [];
     const requested = requestedSessionIdsKey ? requestedSessionIdsKey.split("\u0000") : [];
-    return Array.from(new Set([sessionId, ...requested].map((id) => id.trim()).filter(Boolean)));
-  }, [requestedSessionIdsKey, sessionId]);
+    const inventory = new Set<string>();
+    const queue = [sessionId, ...requested];
+    for (let index = 0; index < queue.length; index += 1) {
+      const id = queue[index]?.trim();
+      if (!id || inventory.has(id)) continue;
+      inventory.add(id);
+      queue.push(...(childrenBySession?.[id] ?? []));
+    }
+    return [...inventory];
+  }, [childrenBySession, requestedSessionIdsKey, sessionId]);
   const permissionQueryKeys = useMemo(
     () => workspaceId ? interactionSessionIds.map((id) => permissionKey(workspaceId, id)) : [],
     [interactionSessionIds, workspaceId],
