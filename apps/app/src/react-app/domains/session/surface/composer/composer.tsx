@@ -1149,6 +1149,12 @@ export const ReactSessionComposer = memo(function ReactSessionComposer(props: Co
       }
     }
 
+    if (activeMenu && event.key === "Escape") {
+      event.preventDefault();
+      setSlashOpen(false);
+      setMentionOpen(false);
+      return;
+    }
     if (!activeMenu || !activeItems.length) return;
     if (event.key === "ArrowDown") {
       event.preventDefault();
@@ -1165,11 +1171,6 @@ export const ReactSessionComposer = memo(function ReactSessionComposer(props: Co
       event.stopPropagation();
       void acceptActiveItem();
       return;
-    }
-    if (event.key === "Escape") {
-      event.preventDefault();
-      setSlashOpen(false);
-      setMentionOpen(false);
     }
   };
 
@@ -1312,6 +1313,7 @@ export const ReactSessionComposer = memo(function ReactSessionComposer(props: Co
     <DevProfiler id="SessionComposer">
     <div
       ref={rootRef}
+      data-composer-menu-open={agentMenuOpen || toolMenuOpen || props.modelPickerOpen || Boolean(activeMenu) ? "true" : undefined}
       className={props.flush ? `relative ${toolMenuOpen ? "z-50" : "z-20"}` : `sticky bottom-0 shrink-0 ${toolMenuOpen ? "z-50" : "z-20"} bg-gradient-to-t from-dls-surface via-dls-surface/95 to-transparent px-4 pb-[max(0.5rem,env(safe-area-inset-bottom))] max-lg:px-3 lg:px-8 ${props.compactTopSpacing ? "pt-0" : "pt-1"}`}
       style={{ contain: "layout style" }}
       onKeyDownCapture={handleKeyDownCapture}

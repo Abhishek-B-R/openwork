@@ -88,6 +88,16 @@ test(`ACT-WHOLE ${resolveEvalEngine()}: a person follows a whole conversation fr
     await user.press("Enter");
     await user.see({ text: world.followup });
     expect((await commands.read()).filter(request => /\/(?:abort|interrupt)$/.test(request.path))).toEqual([]);
+    await user.type("composer", "/", { replace: true, verify: true });
+    await probe.eventually(() => probe.dom('[data-composer-menu-open="true"]'), {
+      within: 5_000, label: "the child's command menu opens", until: value => value.elements.length === 1,
+    });
+    await user.press("Escape");
+    await user.see({ text: "Task from the main chat" });
+    expect((await probe.dom('[data-composer-menu-open="true"]')).elements).toHaveLength(0);
+    await user.press(process.platform === "darwin" ? "Meta+A" : "Control+A");
+    await user.press("Backspace");
+    expect((await probe.composer()).draftText).toBe("");
     await user.click({ role: "button", label: "Change model" });
     await user.press("Escape");
     await user.see({ text: "Task from the main chat" });
@@ -98,7 +108,7 @@ test(`ACT-WHOLE ${resolveEvalEngine()}: a person follows a whole conversation fr
     await user.press("Escape");
     await user.see({ text: world.answer }, { timeoutMs: 90_000 });
     await user.see("Run task");
-    evidence.recordAssertionEvidence("The correct child accepts a busy follow-up without interruption", "Answer opens the child's original brief and decision; the follow-up is visible with 0 aborts, Escape closes its model menu first, and return exposes the parent answer.", true);
+    evidence.recordAssertionEvidence("The correct child accepts a busy follow-up without interruption", "Answer opens the child's original brief and decision; the follow-up is visible with 0 aborts, Escape closes command and model menus first, and the next Escape returns to the parent answer.", true);
   });
   await step("finished tools fold while the answer and exact service result stay accessible", async () => {
     await user.click({ role: "button", label: /Worked for.*[1-9] steps.*Show steps/ });

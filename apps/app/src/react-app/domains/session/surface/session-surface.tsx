@@ -3048,7 +3048,7 @@ export function SessionSurface(props: SessionSurfaceProps) {
     const handler = (event: KeyboardEvent) => {
       if (event.defaultPrevented || event.isComposing) return;
       if (event.key !== "Escape" && !(event.metaKey && event.key === "[")) return;
-      if ([...document.querySelectorAll<HTMLElement>('[role="dialog"], [role="menu"], [role="listbox"]')]
+      if ([...document.querySelectorAll<HTMLElement>('[role="dialog"], [role="menu"], [role="listbox"], [data-composer-menu-open="true"]')]
         .some(element => element.getClientRects().length > 0 && !element.hasAttribute("data-closed")
           && element.getAttribute("data-state") !== "closed")) return;
       event.preventDefault();

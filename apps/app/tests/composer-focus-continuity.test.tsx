@@ -228,11 +228,12 @@ test.each([
   const container = document.createElement("div");
   document.body.append(container);
   const expectStarting = () => {
-    const indicators = container.querySelectorAll('[data-loading-message="starting"]');
+    const indicators = container.querySelectorAll('[data-current-step]');
     expect(indicators).toHaveLength(1);
-    expect(indicators[0]?.getAttribute("role")).toBe("status");
     expect(indicators[0]?.textContent).toBe("Starting…");
-    expect(container.querySelector('[data-loading-message="working"]')).toBeNull();
+    const working = container.querySelector('[data-working-line]');
+    expect(working?.getAttribute("role")).toBe("status");
+    expect(working?.textContent).toMatch(/^Working \d+s$/);
   };
   const expectSettled = () => {
     expect(container.querySelector('[data-loading-message="starting"]')).toBeNull();
@@ -1113,7 +1114,7 @@ test.each([
     await waitFor(() => container.textContent?.includes("Retrying test request") === true, "retry feedback during pending submission");
     expectSettled();
     await act(async () => queryClient.setQueryData(statusKey(workspaceId, sessionId), { type: "idle" }));
-    await waitFor(() => container.querySelector('[data-loading-message="starting"]') !== null, "pending feedback after observed idle");
+    await waitFor(() => container.querySelector('[data-current-step]')?.textContent === "Starting…", "pending feedback after observed idle");
 
     await act(async () => useComposerStateStore.getState().setDraft(sessionId, "A newer draft"));
     await act(async () => submission.reject(new Error("Submission unavailable")));
@@ -1641,7 +1642,7 @@ test.each([
           deferredMessageID: "existing-user-message",
         });
       });
-      await waitFor(() => container.querySelector('[data-loading-message="starting"]') !== null, `${outcome} admission feedback`);
+      await waitFor(() => container.querySelector('[data-current-step]')?.textContent === "Starting…", `${outcome} admission feedback`);
       expectStarting();
       if (outcome === "answered") {
         await act(async () => queryClient.setQueryData(transcriptKey(workspaceId, sessionId), [
