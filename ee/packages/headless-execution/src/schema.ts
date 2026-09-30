@@ -12,11 +12,11 @@ export const runInputSchema = z.object({
 export const runSchema = runInputSchema.extend({
   id: z.string(), actor: actorSchema,
   status: z.enum(["queued", "running", "succeeded", "failed", "cancelled", "blocked"]),
-  createdAt: z.string(), startedAt: z.string().nullable(), finishedAt: z.string().nullable(), result: z.string().nullable(),
+  createdAt: z.iso.datetime(), startedAt: z.iso.datetime().nullable(), finishedAt: z.iso.datetime().nullable(), result: z.string().nullable(),
   failure: z.object({ code: z.string(), message: z.string() }).nullable(),
   usage: z.object({ inputTokens: z.number(), outputTokens: z.number(), durationMs: z.number() }).nullable(),
 })
-export const eventSchema = z.object({ sequence: z.number(), runId: z.string(), createdAt: z.string(), kind: z.enum(["status", "activity", "result"]), text: z.string() })
+export const eventSchema = z.object({ sequence: z.number(), runId: z.string(), createdAt: z.iso.datetime(), kind: z.enum(["status", "activity", "result"]), text: z.string() })
 export const scheduleInputSchema = z.object({
   title: z.string().trim().min(1).max(120),
   prompt: z.string().trim().min(1).max(20000),
@@ -25,7 +25,7 @@ export const scheduleInputSchema = z.object({
   intervalMinutes: z.number().int().min(1).max(10080),
   nextRunAt: z.iso.datetime(),
 }).strict()
-export const scheduleSchema = scheduleInputSchema.extend({ id: z.string(), actor: actorSchema, paused: z.boolean(), createdAt: z.string() })
+export const scheduleSchema = scheduleInputSchema.extend({ id: z.string(), actor: actorSchema, paused: z.boolean(), createdAt: z.iso.datetime() })
 export type HeadlessSchedule = z.infer<typeof scheduleSchema>
 export class HeadlessError extends Error {
   constructor(public code: string, message: string, public status: 400 | 403 | 404 | 409 = 403) { super(message) }

@@ -6,6 +6,7 @@ import {
   Laptop,
   LayoutDashboard,
   LibraryBig,
+  MessageSquare,
   LockKeyhole,
   ScrollText,
   Plug,
@@ -88,6 +89,7 @@ export function buildDashboardNavSections({
   const workflowsEnabled = capabilities.workflows;
   const showWeb = runtimeConfigLoaded && capabilities.openworkWeb;
   const workItems: DashboardNavItem[] = [
+    ...(capabilities.headlessAutomation && capabilities.workbot ? [{href:"/workbot",label:"Workbot",icon:MessageSquare}] : []),
     {
       href: orgSlug ? getLibraryRoute(orgSlug) : "#",
       label: "My Library",
@@ -178,6 +180,7 @@ const PAGE_KEYWORDS: Record<string, string[]> = {
   Members: ["people", "users", "invite", "teams", "roles"],
   Models: ["llm", "provider", "byok", "api key"],
   "My Automations": ["schedule", "recurring", "tasks"],
+  Workbot: ["assistant", "chat", "headless", "scheduled work"],
   "My Library": ["skills", "plugins", "connections"],
   "OpenWork Models": ["llm", "provider", "managed", "inference"],
   "OpenWork Web": ["cloud", "sessions"],

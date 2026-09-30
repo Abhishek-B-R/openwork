@@ -2792,6 +2792,8 @@ export class DenClient extends HeyApiClient {
 
   /**
    * Read Workbot
+   *
+   * Read Workbot. Uses the signed-in Den member and organization. Requires the headless and surface flags; conversation reads return at most 100 runs and activity reads at most 200 events.
    */
   public getV1Workbot<ThrowOnError extends boolean = false>(options?: Options<never, ThrowOnError>) {
     return (options?.client ?? this.client).get<GetV1WorkbotResponses, GetV1WorkbotErrors, ThrowOnError>({
@@ -2802,6 +2804,8 @@ export class DenClient extends HeyApiClient {
 
   /**
    * Read assistant conversation
+   *
+   * Read assistant conversation. Uses the signed-in Den member and organization. Requires the headless and surface flags; conversation reads return at most 100 runs and activity reads at most 200 events.
    */
   public getV1HeadlessRuns<ThrowOnError extends boolean = false>(
     parameters: {
@@ -2830,6 +2834,8 @@ export class DenClient extends HeyApiClient {
 
   /**
    * Send assistant message
+   *
+   * Send assistant message. Uses the signed-in Den member and organization. Requires the headless and surface flags; conversation reads return at most 100 runs and activity reads at most 200 events.
    */
   public postV1HeadlessRuns<ThrowOnError extends boolean = false>(
     parameters: {
@@ -2874,6 +2880,8 @@ export class DenClient extends HeyApiClient {
 
   /**
    * Read assistant run
+   *
+   * Read assistant run. Uses the signed-in Den member and organization. Requires the headless and surface flags; conversation reads return at most 100 runs and activity reads at most 200 events.
    */
   public getV1HeadlessRunsById<ThrowOnError extends boolean = false>(
     parameters: {
@@ -2895,6 +2903,8 @@ export class DenClient extends HeyApiClient {
 
   /**
    * Read assistant activity
+   *
+   * Read assistant activity. Uses the signed-in Den member and organization. Requires the headless and surface flags; conversation reads return at most 100 runs and activity reads at most 200 events.
    */
   public getV1HeadlessRunsByIdEvents<ThrowOnError extends boolean = false>(
     parameters: {
@@ -2927,6 +2937,8 @@ export class DenClient extends HeyApiClient {
 
   /**
    * Stop assistant run
+   *
+   * Stop assistant run. Uses the signed-in Den member and organization. Requires the headless and surface flags; conversation reads return at most 100 runs and activity reads at most 200 events.
    */
   public postV1HeadlessRunsByIdCancel<ThrowOnError extends boolean = false>(
     parameters: {
@@ -2948,6 +2960,8 @@ export class DenClient extends HeyApiClient {
 
   /**
    * Schedule assistant work
+   *
+   * Schedule assistant work. Uses the signed-in Den member and organization. Requires the headless and surface flags; conversation reads return at most 100 runs and activity reads at most 200 events.
    */
   public postV1WorkbotSchedules<ThrowOnError extends boolean = false>(
     parameters: {
@@ -2989,6 +3003,8 @@ export class DenClient extends HeyApiClient {
 
   /**
    * Edit scheduled work
+   *
+   * Edit scheduled work. Uses the signed-in Den member and organization. Requires the headless and surface flags; conversation reads return at most 100 runs and activity reads at most 200 events.
    */
   public patchV1WorkbotSchedulesById<ThrowOnError extends boolean = false>(
     parameters: {
@@ -3034,6 +3050,8 @@ export class DenClient extends HeyApiClient {
 
   /**
    * Run scheduled work now
+   *
+   * Run scheduled work now. Uses the signed-in Den member and organization. Requires the headless and surface flags; conversation reads return at most 100 runs and activity reads at most 200 events.
    */
   public postV1WorkbotSchedulesByIdRun<ThrowOnError extends boolean = false>(
     parameters: {
@@ -3071,6 +3089,8 @@ export class DenClient extends HeyApiClient {
 
   /**
    * Read assistant file
+   *
+   * Read assistant file. Uses the signed-in Den member and organization. Requires the headless and surface flags; conversation reads return at most 100 runs and activity reads at most 200 events.
    */
   public getV1WorkbotFiles<ThrowOnError extends boolean = false>(
     parameters: {

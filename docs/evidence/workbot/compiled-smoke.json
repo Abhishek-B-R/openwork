@@ -1,0 +1,27 @@
+{
+  "api": "compiled Node production exports",
+  "worker": "compiled Node production exports",
+  "status": "succeeded",
+  "requestedTimeoutMs": 300000,
+  "usage": {
+    "inputTokens": 72,
+    "outputTokens": 48,
+    "durationMs": 1393
+  },
+  "result": "Saved and read memory.md. Read the connected witness. This is a deterministic model witness result.",
+  "files": [
+    "memory.md"
+  ],
+  "activity": [
+    "Queued",
+    "Working",
+    "Started the assistant",
+    "Saved memory.md",
+    "Read memory.md",
+    "Checked a team tool",
+    "Checked a team tool",
+    "Finished in 1 seconds",
+    "Saved and read memory.md. Read the connected witness. This is a deterministic model witness result."
+  ],
+  "model": "deterministic HTTP model witness"
+}

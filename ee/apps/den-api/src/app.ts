@@ -408,6 +408,7 @@ const openApiOptions: Parameters<typeof generateSpecs>[1] = {
       { name: "Workers", description: "Worker lifecycle, billing, and runtime routes." },
       { name: "Worker Runtime", description: "Worker runtime inspection and upgrade routes." },
       { name: "Worker Activity", description: "Worker heartbeat and activity reporting routes." },
+      { name: "Headless execution", description: "Member-scoped assistant conversations, durable runs, files and schedules." },
       { name: "Automations", description: "Scheduled Automations, their runs, and desktop runner presence." },
       { name: "Workflows", description: "Saved Workflows (Code Mode scripts), their versions, snapshots, and views." },
       { name: "Workflow Runs", description: "Durable Workflow run history." },

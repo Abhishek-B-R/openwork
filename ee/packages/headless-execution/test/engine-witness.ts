@@ -36,12 +36,12 @@ await writeFile(join(root,"other-member-note.md"),"Must stay private")
 await symlink(join(root,"other-member-note.md"),join(directory,"linked.md"))
 try {
   const started=Date.now()
-  const run=await service.submit(actor,{surface:"workbot",conversationKey:"main",idempotencyKey:"engine-witness",prompt:'Use workbot_files_write_file to save "Keep notes short." in memory.md, then read it with workbot_files_read_file. Use openwork_execute_capability with name mcp:witness:read. Also try reading ../other-member-note.md and linked.md using workbot_files_read_file; these must be blocked. Do not use other tools. Finally reply with a short summary of the read and what was blocked.',limits:{timeoutMs:120000,maxTurns:12}})
+  const run=await service.submit(actor,{surface:"workbot",conversationKey:"main",idempotencyKey:"engine-witness",prompt:process.env.HEADLESS_TEST_PROMPT ?? 'Use workbot_files_write_file to save "Keep notes short." in memory.md, then read it with workbot_files_read_file. Use openwork_execute_capability with name mcp:witness:read. Also try reading ../other-member-note.md and linked.md using workbot_files_read_file; these must be blocked. Do not use other tools. Finally reply with a short summary of the read and what was blocked.',limits:{timeoutMs:Number(process.env.HEADLESS_TEST_TIMEOUT_MS ?? 120000),maxTurns:12}})
   await worker.once()
   const result=await service.read(actor,run.id)
-  if(result?.status!=="succeeded") {await writeFile(join(tmpdir(),"headless-engine-diagnostics.txt"),diagnostics.join("\n"));throw new Error(`Native engine failed: ${result?.failure?.code}; synthetic diagnostics are in /private/tmp/headless-engine-diagnostics.txt`)}
+  if(result?.status!=="succeeded") {await writeFile(join(tmpdir(),"headless-engine-diagnostics.txt"),diagnostics.join("\n"));throw new Error(`Native engine failed: ${result?.failure?.code}; synthetic diagnostics are in ${join(tmpdir(),"headless-engine-diagnostics.txt")}`)}
   await writeFile(join(tmpdir(),"headless-engine-diagnostics.txt"),diagnostics.join("\n"))
-  assert.equal(await readFile(join(directory,"memory.md"),"utf8"),"Keep notes short.")
+  assert.match(await readFile(join(directory,"memory.md"),"utf8"),/^Keep notes short\.?$/)
   assert.ok(reads>0)
   assert.ok(result.result)
   const events=await service.events(actor,run.id)

@@ -1,5 +1,8 @@
 "use client";
 
+import { HeadlessReadActions } from "./headless-read-actions";
+import { DenSwitch } from "../app/(den)/_components/ui/switch";
+
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Copy, Pencil, Trash2 } from "lucide-react";
 import { denApiCredentials, denBrowserEndpoint } from "../app/(den)/_lib/den-api-origin";
@@ -132,6 +135,8 @@ type AdminOrganizationCapabilities = {
   auditLogs: boolean;
   orgManagedDashboards: boolean;
   appMcpServers: boolean;
+  headlessAutomation: boolean;
+  workbot: boolean;
   modelsAnalytics: boolean;
   installLinks: boolean;
   mcpConnections: boolean;
@@ -457,6 +462,8 @@ function parseAdminPayload(payload: unknown): AdminPayload | null {
             auditLogs: capabilities.auditLogs === true,
             orgManagedDashboards: capabilities.orgManagedDashboards === true,
             appMcpServers: capabilities.appMcpServers === true,
+            headlessAutomation: capabilities.headlessAutomation === true,
+            workbot: capabilities.workbot === true,
             modelsAnalytics: capabilities.modelsAnalytics === true,
             installLinks: capabilities.installLinks === true,
             mcpConnections: capabilities.mcpConnections === true
@@ -830,7 +837,7 @@ function buildFixtureOrganization(index: number): AdminOrganization {
     freeSeatCount: target ? 25 : DEFAULT_FREE_SEAT_COUNT,
     seatsFreeAdditional: target ? 20 : 0,
     billableSeatCount: target ? 103 : 0,
-    capabilities: { auditLogs: false, orgManagedDashboards: false, appMcpServers: false, installLinks: target, mcpConnections: target, modelsAnalytics: false },
+    capabilities: { auditLogs: false, orgManagedDashboards: false, appMcpServers: false, headlessAutomation: false, workbot: false, installLinks: target, mcpConnections: target, modelsAnalytics: false },
     openworkWebAccess: {
       hasAccess: target,
       accessSource: target ? "complimentary" : null,
@@ -2782,6 +2789,15 @@ export function DenAdminPanel() {
                         Apps built in OpenWork
                       </label>
                     </div>
+                    <div className="mt-3 divide-y divide-[var(--dls-border)]">
+                      {([{key:"headlessAutomation",label:"Headless automations"},{key:"workbot",label:"Workbot"}] satisfies Array<{key:"headlessAutomation"|"workbot";label:string}>).map(item => (
+                        <label key={item.key} className="flex min-h-10 items-center justify-between gap-4 text-sm">
+                          {item.label}
+                          <DenSwitch aria-label={item.label} testId={`admin-capability-${item.key}`} checked={org.capabilities[item.key]} disabled={savingCapabilityOrgId===org.id} onChange={checked=>void saveOrganizationCapability(org,item.key,checked)} />
+                        </label>
+                      ))}
+                    </div>
+                    <HeadlessReadActions organizationId={org.id} />
                     <label className="mt-3 inline-flex items-center gap-2 text-sm text-slate-700">
                       <input type="checkbox" checked={org.capabilities.modelsAnalytics} disabled={savingCapabilityOrgId === org.id}
                         onChange={(event) => void saveOrganizationCapability(org, "modelsAnalytics", event.target.checked)} />

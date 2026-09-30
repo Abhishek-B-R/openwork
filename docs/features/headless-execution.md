@@ -55,7 +55,15 @@ Requires Node 24 or later (built-in SQLite), pnpm, the ordinary Den MySQL/Redis
 setup and a verified native OpenCode v2 binary at `0.0.0-beta-19086`.
 Use the existing `apps/server/src/opencode-v2-binary.ts` installer to verify its
 published artifact, then point `DEN_HEADLESS_OPENCODE_BIN` at the returned path.
-The adapter rejects a different native version before inference.
+The adapter rejects a different native version before inference. From the repository
+root, this command installs the pinned binary and prints its absolute path:
+
+```sh
+pnpm --filter @openwork-ee/den-api exec tsx --eval 'import { installOpencodeV2Binary } from "../../../apps/server/src/opencode-v2-binary.ts"; installOpencodeV2Binary("/tmp/workbot-native", "0.0.0-beta-19086").then(console.log)'
+```
+
+Point `DEN_HEADLESS_OPENCODE_BIN` at that path; use a private durable cache path
+on the deployed host instead of `/tmp`.
 
 1. Install with `pnpm install --frozen-lockfile` and build Den dependencies with
    `pnpm --filter @openwork-ee/den-api build:workspace-dependencies`.
@@ -66,7 +74,11 @@ The adapter rejects a different native version before inference.
    `DEN_HEADLESS_DATA_DIR` (default `.headless-data` under each process cwd).
 4. Run `pnpm --filter @openwork-ee/den-api dev:headless`. Enable the two flags
    through platform-admin controls, connect a model and grant it to the member.
-5. Sign in and open `/workbot`. Ask it to save a preference to `memory.md`,
+5. For production, the existing `pnpm --filter @openwork-ee/den-api build`
+   includes the shared compiled runtime. Start the worker with
+   `node ee/apps/den-api/dist/headless/worker.js` from the repository root, using
+   the same environment as the API.
+6. Sign in and open `/workbot`. Ask it to save a preference to `memory.md`,
    read that file, and draft a note. Schedule work, edit it, pause/resume it,
    run it now, and inspect the returned draft and activity.
 
@@ -121,6 +133,11 @@ file on disk and an actual upstream MCP call rather than trusting generated
 text. Use `HEADLESS_TEST_LOCAL_MODEL=1 HEADLESS_TEST_MODEL=<model>
 OPENAI_BASE_URL=<local-openai-compatible-url>` for a genuine local model, or the
 normal `OPENAI_API_KEY` credential flow for genuine remote inference.
+`HEADLESS_TEST_TIMEOUT_MS` and `HEADLESS_TEST_PROMPT` allow a bounded focused
+acceptance prompt; the genuine local qwen3:4b run used 300 seconds and finished
+in 172.6 seconds. Workbot chat explicitly requests the supported 300-second bound; other
+requests and scheduled runs retain the 120-second default. The default turn
+limit is unchanged.
 
 External sends, browser takeover, arbitrary shell and native filesystem access
 are denied. Native Code Mode stays confined and nested tools still enforce

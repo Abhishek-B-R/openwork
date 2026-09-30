@@ -13,7 +13,7 @@ const listSchema=z.object({surface:surfaceSchema,conversationKey:z.string().min(
 const errorSchema=z.object({error:z.string(),message:z.string()})
 const stateSchema=z.object({enabled:z.boolean(),blockedReason:z.string().nullable(),runs:z.array(runSchema),schedules:z.array(scheduleSchema),files:z.array(z.string())})
 const headlessRoute=(options:DescribeRouteOptions & {"x-mcp":false})=>describeRoute(options)
-const route=(summary:string,schema:z.ZodType)=>headlessRoute({tags:["Headless execution"],summary,"x-mcp":false,responses:{200:jsonResponse(summary,schema),400:jsonResponse("Invalid request",errorSchema),403:jsonResponse("Assistant blocked",errorSchema),404:jsonResponse("Unavailable",errorSchema),409:jsonResponse("Request conflict",errorSchema)}})
+const route=(summary:string,schema:z.ZodType)=>headlessRoute({tags:["Headless execution"],summary,description:`${summary}. Uses the signed-in Den member and organization. Requires the headless and surface flags; conversation reads return at most 100 runs and activity reads at most 200 events.`,"x-mcp":false,responses:{200:jsonResponse(summary,schema),400:jsonResponse("Invalid request",errorSchema),403:jsonResponse("Assistant blocked",errorSchema),404:jsonResponse("Unavailable",errorSchema),409:jsonResponse("Request conflict",errorSchema)}})
 function actor(c:{get(name:"organizationContext"):OrganizationContextVariables["organizationContext"]}) {const context=c.get("organizationContext");return {organizationId:context.organization.id,memberId:context.currentMember.id}}
 async function respond<T>(operation:()=>Promise<T>) {
   try {return {ok:true,value:await operation()} satisfies {ok:true;value:T}}

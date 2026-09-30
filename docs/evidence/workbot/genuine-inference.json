@@ -1,0 +1,16 @@
+{
+  "engineVersion": "0.0.0-beta-19086",
+  "modelName": "qwen3:4b",
+  "engine": "OpenCode v2",
+  "model": "genuine inference",
+  "mcp": "synthetic read witness",
+  "durationMs": 172623,
+  "usage": {
+    "inputTokens": 891,
+    "outputTokens": 966,
+    "durationMs": 172618
+  },
+  "mcpReads": 1,
+  "persistentFiles": true,
+  "output": "Done"
+}

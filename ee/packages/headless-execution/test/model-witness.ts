@@ -24,7 +24,7 @@ export function modelWitness(port=0) {
     else if(lastName==="workbot_files_read_file" && lastCall?.function.arguments?.includes("../")) {tool="workbot_files_read_file";args={path:"linked.md"}}
     else {
       const content=typeof prompt==="string"?prompt:JSON.stringify(prompt)
-      text=content?.startsWith("Read my connected calendar")?JSON.stringify({events:[],blockedReason:"No live calendar is connected in this local prototype."}):"Saved and read memory.md. Read the connected witness. This is a deterministic model witness result."
+      text=content?.split("\n\nCurrent message:\n").at(-1)?.startsWith("Read my connected calendar")?JSON.stringify({events:[],blockedReason:"No live calendar is connected in this local prototype."}):"Saved and read memory.md. Read the connected witness. This is a deterministic model witness result."
     }
     if(!tool&&!text)text="Saved and read memory.md. This is a deterministic model witness result."
     const chunk={id:`chatcmpl-${requests}`,object:"chat.completion.chunk",created:Math.floor(Date.now()/1000),model:"witness",choices:[{index:0,delta:tool?{role:"assistant",tool_calls:[{index:0,id:`call-${requests}`,type:"function",function:{name:tool,arguments:JSON.stringify(args)}}]}:{role:"assistant",content:text},finish_reason:null}]}
