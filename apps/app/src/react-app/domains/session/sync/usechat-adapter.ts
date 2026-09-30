@@ -1,6 +1,7 @@
 /** @jsxImportSource react */
 import type { UIMessage } from "ai";
 import { projectedMessageMetadata, reasoningProviderMetadata, sessionNotice } from "../../../../lib/session-run";
+import { orderMessageParents } from "./message-merge";
 import type { FilePart, Part, TextPart, ToolPart } from "@opencode-ai/sdk/v2/client";
 
 import type { OpenworkSessionSnapshot } from "../../../../app/lib/openwork-server";
@@ -233,6 +234,7 @@ export function snapshotToUIMessages(snapshot: Pick<OpenworkSessionSnapshot, "me
     snapshotMessageCache.set(message, result);
     return result;
   });
-  snapshotMessagesCache.set(snapshot.messages, messages);
-  return messages;
+  const ordered = orderMessageParents(messages);
+  snapshotMessagesCache.set(snapshot.messages, ordered);
+  return ordered;
 }
