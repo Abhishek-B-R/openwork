@@ -191,7 +191,7 @@ export function MarketplaceDialog({ session, team, current, connect, onRepairCon
     const coworkers = FEATURED_COWORKERS.filter((featured) => matchesQuery(search, featured.name, featured.role, featured.tagline, featured.category));
     const apps = CONNECTORS.filter((entry) => matchesQuery(search, entry.name, entry.description, entry.category));
     body = (
-      <div className={`view-enter ${!showingApps && !search && coworkers.length ? "flex h-full flex-col" : ""}`}>
+      <div className="view-enter">
         {addError ? <p role="alert" className="mb-6 text-sm text-rose">{addError}</p> : null}
         {showingApps ? (
           <>
@@ -213,16 +213,16 @@ export function MarketplaceDialog({ session, team, current, connect, onRepairCon
             ) : <p className="py-16 text-center text-sm text-mist">No app matches “{search}”.</p>}
           </>
         ) : coworkers.length ? (
-          <div className={search ? "space-y-9" : "min-h-0 flex-1"}>
+          <div className={search ? "space-y-9" : undefined}>
             {(search ? FEATURED_CATEGORIES : [category]).map((shown) => {
               const inCategory = coworkers.filter((featured) => featured.category === shown);
               return inCategory.length ? (
-                <section key={shown} aria-label={shown} data-testid="marketplace-category" role={search ? undefined : "tabpanel"} id={search ? undefined : `${titleId}-category`} className={search ? undefined : "h-full"}>
+                <section key={shown} aria-label={shown} data-testid="marketplace-category" role={search ? undefined : "tabpanel"} id={search ? undefined : `${titleId}-category`}>
                   {search ? <h2 className="mb-3 text-sm font-medium text-snow">{shown}</h2> : null}
-                  {/* One category fills the window's height with tall character cards; search results stay compact. */}
-                  <div className={`grid gap-2.5 [grid-template-columns:repeat(auto-fill,minmax(150px,1fr))] sm:gap-3 sm:[grid-template-columns:repeat(auto-fill,minmax(190px,1fr))] ${search ? "" : "h-full auto-rows-[minmax(260px,1fr)]"}`}>
+                  {/* Cards fit their content; extra dialog height stays below the gallery. */}
+                  <div className="grid gap-2.5 [grid-template-columns:repeat(auto-fill,minmax(150px,1fr))] sm:gap-3 sm:[grid-template-columns:repeat(auto-fill,minmax(190px,1fr))]">
                     {inCategory.map((featured) => (
-                      <CoworkerCard key={featured.id} featured={featured} tall={!search} action={addButton(featured)}
+                      <CoworkerCard key={featured.id} featured={featured} showRoutines={!search} action={addButton(featured)}
                         apps={appsOn ? featured.integrations.map((id) => connectorById(id)).filter((entry): entry is MarketplaceConnector => Boolean(entry)) : []}
                         onOpen={() => open({ kind: "coworker", id: featured.id })} />
                     ))}
@@ -309,29 +309,29 @@ export function MarketplaceDialog({ session, team, current, connect, onRepairCon
  * on a backdrop of its own color, then its name, role and one line, the apps
  * it works with when Apps & tools is on, and Add or Open. The card opens its page.
  */
-function CoworkerCard({ featured, action, apps, onOpen, tall = false }: { featured: FeaturedCoworker; action: ReactNode; apps: MarketplaceConnector[]; onOpen: () => void; tall?: boolean }) {
+function CoworkerCard({ featured, action, apps, onOpen, showRoutines = false }: { featured: FeaturedCoworker; action: ReactNode; apps: MarketplaceConnector[]; onOpen: () => void; showRoutines?: boolean }) {
   const identity = `marketplace:${featured.id}`;
   return (
     <article data-testid="marketplace-coworker" data-id={featured.id} onPointerEnter={() => acknowledgeCoworker(identity)}
       className="group relative flex flex-col overflow-hidden rounded-xl border border-line bg-white/[0.015] transition-colors hover:border-white/15">
       <button type="button" onClick={onOpen} aria-label={`Meet ${featured.name}`} className="absolute inset-0 z-0 rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-spark/60" />
-      <span className={`pointer-events-none relative flex items-center justify-center ${tall ? "min-h-24 flex-1" : "h-24"}`} style={{ background: `color-mix(in srgb, ${avatarFill(featured.avatarColor)} 12%, transparent)` }} data-testid="marketplace-coworker-stage">
-        <CoworkerAvatar identity={identity} name={featured.name} color={featured.avatarColor} glasses={featured.avatarGlasses} size={tall ? 84 : 60} motion="playful" temperament={featured.personality} />
+      <span className={`pointer-events-none relative flex shrink-0 items-center justify-center ${showRoutines ? "h-28" : "h-24"}`} style={{ background: `color-mix(in srgb, ${avatarFill(featured.avatarColor)} 12%, transparent)` }} data-testid="marketplace-coworker-stage">
+        <CoworkerAvatar identity={identity} name={featured.name} color={featured.avatarColor} glasses={featured.avatarGlasses} size={showRoutines ? 72 : 60} motion="playful" temperament={featured.personality} />
       </span>
-      {/* Tall cards share one text height, so faces and edges line up across the row. */}
-      <span className={`pointer-events-none relative flex flex-col p-3.5 ${tall ? "" : "flex-1"}`}>
-        <span className={`flex min-w-0 items-baseline gap-x-2 ${tall ? "flex-nowrap" : "flex-wrap"}`}>
+      {/* The footer aligns across each row without stretching the avatar backdrop. */}
+      <span className="pointer-events-none relative flex flex-1 flex-col p-3.5">
+        <span className={`flex min-w-0 items-baseline gap-x-2 ${showRoutines ? "flex-nowrap" : "flex-wrap"}`}>
           <span className="shrink-0 text-[15px] font-medium text-snow">{featured.name}</span>
           <span className="min-w-0 truncate text-xs text-mist">{featured.role}</span>
         </span>
-        <span className={`mt-1 line-clamp-2 text-[13px] leading-snug text-mist ${tall ? "min-h-[2lh]" : ""}`}>{featured.tagline}</span>
-        {tall && !featured.routines.length ? (
+        <span className={`mt-1 line-clamp-2 text-[13px] leading-snug text-mist ${showRoutines ? "min-h-[2lh]" : ""}`}>{featured.tagline}</span>
+        {showRoutines && !featured.routines.length ? (
           <span className="mt-3 flex min-h-[68px] items-start gap-1.5 text-xs text-mist">
             <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.25" strokeLinejoin="round" className="mt-0.5 size-3 shrink-0" aria-hidden="true"><path d="M2.75 4.25A1.5 1.5 0 0 1 4.25 2.75h7.5a1.5 1.5 0 0 1 1.5 1.5v5a1.5 1.5 0 0 1-1.5 1.5H7l-3 2.5v-2.5h.25a1.5 1.5 0 0 1-1.5-1.5v-5Z" /></svg>
             Works when you ask
           </span>
         ) : null}
-        {tall && featured.routines.length ? (
+        {showRoutines && featured.routines.length ? (
           <span className="mt-3 block min-h-[68px] space-y-1" data-testid="marketplace-coworker-routines">
             {featured.routines.slice(0, 2).map((routine) => (
               <span key={routine.name} className="flex min-w-0 items-start gap-1.5 text-xs text-mist">
