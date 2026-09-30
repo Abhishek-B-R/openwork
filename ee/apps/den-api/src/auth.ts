@@ -1218,7 +1218,15 @@ export const auth = betterAuth({
           if ("plan" in metadata) {
             throw new APIError("FORBIDDEN", { message: "plan is reserved for internal platform administration." });
           }
+          if ("headlessReadCapabilities" in metadata) {
+            throw new APIError("FORBIDDEN", { message: "headlessReadCapabilities is reserved for internal platform administration." });
+          }
           const capabilities = metadata.capabilities;
+          for (const key of ["headlessAutomation", "workbot"]) {
+            if (capabilities && typeof capabilities === "object" && key in capabilities) {
+              throw new APIError("FORBIDDEN", { message: `capabilities.${key} is reserved for internal platform administration.` });
+            }
+          }
           if (capabilities && typeof capabilities === "object" && "auditLogs" in capabilities) {
             throw new APIError("FORBIDDEN", { message: "capabilities.auditLogs is reserved for internal platform administration." });
           }

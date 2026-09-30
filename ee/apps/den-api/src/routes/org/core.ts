@@ -21,7 +21,7 @@ import { jsonValidator, orgMemberRoute, orgRoleRoute, publicRoute, queryValidato
 import { denTypeIdSchema, enterprisePlanRequiredSchema, forbiddenSchema, invalidRequestSchema, jsonResponse, notFoundSchema, unauthorizedSchema } from "../../openapi.js"
 import { validateInvitationAcceptVerification } from "../../organization-join-verification.js"
 import { normalizeOrganizationMetadata } from "../../organization-limits.js"
-import { organizationHasCapability, organizationManagedDashboardsEnabled } from "../../organization-capabilities.js"
+import { normalizeOrganizationCapabilities, organizationHasCapability, organizationManagedDashboardsEnabled } from "../../organization-capabilities.js"
 import { appMcpServersEnabled } from "../../mcp-app-rollout.js"
 import { isOpenWorkWebAvailableForOrganization } from "../../openwork-web-availability.js"
 import { getOpenWorkWebAccess } from "../../stripe-billing.js"
@@ -175,6 +175,8 @@ const organizationContextResponseSchema = z.object({
   currentMemberTeams: z.array(z.object({}).passthrough()),
   capabilities: z.object({
     auditLogs: z.boolean(),
+    headlessAutomation: z.boolean(),
+    workbot: z.boolean(),
     gatewayDashboard: z.literal(true).meta({
       deprecated: true,
       description: "Compatibility field, always true. AI Gateway is available to every organization; deployment configuration and authorization still apply.",
@@ -737,6 +739,8 @@ export function registerOrgCoreRoutes<T extends { Variables: OrgRouteVariables }
           // Building your own Apps is per-organization and default-off:
           // platform admins enable metadata.capabilities.appMcpServers in /admin.
           appMcpServers: appMcpServersEnabled(payload.organization.metadata),
+          headlessAutomation: normalizeOrganizationCapabilities(payload.organization.metadata).headlessAutomation,
+          workbot: normalizeOrganizationCapabilities(payload.organization.metadata).workbot,
           // Workflows/Code Mode are enabled for every organization; the field
           // remains for published clients that still read it.
           workflows: true,

@@ -297,6 +297,12 @@ import type {
   GetV1GatewayUsageLimitsMembersErrors,
   GetV1GatewayUsageLimitsMembersResponses,
   GetV1GatewayUsageLimitsMeResponses,
+  GetV1HeadlessRunsByIdErrors,
+  GetV1HeadlessRunsByIdEventsErrors,
+  GetV1HeadlessRunsByIdEventsResponses,
+  GetV1HeadlessRunsByIdResponses,
+  GetV1HeadlessRunsErrors,
+  GetV1HeadlessRunsResponses,
   GetV1InferenceAnalyticsActivityResponses,
   GetV1InferenceAnalyticsConsumptionResponses,
   GetV1InferenceAnalyticsSettingsResponses,
@@ -453,6 +459,10 @@ import type {
   GetV1TelemetryAnalyticsResponses,
   GetV1TelemetryDimensionsErrors,
   GetV1TelemetryDimensionsResponses,
+  GetV1WorkbotErrors,
+  GetV1WorkbotFilesErrors,
+  GetV1WorkbotFilesResponses,
+  GetV1WorkbotResponses,
   GetV1WorkersByIdErrors,
   GetV1WorkersByIdResponses,
   GetV1WorkersByIdRuntimeErrors,
@@ -562,6 +572,8 @@ import type {
   PatchV1SkillHubsBySkillHubIdErrors,
   PatchV1TeamsByTeamIdErrors,
   PatchV1TeamsByTeamIdResponses,
+  PatchV1WorkbotSchedulesByIdErrors,
+  PatchV1WorkbotSchedulesByIdResponses,
   PatchV1WorkersByIdErrors,
   PatchV1WorkersByIdResponses,
   PostApiAuthOauth2RegisterErrors,
@@ -690,6 +702,10 @@ import type {
   PostV1GatewayUsageLimitResetRequestsByIdDenyResponses,
   PostV1GatewayUsageLimitResetRequestsErrors,
   PostV1GatewayUsageLimitResetRequestsResponses,
+  PostV1HeadlessRunsByIdCancelErrors,
+  PostV1HeadlessRunsByIdCancelResponses,
+  PostV1HeadlessRunsErrors,
+  PostV1HeadlessRunsResponses,
   PostV1InferenceAnalyticsEventsErrors,
   PostV1InferenceAnalyticsEventsResponses,
   PostV1InferenceAnalyticsLangfuseConnectErrors,
@@ -820,6 +836,10 @@ import type {
   PostV1TelemetryIngestResponses,
   PostV1WebhooksConnectorsGithubErrors,
   PostV1WebhooksConnectorsGithubResponses,
+  PostV1WorkbotSchedulesByIdRunErrors,
+  PostV1WorkbotSchedulesByIdRunResponses,
+  PostV1WorkbotSchedulesErrors,
+  PostV1WorkbotSchedulesResponses,
   PostV1WorkersByIdActivityHeartbeatErrors,
   PostV1WorkersByIdActivityHeartbeatResponses,
   PostV1WorkersByIdRuntimeUpgradeErrors,
@@ -1218,7 +1238,7 @@ export class DenClient extends HeyApiClient {
   /**
    * Set an organization's capability overrides
    *
-   * Enables, disables or clears (null) the install-links, MCP-connections, Models analytics, auditLogs, orgManagedDashboards and appMcpServers overrides. Audit logs, org-managed Dashboards and appMcpServers (building your own Apps as MCP servers) require literal true (absent/false is disabled); this flag neither grants capture entitlement nor initializes capacity or changes capture preferences. The deprecated gatewayDashboard boolean or null input is validated but ignored and never persisted; its response field is always true. Stale retired overrides are removed on capability writes.
+   * Enables, disables or clears (null) the install-links, MCP-connections, Models analytics, auditLogs, orgManagedDashboards appMcpServers, headlessAutomation and workbot overrides. Headless execution and Workbot are default-off and independent of Web subscriptions. Audit logs, org-managed Dashboards and appMcpServers (building your own Apps as MCP servers) require literal true (absent/false is disabled); this flag neither grants capture entitlement nor initializes capacity or changes capture preferences. The deprecated gatewayDashboard boolean or null input is validated but ignored and never persisted; its response field is always true. Stale retired overrides are removed on capability writes.
    */
   public putV1AdminOrganizationsByOrganizationIdCapabilities<ThrowOnError extends boolean = false>(
     parameters: {
@@ -2768,6 +2788,302 @@ export class DenClient extends HeyApiClient {
         ...params,
       },
     );
+  }
+
+  /**
+   * Read Workbot
+   */
+  public getV1Workbot<ThrowOnError extends boolean = false>(options?: Options<never, ThrowOnError>) {
+    return (options?.client ?? this.client).get<GetV1WorkbotResponses, GetV1WorkbotErrors, ThrowOnError>({
+      url: "/v1/workbot",
+      ...options,
+    });
+  }
+
+  /**
+   * Read assistant conversation
+   */
+  public getV1HeadlessRuns<ThrowOnError extends boolean = false>(
+    parameters: {
+      surface: "workbot" | "slack";
+      conversationKey: string;
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "surface" },
+            { in: "query", key: "conversationKey" },
+          ],
+        },
+      ],
+    );
+    return (options?.client ?? this.client).get<GetV1HeadlessRunsResponses, GetV1HeadlessRunsErrors, ThrowOnError>({
+      url: "/v1/headless/runs",
+      ...options,
+      ...params,
+    });
+  }
+
+  /**
+   * Send assistant message
+   */
+  public postV1HeadlessRuns<ThrowOnError extends boolean = false>(
+    parameters: {
+      surface: "workbot" | "slack";
+      conversationKey: string;
+      idempotencyKey: string;
+      prompt: string;
+      limits?: {
+        timeoutMs?: number;
+        maxTurns?: number;
+      };
+      scheduleId?: string;
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "body", key: "surface" },
+            { in: "body", key: "conversationKey" },
+            { in: "body", key: "idempotencyKey" },
+            { in: "body", key: "prompt" },
+            { in: "body", key: "limits" },
+            { in: "body", key: "scheduleId" },
+          ],
+        },
+      ],
+    );
+    return (options?.client ?? this.client).post<PostV1HeadlessRunsResponses, PostV1HeadlessRunsErrors, ThrowOnError>({
+      url: "/v1/headless/runs",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    });
+  }
+
+  /**
+   * Read assistant run
+   */
+  public getV1HeadlessRunsById<ThrowOnError extends boolean = false>(
+    parameters: {
+      id: string;
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "path", key: "id" }] }]);
+    return (options?.client ?? this.client).get<
+      GetV1HeadlessRunsByIdResponses,
+      GetV1HeadlessRunsByIdErrors,
+      ThrowOnError
+    >({
+      url: "/v1/headless/runs/{id}",
+      ...options,
+      ...params,
+    });
+  }
+
+  /**
+   * Read assistant activity
+   */
+  public getV1HeadlessRunsByIdEvents<ThrowOnError extends boolean = false>(
+    parameters: {
+      id: string;
+      after?: number;
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "id" },
+            { in: "query", key: "after" },
+          ],
+        },
+      ],
+    );
+    return (options?.client ?? this.client).get<
+      GetV1HeadlessRunsByIdEventsResponses,
+      GetV1HeadlessRunsByIdEventsErrors,
+      ThrowOnError
+    >({
+      url: "/v1/headless/runs/{id}/events",
+      ...options,
+      ...params,
+    });
+  }
+
+  /**
+   * Stop assistant run
+   */
+  public postV1HeadlessRunsByIdCancel<ThrowOnError extends boolean = false>(
+    parameters: {
+      id: string;
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "path", key: "id" }] }]);
+    return (options?.client ?? this.client).post<
+      PostV1HeadlessRunsByIdCancelResponses,
+      PostV1HeadlessRunsByIdCancelErrors,
+      ThrowOnError
+    >({
+      url: "/v1/headless/runs/{id}/cancel",
+      ...options,
+      ...params,
+    });
+  }
+
+  /**
+   * Schedule assistant work
+   */
+  public postV1WorkbotSchedules<ThrowOnError extends boolean = false>(
+    parameters: {
+      title: string;
+      prompt: string;
+      intervalMinutes: number;
+      nextRunAt: string;
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "body", key: "title" },
+            { in: "body", key: "prompt" },
+            { in: "body", key: "intervalMinutes" },
+            { in: "body", key: "nextRunAt" },
+          ],
+        },
+      ],
+    );
+    return (options?.client ?? this.client).post<
+      PostV1WorkbotSchedulesResponses,
+      PostV1WorkbotSchedulesErrors,
+      ThrowOnError
+    >({
+      url: "/v1/workbot/schedules",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    });
+  }
+
+  /**
+   * Edit scheduled work
+   */
+  public patchV1WorkbotSchedulesById<ThrowOnError extends boolean = false>(
+    parameters: {
+      id: string;
+      title?: string;
+      prompt?: string;
+      intervalMinutes?: number;
+      nextRunAt?: string;
+      paused?: boolean;
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "id" },
+            { in: "body", key: "title" },
+            { in: "body", key: "prompt" },
+            { in: "body", key: "intervalMinutes" },
+            { in: "body", key: "nextRunAt" },
+            { in: "body", key: "paused" },
+          ],
+        },
+      ],
+    );
+    return (options?.client ?? this.client).patch<
+      PatchV1WorkbotSchedulesByIdResponses,
+      PatchV1WorkbotSchedulesByIdErrors,
+      ThrowOnError
+    >({
+      url: "/v1/workbot/schedules/{id}",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    });
+  }
+
+  /**
+   * Run scheduled work now
+   */
+  public postV1WorkbotSchedulesByIdRun<ThrowOnError extends boolean = false>(
+    parameters: {
+      id: string;
+      idempotencyKey: string;
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "id" },
+            { in: "body", key: "idempotencyKey" },
+          ],
+        },
+      ],
+    );
+    return (options?.client ?? this.client).post<
+      PostV1WorkbotSchedulesByIdRunResponses,
+      PostV1WorkbotSchedulesByIdRunErrors,
+      ThrowOnError
+    >({
+      url: "/v1/workbot/schedules/{id}/run",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    });
+  }
+
+  /**
+   * Read assistant file
+   */
+  public getV1WorkbotFiles<ThrowOnError extends boolean = false>(
+    parameters: {
+      path: string;
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "query", key: "path" }] }]);
+    return (options?.client ?? this.client).get<GetV1WorkbotFilesResponses, GetV1WorkbotFilesErrors, ThrowOnError>({
+      url: "/v1/workbot/files",
+      ...options,
+      ...params,
+    });
   }
 
   /**

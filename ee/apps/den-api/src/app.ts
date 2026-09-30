@@ -29,6 +29,7 @@ import { registerDeprecatedMemoryRoutes } from "./routes/deprecated-memory.js"
 import { registerDeprecatedSkillHubRoutes } from "./routes/deprecated-skill-hubs.js"
 import { registerDevRoutes } from "./routes/dev/index.js"
 import { registerMcpTokenRoutes } from "./routes/mcp/index.js"
+import { registerHeadlessRoutes } from "./headless/routes.js"
 import { registerAutomationRoutes } from "./routes/automations/index.js"
 import { configureCloudAgentExecutor, configureCloudWorkflowExecutor } from "./automations/service.js"
 import { cloudAgentRuntimeAvailable, executeCloudAgent } from "./automations/cloud-agent-executor.js"
@@ -274,6 +275,7 @@ registerDeprecatedSkillHubRoutes(app)
 registerDevRoutes(app)
 registerMeRoutes(app)
 registerAutomationRoutes(app, { enabled: env.automations.runtimeEnabled })
+registerHeadlessRoutes(app)
 registerOrgRoutes(app)
 registerVersionRoutes(app)
 registerWebhookRoutes(app)

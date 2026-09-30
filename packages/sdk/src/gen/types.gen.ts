@@ -76,6 +76,8 @@ export type AdminOrganizationsPageResponse = {
       auditLogs: boolean;
       orgManagedDashboards: boolean;
       appMcpServers: boolean;
+      headlessAutomation: boolean;
+      workbot: boolean;
       /**
        * Compatibility field, always true. AI Gateway is available to every organization; deployment configuration and authorization still apply.
        *
@@ -151,6 +153,8 @@ export type AdminOverviewResponse = {
       auditLogs: boolean;
       orgManagedDashboards: boolean;
       appMcpServers: boolean;
+      headlessAutomation: boolean;
+      workbot: boolean;
       /**
        * Compatibility field, always true. AI Gateway is available to every organization; deployment configuration and authorization still apply.
        *
@@ -691,6 +695,8 @@ export type OrganizationContextResponse = {
   }>;
   capabilities: {
     auditLogs: boolean;
+    headlessAutomation: boolean;
+    workbot: boolean;
     /**
      * Compatibility field, always true. AI Gateway is available to every organization; deployment configuration and authorization still apply.
      *
@@ -1289,7 +1295,9 @@ export type CapabilityDisabledError = {
     | "modelsAnalytics"
     | "auditLogs"
     | "orgManagedDashboards"
-    | "appMcpServers";
+    | "appMcpServers"
+    | "headlessAutomation"
+    | "workbot";
 };
 
 export type CreateInstallLinkRequest = {
@@ -5157,6 +5165,8 @@ export type GetV1AdminOrganizationsByOrganizationIdCapabilitiesResponses = {
       auditLogs: boolean;
       orgManagedDashboards: boolean;
       appMcpServers: boolean;
+      headlessAutomation: boolean;
+      workbot: boolean;
       /**
        * Compatibility field, always true. AI Gateway is available to every organization; deployment configuration and authorization still apply.
        *
@@ -5164,6 +5174,7 @@ export type GetV1AdminOrganizationsByOrganizationIdCapabilitiesResponses = {
        */
       gatewayDashboard: true;
     };
+    headlessReadCapabilities: Array<string>;
   };
 };
 
@@ -5220,6 +5231,8 @@ export type PutV1AdminOrganizationsByOrganizationIdCapabilitiesResponses = {
       auditLogs: boolean;
       orgManagedDashboards: boolean;
       appMcpServers: boolean;
+      headlessAutomation: boolean;
+      workbot: boolean;
       /**
        * Compatibility field, always true. AI Gateway is available to every organization; deployment configuration and authorization still apply.
        *
@@ -7357,6 +7370,791 @@ export type CancelAutomationRunResponses = {
 };
 
 export type CancelAutomationRunResponse = CancelAutomationRunResponses[keyof CancelAutomationRunResponses];
+
+export type GetV1WorkbotData = {
+  body?: never;
+  path?: never;
+  query?: never;
+  url: "/v1/workbot";
+};
+
+export type GetV1WorkbotErrors = {
+  /**
+   * Invalid request
+   */
+  400: {
+    error: string;
+    message: string;
+  };
+  /**
+   * Assistant blocked
+   */
+  403: {
+    error: string;
+    message: string;
+  };
+  /**
+   * Unavailable
+   */
+  404: {
+    error: string;
+    message: string;
+  };
+  /**
+   * Request conflict
+   */
+  409: {
+    error: string;
+    message: string;
+  };
+};
+
+export type GetV1WorkbotError = GetV1WorkbotErrors[keyof GetV1WorkbotErrors];
+
+export type GetV1WorkbotResponses = {
+  /**
+   * Read Workbot
+   */
+  200: {
+    enabled: boolean;
+    blockedReason: string | null;
+    runs: Array<{
+      surface: "workbot" | "slack";
+      conversationKey: string;
+      idempotencyKey: string;
+      prompt: string;
+      limits?: {
+        timeoutMs?: number;
+        maxTurns?: number;
+      };
+      scheduleId?: string;
+      id: string;
+      actor: {
+        organizationId: string;
+        memberId: string;
+      };
+      status: "queued" | "running" | "succeeded" | "failed" | "cancelled" | "blocked";
+      createdAt: string;
+      startedAt: string | null;
+      finishedAt: string | null;
+      result: string | null;
+      failure: {
+        code: string;
+        message: string;
+      } | null;
+      usage: {
+        inputTokens: number;
+        outputTokens: number;
+        durationMs: number;
+      } | null;
+    }>;
+    schedules: Array<{
+      title: string;
+      prompt: string;
+      surface: "workbot" | "slack";
+      conversationKey: string;
+      intervalMinutes: number;
+      nextRunAt: string;
+      id: string;
+      actor: {
+        organizationId: string;
+        memberId: string;
+      };
+      paused: boolean;
+      createdAt: string;
+    }>;
+    files: Array<string>;
+  };
+};
+
+export type GetV1WorkbotResponse = GetV1WorkbotResponses[keyof GetV1WorkbotResponses];
+
+export type GetV1HeadlessRunsData = {
+  body?: never;
+  path?: never;
+  query: {
+    surface: "workbot" | "slack";
+    conversationKey: string;
+  };
+  url: "/v1/headless/runs";
+};
+
+export type GetV1HeadlessRunsErrors = {
+  /**
+   * Invalid request
+   */
+  400: {
+    error: string;
+    message: string;
+  };
+  /**
+   * Assistant blocked
+   */
+  403: {
+    error: string;
+    message: string;
+  };
+  /**
+   * Unavailable
+   */
+  404: {
+    error: string;
+    message: string;
+  };
+  /**
+   * Request conflict
+   */
+  409: {
+    error: string;
+    message: string;
+  };
+};
+
+export type GetV1HeadlessRunsError = GetV1HeadlessRunsErrors[keyof GetV1HeadlessRunsErrors];
+
+export type GetV1HeadlessRunsResponses = {
+  /**
+   * Read assistant conversation
+   */
+  200: {
+    runs: Array<{
+      surface: "workbot" | "slack";
+      conversationKey: string;
+      idempotencyKey: string;
+      prompt: string;
+      limits?: {
+        timeoutMs?: number;
+        maxTurns?: number;
+      };
+      scheduleId?: string;
+      id: string;
+      actor: {
+        organizationId: string;
+        memberId: string;
+      };
+      status: "queued" | "running" | "succeeded" | "failed" | "cancelled" | "blocked";
+      createdAt: string;
+      startedAt: string | null;
+      finishedAt: string | null;
+      result: string | null;
+      failure: {
+        code: string;
+        message: string;
+      } | null;
+      usage: {
+        inputTokens: number;
+        outputTokens: number;
+        durationMs: number;
+      } | null;
+    }>;
+  };
+};
+
+export type GetV1HeadlessRunsResponse = GetV1HeadlessRunsResponses[keyof GetV1HeadlessRunsResponses];
+
+export type PostV1HeadlessRunsData = {
+  body: {
+    surface: "workbot" | "slack";
+    conversationKey: string;
+    idempotencyKey: string;
+    prompt: string;
+    limits?: {
+      timeoutMs?: number;
+      maxTurns?: number;
+    };
+    scheduleId?: string;
+  };
+  path?: never;
+  query?: never;
+  url: "/v1/headless/runs";
+};
+
+export type PostV1HeadlessRunsErrors = {
+  /**
+   * Invalid request
+   */
+  400: {
+    error: string;
+    message: string;
+  };
+  /**
+   * Assistant blocked
+   */
+  403: {
+    error: string;
+    message: string;
+  };
+  /**
+   * Unavailable
+   */
+  404: {
+    error: string;
+    message: string;
+  };
+  /**
+   * Request conflict
+   */
+  409: {
+    error: string;
+    message: string;
+  };
+};
+
+export type PostV1HeadlessRunsError = PostV1HeadlessRunsErrors[keyof PostV1HeadlessRunsErrors];
+
+export type PostV1HeadlessRunsResponses = {
+  /**
+   * Send assistant message
+   */
+  200: {
+    run: {
+      surface: "workbot" | "slack";
+      conversationKey: string;
+      idempotencyKey: string;
+      prompt: string;
+      limits?: {
+        timeoutMs?: number;
+        maxTurns?: number;
+      };
+      scheduleId?: string;
+      id: string;
+      actor: {
+        organizationId: string;
+        memberId: string;
+      };
+      status: "queued" | "running" | "succeeded" | "failed" | "cancelled" | "blocked";
+      createdAt: string;
+      startedAt: string | null;
+      finishedAt: string | null;
+      result: string | null;
+      failure: {
+        code: string;
+        message: string;
+      } | null;
+      usage: {
+        inputTokens: number;
+        outputTokens: number;
+        durationMs: number;
+      } | null;
+    };
+  };
+};
+
+export type PostV1HeadlessRunsResponse = PostV1HeadlessRunsResponses[keyof PostV1HeadlessRunsResponses];
+
+export type GetV1HeadlessRunsByIdData = {
+  body?: never;
+  path: {
+    id: string;
+  };
+  query?: never;
+  url: "/v1/headless/runs/{id}";
+};
+
+export type GetV1HeadlessRunsByIdErrors = {
+  /**
+   * Invalid request
+   */
+  400: {
+    error: string;
+    message: string;
+  };
+  /**
+   * Assistant blocked
+   */
+  403: {
+    error: string;
+    message: string;
+  };
+  /**
+   * Unavailable
+   */
+  404: {
+    error: string;
+    message: string;
+  };
+  /**
+   * Request conflict
+   */
+  409: {
+    error: string;
+    message: string;
+  };
+};
+
+export type GetV1HeadlessRunsByIdError = GetV1HeadlessRunsByIdErrors[keyof GetV1HeadlessRunsByIdErrors];
+
+export type GetV1HeadlessRunsByIdResponses = {
+  /**
+   * Read assistant run
+   */
+  200: {
+    run: {
+      surface: "workbot" | "slack";
+      conversationKey: string;
+      idempotencyKey: string;
+      prompt: string;
+      limits?: {
+        timeoutMs?: number;
+        maxTurns?: number;
+      };
+      scheduleId?: string;
+      id: string;
+      actor: {
+        organizationId: string;
+        memberId: string;
+      };
+      status: "queued" | "running" | "succeeded" | "failed" | "cancelled" | "blocked";
+      createdAt: string;
+      startedAt: string | null;
+      finishedAt: string | null;
+      result: string | null;
+      failure: {
+        code: string;
+        message: string;
+      } | null;
+      usage: {
+        inputTokens: number;
+        outputTokens: number;
+        durationMs: number;
+      } | null;
+    } | null;
+  };
+};
+
+export type GetV1HeadlessRunsByIdResponse = GetV1HeadlessRunsByIdResponses[keyof GetV1HeadlessRunsByIdResponses];
+
+export type GetV1HeadlessRunsByIdEventsData = {
+  body?: never;
+  path: {
+    id: string;
+  };
+  query?: {
+    after?: number;
+  };
+  url: "/v1/headless/runs/{id}/events";
+};
+
+export type GetV1HeadlessRunsByIdEventsErrors = {
+  /**
+   * Invalid request
+   */
+  400: {
+    error: string;
+    message: string;
+  };
+  /**
+   * Assistant blocked
+   */
+  403: {
+    error: string;
+    message: string;
+  };
+  /**
+   * Unavailable
+   */
+  404: {
+    error: string;
+    message: string;
+  };
+  /**
+   * Request conflict
+   */
+  409: {
+    error: string;
+    message: string;
+  };
+};
+
+export type GetV1HeadlessRunsByIdEventsError =
+  GetV1HeadlessRunsByIdEventsErrors[keyof GetV1HeadlessRunsByIdEventsErrors];
+
+export type GetV1HeadlessRunsByIdEventsResponses = {
+  /**
+   * Read assistant activity
+   */
+  200: {
+    events: Array<{
+      sequence: number;
+      runId: string;
+      createdAt: string;
+      kind: "status" | "activity" | "result";
+      text: string;
+    }>;
+  };
+};
+
+export type GetV1HeadlessRunsByIdEventsResponse =
+  GetV1HeadlessRunsByIdEventsResponses[keyof GetV1HeadlessRunsByIdEventsResponses];
+
+export type PostV1HeadlessRunsByIdCancelData = {
+  body?: never;
+  path: {
+    id: string;
+  };
+  query?: never;
+  url: "/v1/headless/runs/{id}/cancel";
+};
+
+export type PostV1HeadlessRunsByIdCancelErrors = {
+  /**
+   * Invalid request
+   */
+  400: {
+    error: string;
+    message: string;
+  };
+  /**
+   * Assistant blocked
+   */
+  403: {
+    error: string;
+    message: string;
+  };
+  /**
+   * Unavailable
+   */
+  404: {
+    error: string;
+    message: string;
+  };
+  /**
+   * Request conflict
+   */
+  409: {
+    error: string;
+    message: string;
+  };
+};
+
+export type PostV1HeadlessRunsByIdCancelError =
+  PostV1HeadlessRunsByIdCancelErrors[keyof PostV1HeadlessRunsByIdCancelErrors];
+
+export type PostV1HeadlessRunsByIdCancelResponses = {
+  /**
+   * Stop assistant run
+   */
+  200: {
+    run: {
+      surface: "workbot" | "slack";
+      conversationKey: string;
+      idempotencyKey: string;
+      prompt: string;
+      limits?: {
+        timeoutMs?: number;
+        maxTurns?: number;
+      };
+      scheduleId?: string;
+      id: string;
+      actor: {
+        organizationId: string;
+        memberId: string;
+      };
+      status: "queued" | "running" | "succeeded" | "failed" | "cancelled" | "blocked";
+      createdAt: string;
+      startedAt: string | null;
+      finishedAt: string | null;
+      result: string | null;
+      failure: {
+        code: string;
+        message: string;
+      } | null;
+      usage: {
+        inputTokens: number;
+        outputTokens: number;
+        durationMs: number;
+      } | null;
+    } | null;
+  };
+};
+
+export type PostV1HeadlessRunsByIdCancelResponse =
+  PostV1HeadlessRunsByIdCancelResponses[keyof PostV1HeadlessRunsByIdCancelResponses];
+
+export type PostV1WorkbotSchedulesData = {
+  body: {
+    title: string;
+    prompt: string;
+    intervalMinutes: number;
+    nextRunAt: string;
+  };
+  path?: never;
+  query?: never;
+  url: "/v1/workbot/schedules";
+};
+
+export type PostV1WorkbotSchedulesErrors = {
+  /**
+   * Invalid request
+   */
+  400: {
+    error: string;
+    message: string;
+  };
+  /**
+   * Assistant blocked
+   */
+  403: {
+    error: string;
+    message: string;
+  };
+  /**
+   * Unavailable
+   */
+  404: {
+    error: string;
+    message: string;
+  };
+  /**
+   * Request conflict
+   */
+  409: {
+    error: string;
+    message: string;
+  };
+};
+
+export type PostV1WorkbotSchedulesError = PostV1WorkbotSchedulesErrors[keyof PostV1WorkbotSchedulesErrors];
+
+export type PostV1WorkbotSchedulesResponses = {
+  /**
+   * Schedule assistant work
+   */
+  200: {
+    schedule: {
+      title: string;
+      prompt: string;
+      surface: "workbot" | "slack";
+      conversationKey: string;
+      intervalMinutes: number;
+      nextRunAt: string;
+      id: string;
+      actor: {
+        organizationId: string;
+        memberId: string;
+      };
+      paused: boolean;
+      createdAt: string;
+    };
+  };
+};
+
+export type PostV1WorkbotSchedulesResponse = PostV1WorkbotSchedulesResponses[keyof PostV1WorkbotSchedulesResponses];
+
+export type PatchV1WorkbotSchedulesByIdData = {
+  body: {
+    title?: string;
+    prompt?: string;
+    intervalMinutes?: number;
+    nextRunAt?: string;
+    paused?: boolean;
+  };
+  path: {
+    id: string;
+  };
+  query?: never;
+  url: "/v1/workbot/schedules/{id}";
+};
+
+export type PatchV1WorkbotSchedulesByIdErrors = {
+  /**
+   * Invalid request
+   */
+  400: {
+    error: string;
+    message: string;
+  };
+  /**
+   * Assistant blocked
+   */
+  403: {
+    error: string;
+    message: string;
+  };
+  /**
+   * Unavailable
+   */
+  404: {
+    error: string;
+    message: string;
+  };
+  /**
+   * Request conflict
+   */
+  409: {
+    error: string;
+    message: string;
+  };
+};
+
+export type PatchV1WorkbotSchedulesByIdError =
+  PatchV1WorkbotSchedulesByIdErrors[keyof PatchV1WorkbotSchedulesByIdErrors];
+
+export type PatchV1WorkbotSchedulesByIdResponses = {
+  /**
+   * Edit scheduled work
+   */
+  200: {
+    schedule: {
+      title: string;
+      prompt: string;
+      surface: "workbot" | "slack";
+      conversationKey: string;
+      intervalMinutes: number;
+      nextRunAt: string;
+      id: string;
+      actor: {
+        organizationId: string;
+        memberId: string;
+      };
+      paused: boolean;
+      createdAt: string;
+    };
+  };
+};
+
+export type PatchV1WorkbotSchedulesByIdResponse =
+  PatchV1WorkbotSchedulesByIdResponses[keyof PatchV1WorkbotSchedulesByIdResponses];
+
+export type PostV1WorkbotSchedulesByIdRunData = {
+  body: {
+    idempotencyKey: string;
+  };
+  path: {
+    id: string;
+  };
+  query?: never;
+  url: "/v1/workbot/schedules/{id}/run";
+};
+
+export type PostV1WorkbotSchedulesByIdRunErrors = {
+  /**
+   * Invalid request
+   */
+  400: {
+    error: string;
+    message: string;
+  };
+  /**
+   * Assistant blocked
+   */
+  403: {
+    error: string;
+    message: string;
+  };
+  /**
+   * Unavailable
+   */
+  404: {
+    error: string;
+    message: string;
+  };
+  /**
+   * Request conflict
+   */
+  409: {
+    error: string;
+    message: string;
+  };
+};
+
+export type PostV1WorkbotSchedulesByIdRunError =
+  PostV1WorkbotSchedulesByIdRunErrors[keyof PostV1WorkbotSchedulesByIdRunErrors];
+
+export type PostV1WorkbotSchedulesByIdRunResponses = {
+  /**
+   * Run scheduled work now
+   */
+  200: {
+    run: {
+      surface: "workbot" | "slack";
+      conversationKey: string;
+      idempotencyKey: string;
+      prompt: string;
+      limits?: {
+        timeoutMs?: number;
+        maxTurns?: number;
+      };
+      scheduleId?: string;
+      id: string;
+      actor: {
+        organizationId: string;
+        memberId: string;
+      };
+      status: "queued" | "running" | "succeeded" | "failed" | "cancelled" | "blocked";
+      createdAt: string;
+      startedAt: string | null;
+      finishedAt: string | null;
+      result: string | null;
+      failure: {
+        code: string;
+        message: string;
+      } | null;
+      usage: {
+        inputTokens: number;
+        outputTokens: number;
+        durationMs: number;
+      } | null;
+    };
+  };
+};
+
+export type PostV1WorkbotSchedulesByIdRunResponse =
+  PostV1WorkbotSchedulesByIdRunResponses[keyof PostV1WorkbotSchedulesByIdRunResponses];
+
+export type GetV1WorkbotFilesData = {
+  body?: never;
+  path?: never;
+  query: {
+    path: string;
+  };
+  url: "/v1/workbot/files";
+};
+
+export type GetV1WorkbotFilesErrors = {
+  /**
+   * Invalid request
+   */
+  400: {
+    error: string;
+    message: string;
+  };
+  /**
+   * Assistant blocked
+   */
+  403: {
+    error: string;
+    message: string;
+  };
+  /**
+   * Unavailable
+   */
+  404: {
+    error: string;
+    message: string;
+  };
+  /**
+   * Request conflict
+   */
+  409: {
+    error: string;
+    message: string;
+  };
+};
+
+export type GetV1WorkbotFilesError = GetV1WorkbotFilesErrors[keyof GetV1WorkbotFilesErrors];
+
+export type GetV1WorkbotFilesResponses = {
+  /**
+   * Read assistant file
+   */
+  200: {
+    path: string;
+    text: string;
+  };
+};
+
+export type GetV1WorkbotFilesResponse = GetV1WorkbotFilesResponses[keyof GetV1WorkbotFilesResponses];
 
 export type DeleteV1OrgData = {
   body?: never;

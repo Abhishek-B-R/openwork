@@ -6,7 +6,7 @@ const callSchema=z.object({name:z.string(),arguments:z.record(z.string(),z.unkno
 const safeMethods=new Set(["initialize","ping","notifications/initialized","tools/list","resources/list","resources/read","prompts/list"])
 const safeTools=new Set(["search_capabilities","list_skills","get_skill"])
 /** Credentials with execute scope never reach the engine. Admin-approved reads are the only forwarding path. */
-export async function createReadMcpProxy(options:{url:string;token:string;readCapabilities:string[];authorize:()=>Promise<void>}) {
+export async function createReadMcpProxy(options:{url:string;token:string;readCapabilities:string[];authorize:()=>Promise<void>;activity?:(text:string)=>Promise<void>}) {
   const token=randomBytes(32).toString("base64url")
   const active=new Set<AbortController>()
   const server=createServer(async(req,res)=>{
@@ -29,10 +29,21 @@ export async function createReadMcpProxy(options:{url:string;token:string;readCa
       const controller=new AbortController();active.add(controller)
       try {
         const response=await fetch(options.url,{method:"POST",headers:{authorization:`Bearer ${options.token}`,"content-type":"application/json",accept:"application/json, text/event-stream",...(req.headers["mcp-protocol-version"]?{"mcp-protocol-version":String(req.headers["mcp-protocol-version"])}:{})},body:JSON.stringify(rpc),signal:AbortSignal.any([controller.signal,AbortSignal.timeout(30000)]),redirect:"error"})
-        const text=await response.text()
+        let text=await response.text()
+        let contentType=response.headers.get("content-type") ?? "application/json"
         if(text.length>2000000) throw new Error("The connected tool returned too much data.")
         await options.authorize()
-        res.writeHead(response.status,{"content-type":response.headers.get("content-type") ?? "application/json"}).end(text)
+        if(rpc.method==="tools/list" && response.ok) {
+          // Hide blocked mutation/send tools as well as rejecting their calls.
+          const lines=contentType.includes("text/event-stream")?text.split("\n").filter(line=>line.startsWith("data:")).map(line=>line.slice(5).trim()):[text]
+          let payload:unknown
+          for(const line of lines) {try{payload=JSON.parse(line)}catch{}}
+          if(typeof payload!=="object" || payload===null || !("result" in payload) || typeof payload.result!=="object" || payload.result===null || !("tools" in payload.result) || !Array.isArray(payload.result.tools)) throw new Error("The team tool catalog could not be verified.")
+          const tools=payload.result.tools.filter((tool:unknown)=>typeof tool==="object" && tool!==null && "name" in tool && typeof tool.name==="string" && (safeTools.has(tool.name)||tool.name==="execute_capability"))
+          text=JSON.stringify({...payload,result:{...payload.result,tools}});contentType="application/json"
+        }
+        if(rpc.method==="tools/call") await options.activity?.("Checked a team tool")
+        res.writeHead(response.status,{"content-type":contentType}).end(text)
       } finally {active.delete(controller)}
     } catch(error) {
       res.writeHead(200,{"content-type":"application/json"}).end(JSON.stringify({jsonrpc:"2.0",id:rpc?.id ?? null,error:{code:-32602,message:error instanceof Error?error.message:"Assistant access is blocked"}}))

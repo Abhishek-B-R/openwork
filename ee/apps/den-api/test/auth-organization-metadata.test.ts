@@ -104,3 +104,18 @@ test("public creation rejects auditLogs presence, including string metadata and 
     })
   }
 })
+
+
+test("public creation cannot set headless flags or approved reads", async () => {
+  for (const key of ["headlessAutomation", "workbot"]) {
+    for (const value of [true, false, null, "true"]) {
+      const metadata = { capabilities: { [key]: value } }
+      for (const input of [metadata, JSON.stringify(metadata)]) {
+        await expect(beforeCreate(input)).rejects.toMatchObject({ status: "FORBIDDEN" })
+      }
+    }
+  }
+  for (const input of [{headlessReadCapabilities: []}, JSON.stringify({headlessReadCapabilities: ["mcp:fixture:read"]})]) {
+    await expect(beforeCreate(input)).rejects.toMatchObject({status:"FORBIDDEN"})
+  }
+})

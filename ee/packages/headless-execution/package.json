@@ -5,7 +5,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./contract": "./src/contract.ts",
-    "./schema": "./src/schema.ts"
+    "./schema": "./src/schema.ts",
+    "./files": "./src/files.ts"
   },
   "engines": {
     "node": ">=24"

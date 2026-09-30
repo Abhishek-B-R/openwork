@@ -28,7 +28,7 @@ export class OpenCodeHeadlessEngine implements HeadlessEngine {
     let force:ReturnType<typeof setTimeout> | undefined
     try {
       files=await createFileMcp(input.directory,async()=>{input.signal.throwIfAborted();await input.authorize?.();await this.options.authorize?.()},input.activity)
-      proxy=await createReadMcpProxy({url:input.credentials.mcpUrl,token:input.credentials.mcpToken,readCapabilities:input.credentials.readCapabilities ?? [],authorize:async()=>{input.signal.throwIfAborted();await input.authorize?.()}})
+      proxy=await createReadMcpProxy({url:input.credentials.mcpUrl,token:input.credentials.mcpToken,readCapabilities:input.credentials.readCapabilities ?? [],activity:input.activity,authorize:async()=>{input.signal.throwIfAborted();await input.authorize?.()}})
       const {model}=input.credentials
       const config={
         $schema:"https://opencode.ai/config.json",

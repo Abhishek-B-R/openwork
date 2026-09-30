@@ -258,6 +258,8 @@ export type DenOrgCapabilities = {
   mcpConnections: boolean;
   /** Apps built in OpenWork are served as their own MCP servers; absent (off) on older servers. */
   appMcpServers?: boolean;
+  headlessAutomation?: boolean;
+  workbot?: boolean;
   /** Always on: Workflows/Code Mode shipped for every organization. Older servers may still return false. */
   workflows: boolean;
   /** Effective Web offer; true for the global switch or this organization's complimentary admin grant. */
@@ -1089,6 +1091,8 @@ function parseOrgCapabilities(value: unknown): DenOrgCapabilities {
     installLinks: value.installLinks === true,
     mcpConnections: value.mcpConnections === true,
     appMcpServers: value.appMcpServers === true,
+    headlessAutomation: value.headlessAutomation === true,
+    workbot: value.workbot === true,
     // Workflows are enabled everywhere on current servers; only an explicit
     // false from an older server still hides the surface.
     workflows: value.workflows !== false,

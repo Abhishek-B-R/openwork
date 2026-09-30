@@ -103,6 +103,7 @@ const updateOrganizationDpaSchema = z.object({
 }).strict()
 
 const updateOrganizationCapabilitiesSchema = z.object({
+  headlessReadCapabilities: z.array(z.string().trim().min(1).max(300)).max(100).optional(),
   capabilities: z.object({
     installLinks: z.boolean().nullable().optional(),
     mcpConnections: z.boolean().nullable().optional(),
@@ -110,6 +111,8 @@ const updateOrganizationCapabilitiesSchema = z.object({
     auditLogs: z.boolean().nullable().optional(),
     orgManagedDashboards: z.boolean().nullable().optional(),
     appMcpServers: z.boolean().nullable().optional(),
+    headlessAutomation: z.boolean().nullable().optional(),
+    workbot: z.boolean().nullable().optional(),
     gatewayDashboard: z.boolean().nullable().optional().meta({
       deprecated: true,
       description: "Accepted for compatibility only and ignored; AI Gateway no longer has an organization rollout override.",
@@ -124,6 +127,8 @@ const adminOrganizationCapabilitiesSchema = z.object({
   auditLogs: z.boolean(),
   orgManagedDashboards: z.boolean(),
   appMcpServers: z.boolean(),
+  headlessAutomation: z.boolean(),
+  workbot: z.boolean(),
   gatewayDashboard: z.literal(true).meta({
     deprecated: true,
     description: "Compatibility field, always true. AI Gateway is available to every organization; deployment configuration and authorization still apply.",
@@ -294,6 +299,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null
 }
 
+function readHeadlessReadCapabilities(metadata: Record<string, unknown> | string | null | undefined): string[] {
+  const value = normalizeOrganizationMetadata(metadata).metadata.headlessReadCapabilities
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : []
+}
+
 function readAdminVisibleOrganizationCapabilities(metadata: Record<string, unknown> | string | null | undefined): z.infer<typeof adminOrganizationCapabilitiesSchema> {
   return {
     installLinks: organizationInstallLinksEnabled(metadata, { gatingEnabled: false }),
@@ -302,6 +312,8 @@ function readAdminVisibleOrganizationCapabilities(metadata: Record<string, unkno
     auditLogs: normalizeOrganizationCapabilities(metadata).auditLogs,
     orgManagedDashboards: normalizeOrganizationCapabilities(metadata).orgManagedDashboards,
     appMcpServers: normalizeOrganizationCapabilities(metadata).appMcpServers,
+    headlessAutomation: normalizeOrganizationCapabilities(metadata).headlessAutomation,
+    workbot: normalizeOrganizationCapabilities(metadata).workbot,
     gatewayDashboard: true,
   }
 }
@@ -341,7 +353,7 @@ function readUnmanagedCapabilityMetadata(metadata: Record<string, unknown>): Rec
     // OpenWork Web access instead), so stale stored overrides stay managed
     // (dropped on the next capabilities write) instead of passing through as
     // unmanaged metadata.
-    if (key !== "gatewayDashboard" && key !== "modelsAnalytics" && key !== "auditLogs" && key !== "orgManagedDashboards" && key !== "appMcpServers" && key !== "installLinks" && key !== "mcpConnections" && key !== "workflows" && key !== "codemodeScripts" && key !== "remoteMcpApps" && key !== "cloud") {
+    if (key !== "headlessAutomation" && key !== "workbot" && key !== "gatewayDashboard" && key !== "modelsAnalytics" && key !== "auditLogs" && key !== "orgManagedDashboards" && key !== "appMcpServers" && key !== "installLinks" && key !== "mcpConnections" && key !== "workflows" && key !== "codemodeScripts" && key !== "remoteMcpApps" && key !== "cloud") {
       capabilities[key] = value
     }
   }
@@ -1981,7 +1993,7 @@ export function registerAdminRoutes<T extends { Variables: AuthContextVariables 
       summary: "Get an organization's capability overrides",
       description: "Returns admin-visible capabilities. The deprecated gatewayDashboard compatibility field is always true, not a mutable organization flag; deployment configuration and authorization still apply.",
       responses: {
-        200: jsonResponse("Capability overrides returned.", z.object({ capabilities: adminOrganizationCapabilitiesSchema })),
+        200: jsonResponse("Capability overrides returned.", z.object({ capabilities: adminOrganizationCapabilitiesSchema, headlessReadCapabilities: z.array(z.string()) })),
         400: jsonResponse("The organization id was invalid.", adminRequestErrorSchema),
         ...adminRouteErrors,
         404: jsonResponse("The organization does not exist.", notFoundSchema),
@@ -2005,7 +2017,7 @@ export function registerAdminRoutes<T extends { Variables: AuthContextVariables 
         return c.json({ error: "not_found", message: "Organization not found." }, 404)
       }
 
-      return c.json({ capabilities: readAdminVisibleOrganizationCapabilities(organization.metadata) })
+      return c.json({ capabilities: readAdminVisibleOrganizationCapabilities(organization.metadata), headlessReadCapabilities: readHeadlessReadCapabilities(organization.metadata) })
     },
   )
 
@@ -2014,7 +2026,7 @@ export function registerAdminRoutes<T extends { Variables: AuthContextVariables 
     describeRoute({
       tags: ["Admin"],
       summary: "Set an organization's capability overrides",
-      description: "Enables, disables or clears (null) the install-links, MCP-connections, Models analytics, auditLogs, orgManagedDashboards and appMcpServers overrides. Audit logs, org-managed Dashboards and appMcpServers (building your own Apps as MCP servers) require literal true (absent/false is disabled); this flag neither grants capture entitlement nor initializes capacity or changes capture preferences. The deprecated gatewayDashboard boolean or null input is validated but ignored and never persisted; its response field is always true. Stale retired overrides are removed on capability writes.",
+      description: "Enables, disables or clears (null) the install-links, MCP-connections, Models analytics, auditLogs, orgManagedDashboards appMcpServers, headlessAutomation and workbot overrides. Headless execution and Workbot are default-off and independent of Web subscriptions. Audit logs, org-managed Dashboards and appMcpServers (building your own Apps as MCP servers) require literal true (absent/false is disabled); this flag neither grants capture entitlement nor initializes capacity or changes capture preferences. The deprecated gatewayDashboard boolean or null input is validated but ignored and never persisted; its response field is always true. Stale retired overrides are removed on capability writes.",
       responses: {
         200: jsonResponse("Capability overrides were updated.", z.object({ ok: z.literal(true), organization: z.object({ id: z.string() }), capabilities: adminOrganizationCapabilitiesSchema })),
         400: jsonResponse("The request body or organization id was invalid.", adminRequestErrorSchema),
@@ -2076,12 +2088,19 @@ export function registerAdminRoutes<T extends { Variables: AuthContextVariables 
         if (orgManagedDashboards === null) delete capabilities.orgManagedDashboards
         else if (orgManagedDashboards !== undefined) capabilities.orgManagedDashboards = orgManagedDashboards
 
+        for (const key of ["headlessAutomation", "workbot"] satisfies Array<"headlessAutomation" | "workbot">) {
+          const value = body.data.capabilities[key]
+          if (value === null) delete capabilities[key]
+          else if (value !== undefined) capabilities[key] = value
+        }
+
         const appMcpServers = body.data.capabilities.appMcpServers
         if (appMcpServers === null) delete capabilities.appMcpServers
         else if (appMcpServers !== undefined) capabilities.appMcpServers = appMcpServers
 
         return {
           ...current,
+          ...(body.data.headlessReadCapabilities !== undefined ? { headlessReadCapabilities: body.data.headlessReadCapabilities } : {}),
           capabilities: {
             ...readUnmanagedCapabilityMetadata(current),
             ...capabilities,
@@ -2089,7 +2108,7 @@ export function registerAdminRoutes<T extends { Variables: AuthContextVariables 
         }
       })
 
-      return c.json({ ok: true, organization: { id: organizationId }, capabilities: readAdminVisibleOrganizationCapabilities(metadata) })
+      return c.json({ ok: true, organization: { id: organizationId }, capabilities: readAdminVisibleOrganizationCapabilities(metadata), headlessReadCapabilities: readHeadlessReadCapabilities(metadata) })
     },
   )
 

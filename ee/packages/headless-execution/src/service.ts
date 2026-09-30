@@ -103,7 +103,7 @@ export class HeadlessWorker {
       await this.service.authority.authorize(run.actor,run.surface)
       credentials=await this.service.authority.credentials(run.actor)
       controller.signal.throwIfAborted()
-      const result=await this.engine.execute({actor:run.actor,run,directory:this.service.store.directory(run.actor),credentials,signal:controller.signal,authorize:async()=>{if(!this.service.store.owns(run.id,this.owner)) throw new HeadlessError("lease_lost","This worker no longer owns the run.");await this.service.authority.authorize(run.actor,run.surface);if(credentials) await this.service.authority.validateCredentials?.(run.actor,credentials);controller.signal.throwIfAborted()},activity:async text=>{
+      const result=await this.engine.execute({actor:run.actor,run,directory:this.service.store.directory(run.actor),credentials,signal:controller.signal,authorize:async()=>{if(!this.service.store.owns(run.id,this.owner)) throw new HeadlessError("lease_lost","This worker no longer owns the run.");await this.service.authority.authorize(run.actor,run.surface);if(credentials) await this.service.authority.validateCredentials?.(run.actor,credentials);controller.signal.throwIfAborted();if(!this.service.store.owns(run.id,this.owner)) throw new HeadlessError("lease_lost","This worker no longer owns the run.")},activity:async text=>{
         await this.service.authority.authorize(run.actor,run.surface)
         controller.signal.throwIfAborted()
         if (!this.service.store.owns(run.id,this.owner)) throw new HeadlessError("run_stopped","This run was stopped.")
