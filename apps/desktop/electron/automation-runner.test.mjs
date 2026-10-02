@@ -5,14 +5,37 @@ import {
   automationRunnerDisabledReason,
   classifyAutomationExecutionError,
   classifyRemoteSessionError,
-  createDesktopAutomationRunner,
+  createDesktopAutomationRunner as createRunner,
   REMOTE_SESSION_FIRST_TURN_WINDOW_MS,
-  executeDesktopAutomation,
-  executeDesktopRemoteSession,
+  executeDesktopAutomation as executeAutomation,
+  executeDesktopRemoteSession as executeRemoteSession,
   normalizeRunnerBaseUrl,
   resolveAssignmentWorkspace,
   runnerTokenAudience,
 } from "./automation-runner.mjs"
+
+// The session client asks the local server which engine chats use and which
+// model is the workspace default. These fakes model a server that predates
+// both routes (404), which keeps sessions on v1 with no extra model.
+function isEngineLookup(url) {
+  const { pathname } = new URL(url)
+  return pathname === "/experimental/engine-v2-preview/status" || /^\/workspace\/[^/]+\/default-model$/.test(pathname)
+}
+
+function legacyLocalServer(options) {
+  if (!options?.fetchImpl) return options
+  const fetchImpl = options.fetchImpl
+  return {
+    ...options,
+    fetchImpl: (url, init) => isEngineLookup(url)
+      ? Promise.resolve(Response.json({ code: "not_found", message: "Not found" }, { status: 404 }))
+      : fetchImpl(url, init),
+  }
+}
+
+const createDesktopAutomationRunner = (options) => createRunner(legacyLocalServer(options))
+const executeDesktopAutomation = (assignment, options) => executeAutomation(assignment, legacyLocalServer(options))
+const executeDesktopRemoteSession = (assignment, options) => executeRemoteSession(assignment, legacyLocalServer(options))
 
 function runnerTokenFor(audience, organizationId = "org-1") {
   const payload = Buffer.from(JSON.stringify({
@@ -992,6 +1015,46 @@ test("remote-session creation omits nullable prompt and model fields", async () 
     { path: "/workspaces", body: null },
     { path: "/workspace/workspace%2Ffirst/opencode/session", body: { title: "Desktop handoff" } },
   ])
+})
+
+test("a remote session starts on v2 when the local server routes chats there", async () => {
+  const requests = []
+  const result = await executeRemoteSession(remoteSessionAssignment(), {
+    getLocalRuntime: async () => ({ baseUrl: "http://127.0.0.1:3000", token: "local-client-token" }),
+    fetchImpl: async (url, options = {}) => {
+      const parsed = new URL(url)
+      requests.push(`${options.method ?? "GET"} ${parsed.pathname}`)
+      if (parsed.pathname === "/workspaces") return Response.json({ items: [{ id: "workspace-1" }], activeId: "workspace-1" })
+      if (parsed.pathname === "/experimental/engine-v2-preview/status") return Response.json({ enabled: true, chatRouting: true })
+      if (parsed.pathname === "/workspace/workspace-1/opencode2/api/session") return Response.json({ data: { id: "ses_v2", title: "Desktop handoff" } })
+      if (parsed.pathname === "/workspace/workspace-1/opencode2/api/session/ses_v2/model") return new Response(null, { status: 204 })
+      if (parsed.pathname === "/workspace/workspace-1/opencode2/api/session/ses_v2/prompt") return Response.json({ data: { id: "inp_1" } })
+      // The first-turn watch reads the session back through the v2 mount.
+      if (parsed.pathname === "/workspace/workspace-1/opencode2/api/session/ses_v2") return Response.json({ data: { id: "ses_v2", title: "Desktop handoff" } })
+      if (parsed.pathname === "/workspace/workspace-1/opencode2/api/session/ses_v2/message") {
+        return Response.json({
+          data: [
+            { id: "msg_reply", type: "assistant", time: { created: 2 }, content: [{ type: "text", text: "On it." }] },
+            { id: "msg_prompt", type: "user", time: { created: 1 }, text: "Summarize my week." },
+          ],
+          cursor: { next: null },
+        })
+      }
+      if (parsed.pathname === "/workspace/workspace-1/opencode2/api/session/active") return Response.json({ data: { ses_v2: { type: "running" } } })
+      throw new Error(`Unexpected request ${parsed.pathname}`)
+    },
+    signal: new AbortController().signal,
+  })
+
+  assert.deepEqual(result, { sessionId: "ses_v2", workspaceId: "workspace-1", started: true, firstTurn: { outcome: "replied" } })
+  assert.deepEqual(requests.slice(0, 5), [
+    "GET /workspaces",
+    "GET /experimental/engine-v2-preview/status",
+    "POST /workspace/workspace-1/opencode2/api/session",
+    "POST /workspace/workspace-1/opencode2/api/session/ses_v2/model",
+    "POST /workspace/workspace-1/opencode2/api/session/ses_v2/prompt",
+  ])
+  assert.ok(requests.slice(5).every((request) => request.startsWith("GET /workspace/workspace-1/opencode2/api/")))
 })
 
 test("native OpenCode failures preserve upstream status, message, and workspace context", async () => {
