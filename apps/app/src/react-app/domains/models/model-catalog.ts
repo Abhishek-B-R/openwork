@@ -63,6 +63,11 @@ export function publicModelTitle(model: ModelRef & { title?: string }): string |
   return title;
 }
 
+/** The OpenWork Models row's meta line, the same in Settings and the Connect a provider sheet. */
+export function autoProviderSubtitle() {
+  return "Auto";
+}
+
 export function modelSubtitle(model: ModelOption, exhausted = false) {
   if (isAutoModel(model)) return exhausted ? "Limit used up" : "OpenWork picks the model";
   // Gateway models assigned to the member that wait on their own provider sign-in.
