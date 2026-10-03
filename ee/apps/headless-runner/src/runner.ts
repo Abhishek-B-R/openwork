@@ -4,7 +4,7 @@ import type { McpConnector, ToolSession } from "./mcp.js"
 import { ModelError, type ModelClient } from "./model.js"
 import type { Store, StoredMessage, Turn } from "./store.js"
 import { withoutAttachments } from "./tool-files.js"
-import { RESUMABLE, type Message, type ToolResult, type TurnCredentials } from "./types.js"
+import { RESUMABLE, type Message, type RepeatLimits, type ToolResult, type TurnCredentials } from "./types.js"
 
 export const DEFAULT_SYSTEM_PROMPT = `You are OpenWork, an assistant running in the cloud on behalf of one person. There is no UI and nobody can approve actions while you work.
 
@@ -14,8 +14,34 @@ export const DEFAULT_SYSTEM_PROMPT = `You are OpenWork, an assistant running in 
 - On a long task the person may only see your final message, so make it a complete answer on its own.
 - Reply concisely in Markdown.`
 
-/** A step that repeats the same calls and gets the same results this many times in a row ends the turn. */
-export const MAX_IDENTICAL_STEPS = 5
+/**
+ * A step that repeats the previous one (same calls, same inputs, same results) is usually waiting on something:
+ * a desktop picking up a task, CI still running. Each repeat first waits a little longer, as anyone checking back
+ * would, so waiting is cheap and can last.
+ */
+export const REPEAT_WAITS_MS = [5_000, 10_000, 20_000, 30_000]
+/** Used for anything a session's caller did not set (see `repeatLimitsSchema`). */
+export const DEFAULT_REPEAT_LIMITS: Required<RepeatLimits> = { maxWaitingMs: 10 * 60_000, maxIdenticalFailures: 3 }
+/**
+ * Added to the system prompt for the rest of the turn when a limit is reached. It stays out of the transcript: the
+ * caller's own instructions say who reads the final message. A model that still repeats the step is stopped.
+ */
+export const STOP_REPEATING_INSTRUCTION =
+  "You have made the same tool call several times and got the same result each time. Do not make that call again. Finish now with your final message: say what you were waiting for or what kept failing, what you have so far, and what is still needed."
+
+const abortableSleep = (ms: number, signal: AbortSignal) =>
+  new Promise<void>((resolve, reject) => {
+    if (signal.aborted) return reject(signal.reason)
+    const onAbort = () => {
+      clearTimeout(timer)
+      reject(signal.reason)
+    }
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort)
+      resolve()
+    }, ms)
+    signal.addEventListener("abort", onAbort, { once: true })
+  })
 
 export type RunnerOptions = {
   store: Store
@@ -35,6 +61,8 @@ export type RunnerOptions = {
   }
   systemPrompt?: string
   now?: () => number
+  /** Waits between repeated steps; tests pass a fake. Rejects with the signal's reason when the turn is stopped. */
+  sleep?: (ms: number, signal: AbortSignal) => Promise<void>
 }
 
 export type SendInput = {
@@ -227,6 +255,11 @@ export class Runner {
     let toolCalls = 0
     let lastStep = ""
     let identicalSteps = 0
+    let repeatStartedAt = 0
+    let askedToStop = false
+    let waitBeforeNextStep = 0
+    const clock = this.options.now ?? Date.now
+    const sleep = this.options.sleep ?? abortableSleep
     console.log(`[headless-runner] turn started ${JSON.stringify({ sessionId, messageId })}`)
 
     const turnMessages = () =>
@@ -264,7 +297,8 @@ export class Runner {
       }
       const session = store.getSession(sessionId)
       const turn = store.getTurn(sessionId, messageId)
-      const system = [
+      const repeatLimits = { ...DEFAULT_REPEAT_LIMITS, ...session?.repeats }
+      const baseSystem = [
         this.options.systemPrompt ?? DEFAULT_SYSTEM_PROMPT,
         tools ? "" : "No OpenWork connection is available in this conversation, so connected apps cannot be reached.",
         session?.instructions ?? "",
@@ -276,6 +310,7 @@ export class Runner {
 
       for (let step = 0; step < limits.maxSteps; step += 1) {
         signal.throwIfAborted()
+        if (waitBeforeNextStep) await sleep(waitBeforeNextStep, signal)
         // Between steps, never mid-call, so no tool is cut off. The caller resumes the turn right away with a
         // fresh MCP token; a caller that stopped supervising simply never resumes it.
         if (tools && step > 0 && Date.now() - startedAt >= limits.credentialRefreshMs) {
@@ -283,7 +318,7 @@ export class Runner {
           return
         }
         const result = await this.options.model.complete({
-          system,
+          system: askedToStop ? `${baseSystem}\n\n${STOP_REPEATING_INSTRUCTION}` : baseSystem,
           messages: buildContext(store.messages(sessionId), messageId, limits.contextCharBudget),
           tools: toolSpecs,
           model: turn?.model ?? this.options.defaultModel,
@@ -322,15 +357,28 @@ export class Runner {
           })
           outcomes.push(outcome)
         }
-        // Same calls, same inputs, same results, again and again: the model is stuck, not making progress.
+        // Same calls, same inputs, same results as the step before: waiting on something, or stuck.
         const signature = createHash("sha256")
           .update(JSON.stringify(result.toolCalls.map((call, index) => [call.name, call.input, outcomes[index]?.output, outcomes[index]?.isError])))
           .digest("hex")
         identicalSteps = signature === lastStep ? identicalSteps + 1 : 1
         lastStep = signature
-        if (identicalSteps >= MAX_IDENTICAL_STEPS) {
-          store.setTurnStatus(sessionId, messageId, "failed", "stuck_repeating")
-          return
+        waitBeforeNextStep = 0
+        if (identicalSteps === 1) {
+          repeatStartedAt = clock()
+          askedToStop = false
+        } else {
+          const failing = outcomes.every((outcome) => outcome.isError)
+          const exhausted = failing
+            ? identicalSteps >= repeatLimits.maxIdenticalFailures
+            : clock() - repeatStartedAt >= repeatLimits.maxWaitingMs
+          if (exhausted && askedToStop) {
+            store.setTurnStatus(sessionId, messageId, "failed", "stuck_repeating")
+            return
+          }
+          // Let the model report what it was waiting for, instead of ending on a generic failure.
+          if (exhausted) askedToStop = true
+          else waitBeforeNextStep = REPEAT_WAITS_MS[Math.min(identicalSteps - 2, REPEAT_WAITS_MS.length - 1)]
         }
       }
       store.setTurnStatus(sessionId, messageId, "failed", "max_steps_exceeded")

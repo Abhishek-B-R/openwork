@@ -127,13 +127,25 @@ function errorCode(payload: unknown, fallback: string) {
 
 const sessionPath = (sessionId: string) => `/v1/sessions/${encodeURIComponent(sessionId)}`
 
+/**
+ * How long the session's turns may keep repeating a step (same calls, same results) before the model is asked to
+ * stop and report: the same successful answer for `maxWaitingMs` (10 s to 24 h), or the same failure
+ * `maxIdenticalFailures` times (2 to 100). Unset values use the runner's defaults.
+ */
+export type RunnerRepeatLimits = { maxWaitingMs?: number; maxIdenticalFailures?: number }
+
 export function createHeadlessRunnerClient(deps: HeadlessRunnerDeps) {
   return {
-    async createSession(input: { title?: string; instructions?: string } = {}): Promise<RunnerResult<{ id: string }>> {
-      const { status, payload } = await request(deps, "POST", "/v1/sessions", {
+    async createSession(
+      input: { title?: string; instructions?: string; repeats?: RunnerRepeatLimits } = {},
+    ): Promise<RunnerResult<{ id: string }>> {
+      const base = {
         ...(input.title ? { title: input.title.slice(0, 200) } : {}),
         ...(input.instructions ? { instructions: input.instructions.slice(0, 20_000) } : {}),
-      })
+      }
+      let { status, payload } = await request(deps, "POST", "/v1/sessions", input.repeats ? { ...base, repeats: input.repeats } : base)
+      // A runner older than per-session repeat limits rejects the field: create the session with its defaults.
+      if (status === 400 && input.repeats) ({ status, payload } = await request(deps, "POST", "/v1/sessions", base))
       const created = z.object({ id: z.string() }).safeParse(payload)
       if (status !== 201 || !created.success) return { ok: false, status, error: errorCode(payload, `headless_create_${status}`) }
       return { ok: true, value: { id: created.data.id } }
