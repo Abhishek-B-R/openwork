@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-import { chmodSync, copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs"
-import { execFileSync } from "node:child_process"
+import { chmodSync, closeSync, copyFileSync, cpSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs"
+import { execFileSync, spawn } from "node:child_process"
 import { createHash, generateKeyPairSync } from "node:crypto"
 import { tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"
@@ -69,10 +69,11 @@ function printHelp() {
     "Usage:",
     "  openwork-bootstrap install [--bin-dir <path>] [--install-dir <path>] [--source <path>] [--json]",
     "  openwork-bootstrap install app --manifest <url-or-file> [--app-dir <path>] [--json]",
+    "  openwork-bootstrap open app [--app-dir <path>] [--json]",
     "  openwork-bootstrap doctor [--bin-dir <path>] [--install-dir <path>] [--base-url <url>] [--desktop-bootstrap] [--json]",
     "  openwork-bootstrap login [--base-url <url>] [--force] [--json]",
     "  openwork-bootstrap logout [--json]",
-    "  openwork-bootstrap cloud onboard --base-url <url> --org-name <name> --invite-email <email> [--skill-name <name>] [--web-base-url <url>] [--prepare-desktop] [--json]",
+    "  openwork-bootstrap cloud onboard --base-url <url> --org-name <name> [--teammate-emails a@x.com,b@y.com] [--skill-name <name>] [--web-base-url <url>] [--prepare-desktop] [--json]",
     "  (deprecated) OPENWORK_OWNER_PASSWORD=<password> openwork-bootstrap cloud onboard --request-code --base-url <url> --owner-email <email> [--json]",
     "  (deprecated) OPENWORK_OWNER_PASSWORD=<password> openwork-bootstrap cloud onboard --verification-code <code> --base-url <url> --owner-email <email> --org-name <name> --invite-email <email> [--json]",
     "  openwork-bootstrap cloud bootstrap-workspace --base-url <url> --workspace-name <name> [--skill-name <name>] [--owner-email <email>] [--teammate-emails a@x.com,b@y.com] [--claim-roles owner,member] [--web-base-url <url>] [--prepare-desktop] [--json]",
@@ -81,10 +82,11 @@ function printHelp() {
     "Commands:",
     "  install          Install the openwork-bootstrap CLI into a user bin dir",
     "  install app      Download and install the desktop app from a manifest",
+    "  open app         Launch the installed desktop app (macOS, Windows, Linux)",
     "  doctor           Check CLI installation and optional Den API health",
     "  login            Sign in from the browser with a one-time code (no password)",
     "  logout           Sign out and delete the saved credentials",
-    "  cloud onboard    Create an org, invite a teammate, and create a skill as the",
+    "  cloud onboard    Create an org you own, optionally invite teammates, and create a skill as the",
     "                   signed-in person (OPENWORK_API_TOKEN, then `login`). The",
     "                   --owner-email/--owner-password flags are deprecated.",
     "  cloud bootstrap-workspace  Create a provisional workspace without email/password auth",
@@ -362,10 +364,14 @@ function runInstall(args) {
   chmodSync(installedCli, 0o755)
 
   const executable = join(binDir, executableBasename())
+  // Pin the Node that ran the install: install.sh may have fetched a private
+  // Node into the install dir that is not on PATH. Fall back to PATH if that
+  // Node is later removed (for example a version manager uninstall).
+  const nodePath = process.execPath
   if (process.platform === "win32") {
-    writeFileSync(executable, `@echo off\r\nnode "${installedCli}" %*\r\n`)
+    writeFileSync(executable, `@echo off\r\nif exist "${nodePath}" (\r\n  "${nodePath}" "${installedCli}" %*\r\n) else (\r\n  node "${installedCli}" %*\r\n)\r\n`)
   } else {
-    writeFileSync(executable, `#!/usr/bin/env sh\nexec node "${installedCli}" "$@"\n`)
+    writeFileSync(executable, `#!/usr/bin/env sh\nif [ -x "${nodePath}" ]; then exec "${nodePath}" "${installedCli}" "$@"; fi\nexec node "${installedCli}" "$@"\n`)
   }
   chmodSync(executable, 0o755)
 
@@ -620,6 +626,85 @@ async function runInstallApp(args) {
   }
 }
 
+function resolveInstalledApp(appDir) {
+  const appManifest = join(appDir, "openwork-app-install.json")
+  let appPath = process.platform === "darwin"
+    ? join(appDir, "OpenWork.app")
+    : process.platform === "win32"
+      ? join(appDir, "OpenWork.exe")
+      : join(appDir, "openwork")
+  if (existsSync(appManifest)) {
+    try {
+      const appInstall = JSON.parse(readFileSync(appManifest, "utf8"))
+      if (appInstall.appPath) appPath = appInstall.appPath
+    } catch {
+      // Keep fallback path.
+    }
+  }
+  return { appPath, appManifest }
+}
+
+function launchDetached(command, commandArgs, logPath) {
+  const log = openSync(logPath, "a")
+  const child = spawn(command, commandArgs, { detached: true, stdio: ["ignore", log, log] })
+  closeSync(log)
+  let exit = null
+  child.on("exit", (code, signal) => { exit = { code, signal } })
+  child.unref()
+  return { child, exited: () => exit }
+}
+
+
+// Electron's Chromium sandbox cannot start for an AppImage when the OS blocks
+// unprivileged user namespaces (Ubuntu 24.04+ AppArmor default, containers) or
+// when running as root. Retry once without it instead of leaving the user with
+// a window that never appears.
+function linuxSandboxFailure(logPath) {
+  try {
+    return /sandbox|namespace|setuid/i.test(readFileSync(logPath, "utf8"))
+  } catch {
+    return false
+  }
+}
+
+async function runOpenApp(args) {
+  const json = hasFlag(args.flags, "json")
+  const appDir = resolve(getFlag(args.flags, "app-dir", defaultAppDir()))
+  const { appPath } = resolveInstalledApp(appDir)
+  if (!existsSync(appPath)) {
+    throw new Error(`app_not_installed: ${appPath} (run \`${COMMAND_NAME} install app --manifest <url>\` first)`)
+  }
+
+  if (process.platform === "darwin") {
+    execFileSync("open", [appPath])
+    jsonOut({ ok: true, message: `Opened ${appPath}`, appPath, launcher: "open" }, json)
+    return
+  }
+
+  if (process.platform === "linux" && !process.env.DISPLAY && !process.env.WAYLAND_DISPLAY) {
+    throw new Error("no_display: DISPLAY and WAYLAND_DISPLAY are unset; run this from the user's desktop session")
+  }
+
+  const logPath = join(appDir, "openwork-app-launch.log")
+  const forceNoSandbox = process.platform === "linux" && typeof process.getuid === "function" && process.getuid() === 0
+  let appArgs = forceNoSandbox ? ["--no-sandbox"] : []
+  let launch = launchDetached(appPath, appArgs, logPath)
+  await sleep(4000)
+  if (process.platform === "linux" && launch.exited() && !appArgs.includes("--no-sandbox") && linuxSandboxFailure(logPath)) {
+    appArgs = ["--no-sandbox"]
+    launch = launchDetached(appPath, appArgs, logPath)
+    await sleep(4000)
+  }
+
+  const exited = launch.exited()
+  if (exited && exited.code !== 0) {
+    jsonOut({ ok: false, message: `OpenWork exited during launch (code ${exited.code ?? exited.signal}); see ${logPath}`, appPath, args: appArgs, log: logPath }, json)
+    process.exitCode = 1
+    return
+  }
+  jsonOut({ ok: true, message: `Opened ${appPath}`, appPath, pid: launch.child.pid, args: appArgs, log: logPath }, json)
+}
+
 async function runDoctor(args) {
   const installDir = resolve(getFlag(args.flags, "install-dir", defaultInstallDir()))
   const binDir = resolve(getFlag(args.flags, "bin-dir", defaultBinDir()))
@@ -657,20 +742,7 @@ async function runDoctor(args) {
   }
 
   if (hasFlag(args.flags, "app") || args.flags.has("app-dir")) {
-    const appManifest = join(appDir, "openwork-app-install.json")
-    let appPath = process.platform === "darwin"
-      ? join(appDir, "OpenWork.app")
-      : process.platform === "win32"
-        ? join(appDir, "OpenWork.exe")
-        : join(appDir, "openwork")
-    if (existsSync(appManifest)) {
-      try {
-        const appInstall = JSON.parse(readFileSync(appManifest, "utf8"))
-        if (appInstall.appPath) appPath = appInstall.appPath
-      } catch {
-        // Keep fallback path.
-      }
-    }
+    const { appPath, appManifest } = resolveInstalledApp(appDir)
     checks.push({ name: "openworkApp", ok: existsSync(appPath), value: appPath })
     checks.push({ name: "appInstallManifest", ok: existsSync(appManifest), value: appManifest })
   }
@@ -1020,7 +1092,12 @@ async function runCloudOnboard(args) {
   const signedIn = baseUrl && !explicitPasswordPath ? resolveApiToken(baseUrl) : null
   const ownerPassword = signedIn ? null : await resolveOwnerPassword(args.flags)
   const orgName = getFlag(args.flags, "org-name")
-  const inviteEmail = getFlag(args.flags, "invite-email")
+  // Teammates are optional: a person can start alone and invite later.
+  const inviteEmails = [getFlag(args.flags, "invite-email"), getFlag(args.flags, "teammate-emails")]
+    .filter(Boolean)
+    .flatMap((value) => String(value).split(","))
+    .map((value) => value.trim())
+    .filter(Boolean)
   const skillName = getFlag(args.flags, "skill-name", "First OpenWork Skill")
   const skillOutput = getFlag(args.flags, "skill-output", "OPENWORK_BOOTSTRAP_SKILL_TRIGGERED")
   const prepareDesktop = hasFlag(args.flags, "prepare-desktop")
@@ -1041,7 +1118,7 @@ async function runCloudOnboard(args) {
 
   const required = requestCodeOnly
     ? { baseUrl, ownerEmail, ownerPassword }
-    : { baseUrl, orgName, inviteEmail }
+    : { baseUrl, orgName }
   for (const [name, value] of Object.entries(required)) {
     if (!value) throw new Error(`missing_required_flag: --${name.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`)}`)
   }
@@ -1103,13 +1180,17 @@ async function runCloudOnboard(args) {
     throw new Error(`org_create_failed: ${org.status} ${JSON.stringify(org.body)}`)
   }
 
-  const invite = await request(baseUrl, "/v1/invitations", {
-    method: "POST",
-    headers: auth,
-    body: JSON.stringify({ email: inviteEmail, role: "member" }),
-  })
-  if (invite.status !== 201 || !invite.body?.invitationId) {
-    throw new Error(`invite_failed: ${invite.status} ${JSON.stringify(invite.body)}`)
+  const invitations = []
+  for (const email of inviteEmails) {
+    const invite = await request(baseUrl, "/v1/invitations", {
+      method: "POST",
+      headers: auth,
+      body: JSON.stringify({ email, role: "member" }),
+    })
+    if (invite.status !== 201 || !invite.body?.invitationId) {
+      throw new Error(`invite_failed: ${invite.status} ${JSON.stringify(invite.body)}`)
+    }
+    invitations.push(invite.body)
   }
 
   const rawSourceText = skillText(skillName, skillOutput)
@@ -1143,7 +1224,9 @@ async function runCloudOnboard(args) {
     user: { id: owner.user.id, email: owner.user.email, emailVerified: owner.user.emailVerified },
     signedInWith: signedIn ? signedIn.source : "password",
     organization: org.body.organization,
-    invitation: invite.body,
+    // `invitation` kept for scripts written against the single-invite shape.
+    invitation: invitations[0] ?? null,
+    invitations,
     skill,
     skillRun,
     desktop,
@@ -1299,6 +1382,11 @@ async function main() {
   const command = args.positionals[0] || "help"
   if (command === "install") {
     runInstall(args)
+    return
+  }
+  if (command === "open") {
+    if (args.positionals[1] !== "app") throw new Error("usage: openwork-bootstrap open app [--json]")
+    await runOpenApp(args)
     return
   }
   if (command === "doctor") {
