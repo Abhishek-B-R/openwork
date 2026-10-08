@@ -11,6 +11,19 @@ function sourceList(values: string[], fallback: string): string {
   return values.length ? values.join(" ") : fallback;
 }
 
+export function isLoopbackHostname(hostname: string): boolean {
+  return hostname === "127.0.0.1" || hostname === "localhost" || hostname === "[::1]";
+}
+
+// One scheme rule for the resource meta (mcp-app-host.ts) and the sandbox csp
+// query param, so the param can never widen the policy past the meta: https:
+// anywhere, http: only on loopback. connectDomains also covers WebSocket
+// connections, so it adds wss: anywhere and ws: only on loopback.
+export function isAllowedMcpAppCspOrigin(url: URL, allowWebSocket: boolean): boolean {
+  if (url.protocol === "https:" || (allowWebSocket && url.protocol === "wss:")) return true;
+  return (url.protocol === "http:" || (allowWebSocket && url.protocol === "ws:")) && isLoopbackHostname(url.hostname);
+}
+
 function safeOrigin(value: unknown, allowWebSocket: boolean): value is string {
   if (typeof value !== "string"
     || /\s/u.test(value)
@@ -19,8 +32,7 @@ function safeOrigin(value: unknown, allowWebSocket: boolean): value is string {
     || value.includes(String.fromCharCode(34))) return false;
   try {
     const url = new URL(value);
-    const schemes = allowWebSocket ? ["https:", "http:", "wss:", "ws:"] : ["https:", "http:"];
-    return schemes.includes(url.protocol) && url.origin === value;
+    return isAllowedMcpAppCspOrigin(url, allowWebSocket) && url.origin === value;
   } catch {
     return false;
   }

@@ -26,6 +26,7 @@ import { join } from "node:path";
 import { runtimeStorageDir } from "./runtime-db.js";
 import { createMcpAppResourceCache } from "./mcp-app-resource-cache.js";
 import { MCP_APP_RESOURCE_MAX_BYTES } from "./mcp-app-limits.js";
+import { isAllowedMcpAppCspOrigin, isLoopbackHostname } from "./mcp-app-sandbox.js";
 import {
   assertLocalManagedMcpUrl,
   createLocalManagedMcpGuardedFetch,
@@ -272,16 +273,10 @@ function safeDomain(value: unknown, allowWebSocket: boolean): string | null {
   try {
     const url = new URL(value);
     if (url.username || url.password || url.pathname !== "/" || url.search || url.hash) return null;
-    if (url.protocol === "https:" || (allowWebSocket && url.protocol === "wss:")) return url.origin;
-    if ((url.protocol === "http:" || (allowWebSocket && url.protocol === "ws:")) && isLoopbackHostname(url.hostname)) return url.origin;
+    return isAllowedMcpAppCspOrigin(url, allowWebSocket) ? url.origin : null;
   } catch {
     return null;
   }
-  return null;
-}
-
-function isLoopbackHostname(hostname: string): boolean {
-  return hostname === "127.0.0.1" || hostname === "localhost" || hostname === "[::1]";
 }
 
 function domainList(value: unknown, allowWebSocket = false): string[] {
