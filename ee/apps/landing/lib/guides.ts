@@ -74,7 +74,7 @@ export const guides: Guide[] = [
     heading: "How does OpenWork work with OpenCode?",
     answer:
       "OpenWork runs on OpenCode, the open-source coding agent. The desktop app gives anyone a point-and-click OpenCode, and the opencode-openwork plugin brings your organization's models, skills, and connections into OpenCode in a terminal.",
-    updated: "2026-10-10",
+    updated: "2026-10-11",
     keyFacts: [
       "Engine: OpenCode, on macOS, Windows, and Linux",
       "Plugin: opencode-openwork, for OpenCode 2",
@@ -82,6 +82,19 @@ export const guides: Guide[] = [
       "License: open source, free desktop app"
     ],
     sections: [
+      {
+        id: "openwork-connect",
+        heading: "What is OpenWork Connect?",
+        paragraphs: [
+          "OpenWork Connect is an AI Gateway, MCP Gateway, and Skills Gateway that lets organizations centrally manage models, tools, reusable skills, and access from one admin panel.",
+          "In OpenCode, the opencode-openwork plugin brings all three in with one sign-in. You don't need the OpenWork desktop app."
+        ],
+        bullets: [
+          "AI Gateway: approved models, without giving people provider keys. Usage and spend limits in one place.",
+          "MCP Gateway: connected tools, such as Slack or Google Workspace, for the people allowed to use them.",
+          "Skills Gateway: reusable instructions your team publishes once and every agent can use."
+        ]
+      },
       {
         id: "built-on-opencode",
         heading: "OpenWork is built on OpenCode",
