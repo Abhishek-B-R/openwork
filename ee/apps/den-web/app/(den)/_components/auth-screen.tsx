@@ -53,8 +53,7 @@ export function AuthScreen({ agentSignIn = false }: { agentSignIn?: boolean }) {
   const router = useRouter();
   const pathname = usePathname();
   const routingRef = useRef(false);
-  const { user, runtimeConfigLoaded, sessionHydrated, memberAuthCheckStatus, desktopAuthRequested, setupPending, authError, webAuthRequested, resolveUserLandingRoute, deploymentFeatures } = useDenFlow();
-  const simplifiedOnboarding = deploymentFeatures.simplifiedOnboarding;
+  const { user, runtimeConfigLoaded, sessionHydrated, memberAuthCheckStatus, desktopAuthRequested, setupPending, authError, webAuthRequested, resolveUserLandingRoute } = useDenFlow();
   const hasResolvedSession = runtimeConfigLoaded && sessionHydrated && Boolean(user) && !authError && (!desktopAuthRequested || setupPending) && !webAuthRequested;
 
   useEffect(() => {
@@ -88,8 +87,8 @@ export function AuthScreen({ agentSignIn = false }: { agentSignIn?: boolean }) {
     <SetupFrame
       step="account"
       panelVisual={<OnboardingTexture />}
-      // The sign-up panel carries its own heading in the simplified flow (P2).
-      title={simplifiedOnboarding ? "" : "Good work starts here."}
+      // The sign-up panel carries its own heading (P2).
+      title=""
       description="One account for your desktop, your tools, and your team."
     >
       <div data-testid="auth-landing-frame">
@@ -103,7 +102,7 @@ export function AuthScreen({ agentSignIn = false }: { agentSignIn?: boolean }) {
           ) : (
             <div className="grid gap-5">
               <TemporaryAuthNotice />
-              <AuthPanel bare emailFirstFlow emailStepContent={simplifiedOnboarding ? { title: "Start using OpenWork." } : undefined} />
+              <AuthPanel bare emailFirstFlow emailStepContent={{ title: "Start using OpenWork." }} />
             </div>
           )}
         </div>

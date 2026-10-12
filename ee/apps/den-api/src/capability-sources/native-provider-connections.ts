@@ -13,7 +13,6 @@ import {
 import { getConnectedAccount, getOrgOAuthClient } from "./oauth-credentials.js"
 import { readProviderTenantId } from "./oauth-tenant.js"
 import { listExternalMcpConnections, listUsableNativeProviderConnections } from "./external-mcp-connections.js"
-import { organizationFeatureEnabled } from "../features.js"
 
 /**
  * Native providers (google-workspace, ...) surface in the SAME member-facing
@@ -116,18 +115,24 @@ export function buildNativeProviderEntry(
 
 export type NativeProviderPolicyError = { kind: "policy_blocked"; message: string }
 
+/**
+ * Connect is generally available: the per-organization `mcpConnections` opt-out
+ * was retired on purpose (product decision, 2026-10), so a stored `false`
+ * override no longer blocks native actions. Access is limited per connection
+ * (team grants) and by each member's own credentials, both enforced where the
+ * connection is resolved. Only a missing organization is refused here.
+ */
+
 export async function nativeProviderConnectionPolicyError(organizationId: DenTypeId<"organization">): Promise<NativeProviderPolicyError | null> {
   const [organization] = await db
     .select({ id: OrganizationTable.id })
     .from(OrganizationTable)
     .where(eq(OrganizationTable.id, organizationId))
     .limit(1)
-  if (organization && await organizationFeatureEnabled(organization.id, "mcpConnections")) return null
+  if (organization) return null
   return {
     kind: "policy_blocked",
-    message: organization
-      ? "Connect is disabled for this organization. Ask your administrator to have it re-enabled."
-      : "This organization is unavailable. Ask your administrator to check your organization access.",
+    message: "This organization is unavailable. Ask your administrator to check your organization access.",
   }
 }
 
