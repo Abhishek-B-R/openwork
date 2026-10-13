@@ -1,6 +1,6 @@
 import { expect } from "vitest";
 import { spec, type SpecBodyContext } from "@openwork/testkit";
-import { appSource, appTitle, buildPrompt, buildReply, chatPrompt, chatReply, launchInput, mcpAppServers, mcpAppServersChat, mcpAppServersChatOwnSignIn, mcpAppCreationV1, mcpAppCreationV2, mcpAppCreationDesktop, payload, pricerTitle, record, reopenPrompt, reopenReply, reservationId, rows, signInPrompt, signInReply, toolNames } from "../worlds/mcp-app-servers.ts";
+import { appSource, appTitle, buildPrompt, buildReply, chatPrompt, chatReply, guidedReply, guidedTitle, launchInput, mcpAppServers, mcpAppServersChat, mcpAppServersChatOwnSignIn, mcpAppCreationV1, mcpAppCreationV2, mcpAppCreationDesktop, payload, pricerTitle, record, reopenPrompt, reopenReply, reservationId, rows, signInPrompt, signInReply, toolNames } from "../worlds/mcp-app-servers.ts";
 
 const test = spec.world(mcpAppServers, {
   resources: { surfaces: ["web"], services: ["den", "mock"] },
@@ -615,6 +615,45 @@ async function creationJourney({ world, agent, user, probe, step, evidence }: Sp
       expect((await probe.dom('[data-built-app-preview]')).elements).toHaveLength(0);
       evidence.recordAssertionEvidence("A real compilation failure never becomes readiness", `${name}: create_app rejects invalid source; the creation row says Couldn’t create artifact and opens no App.`, true);
       await user.screenshot();
+    });
+    await step("after: a turn that only searches leaves no artifact step behind", async () => {
+      const prompt = "Check whether I could create an app that looks up Inventory prices.";
+      await world.prepareLifecycleTurn(prompt, "search");
+      await agent.send(prompt);
+      await user.see({ text: "Inventory can look up unit prices." }, { timeoutMs: 120_000 });
+      expect(await probe.eventually(async () => (await probe.dom('button[aria-label="Stop"]')).elements, { within: 30_000, intervalMs: 200, label: "the search-only turn finishes", until: elements => elements.length === 0 })).toHaveLength(0);
+      expect((await probe.dom('[data-app-builder-step][data-app-creation-stage="needs"]')).elements).toHaveLength(0);
+      await user.notSee({ text: /Preparing artifact/ });
+      evidence.recordAssertionEvidence("Searching without building is not an artifact", `${name}: the person asked about creating an App, the model only called search_capabilities and replied. Once the turn ended, no Preparing artifact step remained.`, true);
+      await user.screenshot();
+    });
+    await step("after: a dashboard request is one artifact step holding the agent's guide, search and build, and the unchanged starter works", async () => {
+      // No "app" in the request: the step comes from what the agent does, not from its wording.
+      const prompt = "Make me a dashboard of Inventory unit prices.";
+      await world.prepareLifecycleTurn(prompt, "guided");
+      await agent.send(prompt);
+      const sentence = `Created artifact “${guidedTitle}”`;
+      await user.see({ text: sentence }, { timeoutMs: 120_000 });
+      await user.see({ text: guidedReply }, { timeoutMs: 30_000 });
+      // The finished App opens beside the chat, which reflows the conversation; hover the step only once it has.
+      frame = await world.appFrameShowing(guidedTitle, "Show unit price");
+      // The details toggle appears when the step is hovered.
+      await user.hover({ text: sentence });
+      await user.click({ role: "button", label: `Show technical details for ${sentence}` });
+      const steps = (await probe.dom(`[data-app-builder-step][aria-label="${sentence}"]`)).elements;
+      expect(steps).toHaveLength(1);
+      expect(steps[0]?.text).toContain("build-an-app");
+      expect(steps[0]?.text).toContain("Inventory lookup unit price");
+      // The guide the agent read, shown in the step's details, is OpenWork Cloud's built-in skill.
+      expect(steps[0]?.text).toContain("# Build an App");
+      // prepare_app's starter, published unchanged, asks for the tool's input and loads it on one click.
+      await user.on(frame).type({ role: "textbox", label: "Sku" }, launchInput.sku);
+      await user.on(frame).click({ role: "button", label: "Show unit price" });
+      await user.on(frame).see({ text: "Unit price" }, { timeoutMs: 60_000 });
+      evidence.recordAssertionEvidence("The agent's own calls make one artifact step, and the starter works as published", `${name}: a dashboard request without the word app read build-an-app, searched, prepared and built from prepare_app's starter. The guide and search sit inside the one Created artifact step, and the published starter loads the Inventory price on one click.`, true);
+      await user.screenshot();
+      await closeFrame();
+      await user.click({ role: "button", label: "Close panel" });
     });
     await step("after: stopping creation pauses its step without opening an App", async () => {
       const prompt = "Create an App and hold while writing so I can stop it.";
