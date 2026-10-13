@@ -165,17 +165,9 @@ export type AdminFeature = {
   key:
     | "teamMembershipCache"
     | "managedDeployments"
-    | "denFlatPageHeaders"
-    | "dashboardActivity"
-    | "libraryIntegrated"
-    | "libraryUsage"
-    | "modelsAnalytics"
-    | "orgManagedDashboards"
     | "slackAssistant"
     | "slackWorkbotReplies"
-    | "headlessAutomations"
     | "workbot"
-    | "calendarPolish"
     | "automationCalendar"
     | "permissions"
     | "engineV2Upgrade"
@@ -220,17 +212,9 @@ export type AdminOrganizationsPageResponse = {
     capabilities: {
       teamMembershipCache: boolean;
       managedDeployments: boolean;
-      denFlatPageHeaders: boolean;
-      dashboardActivity: boolean;
-      libraryIntegrated: boolean;
-      libraryUsage: boolean;
-      modelsAnalytics: boolean;
-      orgManagedDashboards: boolean;
       slackAssistant: boolean;
       slackWorkbotReplies: boolean;
-      headlessAutomations: boolean;
       workbot: boolean;
-      calendarPolish: boolean;
       automationCalendar: boolean;
       permissions: boolean;
       engineV2Upgrade: boolean;
@@ -264,60 +248,6 @@ export type AdminOrganizationsPageResponse = {
         override: boolean | null;
         overrideApplies: boolean;
       };
-      denFlatPageHeaders: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      dashboardActivity: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      libraryIntegrated: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      libraryUsage: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      modelsAnalytics: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      orgManagedDashboards: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
       slackAssistant: {
         enabled: boolean;
         source: "unavailable" | "killed" | "lock" | "override" | "everyone";
@@ -336,25 +266,7 @@ export type AdminOrganizationsPageResponse = {
         override: boolean | null;
         overrideApplies: boolean;
       };
-      headlessAutomations: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
       workbot: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      calendarPolish: {
         enabled: boolean;
         source: "unavailable" | "killed" | "lock" | "override" | "everyone";
         everyone: boolean;
@@ -464,17 +376,9 @@ export type AdminOverviewResponse = {
     capabilities: {
       teamMembershipCache: boolean;
       managedDeployments: boolean;
-      denFlatPageHeaders: boolean;
-      dashboardActivity: boolean;
-      libraryIntegrated: boolean;
-      libraryUsage: boolean;
-      modelsAnalytics: boolean;
-      orgManagedDashboards: boolean;
       slackAssistant: boolean;
       slackWorkbotReplies: boolean;
-      headlessAutomations: boolean;
       workbot: boolean;
-      calendarPolish: boolean;
       automationCalendar: boolean;
       permissions: boolean;
       engineV2Upgrade: boolean;
@@ -508,60 +412,6 @@ export type AdminOverviewResponse = {
         override: boolean | null;
         overrideApplies: boolean;
       };
-      denFlatPageHeaders: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      dashboardActivity: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      libraryIntegrated: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      libraryUsage: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      modelsAnalytics: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      orgManagedDashboards: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
       slackAssistant: {
         enabled: boolean;
         source: "unavailable" | "killed" | "lock" | "override" | "everyone";
@@ -580,25 +430,7 @@ export type AdminOverviewResponse = {
         override: boolean | null;
         overrideApplies: boolean;
       };
-      headlessAutomations: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
       workbot: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      calendarPolish: {
         enabled: boolean;
         source: "unavailable" | "killed" | "lock" | "override" | "everyone";
         everyone: boolean;
@@ -1255,8 +1087,6 @@ export type OrganizationContextResponse = {
       | "marketplaces.manage"
       | "plugins.import"
       | "connectors.manage"
-      | "dashboards.view"
-      | "dashboards.manage"
     >;
     [key: string]: unknown;
   };
@@ -1524,69 +1354,6 @@ export type WorkflowRunListResponse = {
    * Pass as cursor to fetch the next page; null on the last page.
    */
   nextCursor: string | null;
-};
-
-export type DashboardElement = {
-  serverName: string;
-  connectionId?: string;
-  toolName: string;
-  projectedToolName: string;
-  resourceUri: string;
-  title: string;
-  launchArguments?: {
-    [key: string]: unknown;
-  };
-  requiresApproval?: boolean;
-  organizationAutoLaunch?: boolean;
-};
-
-export type Dashboard = {
-  id: string;
-  organizationId: string;
-  name: string;
-  elements: Array<DashboardElement>;
-  createdByOrgMembershipId: string;
-  createdAt: string;
-  updatedAt: string;
-};
-
-export type DashboardListResponse = {
-  items: Array<Dashboard>;
-};
-
-export type DashboardResponse = {
-  item: Dashboard;
-};
-
-export type DashboardAccessGrant = {
-  id: string;
-  orgMembershipId: string | null;
-  teamId: string | null;
-  orgWide: boolean;
-  role: "viewer" | "editor" | "manager";
-  createdByOrgMembershipId: string;
-  createdAt: string;
-  removedAt: string | null;
-};
-
-export type DashboardAccessListResponse = {
-  items: Array<DashboardAccessGrant>;
-};
-
-export type DashboardAccessResponse = {
-  ok: true;
-  item: DashboardAccessGrant;
-};
-
-export type MeDashboard = {
-  id: string;
-  name: string;
-  elements: Array<DashboardElement>;
-  updatedAt: string;
-};
-
-export type MeDashboardListResponse = {
-  items: Array<MeDashboard>;
 };
 
 export type BuiltMcpApp = {
@@ -5491,7 +5258,6 @@ export type WorkbotSession = {
   canSchedule: boolean;
   calendar?: boolean;
   sideChats: boolean;
-  calendarPolish?: boolean;
   model?: string | null;
 };
 
@@ -6244,17 +6010,9 @@ export type GetV1AdminOrganizationsByOrganizationIdCapabilitiesResponses = {
     capabilities: {
       teamMembershipCache: boolean;
       managedDeployments: boolean;
-      denFlatPageHeaders: boolean;
-      dashboardActivity: boolean;
-      libraryIntegrated: boolean;
-      libraryUsage: boolean;
-      modelsAnalytics: boolean;
-      orgManagedDashboards: boolean;
       slackAssistant: boolean;
       slackWorkbotReplies: boolean;
-      headlessAutomations: boolean;
       workbot: boolean;
-      calendarPolish: boolean;
       automationCalendar: boolean;
       permissions: boolean;
       engineV2Upgrade: boolean;
@@ -6288,60 +6046,6 @@ export type GetV1AdminOrganizationsByOrganizationIdCapabilitiesResponses = {
         override: boolean | null;
         overrideApplies: boolean;
       };
-      denFlatPageHeaders: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      dashboardActivity: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      libraryIntegrated: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      libraryUsage: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      modelsAnalytics: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      orgManagedDashboards: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
       slackAssistant: {
         enabled: boolean;
         source: "unavailable" | "killed" | "lock" | "override" | "everyone";
@@ -6360,25 +6064,7 @@ export type GetV1AdminOrganizationsByOrganizationIdCapabilitiesResponses = {
         override: boolean | null;
         overrideApplies: boolean;
       };
-      headlessAutomations: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
       workbot: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      calendarPolish: {
         enabled: boolean;
         source: "unavailable" | "killed" | "lock" | "override" | "everyone";
         everyone: boolean;
@@ -6476,17 +6162,9 @@ export type PutV1AdminOrganizationsByOrganizationIdCapabilitiesResponses = {
     capabilities: {
       teamMembershipCache: boolean;
       managedDeployments: boolean;
-      denFlatPageHeaders: boolean;
-      dashboardActivity: boolean;
-      libraryIntegrated: boolean;
-      libraryUsage: boolean;
-      modelsAnalytics: boolean;
-      orgManagedDashboards: boolean;
       slackAssistant: boolean;
       slackWorkbotReplies: boolean;
-      headlessAutomations: boolean;
       workbot: boolean;
-      calendarPolish: boolean;
       automationCalendar: boolean;
       permissions: boolean;
       engineV2Upgrade: boolean;
@@ -6520,60 +6198,6 @@ export type PutV1AdminOrganizationsByOrganizationIdCapabilitiesResponses = {
         override: boolean | null;
         overrideApplies: boolean;
       };
-      denFlatPageHeaders: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      dashboardActivity: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      libraryIntegrated: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      libraryUsage: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      modelsAnalytics: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      orgManagedDashboards: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
       slackAssistant: {
         enabled: boolean;
         source: "unavailable" | "killed" | "lock" | "override" | "everyone";
@@ -6592,25 +6216,7 @@ export type PutV1AdminOrganizationsByOrganizationIdCapabilitiesResponses = {
         override: boolean | null;
         overrideApplies: boolean;
       };
-      headlessAutomations: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
       workbot: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      calendarPolish: {
         enabled: boolean;
         source: "unavailable" | "killed" | "lock" | "override" | "everyone";
         everyone: boolean;
@@ -9173,13 +8779,6 @@ export type GetV1OrgActivityErrors = {
    * Only workspace owners and admins can read dashboard activity.
    */
   403: ForbiddenError;
-  /**
-   * The organization was not found, or dashboard activity is off.
-   */
-  404: {
-    error: "feature_disabled";
-    feature: string;
-  };
 };
 
 export type GetV1OrgActivityError = GetV1OrgActivityErrors[keyof GetV1OrgActivityErrors];
@@ -12531,362 +12130,6 @@ export type DeleteV1WorkflowsByConfigObjectIdSnapshotsByReceiptIdContentResponse
 export type DeleteV1WorkflowsByConfigObjectIdSnapshotsByReceiptIdContentResponse =
   DeleteV1WorkflowsByConfigObjectIdSnapshotsByReceiptIdContentResponses[keyof DeleteV1WorkflowsByConfigObjectIdSnapshotsByReceiptIdContentResponses];
 
-export type GetV1DashboardsData = {
-  body?: never;
-  path?: never;
-  query?: never;
-  url: "/v1/dashboards";
-};
-
-export type GetV1DashboardsErrors = {
-  /**
-   * The caller must be signed in.
-   */
-  401: UnauthorizedError;
-  /**
-   * Only workspace owners and admins can list dashboards.
-   */
-  403: ForbiddenError;
-};
-
-export type GetV1DashboardsError = GetV1DashboardsErrors[keyof GetV1DashboardsErrors];
-
-export type GetV1DashboardsResponses = {
-  /**
-   * Dashboards returned successfully.
-   */
-  200: DashboardListResponse;
-};
-
-export type GetV1DashboardsResponse = GetV1DashboardsResponses[keyof GetV1DashboardsResponses];
-
-export type PostV1DashboardsData = {
-  body: {
-    name: string;
-    elements?: Array<DashboardElement>;
-  };
-  path?: never;
-  query?: never;
-  url: "/v1/dashboards";
-};
-
-export type PostV1DashboardsErrors = {
-  /**
-   * The dashboard request was invalid.
-   */
-  400: InvalidRequestError;
-  /**
-   * The caller must be signed in.
-   */
-  401: UnauthorizedError;
-  /**
-   * Only workspace owners and admins can create dashboards.
-   */
-  403: ForbiddenError;
-};
-
-export type PostV1DashboardsError = PostV1DashboardsErrors[keyof PostV1DashboardsErrors];
-
-export type PostV1DashboardsResponses = {
-  /**
-   * Dashboard created successfully.
-   */
-  201: DashboardResponse;
-};
-
-export type PostV1DashboardsResponse = PostV1DashboardsResponses[keyof PostV1DashboardsResponses];
-
-export type DeleteV1DashboardsByDashboardIdData = {
-  body?: never;
-  path: {
-    /**
-     * Den TypeID with 'dsb_' prefix and a 26-character base32 suffix.
-     */
-    dashboardId: string;
-  };
-  query?: never;
-  url: "/v1/dashboards/{dashboardId}";
-};
-
-export type DeleteV1DashboardsByDashboardIdErrors = {
-  /**
-   * The caller must be signed in.
-   */
-  401: UnauthorizedError;
-  /**
-   * Only workspace owners and admins can delete dashboards.
-   */
-  403: ForbiddenError;
-  /**
-   * The dashboard was not found.
-   */
-  404: NotFoundError;
-};
-
-export type DeleteV1DashboardsByDashboardIdError =
-  DeleteV1DashboardsByDashboardIdErrors[keyof DeleteV1DashboardsByDashboardIdErrors];
-
-export type DeleteV1DashboardsByDashboardIdResponses = {
-  /**
-   * Dashboard deleted successfully.
-   */
-  204: void;
-};
-
-export type DeleteV1DashboardsByDashboardIdResponse =
-  DeleteV1DashboardsByDashboardIdResponses[keyof DeleteV1DashboardsByDashboardIdResponses];
-
-export type GetV1DashboardsByDashboardIdData = {
-  body?: never;
-  path: {
-    /**
-     * Den TypeID with 'dsb_' prefix and a 26-character base32 suffix.
-     */
-    dashboardId: string;
-  };
-  query?: never;
-  url: "/v1/dashboards/{dashboardId}";
-};
-
-export type GetV1DashboardsByDashboardIdErrors = {
-  /**
-   * The caller must be signed in.
-   */
-  401: UnauthorizedError;
-  /**
-   * Only workspace owners and admins can view dashboards.
-   */
-  403: ForbiddenError;
-  /**
-   * The dashboard was not found.
-   */
-  404: NotFoundError;
-};
-
-export type GetV1DashboardsByDashboardIdError =
-  GetV1DashboardsByDashboardIdErrors[keyof GetV1DashboardsByDashboardIdErrors];
-
-export type GetV1DashboardsByDashboardIdResponses = {
-  /**
-   * Dashboard returned successfully.
-   */
-  200: DashboardResponse;
-};
-
-export type GetV1DashboardsByDashboardIdResponse =
-  GetV1DashboardsByDashboardIdResponses[keyof GetV1DashboardsByDashboardIdResponses];
-
-export type PatchV1DashboardsByDashboardIdData = {
-  body: {
-    name?: string;
-    elements?: Array<DashboardElement>;
-  };
-  path: {
-    /**
-     * Den TypeID with 'dsb_' prefix and a 26-character base32 suffix.
-     */
-    dashboardId: string;
-  };
-  query?: never;
-  url: "/v1/dashboards/{dashboardId}";
-};
-
-export type PatchV1DashboardsByDashboardIdErrors = {
-  /**
-   * The dashboard request was invalid.
-   */
-  400: InvalidRequestError;
-  /**
-   * The caller must be signed in.
-   */
-  401: UnauthorizedError;
-  /**
-   * Only workspace owners and admins can update dashboards.
-   */
-  403: ForbiddenError;
-  /**
-   * The dashboard was not found.
-   */
-  404: NotFoundError;
-};
-
-export type PatchV1DashboardsByDashboardIdError =
-  PatchV1DashboardsByDashboardIdErrors[keyof PatchV1DashboardsByDashboardIdErrors];
-
-export type PatchV1DashboardsByDashboardIdResponses = {
-  /**
-   * Dashboard updated successfully.
-   */
-  200: DashboardResponse;
-};
-
-export type PatchV1DashboardsByDashboardIdResponse =
-  PatchV1DashboardsByDashboardIdResponses[keyof PatchV1DashboardsByDashboardIdResponses];
-
-export type GetV1DashboardsByDashboardIdAccessData = {
-  body?: never;
-  path: {
-    /**
-     * Den TypeID with 'dsb_' prefix and a 26-character base32 suffix.
-     */
-    dashboardId: string;
-  };
-  query?: never;
-  url: "/v1/dashboards/{dashboardId}/access";
-};
-
-export type GetV1DashboardsByDashboardIdAccessErrors = {
-  /**
-   * The caller must be signed in.
-   */
-  401: UnauthorizedError;
-  /**
-   * Only workspace owners and admins can list dashboard access.
-   */
-  403: ForbiddenError;
-  /**
-   * The dashboard was not found.
-   */
-  404: NotFoundError;
-};
-
-export type GetV1DashboardsByDashboardIdAccessError =
-  GetV1DashboardsByDashboardIdAccessErrors[keyof GetV1DashboardsByDashboardIdAccessErrors];
-
-export type GetV1DashboardsByDashboardIdAccessResponses = {
-  /**
-   * Dashboard access grants returned successfully.
-   */
-  200: DashboardAccessListResponse;
-};
-
-export type GetV1DashboardsByDashboardIdAccessResponse =
-  GetV1DashboardsByDashboardIdAccessResponses[keyof GetV1DashboardsByDashboardIdAccessResponses];
-
-export type PostV1DashboardsByDashboardIdAccessData = {
-  body: {
-    /**
-     * Den TypeID with 'om_' prefix and a 26-character base32 suffix.
-     */
-    orgMembershipId?: string;
-    /**
-     * Den TypeID with 'tem_' prefix and a 26-character base32 suffix.
-     */
-    teamId?: string;
-    orgWide?: boolean;
-    role: "viewer" | "editor" | "manager";
-  };
-  path: {
-    /**
-     * Den TypeID with 'dsb_' prefix and a 26-character base32 suffix.
-     */
-    dashboardId: string;
-  };
-  query?: never;
-  url: "/v1/dashboards/{dashboardId}/access";
-};
-
-export type PostV1DashboardsByDashboardIdAccessErrors = {
-  /**
-   * The grant request was invalid.
-   */
-  400: InvalidRequestError;
-  /**
-   * The caller must be signed in.
-   */
-  401: UnauthorizedError;
-  /**
-   * Only workspace owners and admins can grant dashboard access.
-   */
-  403: ForbiddenError;
-  /**
-   * The dashboard, member, or team was not found.
-   */
-  404: NotFoundError;
-};
-
-export type PostV1DashboardsByDashboardIdAccessError =
-  PostV1DashboardsByDashboardIdAccessErrors[keyof PostV1DashboardsByDashboardIdAccessErrors];
-
-export type PostV1DashboardsByDashboardIdAccessResponses = {
-  /**
-   * Dashboard access granted successfully.
-   */
-  201: DashboardAccessResponse;
-};
-
-export type PostV1DashboardsByDashboardIdAccessResponse =
-  PostV1DashboardsByDashboardIdAccessResponses[keyof PostV1DashboardsByDashboardIdAccessResponses];
-
-export type DeleteV1DashboardsByDashboardIdAccessByGrantIdData = {
-  body?: never;
-  path: {
-    /**
-     * Den TypeID with 'dsb_' prefix and a 26-character base32 suffix.
-     */
-    dashboardId: string;
-    /**
-     * Den TypeID with 'dsg_' prefix and a 26-character base32 suffix.
-     */
-    grantId: string;
-  };
-  query?: never;
-  url: "/v1/dashboards/{dashboardId}/access/{grantId}";
-};
-
-export type DeleteV1DashboardsByDashboardIdAccessByGrantIdErrors = {
-  /**
-   * The caller must be signed in.
-   */
-  401: UnauthorizedError;
-  /**
-   * Only workspace owners and admins can revoke dashboard access.
-   */
-  403: ForbiddenError;
-  /**
-   * The dashboard or grant was not found.
-   */
-  404: NotFoundError;
-};
-
-export type DeleteV1DashboardsByDashboardIdAccessByGrantIdError =
-  DeleteV1DashboardsByDashboardIdAccessByGrantIdErrors[keyof DeleteV1DashboardsByDashboardIdAccessByGrantIdErrors];
-
-export type DeleteV1DashboardsByDashboardIdAccessByGrantIdResponses = {
-  /**
-   * Dashboard access revoked successfully.
-   */
-  204: void;
-};
-
-export type DeleteV1DashboardsByDashboardIdAccessByGrantIdResponse =
-  DeleteV1DashboardsByDashboardIdAccessByGrantIdResponses[keyof DeleteV1DashboardsByDashboardIdAccessByGrantIdResponses];
-
-export type GetV1MeDashboardsData = {
-  body?: never;
-  path?: never;
-  query?: never;
-  url: "/v1/me/dashboards";
-};
-
-export type GetV1MeDashboardsErrors = {
-  /**
-   * The caller must be signed in.
-   */
-  401: UnauthorizedError;
-};
-
-export type GetV1MeDashboardsError = GetV1MeDashboardsErrors[keyof GetV1MeDashboardsErrors];
-
-export type GetV1MeDashboardsResponses = {
-  /**
-   * Granted dashboards returned successfully.
-   */
-  200: MeDashboardListResponse;
-};
-
-export type GetV1MeDashboardsResponse = GetV1MeDashboardsResponses[keyof GetV1MeDashboardsResponses];
-
 export type GetV1McpAppsData = {
   body?: never;
   path?: never;
@@ -12909,7 +12152,7 @@ export type GetV1McpAppsError = GetV1McpAppsErrors[keyof GetV1McpAppsErrors];
 
 export type GetV1McpAppsResponses = {
   /**
-   * Apps built in OpenWork that can be added to a dashboard.
+   * Apps built in OpenWork the member can use.
    */
   200: BuiltMcpAppListResponse;
 };
