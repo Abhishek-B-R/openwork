@@ -608,3 +608,241 @@ testWithChatsThatFail("chats that cannot be copied whole are copied trimmed, or 
     await user.screenshot();
   });
 });
+
+test("switching to v2 before the chats are copied copies them first, so every v1 chat stays readable", async ({ world, user, agent, probe, step, evidence }) => {
+  const workspaceId = world.workspace.workspaceId;
+  const status = async () => {
+    const response = await probe.desktopApi("/experimental/engine-v2-preview/status");
+    expect(response.status).toBe(200);
+    if (!isRecord(response.body)) throw new Error("Engine status missing");
+    return response.body;
+  };
+  const v2SessionIds = async () => {
+    const response = await probe.desktopApi(`/workspace/${workspaceId}/opencode2/api/session`);
+    expect(response.status).toBe(200);
+    const items = isRecord(response.body) ? response.body.data : response.body;
+    return (Array.isArray(items) ? items : []).filter(isRecord).map(item => String(item.id)).sort();
+  };
+  // The request the Settings and palette switch sends.
+  const earlySwitch = async () => {
+    const response = await agent.desktopApi("/experimental/engine-v2-preview", { method: "PUT", body: { enabled: true, chatRouting: true } });
+    return { status: response.status, code: isRecord(response.body) ? response.body.code : undefined };
+  };
+  const paletteSwitch = async (engine: "v1" | "v2") => {
+    await user.press(process.platform === "darwin" ? "Meta+K" : "Control+K");
+    await user.type({ role: "combobox" }, `Switch to OpenCode ${engine}`);
+    await user.click({ text: `Switch to OpenCode ${engine}` });
+  };
+  const readChat = async (chat: (typeof world.chats)[number]) => {
+    await user.click({ testId: `sidebar-session-${chat.id}` });
+    await user.see({ text: chat.reply }, { timeoutMs: 60_000 });
+  };
+  expect(world.fixture).toBe(true);
+  const [first, other] = [world.chats[0]!, world.chats[2]!];
+
+  await step("before: the member reads a v1 chat and switches to OpenCode v2 before any chat is copied", async () => {
+    await user.resizeViewport({ width: 1280, height: 800, deviceScaleFactor: 1 });
+    const before = await probe.eventually(status, {
+      within: 60_000, label: "v1 engine with v1 history",
+      until: value => value.chatRouting !== true && value.v1HistoryAvailable === true,
+    });
+    await readChat(first);
+    await paletteSwitch("v2");
+    await user.see({ testId: "engine-migration-consent" }, { timeoutMs: 30_000 });
+    expect((await probe.dom('[data-testid="engine-migration-consent"][data-mode="upgrade"]')).elements).toHaveLength(1);
+    await user.see({ text: "Upgrade chats?" });
+    await user.see({ text: /backing up its existing chats first, then switches OpenWork to v2/ });
+    const after = await status();
+    expect(after.chatRouting).not.toBe(true);
+    expect(after.enabled).toBe(before.enabled);
+    expect(migrationOf(after).state).toBe("idle");
+    await user.see({ text: first.reply });
+    evidence.recordAssertionEvidence(
+      "an early switch asks to copy the chats first instead of routing to v2",
+      `upgrade consent shown; chatRouting ${String(after.chatRouting)}, v2 process enabled ${String(before.enabled)} → ${String(after.enabled)}, migration ${String(migrationOf(after).state)}; "${first.title}" still shows its reply`,
+      after.chatRouting !== true && after.enabled === before.enabled,
+    );
+    await user.screenshot();
+  });
+
+  await step("the early switch request itself is refused until the chats are copied", async () => {
+    const refused = await earlySwitch();
+    const after = await status();
+    evidence.recordAssertionEvidence(
+      "PUT {enabled: true, chatRouting: true} with uncopied v1 chats changes nothing",
+      `HTTP ${refused.status} ${String(refused.code)}; chatRouting ${String(after.chatRouting)}`,
+      refused.status === 409 && refused.code === "engine_migration_required" && after.chatRouting !== true,
+    );
+    expect(refused).toEqual({ status: 409, code: "engine_migration_required" });
+    expect(after.chatRouting).not.toBe(true);
+  });
+
+  await step("while copying: chats stay on v1 and the member keeps reading them", async () => {
+    await user.click({ role: "button", text: /^Upgrade$/ });
+    await probe.eventually(world.readHeldCopy, {
+      within: MIGRATION_WITHIN_MS, intervalMs: 100, label: "the first real history import is held",
+      until: value => value.held && value.arrived === 1,
+    });
+    const copying = await status();
+    const refused = await earlySwitch();
+    await readChat(other);
+    await readChat(first);
+    expect(migrationOf(copying).state).toBe("running");
+    expect(copying.chatRouting).not.toBe(true);
+    expect(refused).toEqual({ status: 409, code: "engine_migration_running" });
+    expect((await status()).chatRouting).not.toBe(true);
+    expect(world.readHeldCopy()).toMatchObject({ held: true, expired: false });
+    evidence.recordAssertionEvidence(
+      "with a copy genuinely unfinished, routing stays on v1 and both chats open",
+      `real import held; migration ${String(migrationOf(copying).state)}/${String(isRecord(copying.migration) ? copying.migration.phase : "")}; switch request HTTP ${refused.status} ${String(refused.code)}; "${other.title}" and "${first.title}" show their replies`,
+      copying.chatRouting !== true && refused.status === 409,
+    );
+    await user.screenshot();
+    world.releaseHeldCopy("continue");
+    await probe.eventually(world.readHeldCopy, {
+      within: MIGRATION_WITHIN_MS, intervalMs: 100, label: "the second real history import is held",
+      until: value => value.held && value.arrived === 2,
+    });
+    world.releaseHeldCopy("continue");
+  });
+
+  await step("after: once every chat is copied OpenWork switches to v2 and the same chats open", async () => {
+    const done = await probe.eventually(status, {
+      within: MIGRATION_WITHIN_MS, intervalMs: 1_000, label: "copied and switched to v2",
+      until: value => migrationOf(value).state === "error"
+        || (migrationOf(value).state === "completed" && value.chatRouting === true && value.running === true),
+    });
+    expect(migrationOf(done)).toMatchObject({ state: "completed", imported: world.expectedChats, skipped: 0 });
+    const ids = await probe.eventually(v2SessionIds, {
+      within: 60_000, label: "fixture chats listed by v2",
+      until: value => world.chats.every(chat => value.includes(chat.id)),
+    });
+    await readChat(other);
+    await readChat(first);
+    expect(world.readV1History()).toEqual(world.before);
+    evidence.recordAssertionEvidence(
+      "the chats read on v1 before the switch read the same on v2",
+      `imported ${migrationOf(done).imported} of ${migrationOf(done).total}; v2 lists ${world.chats.filter(chat => ids.includes(chat.id)).length} of ${world.chats.length}; "${other.title}" and "${first.title}" show their replies on v2; v1 history unchanged`,
+      world.chats.every(chat => ids.includes(chat.id)),
+    );
+    await user.screenshot();
+  });
+
+  await step("after: with every chat copied, switching back and forth asks nothing more", async () => {
+    await paletteSwitch("v1");
+    await probe.eventually(status, { within: 60_000, label: "back on v1", until: value => value.chatRouting !== true });
+    await paletteSwitch("v2");
+    const again = await probe.eventually(status, {
+      within: 60_000, label: "on v2 again without another copy",
+      until: value => value.chatRouting === true && value.running === true,
+    });
+    await user.notSee({ testId: "engine-migration-consent" }, { timeoutMs: 1_000 });
+    await readChat(first);
+    expect(migrationOf(again).state).toBe("completed");
+    evidence.recordAssertionEvidence(
+      "a finished copy is remembered, so later switches go straight through",
+      `v1 → v2 switch with no consent; migration ${String(migrationOf(again).state)}; "${first.title}" shows its reply`,
+      again.chatRouting === true,
+    );
+  });
+});
+
+test("a copy cut short by a force quit resumes on its own, and a chat not copied says why it can't open", async ({ world, user: firstUser, probe: firstProbe, step, evidence }) => {
+  let user = firstUser;
+  let probe = firstProbe;
+  expect(world.fixture).toBe(true);
+  const status = async () => {
+    const response = await probe.desktopApi("/experimental/engine-v2-preview/status");
+    expect(response.status).toBe(200);
+    if (!isRecord(response.body)) throw new Error("Engine status missing");
+    return response.body;
+  };
+  const readChat = async (chat: (typeof world.chats)[number]) => {
+    await user.click({ testId: `sidebar-session-${chat.id}` });
+    await user.see({ text: chat.reply }, { timeoutMs: 60_000 });
+  };
+  const first = world.chats[0]!;
+
+  await step("before: the member starts the upgrade and a chat is genuinely mid-copy", async () => {
+    await user.resizeViewport({ width: 1280, height: 800, deviceScaleFactor: 1 });
+    await probe.eventually(status, {
+      within: 60_000, label: "v1 engine with v1 history",
+      until: value => value.chatRouting !== true && value.v1HistoryAvailable === true,
+    });
+    await user.see({ testId: "engine-upgrade-notice" }, { timeoutMs: 60_000 });
+    await user.click({ role: "button", text: /^Upgrade$/ });
+    await user.see({ testId: "engine-migration-consent" });
+    await user.click({ role: "button", text: /^Upgrade$/ });
+    await probe.eventually(world.readHeldCopy, {
+      within: MIGRATION_WITHIN_MS, intervalMs: 100, label: "the first real history import is held",
+      until: value => value.held && value.arrived === 1,
+    });
+    expect(migrationOf(await status()).state).toBe("running");
+    await user.screenshot();
+  });
+
+  await step("OpenWork is force quit while copying and opened again", async () => {
+    const relaunched = await world.restart();
+    user = user.on(relaunched);
+    probe = probe.on(relaunched);
+  });
+
+  await step("after the restart: the copy picks up where it left off and says so, while chats stay on v1", async () => {
+    await probe.eventually(world.readHeldCopy, {
+      within: MIGRATION_WITHIN_MS, intervalMs: 100, label: "the resumed copy's import is held",
+      until: value => value.held && value.arrived === 2,
+    });
+    const resumed = await status();
+    await user.see({ testId: "engine-migration-progress" }, { timeoutMs: 30_000 });
+    await user.see({ text: /OpenWork closed before your chats finished copying, so it picked up where it left off/ });
+    await user.screenshot();
+    await user.click({ role: "button", text: "Continue using OpenWork" });
+    await readChat(first);
+    expect(migrationOf(resumed).state).toBe("running");
+    expect(isRecord(resumed.migration) && resumed.migration.resumed).toBe(true);
+    expect(resumed.chatRouting).not.toBe(true);
+    evidence.recordAssertionEvidence(
+      "a copy cut short by a force quit restarts by itself and tells the member",
+      `after relaunch: migration ${String(migrationOf(resumed).state)}, resumed ${String(isRecord(resumed.migration) && resumed.migration.resumed)}, real import held again; chatRouting ${String(resumed.chatRouting)}; "${first.title}" readable on v1`,
+      migrationOf(resumed).state === "running" && resumed.chatRouting !== true,
+    );
+    // Watch the end in the progress dialog, where a finished copy offers the switch.
+    await user.click({ role: "button", text: "Show progress" });
+    await user.see({ testId: "engine-migration-progress" });
+    world.releaseHeldCopy("continue");
+  });
+
+  await step("after: the resumed copy finishes, and switching to v2 opens the same chats", async () => {
+    const done = await probe.eventually(status, {
+      within: MIGRATION_WITHIN_MS, intervalMs: 1_000, label: "resumed copy finished",
+      until: value => migrationOf(value).state === "completed" || migrationOf(value).state === "error",
+    });
+    expect(migrationOf(done)).toMatchObject({ state: "completed", total: world.expectedChats });
+    await user.see({ testId: "engine-migration-progress" }, { timeoutMs: 30_000 });
+    await user.click({ role: "button", text: "Switch to OpenCode v2" });
+    await probe.eventually(status, {
+      within: 60_000, label: "switched to v2", until: value => value.chatRouting === true && value.running === true,
+    });
+    await readChat(first);
+    expect(world.readV1History()).toEqual(world.before);
+    evidence.recordAssertionEvidence(
+      "every chat is on v2 after the interrupted copy",
+      `imported ${migrationOf(done).imported}, skipped ${migrationOf(done).skipped} of ${migrationOf(done).total}; "${first.title}" opens on v2; v1 unchanged`,
+      migrationOf(done).imported + migrationOf(done).skipped === world.expectedChats,
+    );
+    await user.screenshot();
+  });
+
+  await step("after: a v1 chat no copy has seen explains itself instead of failing to load", async () => {
+    const late = world.addLateV1Chat();
+    await world.openChat(late.id);
+    await user.see({ text: /This chat is still in OpenCode v1 and hasn't been copied to v2/ }, { timeoutMs: 60_000 });
+    await user.notSee({ text: "This conversation could not be loaded." }, { timeoutMs: 1_000 });
+    evidence.recordAssertionEvidence(
+      "an uncopied v1 chat names the reason and the way out",
+      `"${late.title}" exists only in v1; the chat shows "still in OpenCode v1 and hasn't been copied to v2" instead of "could not be loaded"`,
+      true,
+    );
+    await user.screenshot();
+  });
+});
