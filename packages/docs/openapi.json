@@ -85,6 +85,10 @@
       "description": "Desktop app policies applied to the organization, members, or teams."
     },
     {
+      "name": "Agent Permissions",
+      "description": "What agents may do on members' computers, set for everyone and per team."
+    },
+    {
       "name": "LLM Providers",
       "description": "Organization LLM provider catalog, configuration, and access routes."
     },
@@ -845,6 +849,7 @@
               "automationCalendar",
               "permissions",
               "teamRoles",
+              "agentPermissions",
               "engineV2Upgrade",
               "remoteSessionEvents",
               "backgroundShellTasks"
@@ -1049,6 +1054,9 @@
                     "teamRoles": {
                       "type": "boolean"
                     },
+                    "agentPermissions": {
+                      "type": "boolean"
+                    },
                     "engineV2Upgrade": {
                       "type": "boolean"
                     },
@@ -1075,6 +1083,7 @@
                     "automationCalendar",
                     "permissions",
                     "teamRoles",
+                    "agentPermissions",
                     "engineV2Upgrade",
                     "remoteSessionEvents",
                     "backgroundShellTasks",
@@ -1588,6 +1597,62 @@
                         "overrideApplies"
                       ]
                     },
+                    "agentPermissions": {
+                      "type": "object",
+                      "properties": {
+                        "enabled": {
+                          "type": "boolean"
+                        },
+                        "source": {
+                          "type": "string",
+                          "enum": [
+                            "unavailable",
+                            "killed",
+                            "lock",
+                            "override",
+                            "everyone"
+                          ]
+                        },
+                        "everyone": {
+                          "type": "boolean"
+                        },
+                        "killed": {
+                          "type": "boolean"
+                        },
+                        "lock": {
+                          "anyOf": [
+                            {
+                              "type": "boolean"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "override": {
+                          "anyOf": [
+                            {
+                              "type": "boolean"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "overrideApplies": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "enabled",
+                        "source",
+                        "everyone",
+                        "killed",
+                        "lock",
+                        "override",
+                        "overrideApplies"
+                      ]
+                    },
                     "engineV2Upgrade": {
                       "type": "object",
                       "properties": {
@@ -1767,6 +1832,7 @@
                     "automationCalendar",
                     "permissions",
                     "teamRoles",
+                    "agentPermissions",
                     "engineV2Upgrade",
                     "remoteSessionEvents",
                     "backgroundShellTasks"
@@ -2170,6 +2236,9 @@
                     "teamRoles": {
                       "type": "boolean"
                     },
+                    "agentPermissions": {
+                      "type": "boolean"
+                    },
                     "engineV2Upgrade": {
                       "type": "boolean"
                     },
@@ -2196,6 +2265,7 @@
                     "automationCalendar",
                     "permissions",
                     "teamRoles",
+                    "agentPermissions",
                     "engineV2Upgrade",
                     "remoteSessionEvents",
                     "backgroundShellTasks",
@@ -2709,6 +2779,62 @@
                         "overrideApplies"
                       ]
                     },
+                    "agentPermissions": {
+                      "type": "object",
+                      "properties": {
+                        "enabled": {
+                          "type": "boolean"
+                        },
+                        "source": {
+                          "type": "string",
+                          "enum": [
+                            "unavailable",
+                            "killed",
+                            "lock",
+                            "override",
+                            "everyone"
+                          ]
+                        },
+                        "everyone": {
+                          "type": "boolean"
+                        },
+                        "killed": {
+                          "type": "boolean"
+                        },
+                        "lock": {
+                          "anyOf": [
+                            {
+                              "type": "boolean"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "override": {
+                          "anyOf": [
+                            {
+                              "type": "boolean"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "overrideApplies": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "enabled",
+                        "source",
+                        "everyone",
+                        "killed",
+                        "lock",
+                        "override",
+                        "overrideApplies"
+                      ]
+                    },
                     "engineV2Upgrade": {
                       "type": "object",
                       "properties": {
@@ -2888,6 +3014,7 @@
                     "automationCalendar",
                     "permissions",
                     "teamRoles",
+                    "agentPermissions",
                     "engineV2Upgrade",
                     "remoteSessionEvents",
                     "backgroundShellTasks"
@@ -3502,6 +3629,52 @@
           "user"
         ]
       },
+      "DenDesktopAgentPermissions": {
+        "type": "object",
+        "properties": {
+          "rules": {
+            "maxItems": 2000,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "action": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 64
+                },
+                "resource": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 500
+                },
+                "effect": {
+                  "type": "string",
+                  "enum": [
+                    "allow",
+                    "ask",
+                    "deny"
+                  ]
+                },
+                "source": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 255
+                }
+              },
+              "required": [
+                "action",
+                "resource",
+                "effect",
+                "source"
+              ]
+            }
+          }
+        },
+        "required": [
+          "rules"
+        ]
+      },
       "CurrentUserDesktopConfigResponse": {
         "type": "object",
         "properties": {
@@ -3642,6 +3815,9 @@
               "type": "string",
               "maxLength": 120
             }
+          },
+          "agentPermissions": {
+            "$ref": "#/components/schemas/DenDesktopAgentPermissions"
           }
         }
       },
@@ -5313,6 +5489,8 @@
                     "teams.manage_admin",
                     "permissions.view",
                     "permissions.manage",
+                    "agent_permissions.view",
+                    "agent_permissions.manage",
                     "sharing.manage_all",
                     "sharing.share_org_wide",
                     "sso.view",
@@ -6843,6 +7021,157 @@
           "definitions",
           "desktopPolicies"
         ]
+      },
+      "AgentPermissionSetting": {
+        "type": "object",
+        "properties": {
+          "decision": {
+            "type": "string",
+            "enum": [
+              "allow",
+              "ask",
+              "deny"
+            ]
+          },
+          "allow": {
+            "maxItems": 100,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 500
+            }
+          },
+          "block": {
+            "maxItems": 100,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 500
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "AgentPermissionSettings": {
+        "type": "object",
+        "properties": {
+          "commands": {
+            "$ref": "#/components/schemas/AgentPermissionSetting"
+          },
+          "fileEdits": {
+            "$ref": "#/components/schemas/AgentPermissionSetting"
+          },
+          "websites": {
+            "$ref": "#/components/schemas/AgentPermissionSetting"
+          },
+          "webSearch": {
+            "$ref": "#/components/schemas/AgentPermissionSetting"
+          },
+          "localSkills": {
+            "$ref": "#/components/schemas/AgentPermissionSetting"
+          },
+          "localMcpServers": {
+            "$ref": "#/components/schemas/AgentPermissionSetting"
+          }
+        },
+        "additionalProperties": false
+      },
+      "AgentPermissionPolicy": {
+        "type": "object",
+        "properties": {
+          "teamId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "memberCount": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "settings": {
+            "$ref": "#/components/schemas/AgentPermissionSettings"
+          },
+          "updatedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "teamId",
+          "name",
+          "memberCount",
+          "settings",
+          "updatedAt"
+        ]
+      },
+      "AgentPermissionPolicyList": {
+        "type": "object",
+        "properties": {
+          "everyone": {
+            "$ref": "#/components/schemas/AgentPermissionPolicy"
+          },
+          "teams": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AgentPermissionPolicy"
+            }
+          },
+          "canEdit": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "everyone",
+          "teams",
+          "canEdit"
+        ]
+      },
+      "AgentPermissionPolicyResponse": {
+        "type": "object",
+        "properties": {
+          "policy": {
+            "$ref": "#/components/schemas/AgentPermissionPolicy"
+          }
+        },
+        "required": [
+          "policy"
+        ]
+      },
+      "AgentPermissionPolicyWrite": {
+        "type": "object",
+        "properties": {
+          "settings": {
+            "$ref": "#/components/schemas/AgentPermissionSettings"
+          }
+        },
+        "required": [
+          "settings"
+        ],
+        "additionalProperties": false
       },
       "InferenceAccessResponse": {
         "type": "object",
@@ -25048,6 +25377,9 @@
                         "teamRoles": {
                           "type": "boolean"
                         },
+                        "agentPermissions": {
+                          "type": "boolean"
+                        },
                         "engineV2Upgrade": {
                           "type": "boolean"
                         },
@@ -25074,6 +25406,7 @@
                         "automationCalendar",
                         "permissions",
                         "teamRoles",
+                        "agentPermissions",
                         "engineV2Upgrade",
                         "remoteSessionEvents",
                         "backgroundShellTasks",
@@ -25587,6 +25920,62 @@
                             "overrideApplies"
                           ]
                         },
+                        "agentPermissions": {
+                          "type": "object",
+                          "properties": {
+                            "enabled": {
+                              "type": "boolean"
+                            },
+                            "source": {
+                              "type": "string",
+                              "enum": [
+                                "unavailable",
+                                "killed",
+                                "lock",
+                                "override",
+                                "everyone"
+                              ]
+                            },
+                            "everyone": {
+                              "type": "boolean"
+                            },
+                            "killed": {
+                              "type": "boolean"
+                            },
+                            "lock": {
+                              "anyOf": [
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "override": {
+                              "anyOf": [
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "overrideApplies": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": [
+                            "enabled",
+                            "source",
+                            "everyone",
+                            "killed",
+                            "lock",
+                            "override",
+                            "overrideApplies"
+                          ]
+                        },
                         "engineV2Upgrade": {
                           "type": "object",
                           "properties": {
@@ -25766,6 +26155,7 @@
                         "automationCalendar",
                         "permissions",
                         "teamRoles",
+                        "agentPermissions",
                         "engineV2Upgrade",
                         "remoteSessionEvents",
                         "backgroundShellTasks"
@@ -25914,6 +26304,9 @@
                         "teamRoles": {
                           "type": "boolean"
                         },
+                        "agentPermissions": {
+                          "type": "boolean"
+                        },
                         "engineV2Upgrade": {
                           "type": "boolean"
                         },
@@ -25940,6 +26333,7 @@
                         "automationCalendar",
                         "permissions",
                         "teamRoles",
+                        "agentPermissions",
                         "engineV2Upgrade",
                         "remoteSessionEvents",
                         "backgroundShellTasks",
@@ -26453,6 +26847,62 @@
                             "overrideApplies"
                           ]
                         },
+                        "agentPermissions": {
+                          "type": "object",
+                          "properties": {
+                            "enabled": {
+                              "type": "boolean"
+                            },
+                            "source": {
+                              "type": "string",
+                              "enum": [
+                                "unavailable",
+                                "killed",
+                                "lock",
+                                "override",
+                                "everyone"
+                              ]
+                            },
+                            "everyone": {
+                              "type": "boolean"
+                            },
+                            "killed": {
+                              "type": "boolean"
+                            },
+                            "lock": {
+                              "anyOf": [
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "override": {
+                              "anyOf": [
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "overrideApplies": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": [
+                            "enabled",
+                            "source",
+                            "everyone",
+                            "killed",
+                            "lock",
+                            "override",
+                            "overrideApplies"
+                          ]
+                        },
                         "engineV2Upgrade": {
                           "type": "object",
                           "properties": {
@@ -26632,6 +27082,7 @@
                         "automationCalendar",
                         "permissions",
                         "teamRoles",
+                        "agentPermissions",
                         "engineV2Upgrade",
                         "remoteSessionEvents",
                         "backgroundShellTasks"
@@ -29758,7 +30209,7 @@
           "Users"
         ],
         "summary": "Get current user's desktop config",
-        "description": "Returns the authenticated desktop app restrictions for the caller's active organization.",
+        "description": "Returns the authenticated desktop app restrictions for the caller's active organization, including the caller's agent permissions as ordered OpenCode permission rules when the organization has agent permissions on.",
         "responses": {
           "200": {
             "description": "Current user desktop config returned successfully.",
@@ -47931,6 +48382,305 @@
             }
           }
         },
+        "security": [
+          {
+            "denApiKey": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/v1/agent-permissions": {
+      "get": {
+        "operationId": "getV1AgentPermissions",
+        "tags": [
+          "Agent Permissions"
+        ],
+        "summary": "List agent permissions",
+        "description": "Returns what agents may do on members' computers: everyone's settings and each team's overrides, every team listed by name. A permission a team leaves out inherits everyone's. Members who can view desktop policies can read; canEdit says whether the caller can change them.",
+        "responses": {
+          "200": {
+            "description": "Agent permissions returned successfully.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentPermissionPolicyList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The caller must be signed in.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnauthorizedError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller needs the agent_permissions.view permission.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Agent permissions are not turned on for this organization.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFoundError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "denApiKey": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/v1/agent-permissions/everyone": {
+      "put": {
+        "operationId": "putV1AgentPermissionsEveryone",
+        "tags": [
+          "Agent Permissions"
+        ],
+        "summary": "Set everyone's agent permissions",
+        "description": "Replaces the agent permissions that apply to every member. A permission left out allows, so members' own settings apply. Members' apps pick up the change the next time they refresh their organization's settings. Requires the agent_permissions.manage permission with a recent sign-in and the Agent permissions feature.",
+        "responses": {
+          "200": {
+            "description": "Everyone's agent permissions saved.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentPermissionPolicyResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A permission or pattern was not valid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvalidRequestError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The caller must be signed in.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnauthorizedError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller needs the agent_permissions.manage permission and a recent sign-in.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Agent permissions are not turned on for this organization.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFoundError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentPermissionPolicyWrite"
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "denApiKey": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/v1/agent-permissions/teams/{teamId}": {
+      "put": {
+        "operationId": "putV1AgentPermissionsTeamsByTeamId",
+        "tags": [
+          "Agent Permissions"
+        ],
+        "summary": "Set a team's agent permissions",
+        "description": "Replaces one team's overrides. A team's decision replaces everyone's for its members (the strictest wins when a member is in several teams that set one), and its allowed and blocked patterns add to everyone's. A permission left out inherits everyone's; saving no permissions removes the team's overrides. Requires the agent_permissions.manage permission with a recent sign-in and the Agent permissions feature.",
+        "responses": {
+          "200": {
+            "description": "The team's agent permissions saved.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentPermissionPolicyResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A permission or pattern was not valid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvalidRequestError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The caller must be signed in.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnauthorizedError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller needs the agent_permissions.manage permission and a recent sign-in.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The team was not found, or agent permissions are not turned on for this organization.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFoundError"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "in": "path",
+            "name": "teamId",
+            "schema": {
+              "format": "typeid",
+              "type": "string",
+              "minLength": 30,
+              "maxLength": 30
+            },
+            "required": true,
+            "description": "Den TypeID with 'tem_' prefix and a 26-character base32 suffix."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentPermissionPolicyWrite"
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "denApiKey": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ]
+      },
+      "delete": {
+        "operationId": "deleteV1AgentPermissionsTeamsByTeamId",
+        "tags": [
+          "Agent Permissions"
+        ],
+        "summary": "Remove a team's agent permissions",
+        "description": "Removes one team's overrides, so its members get everyone's agent permissions. Idempotent. Requires the agent_permissions.manage permission with a recent sign-in and the Agent permissions feature.",
+        "responses": {
+          "204": {
+            "description": "The team's overrides were removed."
+          },
+          "401": {
+            "description": "The caller must be signed in.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnauthorizedError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller needs the agent_permissions.manage permission and a recent sign-in.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The team was not found, or agent permissions are not turned on for this organization.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFoundError"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "in": "path",
+            "name": "teamId",
+            "schema": {
+              "format": "typeid",
+              "type": "string",
+              "minLength": 30,
+              "maxLength": 30
+            },
+            "required": true,
+            "description": "Den TypeID with 'tem_' prefix and a 26-character base32 suffix."
+          }
+        ],
         "security": [
           {
             "denApiKey": []
