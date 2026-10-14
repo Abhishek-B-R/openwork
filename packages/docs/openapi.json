@@ -856,7 +856,8 @@
               "remoteSessionEvents",
               "backgroundShellTasks",
               "orgDefaultModel",
-              "gatewayProviderUsageLimits"
+              "gatewayProviderUsageLimits",
+              "stableInstallLinks"
             ]
           },
           "label": {
@@ -1082,6 +1083,9 @@
                     "gatewayProviderUsageLimits": {
                       "type": "boolean"
                     },
+                    "stableInstallLinks": {
+                      "type": "boolean"
+                    },
                     "gatewayDashboard": {
                       "type": "boolean",
                       "const": true,
@@ -1107,6 +1111,7 @@
                     "backgroundShellTasks",
                     "orgDefaultModel",
                     "gatewayProviderUsageLimits",
+                    "stableInstallLinks",
                     "gatewayDashboard"
                   ]
                 },
@@ -2064,6 +2069,62 @@
                         "override",
                         "overrideApplies"
                       ]
+                    },
+                    "stableInstallLinks": {
+                      "type": "object",
+                      "properties": {
+                        "enabled": {
+                          "type": "boolean"
+                        },
+                        "source": {
+                          "type": "string",
+                          "enum": [
+                            "unavailable",
+                            "killed",
+                            "lock",
+                            "override",
+                            "everyone"
+                          ]
+                        },
+                        "everyone": {
+                          "type": "boolean"
+                        },
+                        "killed": {
+                          "type": "boolean"
+                        },
+                        "lock": {
+                          "anyOf": [
+                            {
+                              "type": "boolean"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "override": {
+                          "anyOf": [
+                            {
+                              "type": "boolean"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "overrideApplies": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "enabled",
+                        "source",
+                        "everyone",
+                        "killed",
+                        "lock",
+                        "override",
+                        "overrideApplies"
+                      ]
                     }
                   },
                   "required": [
@@ -2083,7 +2144,8 @@
                     "remoteSessionEvents",
                     "backgroundShellTasks",
                     "orgDefaultModel",
-                    "gatewayProviderUsageLimits"
+                    "gatewayProviderUsageLimits",
+                    "stableInstallLinks"
                   ],
                   "description": "Per feature for this organization: whether it is on and why (not part of this deployment, kill switch, operator lock, organization override, or the deployment-wide on/off state), and whether an organization override would take effect."
                 }
@@ -2508,6 +2570,9 @@
                     "gatewayProviderUsageLimits": {
                       "type": "boolean"
                     },
+                    "stableInstallLinks": {
+                      "type": "boolean"
+                    },
                     "gatewayDashboard": {
                       "type": "boolean",
                       "const": true,
@@ -2533,6 +2598,7 @@
                     "backgroundShellTasks",
                     "orgDefaultModel",
                     "gatewayProviderUsageLimits",
+                    "stableInstallLinks",
                     "gatewayDashboard"
                   ]
                 },
@@ -3490,6 +3556,62 @@
                         "override",
                         "overrideApplies"
                       ]
+                    },
+                    "stableInstallLinks": {
+                      "type": "object",
+                      "properties": {
+                        "enabled": {
+                          "type": "boolean"
+                        },
+                        "source": {
+                          "type": "string",
+                          "enum": [
+                            "unavailable",
+                            "killed",
+                            "lock",
+                            "override",
+                            "everyone"
+                          ]
+                        },
+                        "everyone": {
+                          "type": "boolean"
+                        },
+                        "killed": {
+                          "type": "boolean"
+                        },
+                        "lock": {
+                          "anyOf": [
+                            {
+                              "type": "boolean"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "override": {
+                          "anyOf": [
+                            {
+                              "type": "boolean"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "overrideApplies": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "enabled",
+                        "source",
+                        "everyone",
+                        "killed",
+                        "lock",
+                        "override",
+                        "overrideApplies"
+                      ]
                     }
                   },
                   "required": [
@@ -3509,7 +3631,8 @@
                     "remoteSessionEvents",
                     "backgroundShellTasks",
                     "orgDefaultModel",
-                    "gatewayProviderUsageLimits"
+                    "gatewayProviderUsageLimits",
+                    "stableInstallLinks"
                   ],
                   "description": "Per feature for this organization: whether it is on and why (not part of this deployment, kill switch, operator lock, organization override, or the deployment-wide on/off state), and whether an organization override would take effect."
                 }
@@ -9227,16 +9350,17 @@
         "type": "object",
         "properties": {
           "token": {
+            "description": "Absent when the organization shares the normal install page instead of one-off links.",
             "type": "string"
           },
           "installPageUrl": {
             "type": "string",
             "format": "uri",
-            "description": "Share this page: it downloads the OpenWork desktop app for this organization."
+            "description": "Share this page: it downloads the OpenWork desktop app for this organization. People who open the normal install page sign in first."
           },
           "connectUrl": {
-            "type": "string",
-            "description": "Open on a computer that already has OpenWork installed to point the desktop app at this organization. Short-lived; mint a new link when it expires."
+            "description": "Open on a computer that already has OpenWork installed to point the desktop app at this organization. Short-lived; mint a new link when it expires. Absent with the normal install page: the desktop app signs in instead.",
+            "type": "string"
           },
           "connectExpiresAt": {
             "type": "string",
@@ -9245,10 +9369,7 @@
           }
         },
         "required": [
-          "token",
-          "installPageUrl",
-          "connectUrl",
-          "connectExpiresAt"
+          "installPageUrl"
         ]
       },
       "CreateInstallLinkRequest": {
@@ -26496,6 +26617,9 @@
                         "gatewayProviderUsageLimits": {
                           "type": "boolean"
                         },
+                        "stableInstallLinks": {
+                          "type": "boolean"
+                        },
                         "gatewayDashboard": {
                           "type": "boolean",
                           "const": true,
@@ -26521,6 +26645,7 @@
                         "backgroundShellTasks",
                         "orgDefaultModel",
                         "gatewayProviderUsageLimits",
+                        "stableInstallLinks",
                         "gatewayDashboard"
                       ]
                     },
@@ -27478,6 +27603,62 @@
                             "override",
                             "overrideApplies"
                           ]
+                        },
+                        "stableInstallLinks": {
+                          "type": "object",
+                          "properties": {
+                            "enabled": {
+                              "type": "boolean"
+                            },
+                            "source": {
+                              "type": "string",
+                              "enum": [
+                                "unavailable",
+                                "killed",
+                                "lock",
+                                "override",
+                                "everyone"
+                              ]
+                            },
+                            "everyone": {
+                              "type": "boolean"
+                            },
+                            "killed": {
+                              "type": "boolean"
+                            },
+                            "lock": {
+                              "anyOf": [
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "override": {
+                              "anyOf": [
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "overrideApplies": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": [
+                            "enabled",
+                            "source",
+                            "everyone",
+                            "killed",
+                            "lock",
+                            "override",
+                            "overrideApplies"
+                          ]
                         }
                       },
                       "required": [
@@ -27497,7 +27678,8 @@
                         "remoteSessionEvents",
                         "backgroundShellTasks",
                         "orgDefaultModel",
-                        "gatewayProviderUsageLimits"
+                        "gatewayProviderUsageLimits",
+                        "stableInstallLinks"
                       ],
                       "description": "Per feature for this organization: whether it is on and why (not part of this deployment, kill switch, operator lock, organization override, or the deployment-wide on/off state), and whether an organization override would take effect."
                     }
@@ -27667,6 +27849,9 @@
                         "gatewayProviderUsageLimits": {
                           "type": "boolean"
                         },
+                        "stableInstallLinks": {
+                          "type": "boolean"
+                        },
                         "gatewayDashboard": {
                           "type": "boolean",
                           "const": true,
@@ -27692,6 +27877,7 @@
                         "backgroundShellTasks",
                         "orgDefaultModel",
                         "gatewayProviderUsageLimits",
+                        "stableInstallLinks",
                         "gatewayDashboard"
                       ]
                     },
@@ -28649,6 +28835,62 @@
                             "override",
                             "overrideApplies"
                           ]
+                        },
+                        "stableInstallLinks": {
+                          "type": "object",
+                          "properties": {
+                            "enabled": {
+                              "type": "boolean"
+                            },
+                            "source": {
+                              "type": "string",
+                              "enum": [
+                                "unavailable",
+                                "killed",
+                                "lock",
+                                "override",
+                                "everyone"
+                              ]
+                            },
+                            "everyone": {
+                              "type": "boolean"
+                            },
+                            "killed": {
+                              "type": "boolean"
+                            },
+                            "lock": {
+                              "anyOf": [
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "override": {
+                              "anyOf": [
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "overrideApplies": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": [
+                            "enabled",
+                            "source",
+                            "everyone",
+                            "killed",
+                            "lock",
+                            "override",
+                            "overrideApplies"
+                          ]
                         }
                       },
                       "required": [
@@ -28668,7 +28910,8 @@
                         "remoteSessionEvents",
                         "backgroundShellTasks",
                         "orgDefaultModel",
-                        "gatewayProviderUsageLimits"
+                        "gatewayProviderUsageLimits",
+                        "stableInstallLinks"
                       ],
                       "description": "Per feature for this organization: whether it is on and why (not part of this deployment, kill switch, operator lock, organization override, or the deployment-wide on/off state), and whether an organization override would take effect."
                     }
@@ -54123,7 +54366,7 @@
           "Organizations"
         ],
         "summary": "Create organization install link (download desktop app, install OpenWork)",
-        "description": "Download the desktop app and install OpenWork pointed at this organization. Returns installPageUrl, a shareable page that downloads OpenWork for this organization, and connectUrl, a short-lived link that opens an already-installed desktop app signed in to this organization. Any member can mint one. Older active links remain valid unless an owner or admin explicitly requests rotation.",
+        "description": "Download the desktop app and install OpenWork pointed at this organization. Returns installPageUrl, a shareable page that downloads OpenWork for this organization, and connectUrl, a short-lived link that opens an already-installed desktop app signed in to this organization. Any member can mint one. Older active links remain valid unless an owner or admin explicitly requests rotation. When the organization uses plain install links, returns only installPageUrl, the normal install page where people sign in, and creates no link.",
         "responses": {
           "200": {
             "description": "Install link created successfully.",
