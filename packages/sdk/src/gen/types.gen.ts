@@ -172,6 +172,7 @@ export type AdminFeature = {
     | "automationCalendar"
     | "permissions"
     | "teamRoles"
+    | "sharedRoles"
     | "agentPermissions"
     | "engineV2Upgrade"
     | "remoteSessionEvents"
@@ -223,6 +224,7 @@ export type AdminOrganizationsPageResponse = {
       automationCalendar: boolean;
       permissions: boolean;
       teamRoles: boolean;
+      sharedRoles: boolean;
       agentPermissions: boolean;
       engineV2Upgrade: boolean;
       remoteSessionEvents: boolean;
@@ -311,6 +313,15 @@ export type AdminOrganizationsPageResponse = {
         overrideApplies: boolean;
       };
       teamRoles: {
+        enabled: boolean;
+        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
+        everyone: boolean;
+        killed: boolean;
+        lock: boolean | null;
+        override: boolean | null;
+        overrideApplies: boolean;
+      };
+      sharedRoles: {
         enabled: boolean;
         source: "unavailable" | "killed" | "lock" | "override" | "everyone";
         everyone: boolean;
@@ -427,6 +438,7 @@ export type AdminOverviewResponse = {
       automationCalendar: boolean;
       permissions: boolean;
       teamRoles: boolean;
+      sharedRoles: boolean;
       agentPermissions: boolean;
       engineV2Upgrade: boolean;
       remoteSessionEvents: boolean;
@@ -515,6 +527,15 @@ export type AdminOverviewResponse = {
         overrideApplies: boolean;
       };
       teamRoles: {
+        enabled: boolean;
+        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
+        everyone: boolean;
+        killed: boolean;
+        lock: boolean | null;
+        override: boolean | null;
+        overrideApplies: boolean;
+      };
+      sharedRoles: {
         enabled: boolean;
         source: "unavailable" | "killed" | "lock" | "override" | "everyone";
         everyone: boolean;
@@ -2416,6 +2437,10 @@ export type PermissionSetAppliesToSummary =
   | {
       kind: "team";
       team: PermissionSetTeam | null;
+      teams: Array<PermissionSetTeam>;
+      /**
+       * People in any of the set's teams, each counted once.
+       */
       memberCount: number;
     };
 
@@ -2423,7 +2448,14 @@ export type PermissionSetSummary = {
   id: string;
   name: string;
   kind: "member_default" | "admin_default" | "team";
+  /**
+   * The first team the set applies to. Kept for older clients; see teams.
+   */
   team: PermissionSetTeam | null;
+  /**
+   * Every team the set applies to now. More than one only with Shared roles.
+   */
+  teams: Array<PermissionSetTeam>;
   allowedCount: number;
   createdAt: string;
   appliesTo: PermissionSetAppliesToSummary;
@@ -2488,9 +2520,13 @@ export type PermissionSetAppliesTo =
   | {
       kind: "team";
       team: PermissionSetTeam | null;
+      teams: Array<PermissionSetTeam>;
+      /**
+       * People in any of the set's teams, each counted once.
+       */
       memberCount: number;
       /**
-       * Names and emails of the team's members. Null unless the caller holds teams.view; memberCount is always returned.
+       * Names and emails of the people in the set's teams. Null unless the caller holds teams.view; memberCount is always returned.
        */
       members: Array<PermissionPerson> | null;
     };
@@ -2499,7 +2535,14 @@ export type PermissionSetDetail = {
   id: string;
   name: string;
   kind: "member_default" | "admin_default" | "team";
+  /**
+   * The first team the set applies to. Kept for older clients; see teams.
+   */
   team: PermissionSetTeam | null;
+  /**
+   * Every team the set applies to now. More than one only with Shared roles.
+   */
+  teams: Array<PermissionSetTeam>;
   allowedCount: number;
   createdAt: string;
   archivedAt: string | null;
@@ -2530,9 +2573,17 @@ export type PermissionSetConflictError = {
 
 export type CreatePermissionSetBody = {
   /**
-   * The team this set applies to. A team can have one active permission set; it can't be changed later.
+   * The one team this set applies to, named "<team name> Permissions". A team can have one active permission set. Required unless Shared roles is on and name is given.
    */
-  teamId: string;
+  teamId?: string;
+  /**
+   * Shared roles: the role's name. Required when teamId is left out.
+   */
+  name?: string;
+  /**
+   * Shared roles: teams that get this role now. Each team's current custom role is replaced. Left out or empty, the role starts with no team.
+   */
+  teamIds?: Array<string>;
   /**
    * Initial status per key. Keys left out, or set to deny, start denied.
    */
@@ -2543,6 +2594,29 @@ export type CreatePermissionSetBody = {
     key: string;
     status: "allow" | "deny";
   }>;
+};
+
+export type DefaultPermissionSetError = {
+  error: "default_permission_set";
+  message: string;
+};
+
+export type RenamePermissionSetBody = {
+  /**
+   * The role's new name.
+   */
+  name: string;
+};
+
+export type TeamPermissionSetResponse = {
+  set: PermissionSetDetail | null;
+};
+
+export type TeamPermissionSetBody = {
+  /**
+   * The custom role (team permission set) the team gets, replacing its current one. Null leaves the team with no custom role.
+   */
+  permissionSetId: string | null;
 };
 
 export type UpdatePermissionSetPermissionsBody = {
@@ -2579,11 +2653,6 @@ export type PermissionHistoryPage = {
   nextCursor: string | null;
 };
 
-export type DefaultPermissionSetError = {
-  error: "default_permission_set";
-  message: string;
-};
-
 export type PermissionKeyStatus = {
   permission: PermissionDefinition;
   sets: Array<{
@@ -2591,6 +2660,7 @@ export type PermissionKeyStatus = {
     name: string;
     kind: "member_default" | "admin_default" | "team";
     team: PermissionSetTeam | null;
+    teams: Array<PermissionSetTeam>;
     status: "allow" | "deny";
     locked: boolean;
   }>;
@@ -6180,6 +6250,7 @@ export type GetV1AdminOrganizationsByOrganizationIdCapabilitiesResponses = {
       automationCalendar: boolean;
       permissions: boolean;
       teamRoles: boolean;
+      sharedRoles: boolean;
       agentPermissions: boolean;
       engineV2Upgrade: boolean;
       remoteSessionEvents: boolean;
@@ -6268,6 +6339,15 @@ export type GetV1AdminOrganizationsByOrganizationIdCapabilitiesResponses = {
         overrideApplies: boolean;
       };
       teamRoles: {
+        enabled: boolean;
+        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
+        everyone: boolean;
+        killed: boolean;
+        lock: boolean | null;
+        override: boolean | null;
+        overrideApplies: boolean;
+      };
+      sharedRoles: {
         enabled: boolean;
         source: "unavailable" | "killed" | "lock" | "override" | "everyone";
         everyone: boolean;
@@ -6372,6 +6452,7 @@ export type PutV1AdminOrganizationsByOrganizationIdCapabilitiesResponses = {
       automationCalendar: boolean;
       permissions: boolean;
       teamRoles: boolean;
+      sharedRoles: boolean;
       agentPermissions: boolean;
       engineV2Upgrade: boolean;
       remoteSessionEvents: boolean;
@@ -6460,6 +6541,15 @@ export type PutV1AdminOrganizationsByOrganizationIdCapabilitiesResponses = {
         overrideApplies: boolean;
       };
       teamRoles: {
+        enabled: boolean;
+        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
+        everyone: boolean;
+        killed: boolean;
+        lock: boolean | null;
+        override: boolean | null;
+        overrideApplies: boolean;
+      };
+      sharedRoles: {
         enabled: boolean;
         source: "unavailable" | "killed" | "lock" | "override" | "everyone";
         everyone: boolean;
@@ -20844,6 +20934,102 @@ export type GetV1PermissionsSetsByPermissionSetIdResponses = {
 
 export type GetV1PermissionsSetsByPermissionSetIdResponse =
   GetV1PermissionsSetsByPermissionSetIdResponses[keyof GetV1PermissionsSetsByPermissionSetIdResponses];
+
+export type PatchV1PermissionsSetsByPermissionSetIdData = {
+  body: RenamePermissionSetBody;
+  path: {
+    /**
+     * Den TypeID with 'pms_' prefix and a 26-character base32 suffix.
+     */
+    permissionSetId: string;
+  };
+  query?: never;
+  url: "/v1/permissions/sets/{permissionSetId}";
+};
+
+export type PatchV1PermissionsSetsByPermissionSetIdErrors = {
+  /**
+   * The body or id was invalid, or the set is Member or Admin permissions.
+   */
+  400: InvalidRequestError | DefaultPermissionSetError;
+  /**
+   * The caller must be signed in.
+   */
+  401: UnauthorizedError;
+  /**
+   * The caller lacks permissions.manage or needs a recent sign-in.
+   */
+  403: ForbiddenError | PermissionDeniedError;
+  /**
+   * The permission set or organization was not found, or Permissions or Shared roles is turned off.
+   */
+  404: PermissionsNotFoundError;
+  /**
+   * The permission set is archived.
+   */
+  409: PermissionSetConflictError;
+};
+
+export type PatchV1PermissionsSetsByPermissionSetIdError =
+  PatchV1PermissionsSetsByPermissionSetIdErrors[keyof PatchV1PermissionsSetsByPermissionSetIdErrors];
+
+export type PatchV1PermissionsSetsByPermissionSetIdResponses = {
+  /**
+   * Role renamed; its current state is returned.
+   */
+  200: PermissionSetResponse;
+};
+
+export type PatchV1PermissionsSetsByPermissionSetIdResponse =
+  PatchV1PermissionsSetsByPermissionSetIdResponses[keyof PatchV1PermissionsSetsByPermissionSetIdResponses];
+
+export type PutV1TeamsByTeamIdPermissionSetData = {
+  body: TeamPermissionSetBody;
+  path: {
+    /**
+     * Den TypeID with 'tem_' prefix and a 26-character base32 suffix.
+     */
+    teamId: string;
+  };
+  query?: never;
+  url: "/v1/teams/{teamId}/permission-set";
+};
+
+export type PutV1TeamsByTeamIdPermissionSetErrors = {
+  /**
+   * The body or id was invalid, or the set is Member or Admin permissions.
+   */
+  400: InvalidRequestError | DefaultPermissionSetError;
+  /**
+   * The caller must be signed in.
+   */
+  401: UnauthorizedError;
+  /**
+   * The caller lacks permissions.manage, needs a recent sign-in, tried to turn on a permission they don't have, or tried to change Admin permissions without being the owner or an admin.
+   */
+  403: ForbiddenError | PermissionDeniedError | PermissionEditError;
+  /**
+   * The team, permission set or organization was not found, or Permissions or Shared roles is turned off.
+   */
+  404: PermissionsNotFoundError;
+  /**
+   * The permission set is archived.
+   */
+  409: PermissionSetConflictError;
+};
+
+export type PutV1TeamsByTeamIdPermissionSetError =
+  PutV1TeamsByTeamIdPermissionSetErrors[keyof PutV1TeamsByTeamIdPermissionSetErrors];
+
+export type PutV1TeamsByTeamIdPermissionSetResponses = {
+  /**
+   * The team's custom role was set; the role's current state is returned, or null when the team has none.
+   */
+  200: TeamPermissionSetResponse;
+};
+
+export type PutV1TeamsByTeamIdPermissionSetResponse =
+  PutV1TeamsByTeamIdPermissionSetResponses[keyof PutV1TeamsByTeamIdPermissionSetResponses];
 
 export type PutV1PermissionsSetsByPermissionSetIdPermissionsData = {
   body: UpdatePermissionSetPermissionsBody;
