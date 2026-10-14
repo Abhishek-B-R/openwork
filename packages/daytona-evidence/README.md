@@ -76,6 +76,61 @@ an incident or grounds to restart services or allocate retries.
   distributed lease in this change. A full account with no safe candidates
   fails with a quota-specific diagnostic after the bounded wait.
 
+## Fresh review previews
+
+`daytonaReviewProvider` also implements fresh reviewer infrastructure previews
+when its server-side provider credentials are configured. No OpenWork Cloud
+organization, deployment rollout, or feature-authority request is required.
+`DAYTONA_PREVIEW_WORLDS`, exported from
+`@openwork/daytona-evidence/previews`, currently contains only **`app-web`**.
+Desktop and ACME previews are refused before allocation; the evidence noVNC
+browser is never substituted for those worlds. Saved-checkpoint behavior is
+unchanged.
+
+The provider uses the same REST `DaytonaApi`, private sandbox creation,
+`ensureBase` / `ensureLayer` locks and guest script runner as evidence worlds.
+It reuses Freestyle's app tools/dependency/compile recipes, runtime, gateway and
+health assets; the runtime's browser-domain suffix is adapted to Daytona with a
+checked substitution. No local Daytona executable, saved CLI profile, host Git
+checkout, or host execution of PR code is needed. Only the isolated guest fetches
+and executes the exact pushed report SHA. Production uses `DAYTONA_API_KEY` and
+the evidence region/API settings described above.
+
+Report checkout, dependency rebuilds, compilation and runtime run as the dedicated
+unprivileged `openwork-preview` user with no new privileges or capabilities.
+Only `/workspace`, the user's home and `/opt/openwork-preview/state` are writable
+at runtime. Trusted controller/gateway files stay root-owned, and the gateway's
+root-only access file is inside a root-only `0700` directory outside that state directory, including while the provider uploads a replacement. Build code therefore cannot
+plant a privileged process before a later clone receives its access credential.
+
+Fresh snapshot names (`ow-dy-review-v1-*`) include the full report SHA, world and
+controller/recipe digest in their immutable key. Tools alone are shared by recipe.
+A root-owned socket is reserved before report code executes and remains held across gateway restarts, preventing port squatting. Launch verifies both the gateway's root PID/listener ownership and the app user's inability to read the gateway credential. Security generation 2 includes the actual build/runtime confinement policy in the immutable descriptor: old root-runtime snapshots are never reused.
+
+A launch verifies restored HEAD as the app user, the exact source marker and controller digest,
+then checks the guest engine plus real app HTML and the same-origin backend
+through a signed private host and gateway-cookie handshake. Each launch creates
+its own VM, access token and deadline; it never reuses a report's live VM. The
+server returns only the browser launch link, not provider credentials or CDP.
+
+Access lasts at most two hours from allocation. A guest systemd timer powers off
+the clone at the deadline, independent of the invoking function. Daytona's
+30-minute idle stop and immediate deletion-after-stop also bound abandoned VMs.
+The existing cleanup independently deletes expired owned review VMs **even when
+still active**, after rechecking their expiry labels. Fresh world snapshots idle
+for two days and tool snapshots idle for seven days are cleanup candidates;
+references and in-flight builders remain protected. Guest poweroff/provider
+state transitions need live validation; the cleanup is the independent backstop,
+not a claim of instantaneous provider deletion at the deadline.
+
+Snapshot preparation is asynchronous under the existing review 202/poll/launch
+contract. Progress is read from provider-owned builder names, not process memory.
+Cold base/install/snapshot operations can exceed the review route's 800-second
+budget: prewarming is appropriate, and Next `after()` is not a durable job queue.
+A killed controller's systemd build does not automatically resume snapshot saving;
+its idle/cleanup policy still owns teardown. Unit tests use fake REST witnesses;
+they do not prove a deployed preview or real provider deadline enforcement.
+
 ## Capture the next real Core 502
 
 This instrumentation is diagnostics and readiness hardening, **not a fix or root
