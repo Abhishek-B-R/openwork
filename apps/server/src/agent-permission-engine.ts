@@ -25,12 +25,23 @@ export function agentPermissionRulesOf(policy: { agentPermissions?: { rules: unk
   return parseAgentPermissionRules(policy?.agentPermissions?.rules);
 }
 
-/** Rules from plugin options or a stored policy; anything malformed is dropped. */
+/** Local skills and local MCP servers are each allowed or blocked as a whole. */
+const WHOLE_CATEGORY_ACTIONS: readonly AgentPermissionAction[] = ["skill", "mcp"];
+
+/**
+ * Rules from plugin options or a stored policy; anything malformed is dropped.
+ * A policy stored before skills and MCP servers became switches may still
+ * name them: a name it blocks blocks the whole category, since the switch can
+ * only block everything, and a name it allows is dropped.
+ */
 export function parseAgentPermissionRules(value: unknown): AgentPermissionRule[] {
   if (!Array.isArray(value)) return [];
   return value.flatMap((entry) => {
     const parsed = agentPermissionRuleSchema.safeParse(entry);
-    return parsed.success ? [parsed.data] : [];
+    if (!parsed.success) return [];
+    const rule = parsed.data;
+    if (!WHOLE_CATEGORY_ACTIONS.includes(rule.action) || rule.resource === "*") return [rule];
+    return rule.effect === "deny" ? [{ ...rule, resource: "*" }] : [];
   });
 }
 
@@ -42,10 +53,10 @@ export function agentPermissionDenial(rules: readonly AgentPermissionRule[], act
 
 /**
  * Why the rules block an MCP server an engine has from any config source, or
- * null. A server with an organization name stays on only when it is the one
- * OpenWork registered under that name, at the same address
- * (registeredOrganizationMcpServers); Den applies the rules to the
- * organization's connections behind it.
+ * null: every local server is blocked when local MCP servers are. The
+ * organization's servers OpenWork registered (OpenWork Cloud and the
+ * connections passed through it, registeredOrganizationMcpServers) are never
+ * blocked, but only under their name and at the address OpenWork registered.
  */
 export function agentPermissionEngineMcpDenial(
   rules: readonly AgentPermissionRule[],
@@ -74,15 +85,30 @@ function v2Action(action: string): AgentPermissionAction | null {
  * The rules v2 evaluates natively, in order. A native denial skips the
  * permission hook and reaches the agent as a bare "Permission denied", even
  * through tools OpenWork wraps, so the plugin decides denials instead: they
- * ask natively, which still stops a call if the plugin is missing. Local
- * skills keep native denials so the engine leaves blocked skills out of the
- * catalog it offers. Website patterns become URL wildcards that never block a
- * URL the pattern allows; the plugin then decides with the exact pattern.
+ * ask natively, which still stops a call if the plugin is missing. Blocked
+ * local skills keep a native denial so the engine leaves them out of the
+ * catalog it offers. The engine cannot tell a Cloud skill's discovery entry
+ * from a local skill named like one, so those entries are left out too; the
+ * organization's skills stay available through OpenWork Connect, which Den
+ * serves and authorizes. A denial for every skill is followed by an allow for
+ * a name no skill has: with only the denial the engine removes the skill tool
+ * and does not bring it back once skills are allowed again, and the plugin
+ * still refuses any skill that matched it. Website patterns become URL wildcards that never
+ * block a URL the pattern allows; the plugin then decides with the exact
+ * pattern.
  */
+/** A skill name no folder can have (skill ids are folder names), allowed natively only to keep the skill tool registered. */
+const SKILL_TOOL_KEEPER = "openwork/agent-permissions/no-skill";
+
 export function agentPermissionEngineV2Rules(rules: readonly AgentPermissionRule[]): EngineV2PermissionRule[] {
   return rules.flatMap((rule) => {
     if (!V2_ACTIONS.includes(rule.action)) return [];
-    const effect = rule.effect === "deny" && rule.action !== "skill" ? "ask" : rule.effect;
+    if (rule.action === "skill") {
+      return rule.effect === "deny" && rule.resource === "*"
+        ? [{ action: "skill", resource: "*", effect: "deny" }, { action: "skill", resource: SKILL_TOOL_KEEPER, effect: "allow" }]
+        : [{ action: "skill", resource: rule.resource, effect: rule.effect }];
+    }
+    const effect = rule.effect === "deny" ? "ask" : rule.effect;
     if (rule.action !== "webfetch") return [{ action: rule.action, resource: rule.resource, effect }];
     return websitePatternEngineResources(rule.resource, rule.effect).map((resource) => ({ action: "webfetch", resource, effect }));
   });
