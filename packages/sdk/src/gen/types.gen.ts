@@ -177,7 +177,8 @@ export type AdminFeature = {
     | "engineV2Upgrade"
     | "remoteSessionEvents"
     | "backgroundShellTasks"
-    | "orgDefaultModel";
+    | "orgDefaultModel"
+    | "gatewayProviderUsageLimits";
   label: string;
   description: string;
   since: string;
@@ -231,6 +232,7 @@ export type AdminOrganizationsPageResponse = {
       remoteSessionEvents: boolean;
       backgroundShellTasks: boolean;
       orgDefaultModel: boolean;
+      gatewayProviderUsageLimits: boolean;
       /**
        * Compatibility field, always true. AI Gateway is available to every organization; deployment configuration and authorization still apply.
        *
@@ -369,6 +371,15 @@ export type AdminOrganizationsPageResponse = {
         overrideApplies: boolean;
       };
       orgDefaultModel: {
+        enabled: boolean;
+        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
+        everyone: boolean;
+        killed: boolean;
+        lock: boolean | null;
+        override: boolean | null;
+        overrideApplies: boolean;
+      };
+      gatewayProviderUsageLimits: {
         enabled: boolean;
         source: "unavailable" | "killed" | "lock" | "override" | "everyone";
         everyone: boolean;
@@ -455,6 +466,7 @@ export type AdminOverviewResponse = {
       remoteSessionEvents: boolean;
       backgroundShellTasks: boolean;
       orgDefaultModel: boolean;
+      gatewayProviderUsageLimits: boolean;
       /**
        * Compatibility field, always true. AI Gateway is available to every organization; deployment configuration and authorization still apply.
        *
@@ -593,6 +605,15 @@ export type AdminOverviewResponse = {
         overrideApplies: boolean;
       };
       orgDefaultModel: {
+        enabled: boolean;
+        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
+        everyone: boolean;
+        killed: boolean;
+        lock: boolean | null;
+        override: boolean | null;
+        overrideApplies: boolean;
+      };
+      gatewayProviderUsageLimits: {
         enabled: boolean;
         source: "unavailable" | "killed" | "lock" | "override" | "everyone";
         everyone: boolean;
@@ -6355,6 +6376,7 @@ export type GetV1AdminOrganizationsByOrganizationIdCapabilitiesResponses = {
       remoteSessionEvents: boolean;
       backgroundShellTasks: boolean;
       orgDefaultModel: boolean;
+      gatewayProviderUsageLimits: boolean;
       /**
        * Compatibility field, always true. AI Gateway is available to every organization; deployment configuration and authorization still apply.
        *
@@ -6493,6 +6515,15 @@ export type GetV1AdminOrganizationsByOrganizationIdCapabilitiesResponses = {
         overrideApplies: boolean;
       };
       orgDefaultModel: {
+        enabled: boolean;
+        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
+        everyone: boolean;
+        killed: boolean;
+        lock: boolean | null;
+        override: boolean | null;
+        overrideApplies: boolean;
+      };
+      gatewayProviderUsageLimits: {
         enabled: boolean;
         source: "unavailable" | "killed" | "lock" | "override" | "everyone";
         everyone: boolean;
@@ -6567,6 +6598,7 @@ export type PutV1AdminOrganizationsByOrganizationIdCapabilitiesResponses = {
       remoteSessionEvents: boolean;
       backgroundShellTasks: boolean;
       orgDefaultModel: boolean;
+      gatewayProviderUsageLimits: boolean;
       /**
        * Compatibility field, always true. AI Gateway is available to every organization; deployment configuration and authorization still apply.
        *
@@ -6705,6 +6737,15 @@ export type PutV1AdminOrganizationsByOrganizationIdCapabilitiesResponses = {
         overrideApplies: boolean;
       };
       orgDefaultModel: {
+        enabled: boolean;
+        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
+        everyone: boolean;
+        killed: boolean;
+        lock: boolean | null;
+        override: boolean | null;
+        overrideApplies: boolean;
+      };
+      gatewayProviderUsageLimits: {
         enabled: boolean;
         source: "unavailable" | "killed" | "lock" | "override" | "everyone";
         everyone: boolean;
@@ -16324,6 +16365,7 @@ export type GetV1GatewayUsageLimitPoliciesResponses = {
       hardLimit: boolean;
       allowRequestReset: boolean;
       revision: number;
+      providerId?: string | null;
       limits: Array<{
         timeframe: "day" | "week" | "month";
         costLimitMicroUsd: number;
@@ -16345,6 +16387,7 @@ export type GetV1GatewayUsageLimitPoliciesResponse =
 export type PostV1GatewayUsageLimitPoliciesData = {
   body: {
     name: string;
+    providerId?: string | null;
     hardLimit?: boolean;
     allowRequestReset?: boolean;
     limits: Array<{
@@ -16415,6 +16458,7 @@ export type PostV1GatewayUsageLimitPoliciesResponses = {
     hardLimit: boolean;
     allowRequestReset: boolean;
     revision: number;
+    providerId?: string | null;
     limits: Array<{
       timeframe: "day" | "week" | "month";
       costLimitMicroUsd: number;
@@ -16435,6 +16479,7 @@ export type PostV1GatewayUsageLimitPoliciesResponse =
 export type PatchV1GatewayUsageLimitPoliciesByPolicyIdData = {
   body: {
     name: string;
+    providerId?: string | null;
     hardLimit?: boolean;
     allowRequestReset?: boolean;
     limits: Array<{
@@ -16508,6 +16553,7 @@ export type PatchV1GatewayUsageLimitPoliciesByPolicyIdResponses = {
     hardLimit: boolean;
     allowRequestReset: boolean;
     revision: number;
+    providerId?: string | null;
     limits: Array<{
       timeframe: "day" | "week" | "month";
       costLimitMicroUsd: number;
@@ -16594,6 +16640,7 @@ export type PostV1GatewayUsageLimitPoliciesByPolicyIdArchiveResponses = {
     hardLimit: boolean;
     allowRequestReset: boolean;
     revision: number;
+    providerId?: string | null;
     limits: Array<{
       timeframe: "day" | "week" | "month";
       costLimitMicroUsd: number;
@@ -16680,6 +16727,7 @@ export type PostV1GatewayUsageLimitPoliciesByPolicyIdRestoreResponses = {
     hardLimit: boolean;
     allowRequestReset: boolean;
     revision: number;
+    providerId?: string | null;
     limits: Array<{
       timeframe: "day" | "week" | "month";
       costLimitMicroUsd: number;
@@ -16847,6 +16895,7 @@ export type PostV1GatewayUsageLimitPoliciesByPolicyIdAssignmentsResponses = {
     hardLimit: boolean;
     allowRequestReset: boolean;
     revision: number;
+    providerId?: string | null;
     limits: Array<{
       timeframe: "day" | "week" | "month";
       costLimitMicroUsd: number;
@@ -16932,6 +16981,7 @@ export type DeleteV1GatewayUsageLimitPoliciesByPolicyIdAssignmentsByAssignmentId
     hardLimit: boolean;
     allowRequestReset: boolean;
     revision: number;
+    providerId?: string | null;
     limits: Array<{
       timeframe: "day" | "week" | "month";
       costLimitMicroUsd: number;
@@ -17137,6 +17187,51 @@ export type GetV1GatewayUsageLimitsMeResponses = {
       allowRequestReset: boolean;
       canRequestReset: boolean;
       resetRequestStatus: "pending" | "approved" | "denied" | "expired" | null;
+      providerId?: string | null;
+    }>;
+    providers?: Array<{
+      providerId: string;
+      providerName: string;
+      state: "within_limit" | "over_limit" | "blocked";
+      buckets: Array<{
+        id: string;
+        timeframe: "day" | "week" | "month";
+        policyId: string;
+        policyName: string;
+        policyRevision?: number;
+        provenance?: Array<
+          | {
+              kind: "organization";
+              assignmentId: string;
+              memberId: null;
+              teamId: null;
+            }
+          | {
+              kind: "direct";
+              assignmentId: string;
+              memberId: string;
+              teamId: null;
+            }
+          | {
+              kind: "team";
+              assignmentId: string;
+              memberId: null;
+              teamId: string;
+              teamName: string;
+            }
+        >;
+        baseAllowanceMicroUsd: number;
+        extensionMicroUsd: number;
+        allowanceMicroUsd: number;
+        usedMicroUsd: number;
+        remainingMicroUsd: number;
+        resetAt: string;
+        hardLimit: boolean;
+        allowRequestReset: boolean;
+        canRequestReset: boolean;
+        resetRequestStatus: "pending" | "approved" | "denied" | "expired" | null;
+        providerId?: string | null;
+      }>;
     }>;
   };
 };
@@ -17262,6 +17357,51 @@ export type GetV1GatewayUsageLimitsMembersByMemberIdResponses = {
       allowRequestReset: boolean;
       canRequestReset: boolean;
       resetRequestStatus: "pending" | "approved" | "denied" | "expired" | null;
+      providerId?: string | null;
+    }>;
+    providers?: Array<{
+      providerId: string;
+      providerName: string;
+      state: "within_limit" | "over_limit" | "blocked";
+      buckets: Array<{
+        id: string;
+        timeframe: "day" | "week" | "month";
+        policyId: string;
+        policyName: string;
+        policyRevision?: number;
+        provenance?: Array<
+          | {
+              kind: "organization";
+              assignmentId: string;
+              memberId: null;
+              teamId: null;
+            }
+          | {
+              kind: "direct";
+              assignmentId: string;
+              memberId: string;
+              teamId: null;
+            }
+          | {
+              kind: "team";
+              assignmentId: string;
+              memberId: null;
+              teamId: string;
+              teamName: string;
+            }
+        >;
+        baseAllowanceMicroUsd: number;
+        extensionMicroUsd: number;
+        allowanceMicroUsd: number;
+        usedMicroUsd: number;
+        remainingMicroUsd: number;
+        resetAt: string;
+        hardLimit: boolean;
+        allowRequestReset: boolean;
+        canRequestReset: boolean;
+        resetRequestStatus: "pending" | "approved" | "denied" | "expired" | null;
+        providerId?: string | null;
+      }>;
     }>;
   };
 };
@@ -17341,6 +17481,8 @@ export type GetV1GatewayUsageLimitResetRequestsResponses = {
       bucketId: string;
       timeframe: "day" | "week" | "month";
       policyName: string;
+      providerId?: string | null;
+      providerName?: string | null;
       reason: string;
       status: "pending" | "approved" | "denied" | "expired";
       createdAt: string;
@@ -17432,6 +17574,8 @@ export type PostV1GatewayUsageLimitResetRequestsResponses = {
     bucketId: string;
     timeframe: "day" | "week" | "month";
     policyName: string;
+    providerId?: string | null;
+    providerName?: string | null;
     reason: string;
     status: "pending" | "approved" | "denied" | "expired";
     createdAt: string;
@@ -17519,6 +17663,8 @@ export type GetV1GatewayUsageLimitResetRequestsMeResponses = {
       bucketId: string;
       timeframe: "day" | "week" | "month";
       policyName: string;
+      providerId?: string | null;
+      providerName?: string | null;
       reason: string;
       status: "pending" | "approved" | "denied" | "expired";
       createdAt: string;
@@ -17611,6 +17757,8 @@ export type PostV1GatewayUsageLimitResetRequestsByIdApproveResponses = {
     bucketId: string;
     timeframe: "day" | "week" | "month";
     policyName: string;
+    providerId?: string | null;
+    providerName?: string | null;
     reason: string;
     status: "pending" | "approved" | "denied" | "expired";
     createdAt: string;
@@ -17697,6 +17845,8 @@ export type PostV1GatewayUsageLimitResetRequestsByIdDenyResponses = {
     bucketId: string;
     timeframe: "day" | "week" | "month";
     policyName: string;
+    providerId?: string | null;
+    providerName?: string | null;
     reason: string;
     status: "pending" | "approved" | "denied" | "expired";
     createdAt: string;
