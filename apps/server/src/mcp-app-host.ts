@@ -33,6 +33,7 @@ import {
 import { diagnoseMcpToolDenies, listMcpFromRuntimeSnapshot } from "./mcp.js";
 import { readEffectiveRuntimeOpencodeConfig, readRuntimeMcpConfigRevisions } from "./runtime-opencode-config-store.js";
 import { localManagedMcpAppIdentity } from "./local-managed-mcp.js";
+import { externalFetch } from "./server-fetch.js";
 
 async function listMcp(serverConfig: ServerConfig, workspaceId: string, workspaceRoot: string) {
   // Account-scoped gateways live in the engine-global runtime layer. Resolve
@@ -580,6 +581,8 @@ function connectCatalogError(diagnostic: Exclude<ConnectMcpCatalogDiagnostic, "r
   return new McpAppHostError(`connect_catalog_${diagnostic}`, messages[diagnostic]);
 }
 
+const CONNECT_CATALOG_RECOVERY_BUDGET_MS = 1_000;
+
 async function privateConnectMcpConfigUntimed(input: {
   serverConfig: ServerConfig;
   workspaceId: string;
@@ -594,7 +597,16 @@ async function privateConnectMcpConfigUntimed(input: {
     { connectionId: input.connectionId, serverName: input.serverName },
   );
   if (!descriptor) {
-    const refreshed = await refreshOpenWorkConnectMcpAppHostCatalog(input.serverConfig, input.workspaceId);
+    let refreshed = await refreshOpenWorkConnectMcpAppHostCatalog(input.serverConfig, input.workspaceId);
+    if (refreshed.diagnostic === "discovery_unavailable") {
+      // One immediate discovery-only recovery, with one shared deadline for
+      // its handshake and read. Never add backoff or replay a provider tool.
+      const deadline = AbortSignal.timeout(CONNECT_CATALOG_RECOVERY_BUDGET_MS);
+      refreshed = await refreshOpenWorkConnectMcpAppHostCatalog(input.serverConfig, input.workspaceId, (url, init) => externalFetch(url, {
+        ...init,
+        signal: init?.signal ? AbortSignal.any([init.signal, deadline]) : deadline,
+      }));
+    }
     if (refreshed.diagnostic !== "ready" && refreshed.diagnostic !== "empty") {
       throw connectCatalogError(refreshed.diagnostic);
     }
