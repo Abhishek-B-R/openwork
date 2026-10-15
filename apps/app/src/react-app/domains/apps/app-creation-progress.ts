@@ -1,5 +1,7 @@
 import type { DynamicToolUIPart, UIMessage } from "ai";
 import { prepareMcpAppOutputSchema } from "@openwork/types/mcp-app";
+import { getCapabilityCallSentence } from "@/lib/capability-call";
+import { isToolPartInFlight } from "@/lib/tool-activity";
 import {
   appBuilderResultFailed,
   builtAppSummary,
@@ -19,7 +21,14 @@ export type AppCreationRun = {
    * (edit) and is still writing, before any builder call exists.
    */
   intent?: { kind: "create" | "edit"; part: DynamicToolUIPart };
+  /**
+   * Live only: a Code Mode script the model is still writing that will
+   * prepare, create or update an App. It is replaced by the script's own App
+   * calls once it runs.
+   */
+  script?: { kind: AppScriptKind; part: DynamicToolUIPart };
 };
+export type AppScriptKind = "prepare" | "create" | "update";
 export type AppCreationStage = "needs" | "writing" | "checking" | "ready";
 
 export function isAppPreparationPart(part: DynamicToolUIPart): boolean {
@@ -73,7 +82,7 @@ function isAppGuideCall(tool: string, input: unknown): boolean {
   return typeof name === "string" && BUILD_AN_APP_SKILL.test(name);
 }
 
-function isAppGuidePart(part: DynamicToolUIPart): boolean {
+export function isAppGuidePart(part: DynamicToolUIPart): boolean {
   if (isAppGuideCall(part.toolName, part.input)) return true;
   const calls = field(part.callProviderMetadata?.openwork?.codeMode, "calls");
   return Array.isArray(calls) && calls.length > 0 && calls.every((call) => {
@@ -84,6 +93,47 @@ function isAppGuidePart(part: DynamicToolUIPart): boolean {
 
 function isAppReadPart(part: DynamicToolUIPart): boolean {
   return /(?:^|_)read_app$/.test(part.toolName);
+}
+
+// An App call a script made is keyed by that script, so the step it started
+// while the script was being written stays the same element once it runs.
+function stepId(part: DynamicToolUIPart): string {
+  return part.toolCallId.split(":app:")[0] ?? part.toolCallId;
+}
+
+function codeOf(part: DynamicToolUIPart): string {
+  const code = field(part.input, "code");
+  return typeof code === "string" ? code : "";
+}
+
+/** The App call a Code Mode script being written will make, read from its streamed code. */
+export function appScriptKind(part: DynamicToolUIPart): AppScriptKind | null {
+  if (!part.callProviderMetadata?.openwork?.codeMode) return null;
+  if (part.state !== "input-streaming" && part.state !== "input-available") return null;
+  const code = codeOf(part);
+  if (/\bupdate_app\s*\(/.test(code)) return "update";
+  if (/\bcreate_app\s*\(/.test(code)) return "create";
+  if (/\bprepare_app\s*\(/.test(code)) return "prepare";
+  return null;
+}
+
+/** The App title a builder call or script names, as far as it has streamed. */
+export function appTitleInCall(part: DynamicToolUIPart | undefined): string | null {
+  if (!part) return null;
+  const title = field(part.input, "title");
+  if (typeof title === "string" && title.trim()) return title.trim();
+  const named = /\btitle\s*:\s*"((?:[^"\\]|\\.){1,120})"/.exec(codeOf(part))?.[1];
+  return named ? named.replace(/\\(.)/g, "$1") : null;
+}
+
+/** Lines of App source written so far: the call's reactSource, or the script carrying it. */
+export function appSourceLines(part: DynamicToolUIPart | undefined): number | null {
+  if (!part) return null;
+  const source = field(part.input, "reactSource");
+  if (typeof source === "string") return source ? source.split("\n").length : null;
+  // In a script the source sits in a string literal, its line breaks escaped.
+  const code = codeOf(part);
+  return code ? Math.max(code.split("\n").length, (code.match(/\\n/g)?.length ?? 0) + 1) : null;
 }
 
 /**
@@ -139,11 +189,27 @@ export function appCreationRuns(messages: UIMessage[], live = false): AppCreatio
     if (leadIn.length > 0) run.discoveries = [...(run.discoveries ?? []), ...leadIn];
     leadIn = [];
   };
+  const runsInner = (part: DynamicToolUIPart) => [...parts.keys()].some((id) => id.startsWith(`${part.toolCallId}:app:`));
   for (const part of parts.values()) {
-    if (isAppLeadInPart(part)) {
+    const scriptKind = live ? appScriptKind(part) : null;
+    if (scriptKind && !runsInner(part)) {
+      // A script that will build is the App step from its first streamed line.
+      const latest = runs.at(-1);
+      const prepared = scriptKind !== "prepare" && leadIn.length === 0 && latest?.preparation
+        && appPreparation(latest.preparation) && latest.builds.length === 0 && !latest.script;
+      if (prepared) {
+        latest.script = { kind: scriptKind, part };
+      } else {
+        const started: AppCreationRun = { id: leadIn[0]?.toolCallId ?? part.toolCallId, builds: [], script: { kind: scriptKind, part } };
+        const intent = leadIn.findLast((lead) => isAppGuidePart(lead) || isAppReadPart(lead));
+        if (intent) started.intent = { kind: isAppReadPart(intent) ? "edit" : "create", part: intent };
+        join(started);
+        runs.push(started);
+      }
+    } else if (isAppLeadInPart(part)) {
       leadIn.push(part);
     } else if (isAppPreparationPart(part)) {
-      const run: AppCreationRun = { id: leadIn[0]?.toolCallId ?? part.toolCallId, preparation: part, builds: [] };
+      const run: AppCreationRun = { id: leadIn[0]?.toolCallId ?? stepId(part), preparation: part, builds: [] };
       join(run);
       runs.push(run);
       const preparation = appPreparation(part);
@@ -178,7 +244,7 @@ export function appCreationRuns(messages: UIMessage[], live = false): AppCreatio
         run.builds.push(part);
         join(run);
       } else {
-        const started: AppCreationRun = { id: leadIn[0]?.toolCallId ?? part.toolCallId, builds: [part] };
+        const started: AppCreationRun = { id: leadIn[0]?.toolCallId ?? stepId(part), builds: [part] };
         join(started);
         runs.push(started);
       }
@@ -210,6 +276,8 @@ export function appCreationRuns(messages: UIMessage[], live = false): AppCreatio
   for (const run of runs) {
     const calls = [...(run.discoveries ?? []), ...(run.preparation ? [run.preparation] : []), ...(run.attempts ?? []), ...run.builds];
     run.executions = [...parts.values()].filter(part => part.callProviderMetadata?.openwork?.codeMode && calls.some(call => call.toolCallId.startsWith(`${part.toolCallId}:app:`)));
+    // The script still being written belongs to the step, not to the ordinary rows.
+    if (run.script) run.executions.push(run.script.part);
   }
   return runs;
 }
@@ -230,7 +298,7 @@ export function appCreationProgress(run: AppCreationRun, active: boolean) {
     ? "ready"
     : checking || (build && failed)
       ? "checking"
-      : prepared || build || run.intent?.kind === "edit"
+      : prepared || build || run.intent?.kind === "edit" || (run.script && run.script.kind !== "prepare")
         ? "writing"
         : "needs";
   const title =
@@ -238,6 +306,7 @@ export function appCreationProgress(run: AppCreationRun, active: boolean) {
     field(build?.input, "title") ??
     preparation?.title ??
     field(run.preparation?.input, "title") ??
+    appTitleInCall(run.script?.part) ??
     run.discoveries?.map(appRead).find(read => read?.title)?.title;
   const detail = field(run.preparation?.input, "description");
   // Completion without a verified launch is not success (e.g. catalog capacity).
@@ -262,3 +331,42 @@ export function appCreationProgress(run: AppCreationRun, active: boolean) {
     running,
   };
 }
+
+/** Whether the latest turn is building an App that is not yet built or failed. */
+export function appBuildInProgress(messages: UIMessage[]): boolean {
+  const turn = messages.slice(Math.max(0, messages.findLastIndex((message) => message.role === "user")));
+  const run = appCreationRuns(turn, true).at(-1);
+  if (!run) return false;
+  const progress = appCreationProgress(run, true);
+  return !progress.app && !progress.builtUnrecorded && !progress.failed && !progress.unavailable;
+}
+
+function lastLine(text: string): string | null {
+  const lines = text.replace(/[*_`#>]+/g, "").split(/\n+/).map((line) => line.trim()).filter(Boolean);
+  const line = lines.at(-1);
+  return line ? (line.length > 140 ? `${line.slice(0, 139)}…` : line) : null;
+}
+
+/**
+ * What the agent is doing right now while it builds an App, in one line: its
+ * latest thought, or the latest call that is not part of the App step.
+ */
+export function appBuildActivity(messages: UIMessage[], appParts: ReadonlySet<string>): string | null {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index]!;
+    if (message.role === "user") return null;
+    if (message.role !== "assistant") continue;
+    for (let partIndex = message.parts.length - 1; partIndex >= 0; partIndex -= 1) {
+      const part = message.parts[partIndex]!;
+      if (part.type === "reasoning") {
+        const line = lastLine(part.text);
+        if (line) return line;
+      } else if (part.type === "dynamic-tool" && !appParts.has(part.toolCallId)) {
+        const sentence = getCapabilityCallSentence(part);
+        return isToolPartInFlight(part) ? sentence.present : sentence.past;
+      }
+    }
+  }
+  return null;
+}
+
