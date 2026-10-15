@@ -362,6 +362,7 @@ OpenWork Cloud. Don't change it on a customer install.
 <!-- BEGIN GENERATED features (pnpm features:sync) -->
 | `config.features.*` | Environment variable | Default | What it does |
 | --- | --- | --- | --- |
+| `memberListToolbars` | `DEN_FEATURE_MEMBER_LIST_TOOLBARS` | default off | Filter members, teams and roles beside their add action, with compact member rows and secondary actions in the list menu. |
 | `appBuildProgress` | `DEN_FEATURE_APP_BUILD_PROGRESS` | default off | While an agent creates or changes an MCP App, the chat shows each stage it goes through (finding and checking tools, writing the App, building and verifying it) as a checklist with a progress bar. |
 | `modelsAnalyticsUi` | `DEN_FEATURE_MODELS_ANALYTICS_UI` | default off | Organization admins can view Models & usage analytics and shared model usage limits. |
 | `taskAnalyticsUi` | `DEN_FEATURE_TASK_ANALYTICS_UI` | default off | Members with analytics access can view task activity and consumption, and admins can configure analytics integrations. |
