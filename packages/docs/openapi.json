@@ -17586,6 +17586,38 @@
       "ExternalMcpRequirementsDiscovery": {
         "type": "object",
         "properties": {
+          "publishedSignInAddresses": {
+            "description": "Settings-view-only unverified suggestions; never applied until an administrator saves manual sign-in settings.",
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "authorizationEndpoint": {
+                  "type": "string",
+                  "maxLength": 2048,
+                  "format": "uri"
+                },
+                "tokenEndpoint": {
+                  "type": "string",
+                  "maxLength": 2048,
+                  "format": "uri"
+                },
+                "advertisedIssuer": {
+                  "type": "string"
+                },
+                "metadataIssuer": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "authorizationEndpoint",
+                "tokenEndpoint",
+                "advertisedIssuer",
+                "metadataIssuer"
+              ],
+              "additionalProperties": false
+            }
+          },
           "status": {
             "type": "string",
             "enum": [
@@ -18436,6 +18468,38 @@
             "anyOf": [
               {
                 "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "oauthClientHasSecret": {
+            "description": "Whether a client secret is configured. Only returned with explicit connection-settings view permission; never the secret itself.",
+            "type": "boolean"
+          },
+          "manualOAuthEndpoints": {
+            "description": "Only returned with explicit connection-settings view permission; omitted from usable member listings, including for the connection creator.",
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "authorizationEndpoint": {
+                    "type": "string",
+                    "maxLength": 2048,
+                    "format": "uri"
+                  },
+                  "tokenEndpoint": {
+                    "type": "string",
+                    "maxLength": 2048,
+                    "format": "uri"
+                  }
+                },
+                "required": [
+                  "authorizationEndpoint",
+                  "tokenEndpoint"
+                ],
+                "additionalProperties": false
               },
               {
                 "type": "null"
@@ -19499,6 +19563,38 @@
               }
             ]
           },
+          "oauthClientHasSecret": {
+            "description": "Whether a client secret is configured. Only returned with explicit connection-settings view permission; never the secret itself.",
+            "type": "boolean"
+          },
+          "manualOAuthEndpoints": {
+            "description": "Only returned with explicit connection-settings view permission; omitted from usable member listings, including for the connection creator.",
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "authorizationEndpoint": {
+                    "type": "string",
+                    "maxLength": 2048,
+                    "format": "uri"
+                  },
+                  "tokenEndpoint": {
+                    "type": "string",
+                    "maxLength": 2048,
+                    "format": "uri"
+                  }
+                },
+                "required": [
+                  "authorizationEndpoint",
+                  "tokenEndpoint"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "oauthCallbackUrl": {
             "anyOf": [
               {
@@ -19923,6 +20019,38 @@
               }
             ]
           },
+          "oauthClientHasSecret": {
+            "description": "Whether a client secret is configured. Only returned with explicit connection-settings view permission; never the secret itself.",
+            "type": "boolean"
+          },
+          "manualOAuthEndpoints": {
+            "description": "Only returned with explicit connection-settings view permission; omitted from usable member listings, including for the connection creator.",
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "authorizationEndpoint": {
+                    "type": "string",
+                    "maxLength": 2048,
+                    "format": "uri"
+                  },
+                  "tokenEndpoint": {
+                    "type": "string",
+                    "maxLength": 2048,
+                    "format": "uri"
+                  }
+                },
+                "required": [
+                  "authorizationEndpoint",
+                  "tokenEndpoint"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "oauthCallbackUrl": {
             "anyOf": [
               {
@@ -20126,6 +20254,34 @@
               "clientId"
             ]
           },
+          "manualOAuthEndpoints": {
+            "description": "Administrator-pinned authorization and token URLs. Both required; null restores strict discovery. Changing them clears saved sign-ins.",
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "authorizationEndpoint": {
+                    "type": "string",
+                    "maxLength": 2048,
+                    "format": "uri"
+                  },
+                  "tokenEndpoint": {
+                    "type": "string",
+                    "maxLength": 2048,
+                    "format": "uri"
+                  }
+                },
+                "required": [
+                  "authorizationEndpoint",
+                  "tokenEndpoint"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "authorizationServerIssuer": {
             "anyOf": [
               {
@@ -20239,6 +20395,9 @@
           },
           "message": {
             "type": "string"
+          },
+          "diagnostic": {
+            "$ref": "#/components/schemas/ExternalMcpDiagnostic"
           }
         },
         "required": [
@@ -87512,6 +87671,34 @@
                           "clientId"
                         ]
                       },
+                      "manualOAuthEndpoints": {
+                        "description": "Administrator-pinned authorization and token URLs. Both required; null restores strict discovery. Changing them clears saved sign-ins.",
+                        "anyOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "authorizationEndpoint": {
+                                "type": "string",
+                                "maxLength": 2048,
+                                "format": "uri"
+                              },
+                              "tokenEndpoint": {
+                                "type": "string",
+                                "maxLength": 2048,
+                                "format": "uri"
+                              }
+                            },
+                            "required": [
+                              "authorizationEndpoint",
+                              "tokenEndpoint"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
                       "authorizationServerIssuer": {
                         "anyOf": [
                           {
@@ -88479,6 +88666,34 @@
                     },
                     "required": [
                       "clientId"
+                    ]
+                  },
+                  "manualOAuthEndpoints": {
+                    "description": "Administrator-pinned authorization and token URLs. Both required; null restores strict discovery. Changing them clears saved sign-ins.",
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "authorizationEndpoint": {
+                            "type": "string",
+                            "maxLength": 2048,
+                            "format": "uri"
+                          },
+                          "tokenEndpoint": {
+                            "type": "string",
+                            "maxLength": 2048,
+                            "format": "uri"
+                          }
+                        },
+                        "required": [
+                          "authorizationEndpoint",
+                          "tokenEndpoint"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "null"
+                      }
                     ]
                   },
                   "authorizationServerIssuer": {
