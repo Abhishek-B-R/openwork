@@ -53,6 +53,13 @@ function defineFeatures<const T extends Record<string, FeatureDefinition>>(featu
 const everywhere = ["cloud", "self_hosted"] as const
 
 export const FEATURES = defineFeatures({
+  googleDocumentTools: {
+    label: "Google Docs: focused reading and edits",
+    description: "Connected assistants inspect document tabs and headings, read or search bounded passages, and replace text against the revision they read.",
+    since: "2026-10",
+    deployments: everywhere,
+    default: false,
+  },
   offlineRecovery: {
     label: "Connection failure presentation",
     description: "Show compact App connection failures and a discreet offline indicator in OpenCode v2 conversations.",
