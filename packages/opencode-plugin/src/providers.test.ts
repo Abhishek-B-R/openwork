@@ -16,6 +16,44 @@ test("fetches usable gateway providers and the member's gateway key, like the de
   ])
 })
 
+test("desktop inventory accepts only a dummy credential, never a reusable Gateway key", async () => {
+  const den = createFakeDen()
+  const rejected = await fetchGatewayInventory(den.fetch, session, undefined, "desktop")
+  assert.equal(rejected.apiKey, null)
+  assert.deepEqual(rejected.providers, [])
+  const accepted = await fetchGatewayInventory(async (url, init) => {
+    const response = await den.fetch(url, init)
+    return new Response((await response.text()).replaceAll(GATEWAY_KEY, "ow_local_catalog"), { status: response.status, headers: response.headers })
+  }, session, undefined, "desktop")
+  assert.equal(accepted.apiKey, "ow_local_catalog")
+  assert.deepEqual(accepted.providers.map(provider => provider.id), [PROVIDER_ID])
+})
+
+test("a connect 403 refetches the list and removes a provider whose access changed", async () => {
+  const den = createFakeDen()
+  let lists = 0
+  const inventory = await fetchGatewayInventory(async (url, init) => {
+    if (url.includes("?scope=usable") && ++lists > 1) return Response.json({ inferenceProviders: [] })
+    if (url.endsWith("/connect")) return Response.json({ error: "forbidden" }, { status: 403 })
+    return den.fetch(url, init)
+  }, session)
+  assert.equal(lists, 2)
+  assert.deepEqual(inventory.providers, [])
+  assert.equal(inventory.apiKey, null)
+})
+
+test("a persistent connect 403 is bounded and never returns denied provider credentials", async () => {
+  const den = createFakeDen()
+  let lists = 0
+  const inventory = await fetchGatewayInventory(async (url, init) => {
+    if (url.includes("?scope=usable")) lists++
+    if (url.endsWith("/connect")) return Response.json({ error: "forbidden" }, { status: 403 })
+    return den.fetch(url, init)
+  }, session)
+  assert.equal(lists, 2)
+  assert.deepEqual(inventory.providers, [])
+})
+
 test("maps a gateway provider to a V2 provider with the gateway key and native package", async () => {
   const den = createFakeDen()
   const inventory = await fetchGatewayInventory(den.fetch, session)

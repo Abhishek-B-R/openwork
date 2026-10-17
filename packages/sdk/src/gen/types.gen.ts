@@ -732,6 +732,7 @@ export type AdminDashboard = {
 
 export type AdminFeature = {
   key:
+    | "liveProviderSync"
     | "googleDocumentTools"
     | "offlineRecovery"
     | "rememberLastOrganization"
@@ -802,6 +803,7 @@ export type AdminUsersPageResponse = {
 export type AdminOrganizationsPageResponse = {
   organizations: Array<{
     capabilities?: {
+      liveProviderSync: boolean;
       googleDocumentTools: boolean;
       offlineRecovery: boolean;
       rememberLastOrganization: boolean;
@@ -845,6 +847,15 @@ export type AdminOrganizationsPageResponse = {
      * Per feature for this organization: whether it is on and why (not part of this deployment, kill switch, operator lock, organization override, or the deployment-wide on/off state), and whether an organization override would take effect.
      */
     featureStates?: {
+      liveProviderSync: {
+        enabled: boolean;
+        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
+        everyone: boolean;
+        killed: boolean;
+        lock: boolean | null;
+        override: boolean | null;
+        overrideApplies: boolean;
+      };
       googleDocumentTools: {
         enabled: boolean;
         source: "unavailable" | "killed" | "lock" | "override" | "everyone";
@@ -1196,6 +1207,7 @@ export type AdminOverviewResponse = {
   }>;
   organizations: Array<{
     capabilities: {
+      liveProviderSync: boolean;
       googleDocumentTools: boolean;
       offlineRecovery: boolean;
       rememberLastOrganization: boolean;
@@ -1239,6 +1251,15 @@ export type AdminOverviewResponse = {
      * Per feature for this organization: whether it is on and why (not part of this deployment, kill switch, operator lock, organization override, or the deployment-wide on/off state), and whether an organization override would take effect.
      */
     featureStates: {
+      liveProviderSync: {
+        enabled: boolean;
+        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
+        everyone: boolean;
+        killed: boolean;
+        lock: boolean | null;
+        override: boolean | null;
+        overrideApplies: boolean;
+      };
       googleDocumentTools: {
         enabled: boolean;
         source: "unavailable" | "killed" | "lock" | "override" | "everyone";
@@ -1736,6 +1757,7 @@ export type CurrentUserDesktopConfigResponse = {
   automationsEnabled?: boolean;
   dashboardEnabled?: boolean;
   connectEnabled?: boolean;
+  liveProviderSync?: boolean;
   onboardingPrompts?: Array<string>;
   onboardingPromptDescriptions?: Array<string>;
   agentPermissions?: DenDesktopAgentPermissions;
@@ -7649,6 +7671,7 @@ export type GetV1AdminOrganizationsByOrganizationIdCapabilitiesResponses = {
    */
   200: {
     capabilities: {
+      liveProviderSync: boolean;
       googleDocumentTools: boolean;
       offlineRecovery: boolean;
       rememberLastOrganization: boolean;
@@ -7692,6 +7715,15 @@ export type GetV1AdminOrganizationsByOrganizationIdCapabilitiesResponses = {
      * Per feature for this organization: whether it is on and why (not part of this deployment, kill switch, operator lock, organization override, or the deployment-wide on/off state), and whether an organization override would take effect.
      */
     featureStates: {
+      liveProviderSync: {
+        enabled: boolean;
+        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
+        everyone: boolean;
+        killed: boolean;
+        lock: boolean | null;
+        override: boolean | null;
+        overrideApplies: boolean;
+      };
       googleDocumentTools: {
         enabled: boolean;
         source: "unavailable" | "killed" | "lock" | "override" | "everyone";
@@ -8031,6 +8063,7 @@ export type PutV1AdminOrganizationsByOrganizationIdCapabilitiesResponses = {
       id: string;
     };
     capabilities: {
+      liveProviderSync: boolean;
       googleDocumentTools: boolean;
       offlineRecovery: boolean;
       rememberLastOrganization: boolean;
@@ -8074,6 +8107,15 @@ export type PutV1AdminOrganizationsByOrganizationIdCapabilitiesResponses = {
      * Per feature for this organization: whether it is on and why (not part of this deployment, kill switch, operator lock, organization override, or the deployment-wide on/off state), and whether an organization override would take effect.
      */
     featureStates: {
+      liveProviderSync: {
+        enabled: boolean;
+        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
+        everyone: boolean;
+        killed: boolean;
+        lock: boolean | null;
+        override: boolean | null;
+        overrideApplies: boolean;
+      };
       googleDocumentTools: {
         enabled: boolean;
         source: "unavailable" | "killed" | "lock" | "override" | "everyone";
@@ -17997,6 +18039,88 @@ export type DeleteV1LlmProvidersByLlmProviderIdAccessByAccessIdResponses = {
 
 export type DeleteV1LlmProvidersByLlmProviderIdAccessByAccessIdResponse =
   DeleteV1LlmProvidersByLlmProviderIdAccessByAccessIdResponses[keyof DeleteV1LlmProvidersByLlmProviderIdAccessByAccessIdResponses];
+
+export type GetV1InferenceProvidersInventoryRevisionData = {
+  body?: never;
+  path?: never;
+  query?: never;
+  url: "/v1/inference-providers/inventory/revision";
+};
+
+export type GetV1InferenceProvidersInventoryRevisionErrors = {
+  /**
+   * Sign-in required.
+   */
+  401: UnauthorizedError;
+  /**
+   * Organization not found or liveProviderSync disabled.
+   */
+  404: NotFoundError;
+  /**
+   * Inventory unavailable; reconnect with backoff.
+   */
+  503: {
+    error: string;
+  };
+};
+
+export type GetV1InferenceProvidersInventoryRevisionError =
+  GetV1InferenceProvidersInventoryRevisionErrors[keyof GetV1InferenceProvidersInventoryRevisionErrors];
+
+export type GetV1InferenceProvidersInventoryRevisionResponses = {
+  /**
+   * Current inventory revision.
+   */
+  200: {
+    revision: string;
+  };
+};
+
+export type GetV1InferenceProvidersInventoryRevisionResponse =
+  GetV1InferenceProvidersInventoryRevisionResponses[keyof GetV1InferenceProvidersInventoryRevisionResponses];
+
+export type GetV1InferenceProvidersInventoryEventsData = {
+  body?: never;
+  path?: never;
+  query?: never;
+  url: "/v1/inference-providers/inventory/events";
+};
+
+export type GetV1InferenceProvidersInventoryEventsErrors = {
+  /**
+   * Sign-in required.
+   */
+  401: UnauthorizedError;
+  /**
+   * Organization not found or liveProviderSync disabled.
+   */
+  404: NotFoundError;
+  /**
+   * At most four inventory streams per member per replica.
+   */
+  429: {
+    error: string;
+  };
+  /**
+   * Inventory unavailable; reconnect with backoff.
+   */
+  503: {
+    error: string;
+  };
+};
+
+export type GetV1InferenceProvidersInventoryEventsError =
+  GetV1InferenceProvidersInventoryEventsErrors[keyof GetV1InferenceProvidersInventoryEventsErrors];
+
+export type GetV1InferenceProvidersInventoryEventsResponses = {
+  /**
+   * Inventory revision event stream.
+   */
+  200: string;
+};
+
+export type GetV1InferenceProvidersInventoryEventsResponse =
+  GetV1InferenceProvidersInventoryEventsResponses[keyof GetV1InferenceProvidersInventoryEventsResponses];
 
 export type GetV1InferenceProvidersUsageData = {
   body?: never;
