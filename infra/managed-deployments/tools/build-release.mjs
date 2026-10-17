@@ -100,8 +100,9 @@ export function buildRelease(argv = process.argv.slice(2)) {
     ...(provider === "aws" ? [
       "infra/managed-deployments/aws/runner/runner.py",
       "infra/managed-deployments/aws/health/health_agent.py",
-      ...files("infra/managed-deployments/aws/terraform", terraform),
-      ...files("infra/terraform/modules/openwork-aws-ecs", (name) => name.endsWith(".tf")).filter((path) => !path.includes("/examples/") && !path.includes("/tests/")),
+      // Package only the managed root's frozen implementation, not the
+      // independently evolving direct-user module or its examples/tests.
+      ...files("infra/managed-deployments/aws/terraform", terraform).filter((path) => !path.includes("/examples/") && !path.includes("/tests/")),
     ] : [
       "infra/managed-deployments/gcp/runner/install.py",
       "infra/managed-deployments/gcp/runner/runner.py",

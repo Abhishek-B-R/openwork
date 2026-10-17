@@ -10,6 +10,7 @@ terraform {
     aws     = { source = "hashicorp/aws", version = "= 5.100.0" }
     random  = { source = "hashicorp/random", version = "= 3.7.2" }
     archive = { source = "hashicorp/archive", version = "= 2.8.1" }
+    http    = { source = "hashicorp/http", version = "~> 3.5" }
   }
 }
 
@@ -22,6 +23,13 @@ variable "control_plane_origin" { type = string }
 variable "size" {
   type    = string
   default = "small"
+}
+
+# Non-secret revision marker for controlled installer update proofs. Production
+# callers leave it empty; it changes task definitions, never database inputs.
+variable "tls_task_revision" {
+  type    = string
+  default = ""
 }
 
 # ---- AWS inputs ----
@@ -123,7 +131,8 @@ module "network" {
 }
 
 module "platform" {
-  source = "../../../terraform/modules/openwork-aws-ecs"
+  # Frozen installer implementation; the shared module is for direct users.
+  source = "./modules/openwork-aws-ecs"
 
   name             = module.contract.name
   openwork_version = var.openwork_version
@@ -147,8 +156,9 @@ module "platform" {
   # SMTP and SSO after setup.
   require_email_verification = false
 
-  den_api = local.profile.den_api
-  den_web = local.profile.den_web
+  den_api           = local.profile.den_api
+  den_web           = local.profile.den_web
+  tls_task_revision = var.tls_task_revision
   database = merge(local.profile.database, {
     backup_retention_days = 7
     deletion_protection   = !var.test_disposable
