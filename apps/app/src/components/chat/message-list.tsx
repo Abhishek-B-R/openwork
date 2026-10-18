@@ -1503,7 +1503,7 @@ function MessageGroup({
   isStreaming,
   newestAppCallIds,
 }: AssistantMessageGroupProps) {
-  const { onRevertToUserMessage, onForkAtMessage, forkingMessageId, showThinking, readOnly, getConnectionDecision } = useMessageList()
+  const { onRevertToUserMessage, onForkAtMessage, forkingMessageId, showThinking, readOnly, getConnectionDecision, resolveReplyModelTitle } = useMessageList()
   const connectionCardParts = React.useMemo(() => connectionCardPartIds(items, getConnectionDecision), [items, getConnectionDecision])
   const newestAppCalls = React.useMemo(() => new Set(newestAppCallIds.split("\n")), [newestAppCallIds])
   const modelFooterEnabled = useLastTurnModelFooterEnabled()
@@ -1530,8 +1530,11 @@ function MessageGroup({
   }
 
   const renderableItems = getRenderableMessages(items)
-  const lastTextMessage = getLastTextPart(lastItem.message)
-  const resolvedReplyModel = lastRealItem?.message.role === "assistant" ? replyModelLabel(lastRealItem.message) : null
+  const lastTextMessage = items.findLast(item => getLastTextPart(item.message))
+  // Native turns can end with a metadata-free completion marker. Keep the
+  // latest known model within this turn rather than losing the answer's name.
+  const replyModelMessage = items.findLast(item => item.message.role === "assistant" && replyModelLabel(item.message, resolveReplyModelTitle))?.message
+  const resolvedReplyModel = replyModelMessage ? replyModelLabel(replyModelMessage, resolveReplyModelTitle) : null
   const mcpAppParts = collectMcpAppParts(items)
 
   // Leading messages without prose (tool/reasoning steps) render inline and
@@ -1761,7 +1764,7 @@ function MessageGroup({
           >
             <span className="sr-only">Replied with </span>
             <span aria-hidden="true" className="flex size-3 shrink-0 items-center justify-center">
-              {lastRealItem && replyModelProvider(lastRealItem.message) ? <ProviderIcon providerId={replyModelProvider(lastRealItem.message)} size={12} /> : null}
+              {replyModelMessage && replyModelProvider(replyModelMessage) ? <ProviderIcon providerId={replyModelProvider(replyModelMessage)} size={12} /> : null}
             </span>
             <span className="truncate">{resolvedReplyModel}</span>
           </span> : null}
