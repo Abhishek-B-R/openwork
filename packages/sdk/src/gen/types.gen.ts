@@ -732,6 +732,7 @@ export type AdminDashboard = {
 
 export type AdminFeature = {
   key:
+    | "modelRemovalRecovery"
     | "lastTurnModelFooter"
     | "liveProviderSync"
     | "googleDocumentTools"
@@ -807,6 +808,7 @@ export type AdminUsersPageResponse = {
 export type AdminOrganizationsPageResponse = {
   organizations: Array<{
     capabilities?: {
+      modelRemovalRecovery: boolean;
       lastTurnModelFooter: boolean;
       liveProviderSync: boolean;
       googleDocumentTools: boolean;
@@ -855,6 +857,15 @@ export type AdminOrganizationsPageResponse = {
      * Per feature for this organization: whether it is on and why (not part of this deployment, kill switch, operator lock, organization override, or the deployment-wide on/off state), and whether an organization override would take effect.
      */
     featureStates?: {
+      modelRemovalRecovery: {
+        enabled: boolean;
+        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
+        everyone: boolean;
+        killed: boolean;
+        lock: boolean | null;
+        override: boolean | null;
+        overrideApplies: boolean;
+      };
       lastTurnModelFooter: {
         enabled: boolean;
         source: "unavailable" | "killed" | "lock" | "override" | "everyone";
@@ -1251,6 +1262,7 @@ export type AdminOverviewResponse = {
   }>;
   organizations: Array<{
     capabilities: {
+      modelRemovalRecovery: boolean;
       lastTurnModelFooter: boolean;
       liveProviderSync: boolean;
       googleDocumentTools: boolean;
@@ -1299,6 +1311,15 @@ export type AdminOverviewResponse = {
      * Per feature for this organization: whether it is on and why (not part of this deployment, kill switch, operator lock, organization override, or the deployment-wide on/off state), and whether an organization override would take effect.
      */
     featureStates: {
+      modelRemovalRecovery: {
+        enabled: boolean;
+        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
+        everyone: boolean;
+        killed: boolean;
+        lock: boolean | null;
+        override: boolean | null;
+        overrideApplies: boolean;
+      };
       lastTurnModelFooter: {
         enabled: boolean;
         source: "unavailable" | "killed" | "lock" | "override" | "everyone";
@@ -3214,6 +3235,10 @@ export type GatewayProviderDetails = {
     credentialSetId: string;
     credentialSetName: string;
   }>;
+  /**
+   * True only when models and authorizationRequests.models represent every effective active grant's model alias within the provider universe. False for credential, catalog, or model configuration omissions, even when aggregate credentialStatus is ready. Only true permits absence to establish model removal.
+   */
+  modelAssignmentsComplete: boolean;
   authorizationRequests: Array<{
     /**
      * Den TypeID with 'gcs_' prefix and a 26-character base32 suffix.
@@ -3403,6 +3428,10 @@ export type GatewayProviderSummary = {
     credentialSetId: string;
     credentialSetName: string;
   }>;
+  /**
+   * True only when models and authorizationRequests.models represent every effective active grant's model alias within the provider universe. False for credential, catalog, or model configuration omissions, even when aggregate credentialStatus is ready. Only true permits absence to establish model removal.
+   */
+  modelAssignmentsComplete: boolean;
   authorizationRequests: Array<{
     /**
      * Den TypeID with 'gcs_' prefix and a 26-character base32 suffix.
@@ -7758,6 +7787,7 @@ export type GetV1AdminOrganizationsByOrganizationIdCapabilitiesResponses = {
    */
   200: {
     capabilities: {
+      modelRemovalRecovery: boolean;
       lastTurnModelFooter: boolean;
       liveProviderSync: boolean;
       googleDocumentTools: boolean;
@@ -7806,6 +7836,15 @@ export type GetV1AdminOrganizationsByOrganizationIdCapabilitiesResponses = {
      * Per feature for this organization: whether it is on and why (not part of this deployment, kill switch, operator lock, organization override, or the deployment-wide on/off state), and whether an organization override would take effect.
      */
     featureStates: {
+      modelRemovalRecovery: {
+        enabled: boolean;
+        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
+        everyone: boolean;
+        killed: boolean;
+        lock: boolean | null;
+        override: boolean | null;
+        overrideApplies: boolean;
+      };
       lastTurnModelFooter: {
         enabled: boolean;
         source: "unavailable" | "killed" | "lock" | "override" | "everyone";
@@ -8190,6 +8229,7 @@ export type PutV1AdminOrganizationsByOrganizationIdCapabilitiesResponses = {
       id: string;
     };
     capabilities: {
+      modelRemovalRecovery: boolean;
       lastTurnModelFooter: boolean;
       liveProviderSync: boolean;
       googleDocumentTools: boolean;
@@ -8238,6 +8278,15 @@ export type PutV1AdminOrganizationsByOrganizationIdCapabilitiesResponses = {
      * Per feature for this organization: whether it is on and why (not part of this deployment, kill switch, operator lock, organization override, or the deployment-wide on/off state), and whether an organization override would take effect.
      */
     featureStates: {
+      modelRemovalRecovery: {
+        enabled: boolean;
+        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
+        everyone: boolean;
+        killed: boolean;
+        lock: boolean | null;
+        override: boolean | null;
+        overrideApplies: boolean;
+      };
       lastTurnModelFooter: {
         enabled: boolean;
         source: "unavailable" | "killed" | "lock" | "override" | "everyone";
@@ -20758,6 +20807,10 @@ export type GetV1InferenceProvidersByInferenceProviderIdConnectResponses = {
         credentialSetId: string;
         credentialSetName: string;
       }>;
+      /**
+       * True only when models and authorizationRequests.models represent every effective active grant's model alias within the provider universe. False for credential, catalog, or model configuration omissions, even when aggregate credentialStatus is ready. Only true permits absence to establish model removal.
+       */
+      modelAssignmentsComplete: boolean;
       authorizationRequests: Array<{
         /**
          * Den TypeID with 'gcs_' prefix and a 26-character base32 suffix.

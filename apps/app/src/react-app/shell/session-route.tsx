@@ -24,6 +24,7 @@ import { buildDiagnosticsBundleJson } from "@/app/lib/diagnostics-bundle";
 import { downloadTextAsFile } from "@/app/lib/download";
 import { canCreateWorkspaces } from "@/app/lib/workspace-creation-policy";
 import { createClient, isPromptAdmissionUnknown, unwrap } from "@/app/lib/opencode";
+import { sendWithModelUnavailableRetry } from "@/react-app/domains/session/sync/model-unavailable-retry";
 import { createClientV2, isOpencodeV2BaseUrl, v2AcknowledgementText, V2_SESSION_ARCHIVE_UNAVAILABLE } from "@/app/lib/opencode-v2-adapter";
 import { abortSessionSafe, forkSession, listCommands, revertSession, shellInSession, unrevertSession } from "@/app/lib/opencode-session";
 import { composeNativeSessionHistory } from "@/app/lib/opencode-session-native";
@@ -147,6 +148,10 @@ import { useSessionInteractions } from "@/react-app/domains/session/sync/use-ses
 import { useModelBehavior } from "@/react-app/domains/session/surface/use-model-behavior";
 import { getModelBehaviorSummary, nextModelBehaviorValue, previousModelBehaviorValue, sanitizeModelBehaviorValue } from "@/app/lib/model-behavior";
 import { computeModelAvailability, createUnavailableConfirmationGate, type ModelAvailability } from "@/react-app/domains/session/surface/model-availability";
+import { useModelRemovalConfirmation } from "@/react-app/domains/session/surface/use-model-removal-confirmation";
+import { closestAvailableModel } from "@/react-app/domains/session/surface/model-removal";
+import { modelRecoveryChatKey, useModelRecoveryStore } from "@/react-app/domains/session/surface/model-recovery-store";
+import { readModelDisplayMemory, rememberModelDisplayNames } from "@/react-app/domains/session/surface/model-display-memory";
 import { useSessionFindStore } from "@/react-app/domains/session/surface/find-store";
 import { useModelPicker } from "@/react-app/domains/session/modals/use-model-picker";
 import { GatewayModelAccessProvider, type GatewayModelSelectionHandle } from "@/react-app/domains/connections/provider-auth/gateway-model-access";
@@ -1211,7 +1216,7 @@ export function SessionRoute() {
     workspaceReady: Boolean(selectedWorkspaceId && opencodeClient),
     reloadPending: sessionProviderAuthSnapshot.cloudProviderServerSync?.reloadPending === true,
   });
-  const organizationModelsEmpty = isOrganizationModelsEmpty({
+  const catalogOrganizationModelsEmpty = isOrganizationModelsEmpty({
     workspaceReady: Boolean(selectedWorkspaceId && opencodeClient),
     loading,
     restrictToCloud: restrictToCloudProviders,
@@ -1284,27 +1289,42 @@ export function SessionRoute() {
   // reads as unsettled → pending) instead of judging the new workspace with
   // stale data.
   //
-  // Catalog denials are additionally confirmation-gated: Settings visits and
-  // engine reload churn can settle a momentarily incomplete catalog, and a
-  // denial younger than the confirmation window renders as pending instead of
-  // flashing "Model no longer available" during the transition. The recheck
-  // tick re-evaluates tracked denials so a genuine one still surfaces once it
-  // matures, even without further catalog changes.
+  // Debounce catalog churn before checking Den. Time alone never confirms an
+  // organization model's removal: two complete member inventory reads, with an
+  // engine refetch between them, must independently establish lost assignment.
+  const modelRemovalRecovery = useOrgFeatureState("modelRemovalRecovery").enabled;
+  const modelRecoveryScope = JSON.stringify([sessionDraftScope, opencodeBaseUrl, selectedWorkspaceId]);
+  const selectedSessionModelSelection = useSessionModelStore((state) =>
+    (selectedSessionId ? state.bySessionId[selectedSessionId] ?? null : null),
+  );
+  const activeComposerModel = selectedSessionModelSelection?.model ?? (selectedSessionId ? local.prefs.defaultModel : newTaskModel) ?? null;
+  const recoveryChatKey = modelRecoveryChatKey(modelRecoveryScope, selectedSessionId);
+  // Persist names under the existing stable workspace identity, not a local
+  // server port or engine-version URL that can change at the next launch.
+  const modelDisplayScope = workspaceDefaultScope ? JSON.stringify([sessionDraftScope, workspaceDefaultScope]) : null;
+  const rememberedModelTitles = useMemo(() => readModelDisplayMemory(modelDisplayScope ?? ""), [modelDisplayScope]);
+  useEffect(() => {
+    if (!modelDisplayScope) return;
+    const selected = modelPicker.knownOptions.find((option) => option.providerID === activeComposerModel?.providerID
+      && option.modelID === activeComposerModel.modelID);
+    if (selected) rememberModelDisplayNames(modelDisplayScope, rememberedModelTitles, [selected]);
+  }, [modelDisplayScope, rememberedModelTitles, modelPicker.knownOptions, activeComposerModel]);
   const modelAvailabilityGate = useMemo(() => createUnavailableConfirmationGate(), []);
   const [availabilityRecheckTick, bumpAvailabilityRecheck] = useReducer(
     (value: number) => value + 1,
     0,
   );
-  const resolveModelAvailability = useCallback((model: ModelRef | null): ModelAvailability =>
+  const resolveCatalogModelAvailability = useCallback((model: ModelRef | null): ModelAvailability =>
     modelAvailabilityGate.confirm(model, computeModelAvailability(model, {
       workspaceReady: Boolean(selectedWorkspaceId && opencodeClient),
-      loading,
+      loading: loading || providerListQuery.isPlaceholderData || providerListQuery.isError,
       signedIn: denAuth.isSignedIn,
       cloudProviderSyncReady,
       openWorkModelsSyncing,
       restrictToCloud: restrictToCloudProviders,
       checkRestriction: checkDesktopRestriction,
       cloudProviderList,
+      liveProviderSync,
       providerList: providerListQuery.data,
     })), [
     // The tick only forces re-evaluation of denials tracked by the gate.
@@ -1317,16 +1337,51 @@ export function SessionRoute() {
     modelAvailabilityGate,
     opencodeClient,
     openWorkModelsSyncing,
+    liveProviderSync,
+    providerListQuery.isPlaceholderData,
+    providerListQuery.isError,
     providerListQuery.data,
     restrictToCloudProviders,
     selectedWorkspaceId,
   ]);
   useEffect(() => {
     const delay = modelAvailabilityGate.nextRecheckDelay();
-    if (delay === null) return;
+    if (delay === null || delay === 0) return;
     const timer = window.setTimeout(() => bumpAvailabilityRecheck(), delay + 16);
     return () => window.clearTimeout(timer);
-  }, [modelAvailabilityGate, resolveModelAvailability]);
+  }, [modelAvailabilityGate, resolveCatalogModelAvailability]);
+  const catalogAvailability = resolveCatalogModelAvailability(activeComposerModel);
+  const modelRemovalConfirmation = useModelRemovalConfirmation({
+    model: activeComposerModel,
+    missing: catalogAvailability.status === "unavailable" && catalogAvailability.reason !== "provider_blocked",
+    ready: !loading && cloudProviderSyncReady && !providerListQuery.isError
+      && !providerListQuery.isPlaceholderData && Boolean(opencodeClient && selectedWorkspaceId),
+    scope: modelRecoveryScope,
+    chatKey: recoveryChatKey,
+    refreshEngine: async () => {
+      const refreshed = await providerListQuery.refetch();
+      if (refreshed.isError || !refreshed.data || !activeComposerModel) return false;
+      return computeModelAvailability(activeComposerModel, {
+        workspaceReady: true, loading: false, signedIn: denAuth.isSignedIn,
+        cloudProviderSyncReady, openWorkModelsSyncing: false,
+        restrictToCloud: restrictToCloudProviders, checkRestriction: checkDesktopRestriction,
+        cloudProviderList: refreshed.data, providerList: refreshed.data,
+      }).status === "unavailable";
+    },
+  });
+  const organizationRemovalConfirmed = modelRemovalConfirmation.confirmed;
+  const resolveModelAvailability = useCallback((model: ModelRef | null): ModelAvailability => {
+    const verdict = resolveCatalogModelAvailability(model);
+    if (verdict.status !== "unavailable" || verdict.reason === "provider_blocked") return verdict;
+    // Catalog absence alone cannot revoke an organization model. Without two
+    // authoritative reads keep the selection usable, including sign-in-required providers.
+    if (model && isCloudManagedProviderKey(model.providerID)
+      && !(organizationRemovalConfirmed && activeComposerModel?.providerID === model.providerID
+        && activeComposerModel.modelID === model.modelID)) return { status: "pending" };
+    return verdict;
+  }, [resolveCatalogModelAvailability, organizationRemovalConfirmed, activeComposerModel]);
+  const organizationModelsEmpty = catalogOrganizationModelsEmpty
+    && (!activeComposerModel || !isCloudManagedProviderKey(activeComposerModel.providerID) || organizationRemovalConfirmed);
   const selectedModelUnavailable =
     resolveModelAvailability(newTaskModel).status === "unavailable";
   const orgNewTaskModelUnavailable = Boolean(orgNewTaskModel && !workspaceDefault
@@ -1336,10 +1391,6 @@ export function SessionRoute() {
   }, [orgNewTaskModel, orgNewTaskModelUnavailable]);
   // The composer the user is looking at: the selected conversation's
   // remembered model when it has one, otherwise the global default.
-  const selectedSessionModelSelection = useSessionModelStore((state) =>
-    (selectedSessionId ? state.bySessionId[selectedSessionId] ?? null : null),
-  );
-  const activeComposerModel = selectedSessionModelSelection?.model ?? (selectedSessionId ? local.prefs.defaultModel : newTaskModel) ?? null;
   const activeComposerAvailability = resolveModelAvailability(activeComposerModel);
   const activeComposerTargetsSession = Boolean(selectedSessionModelSelection && selectedSessionId);
   const selectedModelUnavailableKey = activeComposerAvailability.status === "unavailable" && activeComposerModel
@@ -1363,7 +1414,7 @@ export function SessionRoute() {
       // default; a conversation's own unavailable model must surface the
       // picker for that conversation instead.
       entitledOrgDefaultModel: activeComposerTargetsSession || workspaceDefault ? false : Boolean(entitledOrgDefaultModel),
-      organizationModelsEmpty,
+      organizationModelsEmpty: organizationModelsEmpty && !organizationRemovalConfirmed,
       autoOpenedUnavailableModelKey: autoOpenedUnavailableModelRef.current,
     })) return;
     if (!activeComposerTargetsSession && !workspaceDefault && entitledOrgDefaultModel) {
@@ -1372,16 +1423,28 @@ export function SessionRoute() {
     }
 
     autoOpenedUnavailableModelRef.current = selectedModelUnavailableKey;
-    const targetSessionId = activeComposerTargetsSession ? selectedSessionId : null;
+    const targetSessionId = selectedSessionId;
+    // A local disconnect or policy restriction isn't an organization removal.
+    if (!organizationRemovalConfirmed) {
+      window.dispatchEvent(new CustomEvent(openComposerModelPickerEvent, { detail: { sessionId: targetSessionId ?? undefined, focusAlternative: true } }));
+      return;
+    }
     // Move on to the next model the picker lists that can run, instead of
     // stopping the person with a dialog. Only when nothing else can run does
     // the composer's own picker open to say so.
     const collections = useModelCollectionsStore.getState();
     // Named options from the same catalog the entitlement check reads, limited to what the member may use.
     const entitled = new Set(entitledModelOptions.filter((option) => !option.disabled).map((option) => `${option.providerID}/${option.modelID}`));
-    const candidates = runtimeModelOptions(cloudProviderList ?? providerListQuery.data)
-      .filter((option) => entitled.has(`${option.providerID}/${option.modelID}`));
-    const replacement = activeComposerModel ? nextAvailableModel(candidates, collections.favorites, collections.recent, activeComposerModel,
+    const connected = new Set(runtimeModelOptions(cloudProviderList ?? providerListQuery.data)
+      .map((option) => `${option.providerID}/${option.modelID}`));
+    const assigned = new Set(modelRemovalConfirmation.assignedModels.map((model) => `${model.providerID}/${model.modelID}`));
+    const candidates = modelPicker.actionOptions.filter((option) => !option.disabled && !option.gatewayAuthorization
+      && entitled.has(`${option.providerID}/${option.modelID}`) && connected.has(`${option.providerID}/${option.modelID}`)
+      && (!isCloudManagedProviderKey(option.providerID) || assigned.has(`${option.providerID}/${option.modelID}`)));
+    const previous = activeComposerModel
+      ? rememberedModelTitles.get(`${activeComposerModel.providerID}/${activeComposerModel.modelID}`) ?? activeComposerModel : null;
+    const chooseReplacement = modelRemovalRecovery ? closestAvailableModel : nextAvailableModel;
+    const replacement = previous ? chooseReplacement(candidates, collections.favorites, collections.recent, previous,
       (option) => resolveModelAvailability(option).status === "available") : null;
     if (!replacement) {
       window.dispatchEvent(new CustomEvent(openComposerModelPickerEvent, { detail: { sessionId: targetSessionId ?? undefined, focusAlternative: true } }));
@@ -1389,11 +1452,15 @@ export function SessionRoute() {
     }
     if (targetSessionId) useSessionModelStore.getState().setModel(targetSessionId, replacement, null);
     else changeNewTaskModel(replacement, null);
-    toast.info(`Your model isn't available anymore. Switched to ${modelTitle(replacement)}.`, {
-      id: `model-unavailable-switch:${targetSessionId ?? "default"}`,
-      action: { label: "Change", onClick: () => window.dispatchEvent(new CustomEvent(openComposerModelPickerEvent, { detail: { sessionId: targetSessionId ?? undefined } })) },
-    });
-  }, [activityRouteActive, activeComposerModel, activeComposerTargetsSession, changeNewTaskModel, cloudProviderList, cloudProviderSyncReady, denAuth.isSignedIn, entitledModelOptions, entitledOrgDefaultModel, providerListQuery.data, organizationModelsEmpty, resolveModelAvailability, selectedModelUnavailableKey, selectedSessionId, workspaceDefault]);
+    if (modelRemovalRecovery && previous) {
+      useModelRecoveryStore.getState().record(recoveryChatKey, { previous, replacement });
+    } else {
+      toast.info(`Your model isn't available anymore. Switched to ${modelTitle(replacement)}.`, {
+        id: `model-unavailable-switch:${targetSessionId ?? "default"}`,
+        action: { label: "Change", onClick: () => window.dispatchEvent(new CustomEvent(openComposerModelPickerEvent, { detail: { sessionId: targetSessionId ?? undefined } })) },
+      });
+    }
+  }, [activityRouteActive, activeComposerModel, activeComposerTargetsSession, changeNewTaskModel, cloudProviderList, cloudProviderSyncReady, denAuth.isSignedIn, entitledModelOptions, entitledOrgDefaultModel, providerListQuery.data, organizationModelsEmpty, resolveModelAvailability, selectedModelUnavailableKey, selectedSessionId, workspaceDefault, organizationRemovalConfirmed, modelRemovalRecovery, recoveryChatKey, modelPicker.actionOptions, rememberedModelTitles, modelRemovalConfirmation.assignedModels]);
 
   // Optimistic model selection: a remembered model is treated as valid until
   // the availability gate CONFIRMS it absent (selectedModelUnavailable).
@@ -1609,6 +1676,7 @@ export function SessionRoute() {
       // effective session model through `resolveModelAvailability`.
       modelUnavailable: selectedModelUnavailable,
       modelUnavailableMessage,
+      modelRecoveryScope,
       resolveModelAvailability,
       organizationModelsEmpty,
       selectedModel: local.prefs.defaultModel ?? { providerID: "", modelID: "" },
@@ -1752,14 +1820,24 @@ export function SessionRoute() {
                   });
                   assertCurrent();
                   onPrepared?.(v2AcknowledgementText(parts));
-                  const result = await promptClient.session.promptAsync({
-                    sessionID: targetSessionId,
-                    messageID: draft.messageId,
-                    parts,
-                    model: sendModel ?? undefined,
-                    agent: sendAgent ?? undefined,
-                    ...(sendVariant ? { variant: sendVariant } : {}),
-                    system,
+                  const result = await sendWithModelUnavailableRetry({
+                    request: {
+                      sessionID: targetSessionId,
+                      messageID: draft.messageId,
+                      parts,
+                      model: sendModel ?? undefined,
+                      agent: sendAgent ?? undefined,
+                      ...(sendVariant ? { variant: sendVariant } : {}),
+                      system,
+                    },
+                    send: (request) => promptClient.session.promptAsync(request),
+                    refreshModels: () => ensureProviderListQuery(getReactQueryClient(), {
+                      client: promptClient,
+                      baseUrl: opencodeBaseUrl,
+                      directory: selectedWorkspaceRoot,
+                      force: true,
+                    }),
+                    assertCurrent,
                   });
                   if (result.error) {
                     if (isPromptAdmissionUnknown(result.error)) throw result.error;
@@ -1901,6 +1979,7 @@ export function SessionRoute() {
     developerMode,
     modelLabel,
     modelUnavailableMessage,
+    modelRecoveryScope,
     organizationModelsEmpty,
     modelVariantLabel,
     modelVariantValue,
@@ -1983,6 +2062,7 @@ export function SessionRoute() {
     const scopedSurface = {
       ...surfaceProps,
       workspaceRoot,
+      modelRecoveryScope: JSON.stringify([sessionDraftScope, endpoint.opencodeBaseUrl, workspace.id]),
       modelUnavailable: false,
       modelUnavailableMessage: null,
       resolveModelAvailability: undefined,
@@ -2109,14 +2189,24 @@ export function SessionRoute() {
                   });
                   assertCurrent();
                   onPrepared?.(v2AcknowledgementText(parts));
-                  const result = await promptClient.session.promptAsync({
-                    sessionID: targetSessionId,
-                    messageID: draft.messageId,
-                    parts,
-                    model: sendModel ?? undefined,
-                    agent: sendAgent ?? undefined,
-                    ...(sendVariant ? { variant: sendVariant } : {}),
-                    system,
+                  const result = await sendWithModelUnavailableRetry({
+                    request: {
+                      sessionID: targetSessionId,
+                      messageID: draft.messageId,
+                      parts,
+                      model: sendModel ?? undefined,
+                      agent: sendAgent ?? undefined,
+                      ...(sendVariant ? { variant: sendVariant } : {}),
+                      system,
+                    },
+                    send: (request) => promptClient.session.promptAsync(request),
+                    refreshModels: () => ensureProviderListQuery(getReactQueryClient(), {
+                      client: promptClient,
+                      baseUrl: endpoint.opencodeBaseUrl,
+                      directory: workspaceRoot,
+                      force: true,
+                    }),
+                    assertCurrent,
                   });
                   if (result.error) {
                     if (isPromptAdmissionUnknown(result.error)) throw result.error;
@@ -2322,6 +2412,7 @@ export function SessionRoute() {
       modelOptions: pickerFallbackOptions,
       modelUnavailable: resolveModelAvailability(newTaskModel).status === "unavailable",
       modelUnavailableMessage,
+      modelRecoveryScope,
       organizationModelsEmpty,
       onRefreshOrganizationModels: refreshOrganizationModelAccess,
       modelPickerOpen: modelPicker.compactOpen,
@@ -2378,6 +2469,7 @@ export function SessionRoute() {
     listSlashCommands,
     local,
     modelUnavailableMessage,
+    modelRecoveryScope,
     newTaskModel,
     newTaskVariant,
     newTaskBehavior.label,
