@@ -765,6 +765,8 @@ export type AdminFeature = {
     | "teamAccessRows"
     | "teamPageTabs"
     | "inviteLinkVerifiesEmail"
+    | "nativeCloudSkills"
+    | "mcpSkillsExtension"
     | "remoteSessionSubagents";
   label: string;
   description: string;
@@ -837,6 +839,8 @@ export type AdminOrganizationsPageResponse = {
       teamAccessRows: boolean;
       teamPageTabs: boolean;
       inviteLinkVerifiesEmail: boolean;
+      nativeCloudSkills: boolean;
+      mcpSkillsExtension: boolean;
       remoteSessionSubagents: boolean;
       /**
        * Compatibility field, always true. AI Gateway is available to every organization; deployment configuration and authorization still apply.
@@ -1146,6 +1150,24 @@ export type AdminOrganizationsPageResponse = {
         override: boolean | null;
         overrideApplies: boolean;
       };
+      nativeCloudSkills: {
+        enabled: boolean;
+        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
+        everyone: boolean;
+        killed: boolean;
+        lock: boolean | null;
+        override: boolean | null;
+        overrideApplies: boolean;
+      };
+      mcpSkillsExtension: {
+        enabled: boolean;
+        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
+        everyone: boolean;
+        killed: boolean;
+        lock: boolean | null;
+        override: boolean | null;
+        overrideApplies: boolean;
+      };
       remoteSessionSubagents: {
         enabled: boolean;
         source: "unavailable" | "killed" | "lock" | "override" | "everyone";
@@ -1251,6 +1273,8 @@ export type AdminOverviewResponse = {
       teamAccessRows: boolean;
       teamPageTabs: boolean;
       inviteLinkVerifiesEmail: boolean;
+      nativeCloudSkills: boolean;
+      mcpSkillsExtension: boolean;
       remoteSessionSubagents: boolean;
       /**
        * Compatibility field, always true. AI Gateway is available to every organization; deployment configuration and authorization still apply.
@@ -1552,6 +1576,24 @@ export type AdminOverviewResponse = {
         overrideApplies: boolean;
       };
       inviteLinkVerifiesEmail: {
+        enabled: boolean;
+        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
+        everyone: boolean;
+        killed: boolean;
+        lock: boolean | null;
+        override: boolean | null;
+        overrideApplies: boolean;
+      };
+      nativeCloudSkills: {
+        enabled: boolean;
+        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
+        everyone: boolean;
+        killed: boolean;
+        lock: boolean | null;
+        override: boolean | null;
+        overrideApplies: boolean;
+      };
+      mcpSkillsExtension: {
         enabled: boolean;
         source: "unavailable" | "killed" | "lock" | "override" | "everyone";
         everyone: boolean;
@@ -7728,6 +7770,8 @@ export type GetV1AdminOrganizationsByOrganizationIdCapabilitiesResponses = {
       teamAccessRows: boolean;
       teamPageTabs: boolean;
       inviteLinkVerifiesEmail: boolean;
+      nativeCloudSkills: boolean;
+      mcpSkillsExtension: boolean;
       remoteSessionSubagents: boolean;
       /**
        * Compatibility field, always true. AI Gateway is available to every organization; deployment configuration and authorization still apply.
@@ -8029,6 +8073,24 @@ export type GetV1AdminOrganizationsByOrganizationIdCapabilitiesResponses = {
         overrideApplies: boolean;
       };
       inviteLinkVerifiesEmail: {
+        enabled: boolean;
+        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
+        everyone: boolean;
+        killed: boolean;
+        lock: boolean | null;
+        override: boolean | null;
+        overrideApplies: boolean;
+      };
+      nativeCloudSkills: {
+        enabled: boolean;
+        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
+        everyone: boolean;
+        killed: boolean;
+        lock: boolean | null;
+        override: boolean | null;
+        overrideApplies: boolean;
+      };
+      mcpSkillsExtension: {
         enabled: boolean;
         source: "unavailable" | "killed" | "lock" | "override" | "everyone";
         everyone: boolean;
@@ -8130,6 +8192,8 @@ export type PutV1AdminOrganizationsByOrganizationIdCapabilitiesResponses = {
       teamAccessRows: boolean;
       teamPageTabs: boolean;
       inviteLinkVerifiesEmail: boolean;
+      nativeCloudSkills: boolean;
+      mcpSkillsExtension: boolean;
       remoteSessionSubagents: boolean;
       /**
        * Compatibility field, always true. AI Gateway is available to every organization; deployment configuration and authorization still apply.
@@ -8431,6 +8495,24 @@ export type PutV1AdminOrganizationsByOrganizationIdCapabilitiesResponses = {
         overrideApplies: boolean;
       };
       inviteLinkVerifiesEmail: {
+        enabled: boolean;
+        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
+        everyone: boolean;
+        killed: boolean;
+        lock: boolean | null;
+        override: boolean | null;
+        overrideApplies: boolean;
+      };
+      nativeCloudSkills: {
+        enabled: boolean;
+        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
+        everyone: boolean;
+        killed: boolean;
+        lock: boolean | null;
+        override: boolean | null;
+        overrideApplies: boolean;
+      };
+      mcpSkillsExtension: {
         enabled: boolean;
         source: "unavailable" | "killed" | "lock" | "override" | "everyone";
         everyone: boolean;

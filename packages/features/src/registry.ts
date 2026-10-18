@@ -284,6 +284,20 @@ export const FEATURES = defineFeatures({
     deployments: everywhere,
     default: false,
   },
+  nativeCloudSkills: {
+    label: "Desktop: organization skills load like local skills",
+    description: "In the desktop app (OpenCode v2), organization and plugin skills are listed next to local skills with their full description and load with their full instructions in one step, and a skill a message names loads before the agent starts.",
+    since: "2026-10",
+    deployments: everywhere,
+    default: false,
+  },
+  mcpSkillsExtension: {
+    label: "MCP: skill index and standard skills listing",
+    description: "MCP clients connected to OpenWork (Claude Code, Codex, Cursor and others) get a short list of the member's skills when they connect, and clients that support the MCP Skills Extension can list and load those skills directly.",
+    since: "2026-10",
+    deployments: everywhere,
+    default: false,
+  },
   remoteSessionSubagents: {
     label: "Desktop: tasks on other computers as sub-agents",
     description: "A task the agent starts on the cloud or another computer shows in the chat like a sub-agent: whether it is working, needs an answer or finished, and its conversation, which people can open, follow up on and stop.",
