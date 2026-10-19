@@ -25,6 +25,8 @@ export const denSessionSchema = z.object({
   organization: z.object({ id: z.string(), name: z.string(), brandAppName: z.string().nullable() }),
   memberId: z.string(),
   enabled: z.boolean(),
+  firstRun: z.boolean().optional(),
+  canEnableWorkbot: z.boolean().optional(),
   canSchedule: z.boolean(),
   /** Workbot's Calendar tab is on (while Workbot is on). Older Dens omit it: off. */
   calendar: z.boolean().optional(),
@@ -128,7 +130,7 @@ export function createDen(options: { apiUrl: string; publicUrl: string; serviceT
   return {
     discover,
     /** Where to send the browser to sign in; Den returns it to /auth/callback with a code. */
-    async authorizeUrl(input: { state: string; verifier: string }) {
+    async authorizeUrl(input: { state: string; verifier: string; chooseWorkspace?: boolean }) {
       const { authorizationEndpoint, resource } = await discover()
       const url = new URL(authorizationEndpoint)
       url.search = new URLSearchParams({
@@ -139,6 +141,8 @@ export function createDen(options: { apiUrl: string; publicUrl: string; serviceT
         state: input.state,
         code_challenge: pkceChallenge(input.verifier),
         code_challenge_method: "S256",
+        // Explicit workspace changes must not silently reuse the active workspace's existing grant.
+        ...(input.chooseWorkspace ? { prompt: "consent" } : {}),
         resource,
       }).toString()
       return url.toString()
