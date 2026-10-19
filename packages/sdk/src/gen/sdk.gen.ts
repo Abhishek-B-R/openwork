@@ -889,6 +889,8 @@ import type {
   PostV1OrgsInvitationsAcceptResponses,
   PostV1OrgWebOriginsErrors,
   PostV1OrgWebOriginsResponses,
+  PostV1OrgWorkbotSettingsTestDefaultModelErrors,
+  PostV1OrgWorkbotSettingsTestDefaultModelResponses,
   PostV1PermissionsSetsErrors,
   PostV1PermissionsSetsResponses,
   PostV1PluginsByPluginIdAccessErrors,
@@ -16111,9 +16113,39 @@ export class DenClient extends HeyApiClient {
   }
 
   /**
+   * Test Workbot's default model
+   *
+   * Runs one bounded synthetic completion on the server-resolved organization default with the runner's configured key. No member content, tools, files, MCP access or conversation is used. May consume paid inference. Returns only status, a safe error code and requested/provider-reported model IDs. Requires a genuine user session, recent sign-in, Manage OpenWork Models, Workbot and workbotLunaDefault. Limited durably to three checks per organization and three per member in a ten-minute inactivity-reset window. Never exposed to MCP.
+   */
+  public postV1OrgWorkbotSettingsTestDefaultModel<ThrowOnError extends boolean = false>(
+    parameters: {
+      body: {
+        [key: string]: never;
+      };
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ key: "body", map: "body" }] }]);
+    return (options?.client ?? this.client).post<
+      PostV1OrgWorkbotSettingsTestDefaultModelResponses,
+      PostV1OrgWorkbotSettingsTestDefaultModelErrors,
+      ThrowOnError
+    >({
+      url: "/v1/org/workbot-settings/test-default-model",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    });
+  }
+
+  /**
    * Get Workbot settings
    *
-   * Returns the organization's default model for Workbot, the Slack assistant and cloud Automations set to the cloud default (null means the headless runner's default), and the models the runner can serve. Requires View OpenWork Models settings or Manage OpenWork Models, and Workbot.
+   * Returns the organization's default model for Workbot, the Slack assistant and cloud Automations set to the cloud default (null means the headless runner's default), and the models the runner can serve. With workbotLunaDefault on, Workbot's null choice means explicit GPT-6 Luna, defaultModel identifies that default and defaultReadiness reports authenticated catalog availability; Slack and Automations keep their existing default policy. Requires View OpenWork Models settings or Manage OpenWork Models, and Workbot.
    */
   public getV1OrgWorkbotSettings<ThrowOnError extends boolean = false>(options?: Options<never, ThrowOnError>) {
     return (options?.client ?? this.client).get<
@@ -16126,7 +16158,7 @@ export class DenClient extends HeyApiClient {
   /**
    * Set Workbot's default model
    *
-   * Sets the organization's default model for Workbot, the Slack assistant and cloud Automations set to the cloud default, from their next message or run; null uses the headless runner's default. Automations with their own model keep it. Only models the runner serves are accepted. Requires the Manage OpenWork Models permission, a recent sign-in and Workbot.
+   * Sets the organization's default model for Workbot, the Slack assistant and cloud Automations set to the cloud default, from their next message or run; null uses the headless runner's default, except Workbot uses explicit GPT-6 Luna while workbotLunaDefault is on. Automations with their own model keep it. Only models the runner serves are accepted. Requires the Manage OpenWork Models permission, a recent sign-in and Workbot.
    */
   public putV1OrgWorkbotSettings<ThrowOnError extends boolean = false>(
     parameters: {

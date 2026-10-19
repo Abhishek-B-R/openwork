@@ -753,6 +753,7 @@ export type AdminFeature = {
     | "workbot"
     | "workbotSharing"
     | "workbotTeamLinks"
+    | "workbotLunaDefault"
     | "workbotDocuments"
     | "workbotWorkspaceAssistant"
     | "automationCalendar"
@@ -831,6 +832,7 @@ export type AdminOrganizationsPageResponse = {
       workbot: boolean;
       workbotSharing: boolean;
       workbotTeamLinks: boolean;
+      workbotLunaDefault: boolean;
       workbotDocuments: boolean;
       workbotWorkspaceAssistant: boolean;
       automationCalendar: boolean;
@@ -1042,6 +1044,15 @@ export type AdminOrganizationsPageResponse = {
         overrideApplies: boolean;
       };
       workbotTeamLinks: {
+        enabled: boolean;
+        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
+        everyone: boolean;
+        killed: boolean;
+        lock: boolean | null;
+        override: boolean | null;
+        overrideApplies: boolean;
+      };
+      workbotLunaDefault: {
         enabled: boolean;
         source: "unavailable" | "killed" | "lock" | "override" | "everyone";
         everyone: boolean;
@@ -1305,6 +1316,7 @@ export type AdminOverviewResponse = {
       workbot: boolean;
       workbotSharing: boolean;
       workbotTeamLinks: boolean;
+      workbotLunaDefault: boolean;
       workbotDocuments: boolean;
       workbotWorkspaceAssistant: boolean;
       automationCalendar: boolean;
@@ -1516,6 +1528,15 @@ export type AdminOverviewResponse = {
         overrideApplies: boolean;
       };
       workbotTeamLinks: {
+        enabled: boolean;
+        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
+        everyone: boolean;
+        killed: boolean;
+        lock: boolean | null;
+        override: boolean | null;
+        overrideApplies: boolean;
+      };
+      workbotLunaDefault: {
         enabled: boolean;
         source: "unavailable" | "killed" | "lock" | "override" | "everyone";
         everyone: boolean;
@@ -6782,6 +6803,29 @@ export type WebOriginNotFoundError = {
 
 export type RemoveWebOriginNotFound = WebOriginNotFoundError | WebOriginOrganizationNotFoundError;
 
+export type WorkbotModelTest =
+  | {
+      status: "answered";
+      errorCode: null;
+      requestedModel: string;
+      reportedModel: string | null;
+    }
+  | {
+      status: "failed";
+      errorCode:
+        | "model_unavailable"
+        | "runner_unavailable"
+        | "credentials_unavailable"
+        | "authentication_failed"
+        | "payment_required"
+        | "provider_unavailable"
+        | "timed_out"
+        | "invalid_response"
+        | "busy";
+      requestedModel: string;
+      reportedModel: null;
+    };
+
 export type WorkbotSettings = {
   model: string | null;
   defaultModel: string | null;
@@ -6791,6 +6835,7 @@ export type WorkbotSettings = {
   }>;
   modelAvailable: boolean;
   runnerReachable: boolean;
+  defaultReadiness?: "available" | "unavailable" | "unverified";
 };
 
 export type WorkbotUnknownModelError = {
@@ -6881,6 +6926,7 @@ export type WorkbotSession = {
   };
   sideChats: boolean;
   model?: string | null;
+  verifyModel?: boolean;
 };
 
 export type WorkbotRunToken = {
@@ -7858,6 +7904,7 @@ export type GetV1AdminOrganizationsByOrganizationIdCapabilitiesResponses = {
       workbot: boolean;
       workbotSharing: boolean;
       workbotTeamLinks: boolean;
+      workbotLunaDefault: boolean;
       workbotDocuments: boolean;
       workbotWorkspaceAssistant: boolean;
       automationCalendar: boolean;
@@ -8069,6 +8116,15 @@ export type GetV1AdminOrganizationsByOrganizationIdCapabilitiesResponses = {
         overrideApplies: boolean;
       };
       workbotTeamLinks: {
+        enabled: boolean;
+        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
+        everyone: boolean;
+        killed: boolean;
+        lock: boolean | null;
+        override: boolean | null;
+        overrideApplies: boolean;
+      };
+      workbotLunaDefault: {
         enabled: boolean;
         source: "unavailable" | "killed" | "lock" | "override" | "everyone";
         everyone: boolean;
@@ -8320,6 +8376,7 @@ export type PutV1AdminOrganizationsByOrganizationIdCapabilitiesResponses = {
       workbot: boolean;
       workbotSharing: boolean;
       workbotTeamLinks: boolean;
+      workbotLunaDefault: boolean;
       workbotDocuments: boolean;
       workbotWorkspaceAssistant: boolean;
       automationCalendar: boolean;
@@ -8531,6 +8588,15 @@ export type PutV1AdminOrganizationsByOrganizationIdCapabilitiesResponses = {
         overrideApplies: boolean;
       };
       workbotTeamLinks: {
+        enabled: boolean;
+        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
+        everyone: boolean;
+        killed: boolean;
+        lock: boolean | null;
+        override: boolean | null;
+        overrideApplies: boolean;
+      };
+      workbotLunaDefault: {
         enabled: boolean;
         source: "unavailable" | "killed" | "lock" | "override" | "everyone";
         everyone: boolean;
@@ -34057,6 +34123,57 @@ export type DeleteV1OrgWebOriginsByWebOriginIdResponses = {
 export type DeleteV1OrgWebOriginsByWebOriginIdResponse =
   DeleteV1OrgWebOriginsByWebOriginIdResponses[keyof DeleteV1OrgWebOriginsByWebOriginIdResponses];
 
+export type PostV1OrgWorkbotSettingsTestDefaultModelData = {
+  body: {
+    [key: string]: never;
+  };
+  path?: never;
+  query?: never;
+  url: "/v1/org/workbot-settings/test-default-model";
+};
+
+export type PostV1OrgWorkbotSettingsTestDefaultModelErrors = {
+  /**
+   * Only an empty request body is accepted.
+   */
+  400: InvalidRequestError;
+  /**
+   * Authentication required.
+   */
+  401: UnauthorizedError;
+  /**
+   * A genuine recent user sign-in and Manage OpenWork Models are required.
+   */
+  403: ForbiddenError;
+  /**
+   * The organization was not found, or Workbot is off.
+   */
+  404: {
+    error: "feature_disabled";
+    feature: string;
+  };
+  /**
+   * The durable diagnostic request limit was reached.
+   */
+  429: {
+    error: "rate_limited";
+    retryAfterSeconds: number;
+  };
+};
+
+export type PostV1OrgWorkbotSettingsTestDefaultModelError =
+  PostV1OrgWorkbotSettingsTestDefaultModelErrors[keyof PostV1OrgWorkbotSettingsTestDefaultModelErrors];
+
+export type PostV1OrgWorkbotSettingsTestDefaultModelResponses = {
+  /**
+   * Synthetic completion result; catalog availability alone never means answered.
+   */
+  200: WorkbotModelTest;
+};
+
+export type PostV1OrgWorkbotSettingsTestDefaultModelResponse =
+  PostV1OrgWorkbotSettingsTestDefaultModelResponses[keyof PostV1OrgWorkbotSettingsTestDefaultModelResponses];
+
 export type GetV1OrgWorkbotSettingsData = {
   body?: never;
   path?: never;
@@ -34070,7 +34187,7 @@ export type GetV1OrgWorkbotSettingsErrors = {
    */
   401: UnauthorizedError;
   /**
-   * The caller lacks the View OpenWork Models settings permission.
+   * The caller lacks both View OpenWork Models settings and Manage OpenWork Models.
    */
   403: ForbiddenError;
   /**
