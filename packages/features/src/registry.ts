@@ -186,6 +186,13 @@ export const FEATURES = defineFeatures({
     deployments: everywhere,
     default: false,
   },
+  workbotSharing: {
+    label: "Workbot: share with coworkers",
+    description: "Members can copy a Workbot link for coworkers; team access still requires an invitation.",
+    since: "2026-10",
+    deployments: everywhere,
+    default: false,
+  },
   workbotDocuments: {
     label: "Workbot Documents",
     description: "Members browse recent Google Drive files and folders in Workbot, open documents in tabs, and save supported text and spreadsheet edits to Drive.",

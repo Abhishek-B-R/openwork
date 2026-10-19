@@ -47,6 +47,8 @@ const sessionSchema = z.object({
   /** Connected document browsing; off on older Dens. */
   documents: z.boolean().optional(),
   workspaceAssistant: z.boolean().optional(),
+  /** Sharing a URL never grants membership; invitations still require Den's recent sign-in. */
+  shareWorkbot: z.object({ enabled: z.boolean() }).optional(),
   /** The person can start side chats next to their main chat (while Workbot is on). */
   sideChats: z.boolean(),
   /**
@@ -275,6 +277,7 @@ export function registerWorkbotRoutes<T extends { Variables: object }>(app: Hono
         calendar: features.workbot,
         documents: features.workbot && features.workbotDocuments,
         workspaceAssistant: features.workbot && features.workbotWorkspaceAssistant,
+        shareWorkbot: features.workbot ? { enabled: features.workbotSharing } : undefined,
         sideChats: features.workbot,
         model,
       })
