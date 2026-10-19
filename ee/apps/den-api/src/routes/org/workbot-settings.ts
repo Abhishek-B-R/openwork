@@ -13,7 +13,7 @@ import {
   readOrganizationDefaultModel,
   workbotSettingsView,
 } from "../../workbot/model.js"
-import type { OrgRouteVariables } from "./shared.js"
+import { memberPermissionsForRequest, type OrgRouteVariables } from "./shared.js"
 
 const workbotSettingsDocumentSchema = workbotSettingsSchema.meta({ ref: "WorkbotSettings" })
 const workbotSettingsInputDocumentSchema = workbotSettingsInputSchema.meta({ ref: "WorkbotSettingsInput" })
@@ -28,6 +28,11 @@ export const RUNNER_UNAVAILABLE_MESSAGE = "Workbot's models can't be checked rig
 
 const notFound = jsonResponse("The organization was not found, or Workbot is off.", featureDisabledSchema)
 
+const requireWorkbotSettingsRead: ReturnType<typeof requireOrgPermission> = async (c, next) => {
+  if ((await memberPermissionsForRequest(c))?.has("inference.manage")) return next()
+  return requireOrgPermission("inference.view")(c, next)
+}
+
 /**
  * Manage › Workbot: the organization's default model for its cloud agents (Workbot, the Slack assistant, and cloud
  * Automations set to the cloud default). Admins choose it from the models the headless runner serves.
@@ -39,7 +44,7 @@ export function registerOrgWorkbotSettingsRoutes<T extends { Variables: OrgRoute
       tags: ["Organizations"],
       summary: "Get Workbot settings",
       description:
-        "Returns the organization's default model for Workbot, the Slack assistant and cloud Automations set to the cloud default (null means the headless runner's default), and the models the runner can serve. Requires the View OpenWork Models settings permission and Workbot.",
+        "Returns the organization's default model for Workbot, the Slack assistant and cloud Automations set to the cloud default (null means the headless runner's default), and the models the runner can serve. Requires View OpenWork Models settings or Manage OpenWork Models, and Workbot.",
       responses: {
         200: jsonResponse("Workbot settings returned.", workbotSettingsDocumentSchema),
         401: jsonResponse("Authentication required.", unauthorizedSchema),
@@ -49,7 +54,7 @@ export function registerOrgWorkbotSettingsRoutes<T extends { Variables: OrgRoute
     }),
     orgMemberRoute(),
     requireFeature("workbot"),
-    requireOrgPermission("inference.view"),
+    requireWorkbotSettingsRead,
     async (c) => {
       c.header("Cache-Control", "no-store")
       const organizationId = c.get("organizationContext").organization.id
