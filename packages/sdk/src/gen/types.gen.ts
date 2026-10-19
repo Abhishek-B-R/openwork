@@ -733,48 +733,23 @@ export type AdminDashboard = {
 export type AdminFeature = {
   key:
     | "cloudAgentGateway"
-    | "modelRemovalRecovery"
-    | "lastTurnModelFooter"
     | "liveProviderSync"
-    | "googleDocumentTools"
     | "offlineRecovery"
-    | "rememberLastOrganization"
     | "secureSecretFields"
-    | "memberListToolbars"
-    | "appBuildProgress"
     | "modelsAnalyticsUi"
     | "taskAnalyticsUi"
-    | "desktopPolicyScreenRemoval"
-    | "teamMembershipCache"
-    | "managedDeploymentsGcp"
-    | "managedDeploymentsMcp"
     | "managedDeployments"
     | "slackAssistant"
-    | "slackWorkbotReplies"
-    | "workbot"
     | "workbotTeamLinks"
-    | "workbotLunaDefault"
     | "workbotFirstRun"
     | "workbotInlineConnect"
     | "workbotDocuments"
     | "workbotWorkspaceAssistant"
     | "workbotGuidedNavigation"
     | "automationCalendar"
-    | "permissions"
-    | "teamRoles"
-    | "sharedRoles"
-    | "agentPermissions"
     | "engineV2ForceUpgrade"
     | "engineV2Upgrade"
     | "remoteSessionEvents"
-    | "backgroundShellTasks"
-    | "orgDefaultModel"
-    | "gatewayProviderUsageLimits"
-    | "teamAccessRows"
-    | "teamPageTabs"
-    | "inviteLinkVerifiesEmail"
-    | "nativeCloudSkills"
-    | "mcpSkillsExtension"
     | "remoteSessionSubagents"
     | "headlessDurableTurns";
   label: string;
@@ -816,48 +791,23 @@ export type AdminOrganizationsPageResponse = {
   organizations: Array<{
     capabilities?: {
       cloudAgentGateway: boolean;
-      modelRemovalRecovery: boolean;
-      lastTurnModelFooter: boolean;
       liveProviderSync: boolean;
-      googleDocumentTools: boolean;
       offlineRecovery: boolean;
-      rememberLastOrganization: boolean;
       secureSecretFields: boolean;
-      memberListToolbars: boolean;
-      appBuildProgress: boolean;
       modelsAnalyticsUi: boolean;
       taskAnalyticsUi: boolean;
-      desktopPolicyScreenRemoval: boolean;
-      teamMembershipCache: boolean;
-      managedDeploymentsGcp: boolean;
-      managedDeploymentsMcp: boolean;
       managedDeployments: boolean;
       slackAssistant: boolean;
-      slackWorkbotReplies: boolean;
-      workbot: boolean;
       workbotTeamLinks: boolean;
-      workbotLunaDefault: boolean;
       workbotFirstRun: boolean;
       workbotInlineConnect: boolean;
       workbotDocuments: boolean;
       workbotWorkspaceAssistant: boolean;
       workbotGuidedNavigation: boolean;
       automationCalendar: boolean;
-      permissions: boolean;
-      teamRoles: boolean;
-      sharedRoles: boolean;
-      agentPermissions: boolean;
       engineV2ForceUpgrade: boolean;
       engineV2Upgrade: boolean;
       remoteSessionEvents: boolean;
-      backgroundShellTasks: boolean;
-      orgDefaultModel: boolean;
-      gatewayProviderUsageLimits: boolean;
-      teamAccessRows: boolean;
-      teamPageTabs: boolean;
-      inviteLinkVerifiesEmail: boolean;
-      nativeCloudSkills: boolean;
-      mcpSkillsExtension: boolean;
       remoteSessionSubagents: boolean;
       headlessDurableTurns: boolean;
       /**
@@ -880,34 +830,7 @@ export type AdminOrganizationsPageResponse = {
         override: boolean | null;
         overrideApplies: boolean;
       };
-      modelRemovalRecovery: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      lastTurnModelFooter: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
       liveProviderSync: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      googleDocumentTools: {
         enabled: boolean;
         source: "unavailable" | "killed" | "lock" | "override" | "everyone";
         everyone: boolean;
@@ -925,34 +848,7 @@ export type AdminOrganizationsPageResponse = {
         override: boolean | null;
         overrideApplies: boolean;
       };
-      rememberLastOrganization: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
       secureSecretFields: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      memberListToolbars: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      appBuildProgress: {
         enabled: boolean;
         source: "unavailable" | "killed" | "lock" | "override" | "everyone";
         everyone: boolean;
@@ -979,42 +875,6 @@ export type AdminOrganizationsPageResponse = {
         override: boolean | null;
         overrideApplies: boolean;
       };
-      desktopPolicyScreenRemoval: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      teamMembershipCache: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      managedDeploymentsGcp: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      managedDeploymentsMcp: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
       managedDeployments: {
         enabled: boolean;
         source: "unavailable" | "killed" | "lock" | "override" | "everyone";
@@ -1033,34 +893,7 @@ export type AdminOrganizationsPageResponse = {
         override: boolean | null;
         overrideApplies: boolean;
       };
-      slackWorkbotReplies: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      workbot: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
       workbotTeamLinks: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      workbotLunaDefault: {
         enabled: boolean;
         source: "unavailable" | "killed" | "lock" | "override" | "everyone";
         everyone: boolean;
@@ -1123,42 +956,6 @@ export type AdminOrganizationsPageResponse = {
         override: boolean | null;
         overrideApplies: boolean;
       };
-      permissions: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      teamRoles: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      sharedRoles: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      agentPermissions: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
       engineV2ForceUpgrade: {
         enabled: boolean;
         source: "unavailable" | "killed" | "lock" | "override" | "everyone";
@@ -1178,78 +975,6 @@ export type AdminOrganizationsPageResponse = {
         overrideApplies: boolean;
       };
       remoteSessionEvents: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      backgroundShellTasks: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      orgDefaultModel: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      gatewayProviderUsageLimits: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      teamAccessRows: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      teamPageTabs: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      inviteLinkVerifiesEmail: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      nativeCloudSkills: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      mcpSkillsExtension: {
         enabled: boolean;
         source: "unavailable" | "killed" | "lock" | "override" | "everyone";
         everyone: boolean;
@@ -1340,48 +1065,23 @@ export type AdminOverviewResponse = {
   organizations: Array<{
     capabilities: {
       cloudAgentGateway: boolean;
-      modelRemovalRecovery: boolean;
-      lastTurnModelFooter: boolean;
       liveProviderSync: boolean;
-      googleDocumentTools: boolean;
       offlineRecovery: boolean;
-      rememberLastOrganization: boolean;
       secureSecretFields: boolean;
-      memberListToolbars: boolean;
-      appBuildProgress: boolean;
       modelsAnalyticsUi: boolean;
       taskAnalyticsUi: boolean;
-      desktopPolicyScreenRemoval: boolean;
-      teamMembershipCache: boolean;
-      managedDeploymentsGcp: boolean;
-      managedDeploymentsMcp: boolean;
       managedDeployments: boolean;
       slackAssistant: boolean;
-      slackWorkbotReplies: boolean;
-      workbot: boolean;
       workbotTeamLinks: boolean;
-      workbotLunaDefault: boolean;
       workbotFirstRun: boolean;
       workbotInlineConnect: boolean;
       workbotDocuments: boolean;
       workbotWorkspaceAssistant: boolean;
       workbotGuidedNavigation: boolean;
       automationCalendar: boolean;
-      permissions: boolean;
-      teamRoles: boolean;
-      sharedRoles: boolean;
-      agentPermissions: boolean;
       engineV2ForceUpgrade: boolean;
       engineV2Upgrade: boolean;
       remoteSessionEvents: boolean;
-      backgroundShellTasks: boolean;
-      orgDefaultModel: boolean;
-      gatewayProviderUsageLimits: boolean;
-      teamAccessRows: boolean;
-      teamPageTabs: boolean;
-      inviteLinkVerifiesEmail: boolean;
-      nativeCloudSkills: boolean;
-      mcpSkillsExtension: boolean;
       remoteSessionSubagents: boolean;
       headlessDurableTurns: boolean;
       /**
@@ -1404,34 +1104,7 @@ export type AdminOverviewResponse = {
         override: boolean | null;
         overrideApplies: boolean;
       };
-      modelRemovalRecovery: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      lastTurnModelFooter: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
       liveProviderSync: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      googleDocumentTools: {
         enabled: boolean;
         source: "unavailable" | "killed" | "lock" | "override" | "everyone";
         everyone: boolean;
@@ -1449,34 +1122,7 @@ export type AdminOverviewResponse = {
         override: boolean | null;
         overrideApplies: boolean;
       };
-      rememberLastOrganization: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
       secureSecretFields: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      memberListToolbars: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      appBuildProgress: {
         enabled: boolean;
         source: "unavailable" | "killed" | "lock" | "override" | "everyone";
         everyone: boolean;
@@ -1503,42 +1149,6 @@ export type AdminOverviewResponse = {
         override: boolean | null;
         overrideApplies: boolean;
       };
-      desktopPolicyScreenRemoval: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      teamMembershipCache: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      managedDeploymentsGcp: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      managedDeploymentsMcp: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
       managedDeployments: {
         enabled: boolean;
         source: "unavailable" | "killed" | "lock" | "override" | "everyone";
@@ -1557,34 +1167,7 @@ export type AdminOverviewResponse = {
         override: boolean | null;
         overrideApplies: boolean;
       };
-      slackWorkbotReplies: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      workbot: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
       workbotTeamLinks: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      workbotLunaDefault: {
         enabled: boolean;
         source: "unavailable" | "killed" | "lock" | "override" | "everyone";
         everyone: boolean;
@@ -1647,42 +1230,6 @@ export type AdminOverviewResponse = {
         override: boolean | null;
         overrideApplies: boolean;
       };
-      permissions: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      teamRoles: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      sharedRoles: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      agentPermissions: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
       engineV2ForceUpgrade: {
         enabled: boolean;
         source: "unavailable" | "killed" | "lock" | "override" | "everyone";
@@ -1702,78 +1249,6 @@ export type AdminOverviewResponse = {
         overrideApplies: boolean;
       };
       remoteSessionEvents: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      backgroundShellTasks: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      orgDefaultModel: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      gatewayProviderUsageLimits: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      teamAccessRows: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      teamPageTabs: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      inviteLinkVerifiesEmail: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      nativeCloudSkills: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      mcpSkillsExtension: {
         enabled: boolean;
         source: "unavailable" | "killed" | "lock" | "override" | "everyone";
         everyone: boolean;
@@ -7991,48 +7466,23 @@ export type GetV1AdminOrganizationsByOrganizationIdCapabilitiesResponses = {
   200: {
     capabilities: {
       cloudAgentGateway: boolean;
-      modelRemovalRecovery: boolean;
-      lastTurnModelFooter: boolean;
       liveProviderSync: boolean;
-      googleDocumentTools: boolean;
       offlineRecovery: boolean;
-      rememberLastOrganization: boolean;
       secureSecretFields: boolean;
-      memberListToolbars: boolean;
-      appBuildProgress: boolean;
       modelsAnalyticsUi: boolean;
       taskAnalyticsUi: boolean;
-      desktopPolicyScreenRemoval: boolean;
-      teamMembershipCache: boolean;
-      managedDeploymentsGcp: boolean;
-      managedDeploymentsMcp: boolean;
       managedDeployments: boolean;
       slackAssistant: boolean;
-      slackWorkbotReplies: boolean;
-      workbot: boolean;
       workbotTeamLinks: boolean;
-      workbotLunaDefault: boolean;
       workbotFirstRun: boolean;
       workbotInlineConnect: boolean;
       workbotDocuments: boolean;
       workbotWorkspaceAssistant: boolean;
       workbotGuidedNavigation: boolean;
       automationCalendar: boolean;
-      permissions: boolean;
-      teamRoles: boolean;
-      sharedRoles: boolean;
-      agentPermissions: boolean;
       engineV2ForceUpgrade: boolean;
       engineV2Upgrade: boolean;
       remoteSessionEvents: boolean;
-      backgroundShellTasks: boolean;
-      orgDefaultModel: boolean;
-      gatewayProviderUsageLimits: boolean;
-      teamAccessRows: boolean;
-      teamPageTabs: boolean;
-      inviteLinkVerifiesEmail: boolean;
-      nativeCloudSkills: boolean;
-      mcpSkillsExtension: boolean;
       remoteSessionSubagents: boolean;
       headlessDurableTurns: boolean;
       /**
@@ -8055,34 +7505,7 @@ export type GetV1AdminOrganizationsByOrganizationIdCapabilitiesResponses = {
         override: boolean | null;
         overrideApplies: boolean;
       };
-      modelRemovalRecovery: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      lastTurnModelFooter: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
       liveProviderSync: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      googleDocumentTools: {
         enabled: boolean;
         source: "unavailable" | "killed" | "lock" | "override" | "everyone";
         everyone: boolean;
@@ -8100,34 +7523,7 @@ export type GetV1AdminOrganizationsByOrganizationIdCapabilitiesResponses = {
         override: boolean | null;
         overrideApplies: boolean;
       };
-      rememberLastOrganization: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
       secureSecretFields: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      memberListToolbars: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      appBuildProgress: {
         enabled: boolean;
         source: "unavailable" | "killed" | "lock" | "override" | "everyone";
         everyone: boolean;
@@ -8154,42 +7550,6 @@ export type GetV1AdminOrganizationsByOrganizationIdCapabilitiesResponses = {
         override: boolean | null;
         overrideApplies: boolean;
       };
-      desktopPolicyScreenRemoval: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      teamMembershipCache: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      managedDeploymentsGcp: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      managedDeploymentsMcp: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
       managedDeployments: {
         enabled: boolean;
         source: "unavailable" | "killed" | "lock" | "override" | "everyone";
@@ -8208,34 +7568,7 @@ export type GetV1AdminOrganizationsByOrganizationIdCapabilitiesResponses = {
         override: boolean | null;
         overrideApplies: boolean;
       };
-      slackWorkbotReplies: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      workbot: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
       workbotTeamLinks: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      workbotLunaDefault: {
         enabled: boolean;
         source: "unavailable" | "killed" | "lock" | "override" | "everyone";
         everyone: boolean;
@@ -8298,42 +7631,6 @@ export type GetV1AdminOrganizationsByOrganizationIdCapabilitiesResponses = {
         override: boolean | null;
         overrideApplies: boolean;
       };
-      permissions: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      teamRoles: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      sharedRoles: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      agentPermissions: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
       engineV2ForceUpgrade: {
         enabled: boolean;
         source: "unavailable" | "killed" | "lock" | "override" | "everyone";
@@ -8353,78 +7650,6 @@ export type GetV1AdminOrganizationsByOrganizationIdCapabilitiesResponses = {
         overrideApplies: boolean;
       };
       remoteSessionEvents: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      backgroundShellTasks: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      orgDefaultModel: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      gatewayProviderUsageLimits: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      teamAccessRows: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      teamPageTabs: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      inviteLinkVerifiesEmail: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      nativeCloudSkills: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      mcpSkillsExtension: {
         enabled: boolean;
         source: "unavailable" | "killed" | "lock" | "override" | "everyone";
         everyone: boolean;
@@ -8503,48 +7728,23 @@ export type PutV1AdminOrganizationsByOrganizationIdCapabilitiesResponses = {
     };
     capabilities: {
       cloudAgentGateway: boolean;
-      modelRemovalRecovery: boolean;
-      lastTurnModelFooter: boolean;
       liveProviderSync: boolean;
-      googleDocumentTools: boolean;
       offlineRecovery: boolean;
-      rememberLastOrganization: boolean;
       secureSecretFields: boolean;
-      memberListToolbars: boolean;
-      appBuildProgress: boolean;
       modelsAnalyticsUi: boolean;
       taskAnalyticsUi: boolean;
-      desktopPolicyScreenRemoval: boolean;
-      teamMembershipCache: boolean;
-      managedDeploymentsGcp: boolean;
-      managedDeploymentsMcp: boolean;
       managedDeployments: boolean;
       slackAssistant: boolean;
-      slackWorkbotReplies: boolean;
-      workbot: boolean;
       workbotTeamLinks: boolean;
-      workbotLunaDefault: boolean;
       workbotFirstRun: boolean;
       workbotInlineConnect: boolean;
       workbotDocuments: boolean;
       workbotWorkspaceAssistant: boolean;
       workbotGuidedNavigation: boolean;
       automationCalendar: boolean;
-      permissions: boolean;
-      teamRoles: boolean;
-      sharedRoles: boolean;
-      agentPermissions: boolean;
       engineV2ForceUpgrade: boolean;
       engineV2Upgrade: boolean;
       remoteSessionEvents: boolean;
-      backgroundShellTasks: boolean;
-      orgDefaultModel: boolean;
-      gatewayProviderUsageLimits: boolean;
-      teamAccessRows: boolean;
-      teamPageTabs: boolean;
-      inviteLinkVerifiesEmail: boolean;
-      nativeCloudSkills: boolean;
-      mcpSkillsExtension: boolean;
       remoteSessionSubagents: boolean;
       headlessDurableTurns: boolean;
       /**
@@ -8567,34 +7767,7 @@ export type PutV1AdminOrganizationsByOrganizationIdCapabilitiesResponses = {
         override: boolean | null;
         overrideApplies: boolean;
       };
-      modelRemovalRecovery: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      lastTurnModelFooter: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
       liveProviderSync: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      googleDocumentTools: {
         enabled: boolean;
         source: "unavailable" | "killed" | "lock" | "override" | "everyone";
         everyone: boolean;
@@ -8612,34 +7785,7 @@ export type PutV1AdminOrganizationsByOrganizationIdCapabilitiesResponses = {
         override: boolean | null;
         overrideApplies: boolean;
       };
-      rememberLastOrganization: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
       secureSecretFields: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      memberListToolbars: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      appBuildProgress: {
         enabled: boolean;
         source: "unavailable" | "killed" | "lock" | "override" | "everyone";
         everyone: boolean;
@@ -8666,42 +7812,6 @@ export type PutV1AdminOrganizationsByOrganizationIdCapabilitiesResponses = {
         override: boolean | null;
         overrideApplies: boolean;
       };
-      desktopPolicyScreenRemoval: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      teamMembershipCache: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      managedDeploymentsGcp: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      managedDeploymentsMcp: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
       managedDeployments: {
         enabled: boolean;
         source: "unavailable" | "killed" | "lock" | "override" | "everyone";
@@ -8720,34 +7830,7 @@ export type PutV1AdminOrganizationsByOrganizationIdCapabilitiesResponses = {
         override: boolean | null;
         overrideApplies: boolean;
       };
-      slackWorkbotReplies: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      workbot: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
       workbotTeamLinks: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      workbotLunaDefault: {
         enabled: boolean;
         source: "unavailable" | "killed" | "lock" | "override" | "everyone";
         everyone: boolean;
@@ -8810,42 +7893,6 @@ export type PutV1AdminOrganizationsByOrganizationIdCapabilitiesResponses = {
         override: boolean | null;
         overrideApplies: boolean;
       };
-      permissions: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      teamRoles: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      sharedRoles: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      agentPermissions: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
       engineV2ForceUpgrade: {
         enabled: boolean;
         source: "unavailable" | "killed" | "lock" | "override" | "everyone";
@@ -8865,78 +7912,6 @@ export type PutV1AdminOrganizationsByOrganizationIdCapabilitiesResponses = {
         overrideApplies: boolean;
       };
       remoteSessionEvents: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      backgroundShellTasks: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      orgDefaultModel: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      gatewayProviderUsageLimits: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      teamAccessRows: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      teamPageTabs: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      inviteLinkVerifiesEmail: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      nativeCloudSkills: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      mcpSkillsExtension: {
         enabled: boolean;
         source: "unavailable" | "killed" | "lock" | "override" | "everyone";
         everyone: boolean;
