@@ -782,6 +782,7 @@ export type AdminFeature = {
     | "workbotFirstRun"
     | "workbotInlineConnect"
     | "workbotDocuments"
+    | "workbotDocumentEditing"
     | "workbotWorkspaceAssistant"
     | "workbotGuidedNavigation"
     | "automationCalendar"
@@ -844,6 +845,7 @@ export type AdminOrganizationsPageResponse = {
       workbotFirstRun: boolean;
       workbotInlineConnect: boolean;
       workbotDocuments: boolean;
+      workbotDocumentEditing: boolean;
       workbotWorkspaceAssistant: boolean;
       workbotGuidedNavigation: boolean;
       automationCalendar: boolean;
@@ -975,6 +977,15 @@ export type AdminOrganizationsPageResponse = {
         overrideApplies: boolean;
       };
       workbotDocuments: {
+        enabled: boolean;
+        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
+        everyone: boolean;
+        killed: boolean;
+        lock: boolean | null;
+        override: boolean | null;
+        overrideApplies: boolean;
+      };
+      workbotDocumentEditing: {
         enabled: boolean;
         source: "unavailable" | "killed" | "lock" | "override" | "everyone";
         everyone: boolean;
@@ -1158,6 +1169,7 @@ export type AdminOverviewResponse = {
       workbotFirstRun: boolean;
       workbotInlineConnect: boolean;
       workbotDocuments: boolean;
+      workbotDocumentEditing: boolean;
       workbotWorkspaceAssistant: boolean;
       workbotGuidedNavigation: boolean;
       automationCalendar: boolean;
@@ -1289,6 +1301,15 @@ export type AdminOverviewResponse = {
         overrideApplies: boolean;
       };
       workbotDocuments: {
+        enabled: boolean;
+        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
+        everyone: boolean;
+        killed: boolean;
+        lock: boolean | null;
+        override: boolean | null;
+        overrideApplies: boolean;
+      };
+      workbotDocumentEditing: {
         enabled: boolean;
         source: "unavailable" | "killed" | "lock" | "override" | "everyone";
         everyone: boolean;
@@ -6672,6 +6693,7 @@ export type WorkbotSession = {
   canSchedule: boolean;
   calendar?: boolean;
   documents?: boolean;
+  documentEditing?: boolean;
   workspaceAssistant?: boolean;
   guidedNavigation?: boolean;
   teamLinks?: {
@@ -7744,6 +7766,7 @@ export type GetV1AdminOrganizationsByOrganizationIdCapabilitiesResponses = {
       workbotFirstRun: boolean;
       workbotInlineConnect: boolean;
       workbotDocuments: boolean;
+      workbotDocumentEditing: boolean;
       workbotWorkspaceAssistant: boolean;
       workbotGuidedNavigation: boolean;
       automationCalendar: boolean;
@@ -7875,6 +7898,15 @@ export type GetV1AdminOrganizationsByOrganizationIdCapabilitiesResponses = {
         overrideApplies: boolean;
       };
       workbotDocuments: {
+        enabled: boolean;
+        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
+        everyone: boolean;
+        killed: boolean;
+        lock: boolean | null;
+        override: boolean | null;
+        overrideApplies: boolean;
+      };
+      workbotDocumentEditing: {
         enabled: boolean;
         source: "unavailable" | "killed" | "lock" | "override" | "everyone";
         everyone: boolean;
@@ -8046,6 +8078,7 @@ export type PutV1AdminOrganizationsByOrganizationIdCapabilitiesResponses = {
       workbotFirstRun: boolean;
       workbotInlineConnect: boolean;
       workbotDocuments: boolean;
+      workbotDocumentEditing: boolean;
       workbotWorkspaceAssistant: boolean;
       workbotGuidedNavigation: boolean;
       automationCalendar: boolean;
@@ -8177,6 +8210,15 @@ export type PutV1AdminOrganizationsByOrganizationIdCapabilitiesResponses = {
         overrideApplies: boolean;
       };
       workbotDocuments: {
+        enabled: boolean;
+        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
+        everyone: boolean;
+        killed: boolean;
+        lock: boolean | null;
+        override: boolean | null;
+        overrideApplies: boolean;
+      };
+      workbotDocumentEditing: {
         enabled: boolean;
         source: "unavailable" | "killed" | "lock" | "override" | "everyone";
         everyone: boolean;
