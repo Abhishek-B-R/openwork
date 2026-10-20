@@ -807,6 +807,7 @@ export type DeploymentServiceReadiness = {
 
 export type AdminFeature = {
   key:
+    | "organizationGrants"
     | "cloudAgentGateway"
     | "liveProviderSync"
     | "offlineRecovery"
@@ -869,6 +870,7 @@ export type AdminUsersPageResponse = {
 export type AdminOrganizationsPageResponse = {
   organizations: Array<{
     capabilities?: {
+      organizationGrants: boolean;
       cloudAgentGateway: boolean;
       liveProviderSync: boolean;
       offlineRecovery: boolean;
@@ -904,6 +906,15 @@ export type AdminOrganizationsPageResponse = {
      * Per feature for this organization: whether it is on and why (not part of this deployment, kill switch, operator lock, organization override, or the deployment-wide on/off state), and whether an organization override would take effect.
      */
     featureStates?: {
+      organizationGrants: {
+        enabled: boolean;
+        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
+        everyone: boolean;
+        killed: boolean;
+        lock: boolean | null;
+        override: boolean | null;
+        overrideApplies: boolean;
+      };
       cloudAgentGateway: {
         enabled: boolean;
         source: "unavailable" | "killed" | "lock" | "override" | "everyone";
@@ -1183,6 +1194,7 @@ export type AdminOverviewResponse = {
   }>;
   organizations: Array<{
     capabilities: {
+      organizationGrants: boolean;
       cloudAgentGateway: boolean;
       liveProviderSync: boolean;
       offlineRecovery: boolean;
@@ -1218,6 +1230,15 @@ export type AdminOverviewResponse = {
      * Per feature for this organization: whether it is on and why (not part of this deployment, kill switch, operator lock, organization override, or the deployment-wide on/off state), and whether an organization override would take effect.
      */
     featureStates: {
+      organizationGrants: {
+        enabled: boolean;
+        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
+        everyone: boolean;
+        killed: boolean;
+        lock: boolean | null;
+        override: boolean | null;
+        overrideApplies: boolean;
+      };
       cloudAgentGateway: {
         enabled: boolean;
         source: "unavailable" | "killed" | "lock" | "override" | "everyone";
@@ -7361,6 +7382,267 @@ export type GetV1AdminOrganizationsByOrganizationIdInsightsResponses = {
 export type GetV1AdminOrganizationsByOrganizationIdInsightsResponse =
   GetV1AdminOrganizationsByOrganizationIdInsightsResponses[keyof GetV1AdminOrganizationsByOrganizationIdInsightsResponses];
 
+export type GetV1AdminOrganizationsByOrganizationIdControlPanelData = {
+  body?: never;
+  path: {
+    organizationId: string;
+  };
+  query?: {
+    history?: "0" | "1";
+    /**
+     * Opaque cursor returned as nextCursor by the previous page. Omit for the first page.
+     */
+    cursor?: string;
+    /**
+     * Maximum grants per page, from 1 to 100; defaults to 50.
+     */
+    limit?: number;
+  };
+  url: "/v1/admin/organizations/{organizationId}/control-panel";
+};
+
+export type GetV1AdminOrganizationsByOrganizationIdControlPanelErrors = {
+  /**
+   * Invalid organization, grant or request.
+   */
+  400: InvalidRequestError;
+  /**
+   * Sign in required.
+   */
+  401: UnauthorizedError;
+  /**
+   * Platform administrator required.
+   */
+  403: ForbiddenError;
+  /**
+   * Organization, grant or rollout not available.
+   */
+  404: NotFoundError;
+  /**
+   * The request conflicts with an existing grant or paid Web subscription.
+   */
+  409: {
+    error: string;
+    message: string;
+  };
+};
+
+export type GetV1AdminOrganizationsByOrganizationIdControlPanelError =
+  GetV1AdminOrganizationsByOrganizationIdControlPanelErrors[keyof GetV1AdminOrganizationsByOrganizationIdControlPanelErrors];
+
+export type GetV1AdminOrganizationsByOrganizationIdControlPanelResponses = {
+  /**
+   * Organization control panel.
+   */
+  200: {
+    enabled: boolean;
+    generatedAt: string;
+    access: {
+      freeAuto: {
+        setting: "default" | "enabled" | "disabled";
+        enabled: boolean;
+        source: string;
+      };
+      openworkWeb: {
+        setting: "default" | "enabled" | "disabled";
+        enabled: boolean;
+        source: string;
+      };
+    };
+    freeAuto: {
+      weeklyLimitUsd: number;
+      extraRemainingUsd: number;
+      unlimited: boolean;
+    };
+    grants: Array<{
+      id: string;
+      feature: "freeAuto" | "openworkWeb";
+      kind: "access" | "usage" | "unlimited";
+      amountUsd: number | null;
+      usedUsd: number;
+      remainingUsd: number | null;
+      startsAt: string;
+      expiresAt: string | null;
+      createdAt: string;
+      revokedAt: string | null;
+      createdByUserId: string;
+      reason: string;
+      state: "scheduled" | "active" | "expired" | "exhausted" | "revoked" | "blocked";
+    }>;
+    legacyWebAccess: boolean;
+    /**
+     * Pass as cursor to fetch the next grants page; null on the last page.
+     */
+    nextCursor: string | null;
+  };
+};
+
+export type GetV1AdminOrganizationsByOrganizationIdControlPanelResponse =
+  GetV1AdminOrganizationsByOrganizationIdControlPanelResponses[keyof GetV1AdminOrganizationsByOrganizationIdControlPanelResponses];
+
+export type PutV1AdminOrganizationsByOrganizationIdControlPanelAccessData = {
+  body: {
+    feature: "freeAuto" | "openworkWeb";
+    setting: "default" | "enabled" | "disabled";
+  };
+  path: {
+    organizationId: string;
+  };
+  query?: never;
+  url: "/v1/admin/organizations/{organizationId}/control-panel/access";
+};
+
+export type PutV1AdminOrganizationsByOrganizationIdControlPanelAccessErrors = {
+  /**
+   * Invalid organization, grant or request.
+   */
+  400: InvalidRequestError;
+  /**
+   * Sign in required.
+   */
+  401: UnauthorizedError;
+  /**
+   * Platform administrator required.
+   */
+  403: ForbiddenError;
+  /**
+   * Organization, grant or rollout not available.
+   */
+  404: NotFoundError;
+  /**
+   * The request conflicts with an existing grant or paid Web subscription.
+   */
+  409: {
+    error: string;
+    message: string;
+  };
+};
+
+export type PutV1AdminOrganizationsByOrganizationIdControlPanelAccessError =
+  PutV1AdminOrganizationsByOrganizationIdControlPanelAccessErrors[keyof PutV1AdminOrganizationsByOrganizationIdControlPanelAccessErrors];
+
+export type PutV1AdminOrganizationsByOrganizationIdControlPanelAccessResponses = {
+  /**
+   * Access setting saved.
+   */
+  200: {
+    ok: true;
+  };
+};
+
+export type PutV1AdminOrganizationsByOrganizationIdControlPanelAccessResponse =
+  PutV1AdminOrganizationsByOrganizationIdControlPanelAccessResponses[keyof PutV1AdminOrganizationsByOrganizationIdControlPanelAccessResponses];
+
+export type PostV1AdminOrganizationsByOrganizationIdControlPanelGrantsData = {
+  body: {
+    requestId: string;
+    feature: "freeAuto" | "openworkWeb";
+    kind: "access" | "usage" | "unlimited";
+    amountUsd: number | null;
+    startsAt: string | null;
+    expiresAt: string | null;
+    reason: string;
+  };
+  path: {
+    organizationId: string;
+  };
+  query?: never;
+  url: "/v1/admin/organizations/{organizationId}/control-panel/grants";
+};
+
+export type PostV1AdminOrganizationsByOrganizationIdControlPanelGrantsErrors = {
+  /**
+   * Invalid organization, grant or request.
+   */
+  400: InvalidRequestError;
+  /**
+   * Sign in required.
+   */
+  401: UnauthorizedError;
+  /**
+   * Platform administrator required.
+   */
+  403: ForbiddenError;
+  /**
+   * Organization, grant or rollout not available.
+   */
+  404: NotFoundError;
+  /**
+   * The request conflicts with an existing grant or paid Web subscription.
+   */
+  409: {
+    error: string;
+    message: string;
+  };
+};
+
+export type PostV1AdminOrganizationsByOrganizationIdControlPanelGrantsError =
+  PostV1AdminOrganizationsByOrganizationIdControlPanelGrantsErrors[keyof PostV1AdminOrganizationsByOrganizationIdControlPanelGrantsErrors];
+
+export type PostV1AdminOrganizationsByOrganizationIdControlPanelGrantsResponses = {
+  /**
+   * Grant created or original retry returned.
+   */
+  200: {
+    ok: true;
+    grantId: string;
+  };
+};
+
+export type PostV1AdminOrganizationsByOrganizationIdControlPanelGrantsResponse =
+  PostV1AdminOrganizationsByOrganizationIdControlPanelGrantsResponses[keyof PostV1AdminOrganizationsByOrganizationIdControlPanelGrantsResponses];
+
+export type PostV1AdminOrganizationsByOrganizationIdControlPanelGrantsByGrantIdRevokeData = {
+  body?: never;
+  path: {
+    organizationId: string;
+    grantId: string;
+  };
+  query?: never;
+  url: "/v1/admin/organizations/{organizationId}/control-panel/grants/{grantId}/revoke";
+};
+
+export type PostV1AdminOrganizationsByOrganizationIdControlPanelGrantsByGrantIdRevokeErrors = {
+  /**
+   * Invalid organization, grant or request.
+   */
+  400: InvalidRequestError;
+  /**
+   * Sign in required.
+   */
+  401: UnauthorizedError;
+  /**
+   * Platform administrator required.
+   */
+  403: ForbiddenError;
+  /**
+   * Organization, grant or rollout not available.
+   */
+  404: NotFoundError;
+  /**
+   * The request conflicts with an existing grant or paid Web subscription.
+   */
+  409: {
+    error: string;
+    message: string;
+  };
+};
+
+export type PostV1AdminOrganizationsByOrganizationIdControlPanelGrantsByGrantIdRevokeError =
+  PostV1AdminOrganizationsByOrganizationIdControlPanelGrantsByGrantIdRevokeErrors[keyof PostV1AdminOrganizationsByOrganizationIdControlPanelGrantsByGrantIdRevokeErrors];
+
+export type PostV1AdminOrganizationsByOrganizationIdControlPanelGrantsByGrantIdRevokeResponses = {
+  /**
+   * Grant revoked.
+   */
+  200: {
+    ok: true;
+  };
+};
+
+export type PostV1AdminOrganizationsByOrganizationIdControlPanelGrantsByGrantIdRevokeResponse =
+  PostV1AdminOrganizationsByOrganizationIdControlPanelGrantsByGrantIdRevokeResponses[keyof PostV1AdminOrganizationsByOrganizationIdControlPanelGrantsByGrantIdRevokeResponses];
+
 export type GetV1AdminDashboardData = {
   body?: never;
   path?: never;
@@ -8026,6 +8308,7 @@ export type GetV1AdminOrganizationsByOrganizationIdCapabilitiesResponses = {
    */
   200: {
     capabilities: {
+      organizationGrants: boolean;
       cloudAgentGateway: boolean;
       liveProviderSync: boolean;
       offlineRecovery: boolean;
@@ -8061,6 +8344,15 @@ export type GetV1AdminOrganizationsByOrganizationIdCapabilitiesResponses = {
      * Per feature for this organization: whether it is on and why (not part of this deployment, kill switch, operator lock, organization override, or the deployment-wide on/off state), and whether an organization override would take effect.
      */
     featureStates: {
+      organizationGrants: {
+        enabled: boolean;
+        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
+        everyone: boolean;
+        killed: boolean;
+        lock: boolean | null;
+        override: boolean | null;
+        overrideApplies: boolean;
+      };
       cloudAgentGateway: {
         enabled: boolean;
         source: "unavailable" | "killed" | "lock" | "override" | "everyone";
@@ -8328,6 +8620,7 @@ export type PutV1AdminOrganizationsByOrganizationIdCapabilitiesResponses = {
       id: string;
     };
     capabilities: {
+      organizationGrants: boolean;
       cloudAgentGateway: boolean;
       liveProviderSync: boolean;
       offlineRecovery: boolean;
@@ -8363,6 +8656,15 @@ export type PutV1AdminOrganizationsByOrganizationIdCapabilitiesResponses = {
      * Per feature for this organization: whether it is on and why (not part of this deployment, kill switch, operator lock, organization override, or the deployment-wide on/off state), and whether an organization override would take effect.
      */
     featureStates: {
+      organizationGrants: {
+        enabled: boolean;
+        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
+        everyone: boolean;
+        killed: boolean;
+        lock: boolean | null;
+        override: boolean | null;
+        overrideApplies: boolean;
+      };
       cloudAgentGateway: {
         enabled: boolean;
         source: "unavailable" | "killed" | "lock" | "override" | "everyone";

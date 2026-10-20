@@ -214,6 +214,8 @@ import type {
   GetV1AdminOpportunitiesResponses,
   GetV1AdminOrganizationsByOrganizationIdCapabilitiesErrors,
   GetV1AdminOrganizationsByOrganizationIdCapabilitiesResponses,
+  GetV1AdminOrganizationsByOrganizationIdControlPanelErrors,
+  GetV1AdminOrganizationsByOrganizationIdControlPanelResponses,
   GetV1AdminOrganizationsByOrganizationIdErrors,
   GetV1AdminOrganizationsByOrganizationIdInsightsErrors,
   GetV1AdminOrganizationsByOrganizationIdInsightsResponses,
@@ -683,6 +685,10 @@ import type {
   PostRegisterResponses,
   PostV1AdminAdminsErrors,
   PostV1AdminAdminsResponses,
+  PostV1AdminOrganizationsByOrganizationIdControlPanelGrantsByGrantIdRevokeErrors,
+  PostV1AdminOrganizationsByOrganizationIdControlPanelGrantsByGrantIdRevokeResponses,
+  PostV1AdminOrganizationsByOrganizationIdControlPanelGrantsErrors,
+  PostV1AdminOrganizationsByOrganizationIdControlPanelGrantsResponses,
   PostV1AdminServicesCheckErrors,
   PostV1AdminServicesCheckResponses,
   PostV1AdminUsersByUserIdInferenceUsageResetErrors,
@@ -989,6 +995,8 @@ import type {
   PutV1AdminFeaturesByKeyResponses,
   PutV1AdminOrganizationsByOrganizationIdCapabilitiesErrors,
   PutV1AdminOrganizationsByOrganizationIdCapabilitiesResponses,
+  PutV1AdminOrganizationsByOrganizationIdControlPanelAccessErrors,
+  PutV1AdminOrganizationsByOrganizationIdControlPanelAccessResponses,
   PutV1AdminOrganizationsByOrganizationIdOpenworkWebAccessErrors,
   PutV1AdminOrganizationsByOrganizationIdOpenworkWebAccessResponses,
   PutV1AgentPermissionsEveryoneErrors,
@@ -1334,6 +1342,172 @@ export class DenClient extends HeyApiClient {
       ThrowOnError
     >({
       url: "/v1/admin/organizations/{organizationId}/insights",
+      ...options,
+      ...params,
+    });
+  }
+
+  /**
+   * Read an organization's complimentary access and grants
+   *
+   * Returns effective complimentary access, usage balances and a cursor-paginated grants list. Include history to see revoked, expired and exhausted grants. Platform administrators only.
+   */
+  public getV1AdminOrganizationsByOrganizationIdControlPanel<ThrowOnError extends boolean = false>(
+    parameters: {
+      organizationId: string;
+      history?: "0" | "1";
+      cursor?: string;
+      limit?: number;
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "organizationId" },
+            { in: "query", key: "history" },
+            { in: "query", key: "cursor" },
+            { in: "query", key: "limit" },
+          ],
+        },
+      ],
+    );
+    return (options?.client ?? this.client).get<
+      GetV1AdminOrganizationsByOrganizationIdControlPanelResponses,
+      GetV1AdminOrganizationsByOrganizationIdControlPanelErrors,
+      ThrowOnError
+    >({
+      url: "/v1/admin/organizations/{organizationId}/control-panel",
+      ...options,
+      ...params,
+    });
+  }
+
+  /**
+   * Set complimentary organization access
+   *
+   * Sets or restores the organization's complimentary access policy. An explicit disable blocks matching grants without deleting balances or history. Paid subscriptions are preserved. Platform administrators only.
+   */
+  public putV1AdminOrganizationsByOrganizationIdControlPanelAccess<ThrowOnError extends boolean = false>(
+    parameters: {
+      organizationId: string;
+      feature: "freeAuto" | "openworkWeb";
+      setting: "default" | "enabled" | "disabled";
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "organizationId" },
+            { in: "body", key: "feature" },
+            { in: "body", key: "setting" },
+          ],
+        },
+      ],
+    );
+    return (options?.client ?? this.client).put<
+      PutV1AdminOrganizationsByOrganizationIdControlPanelAccessResponses,
+      PutV1AdminOrganizationsByOrganizationIdControlPanelAccessErrors,
+      ThrowOnError
+    >({
+      url: "/v1/admin/organizations/{organizationId}/control-panel/access",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    });
+  }
+
+  /**
+   * Grant organization access or Free Auto usage
+   *
+   * Creates an idempotent organization-scoped grant. A null expiry means until spent or revoked; unlimited usage is a separate grant kind. Does not change billing.
+   */
+  public postV1AdminOrganizationsByOrganizationIdControlPanelGrants<ThrowOnError extends boolean = false>(
+    parameters: {
+      organizationId: string;
+      requestId: string;
+      feature: "freeAuto" | "openworkWeb";
+      kind: "access" | "usage" | "unlimited";
+      amountUsd: number | null;
+      startsAt: string | null;
+      expiresAt: string | null;
+      reason: string;
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "organizationId" },
+            { in: "body", key: "requestId" },
+            { in: "body", key: "feature" },
+            { in: "body", key: "kind" },
+            { in: "body", key: "amountUsd" },
+            { in: "body", key: "startsAt" },
+            { in: "body", key: "expiresAt" },
+            { in: "body", key: "reason" },
+          ],
+        },
+      ],
+    );
+    return (options?.client ?? this.client).post<
+      PostV1AdminOrganizationsByOrganizationIdControlPanelGrantsResponses,
+      PostV1AdminOrganizationsByOrganizationIdControlPanelGrantsErrors,
+      ThrowOnError
+    >({
+      url: "/v1/admin/organizations/{organizationId}/control-panel/grants",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    });
+  }
+
+  /**
+   * Revoke an organization grant without removing its history
+   *
+   * Revokes a grant scoped to this organization and retains its usage and audit history. Repeated revocation succeeds without another change. Platform administrators only.
+   */
+  public postV1AdminOrganizationsByOrganizationIdControlPanelGrantsByGrantIdRevoke<
+    ThrowOnError extends boolean = false,
+  >(
+    parameters: {
+      organizationId: string;
+      grantId: string;
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "organizationId" },
+            { in: "path", key: "grantId" },
+          ],
+        },
+      ],
+    );
+    return (options?.client ?? this.client).post<
+      PostV1AdminOrganizationsByOrganizationIdControlPanelGrantsByGrantIdRevokeResponses,
+      PostV1AdminOrganizationsByOrganizationIdControlPanelGrantsByGrantIdRevokeErrors,
+      ThrowOnError
+    >({
+      url: "/v1/admin/organizations/{organizationId}/control-panel/grants/{grantId}/revoke",
       ...options,
       ...params,
     });

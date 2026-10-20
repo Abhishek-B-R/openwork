@@ -47,6 +47,7 @@ import { registerAdminDashboardRoute } from "./dashboard.js"
 import { registerAdminOpportunitiesRoute } from "./opportunities.js"
 import { registerAdminServiceReadinessRoutes } from "./services.js"
 import { registerAdminOrganizationDetailRoutes } from "./organization-detail.js"
+import { registerAdminOrganizationControlPanelRoutes } from "./organization-control-panel.js"
 import { denTypeIdSchema, forbiddenSchema, invalidRequestSchema, jsonResponse, notFoundSchema, unauthorizedSchema } from "../../openapi.js"
 import { appLogger } from "../../observability/logger.js"
 import {
@@ -1402,6 +1403,7 @@ export function registerAdminRoutes<T extends { Variables: AuthContextVariables 
   registerAdminFreeAutoUsageRoutes(app)
   registerAdminFreeAutoConversionsRoutes(app)
   registerAdminOrganizationDetailRoutes(app)
+  registerAdminOrganizationControlPanelRoutes(app)
   registerAdminDashboardRoute(app)
   registerAdminOpportunitiesRoute(app)
   registerAdminServiceReadinessRoutes(app)
