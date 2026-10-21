@@ -809,7 +809,6 @@ export type AdminFeature = {
   key:
     | "organizationGrants"
     | "liveProviderSync"
-    | "offlineRecovery"
     | "managedDeployments"
     | "workbotDocuments"
     | "workbotDocumentEditing"
@@ -857,7 +856,6 @@ export type AdminOrganizationsPageResponse = {
     capabilities?: {
       organizationGrants: boolean;
       liveProviderSync: boolean;
-      offlineRecovery: boolean;
       managedDeployments: boolean;
       workbotDocuments: boolean;
       workbotDocumentEditing: boolean;
@@ -886,15 +884,6 @@ export type AdminOrganizationsPageResponse = {
         overrideApplies: boolean;
       };
       liveProviderSync: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      offlineRecovery: {
         enabled: boolean;
         source: "unavailable" | "killed" | "lock" | "override" | "everyone";
         everyone: boolean;
@@ -1031,7 +1020,6 @@ export type AdminOverviewResponse = {
     capabilities: {
       organizationGrants: boolean;
       liveProviderSync: boolean;
-      offlineRecovery: boolean;
       managedDeployments: boolean;
       workbotDocuments: boolean;
       workbotDocumentEditing: boolean;
@@ -1060,15 +1048,6 @@ export type AdminOverviewResponse = {
         overrideApplies: boolean;
       };
       liveProviderSync: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      offlineRecovery: {
         enabled: boolean;
         source: "unavailable" | "killed" | "lock" | "override" | "everyone";
         everyone: boolean;
@@ -7988,7 +7967,6 @@ export type GetV1AdminOrganizationsByOrganizationIdCapabilitiesResponses = {
     capabilities: {
       organizationGrants: boolean;
       liveProviderSync: boolean;
-      offlineRecovery: boolean;
       managedDeployments: boolean;
       workbotDocuments: boolean;
       workbotDocumentEditing: boolean;
@@ -8017,15 +7995,6 @@ export type GetV1AdminOrganizationsByOrganizationIdCapabilitiesResponses = {
         overrideApplies: boolean;
       };
       liveProviderSync: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      offlineRecovery: {
         enabled: boolean;
         source: "unavailable" | "killed" | "lock" | "override" | "everyone";
         everyone: boolean;
@@ -8150,7 +8119,6 @@ export type PutV1AdminOrganizationsByOrganizationIdCapabilitiesResponses = {
     capabilities: {
       organizationGrants: boolean;
       liveProviderSync: boolean;
-      offlineRecovery: boolean;
       managedDeployments: boolean;
       workbotDocuments: boolean;
       workbotDocumentEditing: boolean;
@@ -8179,15 +8147,6 @@ export type PutV1AdminOrganizationsByOrganizationIdCapabilitiesResponses = {
         overrideApplies: boolean;
       };
       liveProviderSync: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      offlineRecovery: {
         enabled: boolean;
         source: "unavailable" | "killed" | "lock" | "override" | "everyone";
         everyone: boolean;

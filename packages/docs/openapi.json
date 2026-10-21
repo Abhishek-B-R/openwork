@@ -2806,7 +2806,6 @@
             "enum": [
               "organizationGrants",
               "liveProviderSync",
-              "offlineRecovery",
               "managedDeployments",
               "workbotDocuments",
               "workbotDocumentEditing",
@@ -2994,9 +2993,6 @@
                     "liveProviderSync": {
                       "type": "boolean"
                     },
-                    "offlineRecovery": {
-                      "type": "boolean"
-                    },
                     "managedDeployments": {
                       "type": "boolean"
                     },
@@ -3028,7 +3024,6 @@
                   "required": [
                     "organizationGrants",
                     "liveProviderSync",
-                    "offlineRecovery",
                     "managedDeployments",
                     "workbotDocuments",
                     "workbotDocumentEditing",
@@ -3154,62 +3149,6 @@
                         "overrideApplies"
                       ]
                     },
-                    "offlineRecovery": {
-                      "type": "object",
-                      "properties": {
-                        "enabled": {
-                          "type": "boolean"
-                        },
-                        "source": {
-                          "type": "string",
-                          "enum": [
-                            "unavailable",
-                            "killed",
-                            "lock",
-                            "override",
-                            "everyone"
-                          ]
-                        },
-                        "everyone": {
-                          "type": "boolean"
-                        },
-                        "killed": {
-                          "type": "boolean"
-                        },
-                        "lock": {
-                          "anyOf": [
-                            {
-                              "type": "boolean"
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ]
-                        },
-                        "override": {
-                          "anyOf": [
-                            {
-                              "type": "boolean"
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ]
-                        },
-                        "overrideApplies": {
-                          "type": "boolean"
-                        }
-                      },
-                      "required": [
-                        "enabled",
-                        "source",
-                        "everyone",
-                        "killed",
-                        "lock",
-                        "override",
-                        "overrideApplies"
-                      ]
-                    },
                     "managedDeployments": {
                       "type": "object",
                       "properties": {
@@ -3606,7 +3545,6 @@
                   "required": [
                     "organizationGrants",
                     "liveProviderSync",
-                    "offlineRecovery",
                     "managedDeployments",
                     "workbotDocuments",
                     "workbotDocumentEditing",
@@ -3989,9 +3927,6 @@
                     "liveProviderSync": {
                       "type": "boolean"
                     },
-                    "offlineRecovery": {
-                      "type": "boolean"
-                    },
                     "managedDeployments": {
                       "type": "boolean"
                     },
@@ -4023,7 +3958,6 @@
                   "required": [
                     "organizationGrants",
                     "liveProviderSync",
-                    "offlineRecovery",
                     "managedDeployments",
                     "workbotDocuments",
                     "workbotDocumentEditing",
@@ -4149,62 +4083,6 @@
                         "overrideApplies"
                       ]
                     },
-                    "offlineRecovery": {
-                      "type": "object",
-                      "properties": {
-                        "enabled": {
-                          "type": "boolean"
-                        },
-                        "source": {
-                          "type": "string",
-                          "enum": [
-                            "unavailable",
-                            "killed",
-                            "lock",
-                            "override",
-                            "everyone"
-                          ]
-                        },
-                        "everyone": {
-                          "type": "boolean"
-                        },
-                        "killed": {
-                          "type": "boolean"
-                        },
-                        "lock": {
-                          "anyOf": [
-                            {
-                              "type": "boolean"
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ]
-                        },
-                        "override": {
-                          "anyOf": [
-                            {
-                              "type": "boolean"
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ]
-                        },
-                        "overrideApplies": {
-                          "type": "boolean"
-                        }
-                      },
-                      "required": [
-                        "enabled",
-                        "source",
-                        "everyone",
-                        "killed",
-                        "lock",
-                        "override",
-                        "overrideApplies"
-                      ]
-                    },
                     "managedDeployments": {
                       "type": "object",
                       "properties": {
@@ -4601,7 +4479,6 @@
                   "required": [
                     "organizationGrants",
                     "liveProviderSync",
-                    "offlineRecovery",
                     "managedDeployments",
                     "workbotDocuments",
                     "workbotDocumentEditing",
@@ -31257,9 +31134,6 @@
                         "liveProviderSync": {
                           "type": "boolean"
                         },
-                        "offlineRecovery": {
-                          "type": "boolean"
-                        },
                         "managedDeployments": {
                           "type": "boolean"
                         },
@@ -31291,7 +31165,6 @@
                       "required": [
                         "organizationGrants",
                         "liveProviderSync",
-                        "offlineRecovery",
                         "managedDeployments",
                         "workbotDocuments",
                         "workbotDocumentEditing",
@@ -31417,62 +31290,6 @@
                             "overrideApplies"
                           ]
                         },
-                        "offlineRecovery": {
-                          "type": "object",
-                          "properties": {
-                            "enabled": {
-                              "type": "boolean"
-                            },
-                            "source": {
-                              "type": "string",
-                              "enum": [
-                                "unavailable",
-                                "killed",
-                                "lock",
-                                "override",
-                                "everyone"
-                              ]
-                            },
-                            "everyone": {
-                              "type": "boolean"
-                            },
-                            "killed": {
-                              "type": "boolean"
-                            },
-                            "lock": {
-                              "anyOf": [
-                                {
-                                  "type": "boolean"
-                                },
-                                {
-                                  "type": "null"
-                                }
-                              ]
-                            },
-                            "override": {
-                              "anyOf": [
-                                {
-                                  "type": "boolean"
-                                },
-                                {
-                                  "type": "null"
-                                }
-                              ]
-                            },
-                            "overrideApplies": {
-                              "type": "boolean"
-                            }
-                          },
-                          "required": [
-                            "enabled",
-                            "source",
-                            "everyone",
-                            "killed",
-                            "lock",
-                            "override",
-                            "overrideApplies"
-                          ]
-                        },
                         "managedDeployments": {
                           "type": "object",
                           "properties": {
@@ -31869,7 +31686,6 @@
                       "required": [
                         "organizationGrants",
                         "liveProviderSync",
-                        "offlineRecovery",
                         "managedDeployments",
                         "workbotDocuments",
                         "workbotDocumentEditing",
@@ -32001,9 +31817,6 @@
                         "liveProviderSync": {
                           "type": "boolean"
                         },
-                        "offlineRecovery": {
-                          "type": "boolean"
-                        },
                         "managedDeployments": {
                           "type": "boolean"
                         },
@@ -32035,7 +31848,6 @@
                       "required": [
                         "organizationGrants",
                         "liveProviderSync",
-                        "offlineRecovery",
                         "managedDeployments",
                         "workbotDocuments",
                         "workbotDocumentEditing",
@@ -32161,62 +31973,6 @@
                             "overrideApplies"
                           ]
                         },
-                        "offlineRecovery": {
-                          "type": "object",
-                          "properties": {
-                            "enabled": {
-                              "type": "boolean"
-                            },
-                            "source": {
-                              "type": "string",
-                              "enum": [
-                                "unavailable",
-                                "killed",
-                                "lock",
-                                "override",
-                                "everyone"
-                              ]
-                            },
-                            "everyone": {
-                              "type": "boolean"
-                            },
-                            "killed": {
-                              "type": "boolean"
-                            },
-                            "lock": {
-                              "anyOf": [
-                                {
-                                  "type": "boolean"
-                                },
-                                {
-                                  "type": "null"
-                                }
-                              ]
-                            },
-                            "override": {
-                              "anyOf": [
-                                {
-                                  "type": "boolean"
-                                },
-                                {
-                                  "type": "null"
-                                }
-                              ]
-                            },
-                            "overrideApplies": {
-                              "type": "boolean"
-                            }
-                          },
-                          "required": [
-                            "enabled",
-                            "source",
-                            "everyone",
-                            "killed",
-                            "lock",
-                            "override",
-                            "overrideApplies"
-                          ]
-                        },
                         "managedDeployments": {
                           "type": "object",
                           "properties": {
@@ -32613,7 +32369,6 @@
                       "required": [
                         "organizationGrants",
                         "liveProviderSync",
-                        "offlineRecovery",
                         "managedDeployments",
                         "workbotDocuments",
                         "workbotDocumentEditing",
