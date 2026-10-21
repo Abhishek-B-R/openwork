@@ -815,6 +815,9 @@ export type AdminFeature = {
     | "workbotWorkspaceAssistant"
     | "automationCalendar"
     | "engineV2ForceUpgrade"
+    | "computerUse"
+    | "browserFloatingView"
+    | "remoteComputers"
     | "remoteSessionSubagents";
   label: string;
   description: string;
@@ -862,6 +865,9 @@ export type AdminOrganizationsPageResponse = {
       workbotWorkspaceAssistant: boolean;
       automationCalendar: boolean;
       engineV2ForceUpgrade: boolean;
+      computerUse: boolean;
+      browserFloatingView: boolean;
+      remoteComputers: boolean;
       remoteSessionSubagents: boolean;
       /**
        * Compatibility field, always true. AI Gateway is available to every organization; deployment configuration and authorization still apply.
@@ -938,6 +944,33 @@ export type AdminOrganizationsPageResponse = {
         overrideApplies: boolean;
       };
       engineV2ForceUpgrade: {
+        enabled: boolean;
+        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
+        everyone: boolean;
+        killed: boolean;
+        lock: boolean | null;
+        override: boolean | null;
+        overrideApplies: boolean;
+      };
+      computerUse: {
+        enabled: boolean;
+        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
+        everyone: boolean;
+        killed: boolean;
+        lock: boolean | null;
+        override: boolean | null;
+        overrideApplies: boolean;
+      };
+      browserFloatingView: {
+        enabled: boolean;
+        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
+        everyone: boolean;
+        killed: boolean;
+        lock: boolean | null;
+        override: boolean | null;
+        overrideApplies: boolean;
+      };
+      remoteComputers: {
         enabled: boolean;
         source: "unavailable" | "killed" | "lock" | "override" | "everyone";
         everyone: boolean;
@@ -1026,6 +1059,9 @@ export type AdminOverviewResponse = {
       workbotWorkspaceAssistant: boolean;
       automationCalendar: boolean;
       engineV2ForceUpgrade: boolean;
+      computerUse: boolean;
+      browserFloatingView: boolean;
+      remoteComputers: boolean;
       remoteSessionSubagents: boolean;
       /**
        * Compatibility field, always true. AI Gateway is available to every organization; deployment configuration and authorization still apply.
@@ -1102,6 +1138,33 @@ export type AdminOverviewResponse = {
         overrideApplies: boolean;
       };
       engineV2ForceUpgrade: {
+        enabled: boolean;
+        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
+        everyone: boolean;
+        killed: boolean;
+        lock: boolean | null;
+        override: boolean | null;
+        overrideApplies: boolean;
+      };
+      computerUse: {
+        enabled: boolean;
+        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
+        everyone: boolean;
+        killed: boolean;
+        lock: boolean | null;
+        override: boolean | null;
+        overrideApplies: boolean;
+      };
+      browserFloatingView: {
+        enabled: boolean;
+        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
+        everyone: boolean;
+        killed: boolean;
+        lock: boolean | null;
+        override: boolean | null;
+        overrideApplies: boolean;
+      };
+      remoteComputers: {
         enabled: boolean;
         source: "unavailable" | "killed" | "lock" | "override" | "everyone";
         everyone: boolean;
@@ -6601,6 +6664,7 @@ export type WorkbotSession = {
   memberId: string;
   enabled: boolean;
   canSchedule: boolean;
+  computer?: boolean;
   calendar?: boolean;
   documents?: boolean;
   documentEditing?: boolean;
@@ -7973,6 +8037,9 @@ export type GetV1AdminOrganizationsByOrganizationIdCapabilitiesResponses = {
       workbotWorkspaceAssistant: boolean;
       automationCalendar: boolean;
       engineV2ForceUpgrade: boolean;
+      computerUse: boolean;
+      browserFloatingView: boolean;
+      remoteComputers: boolean;
       remoteSessionSubagents: boolean;
       /**
        * Compatibility field, always true. AI Gateway is available to every organization; deployment configuration and authorization still apply.
@@ -8049,6 +8116,33 @@ export type GetV1AdminOrganizationsByOrganizationIdCapabilitiesResponses = {
         overrideApplies: boolean;
       };
       engineV2ForceUpgrade: {
+        enabled: boolean;
+        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
+        everyone: boolean;
+        killed: boolean;
+        lock: boolean | null;
+        override: boolean | null;
+        overrideApplies: boolean;
+      };
+      computerUse: {
+        enabled: boolean;
+        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
+        everyone: boolean;
+        killed: boolean;
+        lock: boolean | null;
+        override: boolean | null;
+        overrideApplies: boolean;
+      };
+      browserFloatingView: {
+        enabled: boolean;
+        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
+        everyone: boolean;
+        killed: boolean;
+        lock: boolean | null;
+        override: boolean | null;
+        overrideApplies: boolean;
+      };
+      remoteComputers: {
         enabled: boolean;
         source: "unavailable" | "killed" | "lock" | "override" | "everyone";
         everyone: boolean;
@@ -8125,6 +8219,9 @@ export type PutV1AdminOrganizationsByOrganizationIdCapabilitiesResponses = {
       workbotWorkspaceAssistant: boolean;
       automationCalendar: boolean;
       engineV2ForceUpgrade: boolean;
+      computerUse: boolean;
+      browserFloatingView: boolean;
+      remoteComputers: boolean;
       remoteSessionSubagents: boolean;
       /**
        * Compatibility field, always true. AI Gateway is available to every organization; deployment configuration and authorization still apply.
@@ -8201,6 +8298,33 @@ export type PutV1AdminOrganizationsByOrganizationIdCapabilitiesResponses = {
         overrideApplies: boolean;
       };
       engineV2ForceUpgrade: {
+        enabled: boolean;
+        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
+        everyone: boolean;
+        killed: boolean;
+        lock: boolean | null;
+        override: boolean | null;
+        overrideApplies: boolean;
+      };
+      computerUse: {
+        enabled: boolean;
+        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
+        everyone: boolean;
+        killed: boolean;
+        lock: boolean | null;
+        override: boolean | null;
+        overrideApplies: boolean;
+      };
+      browserFloatingView: {
+        enabled: boolean;
+        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
+        everyone: boolean;
+        killed: boolean;
+        lock: boolean | null;
+        override: boolean | null;
+        overrideApplies: boolean;
+      };
+      remoteComputers: {
         enabled: boolean;
         source: "unavailable" | "killed" | "lock" | "override" | "everyone";
         everyone: boolean;

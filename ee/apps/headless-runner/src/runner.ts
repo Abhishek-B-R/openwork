@@ -844,6 +844,7 @@ export class Runner {
       this.options.systemPrompt ?? DEFAULT_SYSTEM_PROMPT,
       files ? FILES_PROMPT : "",
       computer?.prompt ?? "",
+      session?.desktop && computer?.desktopTools?.length ? "Use desktop to work in the visible browser and native applications. The organization enabled this computer: use it directly when needed. If the person takes control, wait for them to return it before continuing desktop operations." : "",
       tools || kind === "report" ? "" : "No OpenWork connection is available in this conversation, so connected apps cannot be reached.",
       session?.instructions ?? "",
       memorySection(memoryFiles),
@@ -853,7 +854,7 @@ export class Runner {
     ]
       .filter(Boolean)
       .join("\n\n")
-    const toolSpecs = kind === "report" ? [] : [...FILE_TOOLS.filter((tool) => !readOnly || READ_ONLY_LOCAL_TOOLS.has(tool.name)), ...(files ? SAVED_FILE_TOOLS.filter((tool) => !readOnly || READ_ONLY_LOCAL_TOOLS.has(tool.name)) : []), ...(computer?.tools ?? []), ...(reactions ? REACTION_TOOLS : []), ...(taskTools ? TASK_TOOLS : []), ...(tools?.tools ?? [])]
+    const toolSpecs = kind === "report" ? [] : [...FILE_TOOLS.filter((tool) => !readOnly || READ_ONLY_LOCAL_TOOLS.has(tool.name)), ...(files ? SAVED_FILE_TOOLS.filter((tool) => !readOnly || READ_ONLY_LOCAL_TOOLS.has(tool.name)) : []), ...(computer?.tools ?? []), ...(session?.desktop ? computer?.desktopTools ?? [] : []), ...(reactions ? REACTION_TOOLS : []), ...(taskTools ? TASK_TOOLS : []), ...(tools?.tools ?? [])]
     return { turn, session, repeatLimits, files, readOnly, computer, reactions, taskTools, memory, baseSystem, toolSpecs }
   }
 
@@ -947,6 +948,8 @@ export class Runner {
           ? runReactionTool(call.input)
         : taskTools && turn && TASK_TOOL_NAMES.has(call.name)
           ? this.runTaskTool(turn, call.name, call.input, context.held)
+        : call.name === "desktop" && store.getSession(sessionId)?.desktop && computer?.desktopRun
+          ? await computer.desktopRun(sessionId, call.input, signal).catch((error: unknown) => ({ output: error instanceof Error ? error.message : "Desktop unavailable", isError: true }))
         : computer?.toolNames.has(call.name)
           ? await computer.run(sessionId, call.name, call.input).catch((error: unknown) => ({
               output: `The computer didn't respond: ${error instanceof Error ? error.message : "unknown error"}. Its outcome is unknown; check before repeating it.`,
