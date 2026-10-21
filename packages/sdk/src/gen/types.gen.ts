@@ -817,6 +817,7 @@ export type AdminFeature = {
     | "automationCalendar"
     | "engineV2ForceUpgrade"
     | "computerUse"
+    | "browserDemonstrations"
     | "browserFloatingView"
     | "remoteComputers"
     | "remoteSessionSubagents";
@@ -868,6 +869,7 @@ export type AdminOrganizationsPageResponse = {
       automationCalendar: boolean;
       engineV2ForceUpgrade: boolean;
       computerUse: boolean;
+      browserDemonstrations: boolean;
       browserFloatingView: boolean;
       remoteComputers: boolean;
       remoteSessionSubagents: boolean;
@@ -964,6 +966,15 @@ export type AdminOrganizationsPageResponse = {
         overrideApplies: boolean;
       };
       computerUse: {
+        enabled: boolean;
+        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
+        everyone: boolean;
+        killed: boolean;
+        lock: boolean | null;
+        override: boolean | null;
+        overrideApplies: boolean;
+      };
+      browserDemonstrations: {
         enabled: boolean;
         source: "unavailable" | "killed" | "lock" | "override" | "everyone";
         everyone: boolean;
@@ -1072,6 +1083,7 @@ export type AdminOverviewResponse = {
       automationCalendar: boolean;
       engineV2ForceUpgrade: boolean;
       computerUse: boolean;
+      browserDemonstrations: boolean;
       browserFloatingView: boolean;
       remoteComputers: boolean;
       remoteSessionSubagents: boolean;
@@ -1168,6 +1180,15 @@ export type AdminOverviewResponse = {
         overrideApplies: boolean;
       };
       computerUse: {
+        enabled: boolean;
+        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
+        everyone: boolean;
+        killed: boolean;
+        lock: boolean | null;
+        override: boolean | null;
+        overrideApplies: boolean;
+      };
+      browserDemonstrations: {
         enabled: boolean;
         source: "unavailable" | "killed" | "lock" | "override" | "everyone";
         everyone: boolean;
@@ -6686,6 +6707,7 @@ export type WorkbotSession = {
   enabled: boolean;
   canSchedule: boolean;
   computer?: boolean;
+  browserDemonstrations?: boolean;
   calendar?: boolean;
   documents?: boolean;
   documentEditing?: boolean;
@@ -8061,6 +8083,7 @@ export type GetV1AdminOrganizationsByOrganizationIdCapabilitiesResponses = {
       automationCalendar: boolean;
       engineV2ForceUpgrade: boolean;
       computerUse: boolean;
+      browserDemonstrations: boolean;
       browserFloatingView: boolean;
       remoteComputers: boolean;
       remoteSessionSubagents: boolean;
@@ -8157,6 +8180,15 @@ export type GetV1AdminOrganizationsByOrganizationIdCapabilitiesResponses = {
         overrideApplies: boolean;
       };
       computerUse: {
+        enabled: boolean;
+        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
+        everyone: boolean;
+        killed: boolean;
+        lock: boolean | null;
+        override: boolean | null;
+        overrideApplies: boolean;
+      };
+      browserDemonstrations: {
         enabled: boolean;
         source: "unavailable" | "killed" | "lock" | "override" | "everyone";
         everyone: boolean;
@@ -8253,6 +8285,7 @@ export type PutV1AdminOrganizationsByOrganizationIdCapabilitiesResponses = {
       automationCalendar: boolean;
       engineV2ForceUpgrade: boolean;
       computerUse: boolean;
+      browserDemonstrations: boolean;
       browserFloatingView: boolean;
       remoteComputers: boolean;
       remoteSessionSubagents: boolean;
@@ -8349,6 +8382,15 @@ export type PutV1AdminOrganizationsByOrganizationIdCapabilitiesResponses = {
         overrideApplies: boolean;
       };
       computerUse: {
+        enabled: boolean;
+        source: "unavailable" | "killed" | "lock" | "override" | "everyone";
+        everyone: boolean;
+        killed: boolean;
+        lock: boolean | null;
+        override: boolean | null;
+        overrideApplies: boolean;
+      };
+      browserDemonstrations: {
         enabled: boolean;
         source: "unavailable" | "killed" | "lock" | "override" | "everyone";
         everyone: boolean;

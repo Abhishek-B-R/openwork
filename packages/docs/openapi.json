@@ -2814,6 +2814,7 @@
               "automationCalendar",
               "engineV2ForceUpgrade",
               "computerUse",
+              "browserDemonstrations",
               "browserFloatingView",
               "remoteComputers",
               "remoteSessionSubagents"
@@ -3021,6 +3022,9 @@
                     "computerUse": {
                       "type": "boolean"
                     },
+                    "browserDemonstrations": {
+                      "type": "boolean"
+                    },
                     "browserFloatingView": {
                       "type": "boolean"
                     },
@@ -3048,6 +3052,7 @@
                     "automationCalendar",
                     "engineV2ForceUpgrade",
                     "computerUse",
+                    "browserDemonstrations",
                     "browserFloatingView",
                     "remoteComputers",
                     "remoteSessionSubagents",
@@ -3617,6 +3622,62 @@
                         "overrideApplies"
                       ]
                     },
+                    "browserDemonstrations": {
+                      "type": "object",
+                      "properties": {
+                        "enabled": {
+                          "type": "boolean"
+                        },
+                        "source": {
+                          "type": "string",
+                          "enum": [
+                            "unavailable",
+                            "killed",
+                            "lock",
+                            "override",
+                            "everyone"
+                          ]
+                        },
+                        "everyone": {
+                          "type": "boolean"
+                        },
+                        "killed": {
+                          "type": "boolean"
+                        },
+                        "lock": {
+                          "anyOf": [
+                            {
+                              "type": "boolean"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "override": {
+                          "anyOf": [
+                            {
+                              "type": "boolean"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "overrideApplies": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "enabled",
+                        "source",
+                        "everyone",
+                        "killed",
+                        "lock",
+                        "override",
+                        "overrideApplies"
+                      ]
+                    },
                     "browserFloatingView": {
                       "type": "object",
                       "properties": {
@@ -3797,6 +3858,7 @@
                     "automationCalendar",
                     "engineV2ForceUpgrade",
                     "computerUse",
+                    "browserDemonstrations",
                     "browserFloatingView",
                     "remoteComputers",
                     "remoteSessionSubagents"
@@ -4199,6 +4261,9 @@
                     "computerUse": {
                       "type": "boolean"
                     },
+                    "browserDemonstrations": {
+                      "type": "boolean"
+                    },
                     "browserFloatingView": {
                       "type": "boolean"
                     },
@@ -4226,6 +4291,7 @@
                     "automationCalendar",
                     "engineV2ForceUpgrade",
                     "computerUse",
+                    "browserDemonstrations",
                     "browserFloatingView",
                     "remoteComputers",
                     "remoteSessionSubagents",
@@ -4795,6 +4861,62 @@
                         "overrideApplies"
                       ]
                     },
+                    "browserDemonstrations": {
+                      "type": "object",
+                      "properties": {
+                        "enabled": {
+                          "type": "boolean"
+                        },
+                        "source": {
+                          "type": "string",
+                          "enum": [
+                            "unavailable",
+                            "killed",
+                            "lock",
+                            "override",
+                            "everyone"
+                          ]
+                        },
+                        "everyone": {
+                          "type": "boolean"
+                        },
+                        "killed": {
+                          "type": "boolean"
+                        },
+                        "lock": {
+                          "anyOf": [
+                            {
+                              "type": "boolean"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "override": {
+                          "anyOf": [
+                            {
+                              "type": "boolean"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "overrideApplies": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "enabled",
+                        "source",
+                        "everyone",
+                        "killed",
+                        "lock",
+                        "override",
+                        "overrideApplies"
+                      ]
+                    },
                     "browserFloatingView": {
                       "type": "object",
                       "properties": {
@@ -4975,6 +5097,7 @@
                     "automationCalendar",
                     "engineV2ForceUpgrade",
                     "computerUse",
+                    "browserDemonstrations",
                     "browserFloatingView",
                     "remoteComputers",
                     "remoteSessionSubagents"
@@ -27931,6 +28054,9 @@
           "computer": {
             "type": "boolean"
           },
+          "browserDemonstrations": {
+            "type": "boolean"
+          },
           "calendar": {
             "type": "boolean"
           },
@@ -31656,6 +31782,9 @@
                         "computerUse": {
                           "type": "boolean"
                         },
+                        "browserDemonstrations": {
+                          "type": "boolean"
+                        },
                         "browserFloatingView": {
                           "type": "boolean"
                         },
@@ -31683,6 +31812,7 @@
                         "automationCalendar",
                         "engineV2ForceUpgrade",
                         "computerUse",
+                        "browserDemonstrations",
                         "browserFloatingView",
                         "remoteComputers",
                         "remoteSessionSubagents",
@@ -32252,6 +32382,62 @@
                             "overrideApplies"
                           ]
                         },
+                        "browserDemonstrations": {
+                          "type": "object",
+                          "properties": {
+                            "enabled": {
+                              "type": "boolean"
+                            },
+                            "source": {
+                              "type": "string",
+                              "enum": [
+                                "unavailable",
+                                "killed",
+                                "lock",
+                                "override",
+                                "everyone"
+                              ]
+                            },
+                            "everyone": {
+                              "type": "boolean"
+                            },
+                            "killed": {
+                              "type": "boolean"
+                            },
+                            "lock": {
+                              "anyOf": [
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "override": {
+                              "anyOf": [
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "overrideApplies": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": [
+                            "enabled",
+                            "source",
+                            "everyone",
+                            "killed",
+                            "lock",
+                            "override",
+                            "overrideApplies"
+                          ]
+                        },
                         "browserFloatingView": {
                           "type": "object",
                           "properties": {
@@ -32432,6 +32618,7 @@
                         "automationCalendar",
                         "engineV2ForceUpgrade",
                         "computerUse",
+                        "browserDemonstrations",
                         "browserFloatingView",
                         "remoteComputers",
                         "remoteSessionSubagents"
@@ -32583,6 +32770,9 @@
                         "computerUse": {
                           "type": "boolean"
                         },
+                        "browserDemonstrations": {
+                          "type": "boolean"
+                        },
                         "browserFloatingView": {
                           "type": "boolean"
                         },
@@ -32610,6 +32800,7 @@
                         "automationCalendar",
                         "engineV2ForceUpgrade",
                         "computerUse",
+                        "browserDemonstrations",
                         "browserFloatingView",
                         "remoteComputers",
                         "remoteSessionSubagents",
@@ -33179,6 +33370,62 @@
                             "overrideApplies"
                           ]
                         },
+                        "browserDemonstrations": {
+                          "type": "object",
+                          "properties": {
+                            "enabled": {
+                              "type": "boolean"
+                            },
+                            "source": {
+                              "type": "string",
+                              "enum": [
+                                "unavailable",
+                                "killed",
+                                "lock",
+                                "override",
+                                "everyone"
+                              ]
+                            },
+                            "everyone": {
+                              "type": "boolean"
+                            },
+                            "killed": {
+                              "type": "boolean"
+                            },
+                            "lock": {
+                              "anyOf": [
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "override": {
+                              "anyOf": [
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "overrideApplies": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": [
+                            "enabled",
+                            "source",
+                            "everyone",
+                            "killed",
+                            "lock",
+                            "override",
+                            "overrideApplies"
+                          ]
+                        },
                         "browserFloatingView": {
                           "type": "object",
                           "properties": {
@@ -33359,6 +33606,7 @@
                         "automationCalendar",
                         "engineV2ForceUpgrade",
                         "computerUse",
+                        "browserDemonstrations",
                         "browserFloatingView",
                         "remoteComputers",
                         "remoteSessionSubagents"

@@ -86,7 +86,7 @@ export function createCloudBrowser({ statePath, assertActive, enabled, beforeInp
       let message;
       try { message = JSON.parse(String(event.data)); } catch { return; }
       if (!message.id) {
-        if (message.method === "Page.frameNavigated") tabChanged();
+        if (["Page.frameNavigated", "Runtime.executionContextsCleared", "Runtime.executionContextDestroyed"].includes(message.method)) tabChanged();
         // Every network resource and redirect hop is checked before it loads.
         if (message.method === "Fetch.requestPaused") void admitRequest(message.params);
         return;
@@ -202,6 +202,7 @@ export function createCloudBrowser({ statePath, assertActive, enabled, beforeInp
     // not just documents. Navigation and observation must wait for enforcement.
     const guarded = Promise.all([
       wire.send("Page.enable", {}, false),
+      wire.send("Runtime.enable", {}, false),
       wire.send("Fetch.enable", { patterns: [{ urlPattern: "*", requestStage: "Request" }] }, false),
     ]);
     void guarded.catch(() => {});

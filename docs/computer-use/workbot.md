@@ -94,6 +94,13 @@ web apps. This slice does not enforce the desktop app's organization website
 rules or a private-network egress policy. Deploy it on an isolated VM network;
 an organization requiring restricted egress needs enforcement at that boundary.
 
+## Teach browser tasks
+
+With `browserDemonstrations` enabled, members can demonstrate a browser task,
+explain it in chat, select fields to collect, and save a private reusable skill.
+See [Teach Workbot browser tasks](browser-demonstrations.md) for the flow,
+recording boundaries, and desktop snapshot requirements.
+
 ## Useful applications
 
 The desktop image includes a practical set of applications on the same display:
