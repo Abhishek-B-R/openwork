@@ -816,6 +816,7 @@ export type AdminFeature = {
     | "workbotDocuments"
     | "workbotDocumentEditing"
     | "workbotWorkspaceAssistant"
+    | "workbotUsageRecovery"
     | "automationCalendar"
     | "engineV2ForceUpgrade"
     | "computerUse"
@@ -870,6 +871,7 @@ export type AdminOrganizationsPageResponse = {
       workbotDocuments: boolean;
       workbotDocumentEditing: boolean;
       workbotWorkspaceAssistant: boolean;
+      workbotUsageRecovery: boolean;
       automationCalendar: boolean;
       engineV2ForceUpgrade: boolean;
       computerUse: boolean;
@@ -961,6 +963,15 @@ export type AdminOrganizationsPageResponse = {
         overrideApplies: boolean;
       };
       workbotWorkspaceAssistant: {
+        enabled: boolean;
+        source: "unavailable" | "killed" | "lock" | "override" | "member" | "everyone";
+        everyone: boolean;
+        killed: boolean;
+        lock: boolean | null;
+        override: boolean | null;
+        overrideApplies: boolean;
+      };
+      workbotUsageRecovery: {
         enabled: boolean;
         source: "unavailable" | "killed" | "lock" | "override" | "member" | "everyone";
         everyone: boolean;
@@ -1104,6 +1115,7 @@ export type AdminOverviewResponse = {
       workbotDocuments: boolean;
       workbotDocumentEditing: boolean;
       workbotWorkspaceAssistant: boolean;
+      workbotUsageRecovery: boolean;
       automationCalendar: boolean;
       engineV2ForceUpgrade: boolean;
       computerUse: boolean;
@@ -1195,6 +1207,15 @@ export type AdminOverviewResponse = {
         overrideApplies: boolean;
       };
       workbotWorkspaceAssistant: {
+        enabled: boolean;
+        source: "unavailable" | "killed" | "lock" | "override" | "member" | "everyone";
+        everyone: boolean;
+        killed: boolean;
+        lock: boolean | null;
+        override: boolean | null;
+        overrideApplies: boolean;
+      };
+      workbotUsageRecovery: {
         enabled: boolean;
         source: "unavailable" | "killed" | "lock" | "override" | "member" | "everyone";
         everyone: boolean;
@@ -6952,6 +6973,7 @@ export type WorkbotSession = {
   nativeDictation?: boolean;
   workspaceAssistant?: boolean;
   guidedNavigation?: boolean;
+  usageRecovery?: boolean;
   sideChats: boolean;
   model?: string | null;
   verifyModel?: boolean;
@@ -6968,6 +6990,7 @@ export type WorkbotRunToken = {
     baseUrl: string;
     apiKey: string;
     protocol: "anthropic" | "openai" | "openai-responses";
+    model?: string;
   };
   indexCapability?: string;
 };
@@ -7369,6 +7392,15 @@ export type GetV1AdminOrganizationsByOrganizationIdMembersByMemberIdCapabilities
         override: boolean | null;
         overrideApplies: boolean;
       };
+      workbotUsageRecovery: {
+        enabled: boolean;
+        source: "unavailable" | "killed" | "lock" | "override" | "member" | "everyone";
+        everyone: boolean;
+        killed: boolean;
+        lock: boolean | null;
+        override: boolean | null;
+        overrideApplies: boolean;
+      };
       automationCalendar: {
         enabled: boolean;
         source: "unavailable" | "killed" | "lock" | "override" | "member" | "everyone";
@@ -7451,6 +7483,7 @@ export type PutV1AdminOrganizationsByOrganizationIdMembersByMemberIdCapabilities
       workbotDocuments?: boolean | null;
       workbotDocumentEditing?: boolean | null;
       workbotWorkspaceAssistant?: boolean | null;
+      workbotUsageRecovery?: boolean | null;
       automationCalendar?: boolean | null;
       engineV2ForceUpgrade?: boolean | null;
       computerUse?: boolean | null;
@@ -7569,6 +7602,15 @@ export type PutV1AdminOrganizationsByOrganizationIdMembersByMemberIdCapabilities
         overrideApplies: boolean;
       };
       workbotWorkspaceAssistant: {
+        enabled: boolean;
+        source: "unavailable" | "killed" | "lock" | "override" | "member" | "everyone";
+        everyone: boolean;
+        killed: boolean;
+        lock: boolean | null;
+        override: boolean | null;
+        overrideApplies: boolean;
+      };
+      workbotUsageRecovery: {
         enabled: boolean;
         source: "unavailable" | "killed" | "lock" | "override" | "member" | "everyone";
         everyone: boolean;
@@ -8717,6 +8759,7 @@ export type GetV1AdminOrganizationsByOrganizationIdCapabilitiesResponses = {
       workbotDocuments: boolean;
       workbotDocumentEditing: boolean;
       workbotWorkspaceAssistant: boolean;
+      workbotUsageRecovery: boolean;
       automationCalendar: boolean;
       engineV2ForceUpgrade: boolean;
       computerUse: boolean;
@@ -8808,6 +8851,15 @@ export type GetV1AdminOrganizationsByOrganizationIdCapabilitiesResponses = {
         overrideApplies: boolean;
       };
       workbotWorkspaceAssistant: {
+        enabled: boolean;
+        source: "unavailable" | "killed" | "lock" | "override" | "member" | "everyone";
+        everyone: boolean;
+        killed: boolean;
+        lock: boolean | null;
+        override: boolean | null;
+        overrideApplies: boolean;
+      };
+      workbotUsageRecovery: {
         enabled: boolean;
         source: "unavailable" | "killed" | "lock" | "override" | "member" | "everyone";
         everyone: boolean;
@@ -8939,6 +8991,7 @@ export type PutV1AdminOrganizationsByOrganizationIdCapabilitiesResponses = {
       workbotDocuments: boolean;
       workbotDocumentEditing: boolean;
       workbotWorkspaceAssistant: boolean;
+      workbotUsageRecovery: boolean;
       automationCalendar: boolean;
       engineV2ForceUpgrade: boolean;
       computerUse: boolean;
@@ -9030,6 +9083,15 @@ export type PutV1AdminOrganizationsByOrganizationIdCapabilitiesResponses = {
         overrideApplies: boolean;
       };
       workbotWorkspaceAssistant: {
+        enabled: boolean;
+        source: "unavailable" | "killed" | "lock" | "override" | "member" | "everyone";
+        everyone: boolean;
+        killed: boolean;
+        lock: boolean | null;
+        override: boolean | null;
+        overrideApplies: boolean;
+      };
+      workbotUsageRecovery: {
         enabled: boolean;
         source: "unavailable" | "killed" | "lock" | "override" | "member" | "everyone";
         everyone: boolean;
@@ -35199,6 +35261,54 @@ export type PostV1IntegrationsSlackByConnectionIdInteractionsResponses = {
 export type PostV1IntegrationsSlackByConnectionIdInteractionsResponse =
   PostV1IntegrationsSlackByConnectionIdInteractionsResponses[keyof PostV1IntegrationsSlackByConnectionIdInteractionsResponses];
 
+export type GetWorkbotModelRecoveryData = {
+  body?: never;
+  path?: never;
+  query?: never;
+  url: "/v1/workbot/model-recovery";
+};
+
+export type GetWorkbotModelRecoveryErrors = {
+  /**
+   * The token or membership is invalid.
+   */
+  401: UnauthorizedError;
+  /**
+   * Read scope is required.
+   */
+  403: {
+    error: "insufficient_scope";
+  };
+  /**
+   * Usage recovery is off.
+   */
+  404: {
+    error: "feature_disabled";
+  };
+};
+
+export type GetWorkbotModelRecoveryError = GetWorkbotModelRecoveryErrors[keyof GetWorkbotModelRecoveryErrors];
+
+export type GetWorkbotModelRecoveryResponses = {
+  /**
+   * The member's recovery options.
+   */
+  200: {
+    canUpgrade: boolean;
+    purchaseEligible?: boolean;
+    managedLuna?: boolean;
+    hasModelsSubscription?: boolean;
+    paidContinuation?: "unavailable" | "after_upgrade" | "authorized";
+    upgradeBlockedReason?: "paid_workbot_route_unavailable" | null;
+    canManageModels: boolean;
+    canManageBilling: boolean;
+    freeExhausted: boolean;
+    freeResetsAt: string | null;
+  };
+};
+
+export type GetWorkbotModelRecoveryResponse = GetWorkbotModelRecoveryResponses[keyof GetWorkbotModelRecoveryResponses];
+
 export type RecordWorkbotTelemetryData = {
   body:
     | {
@@ -35390,12 +35500,28 @@ export type CreateWorkbotRunTokenErrors = {
    */
   401: UnauthorizedError;
   /**
-   * Workbot is off or the sign-in grant cannot start a turn.
+   * Workbot or model access cannot start a turn.
    */
-  403: {
-    error: string;
-    message?: string;
-  };
+  403:
+    | {
+        error: string;
+        message?: string;
+      }
+    | {
+        error: "workbot_turn_access_denied";
+        reason:
+          | "gateway_not_configured"
+          | "gateway_provider_missing"
+          | "gateway_member_access_missing"
+          | "gateway_model_unavailable"
+          | "gateway_authentication_required"
+          | "gateway_credentials_unavailable"
+          | "oauth_scope_missing"
+          | "model_access_unavailable"
+          | "managed_models_setup_required"
+          | "rate_limited";
+        retryAfter?: number;
+      };
   /**
    * Too many tokens requested.
    */
