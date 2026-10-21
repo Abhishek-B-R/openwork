@@ -138,6 +138,7 @@ import type {
   DownloadHostGoogleDriveFileResponses,
   ExternalMcpConnectionAccessInput,
   ExternalMcpConnectionByKeyUpsertInput,
+  ExternalMcpConnectionRemovalRequestBody,
   ExternalMcpConnectionToolPolicyInput,
   ExternalMcpConnectionToolRunInput,
   ExternalMcpIssuerReviewInput,
@@ -1042,6 +1043,8 @@ import type {
   RenamePermissionSetBody,
   ReplaceGoogleDocumentTextErrors,
   ReplaceGoogleDocumentTextResponses,
+  RequestMcpConnectionRemovalErrors,
+  RequestMcpConnectionRemovalResponses,
   RunAutomationNowErrors,
   RunAutomationNowResponses,
   SaveGoogleDriveDocumentEditsErrors,
@@ -1272,6 +1275,7 @@ export class DenClient extends HeyApiClient {
         organizationGrants?: boolean | null;
         connectionMcpServers?: boolean | null;
         liveProviderSync?: boolean | null;
+        agentConnectionRemoval?: boolean | null;
         managedDeployments?: boolean | null;
         workbotDocuments?: boolean | null;
         workbotDocumentEditing?: boolean | null;
@@ -12776,6 +12780,45 @@ export class DenClient extends HeyApiClient {
       ThrowOnError
     >({
       url: "/v1/mcp-connections/{connectionId}/access",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    });
+  }
+
+  /**
+   * Prepare removing an organization connection
+   *
+   * Prepares removing one organization connection (connector) from OpenWork and returns a link where the person confirms it. Nothing is removed by this call: the connection, who can use it, its stored accounts and OAuth app are deleted only when the person opens the link and confirms in OpenWork. It never deletes anything in the connected service. Only when the user explicitly asks to remove a connection: first list connections with getMcpConnections and pick the one whose name matches; if several could match, ask the user which one and do not guess. Send its exact name as expectedName. A connection that plugins need is refused unless detachFromPlugins is true, which you may send only after telling the user which plugins use it and they agree. Needs the Remove any connection permission, or having added the connection. Give the person handoff.url and handoff.instructions; afterwards, list connections with getMcpConnections to confirm it is gone.
+   */
+  public requestMcpConnectionRemoval<ThrowOnError extends boolean = false>(
+    parameters: {
+      connectionId: string;
+      externalMcpConnectionRemovalRequestBody: ExternalMcpConnectionRemovalRequestBody;
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "connectionId" },
+            { key: "externalMcpConnectionRemovalRequestBody", map: "body" },
+          ],
+        },
+      ],
+    );
+    return (options?.client ?? this.client).post<
+      RequestMcpConnectionRemovalResponses,
+      RequestMcpConnectionRemovalErrors,
+      ThrowOnError
+    >({
+      url: "/v1/mcp-connections/{connectionId}/removal-request",
       ...options,
       ...params,
       headers: {

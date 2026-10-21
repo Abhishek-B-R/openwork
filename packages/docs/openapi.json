@@ -2808,6 +2808,7 @@
               "organizationGrants",
               "connectionMcpServers",
               "liveProviderSync",
+              "agentConnectionRemoval",
               "managedDeployments",
               "workbotDocuments",
               "workbotDocumentEditing",
@@ -3005,6 +3006,9 @@
                     "liveProviderSync": {
                       "type": "boolean"
                     },
+                    "agentConnectionRemoval": {
+                      "type": "boolean"
+                    },
                     "managedDeployments": {
                       "type": "boolean"
                     },
@@ -3050,6 +3054,7 @@
                     "organizationGrants",
                     "connectionMcpServers",
                     "liveProviderSync",
+                    "agentConnectionRemoval",
                     "managedDeployments",
                     "workbotDocuments",
                     "workbotDocumentEditing",
@@ -3295,6 +3300,63 @@
                         "overrideApplies"
                       ]
                     },
+                    "agentConnectionRemoval": {
+                      "type": "object",
+                      "properties": {
+                        "enabled": {
+                          "type": "boolean"
+                        },
+                        "source": {
+                          "type": "string",
+                          "enum": [
+                            "unavailable",
+                            "killed",
+                            "lock",
+                            "override",
+                            "member",
+                            "everyone"
+                          ]
+                        },
+                        "everyone": {
+                          "type": "boolean"
+                        },
+                        "killed": {
+                          "type": "boolean"
+                        },
+                        "lock": {
+                          "anyOf": [
+                            {
+                              "type": "boolean"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "override": {
+                          "anyOf": [
+                            {
+                              "type": "boolean"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "overrideApplies": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "enabled",
+                        "source",
+                        "everyone",
+                        "killed",
+                        "lock",
+                        "override",
+                        "overrideApplies"
+                      ]
+                    },
                     "managedDeployments": {
                       "type": "object",
                       "properties": {
@@ -3928,6 +3990,7 @@
                     "organizationGrants",
                     "connectionMcpServers",
                     "liveProviderSync",
+                    "agentConnectionRemoval",
                     "managedDeployments",
                     "workbotDocuments",
                     "workbotDocumentEditing",
@@ -4320,6 +4383,9 @@
                     "liveProviderSync": {
                       "type": "boolean"
                     },
+                    "agentConnectionRemoval": {
+                      "type": "boolean"
+                    },
                     "managedDeployments": {
                       "type": "boolean"
                     },
@@ -4365,6 +4431,7 @@
                     "organizationGrants",
                     "connectionMcpServers",
                     "liveProviderSync",
+                    "agentConnectionRemoval",
                     "managedDeployments",
                     "workbotDocuments",
                     "workbotDocumentEditing",
@@ -4610,6 +4677,63 @@
                         "overrideApplies"
                       ]
                     },
+                    "agentConnectionRemoval": {
+                      "type": "object",
+                      "properties": {
+                        "enabled": {
+                          "type": "boolean"
+                        },
+                        "source": {
+                          "type": "string",
+                          "enum": [
+                            "unavailable",
+                            "killed",
+                            "lock",
+                            "override",
+                            "member",
+                            "everyone"
+                          ]
+                        },
+                        "everyone": {
+                          "type": "boolean"
+                        },
+                        "killed": {
+                          "type": "boolean"
+                        },
+                        "lock": {
+                          "anyOf": [
+                            {
+                              "type": "boolean"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "override": {
+                          "anyOf": [
+                            {
+                              "type": "boolean"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "overrideApplies": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "enabled",
+                        "source",
+                        "everyone",
+                        "killed",
+                        "lock",
+                        "override",
+                        "overrideApplies"
+                      ]
+                    },
                     "managedDeployments": {
                       "type": "object",
                       "properties": {
@@ -5243,6 +5367,7 @@
                     "organizationGrants",
                     "connectionMcpServers",
                     "liveProviderSync",
+                    "agentConnectionRemoval",
                     "managedDeployments",
                     "workbotDocuments",
                     "workbotDocumentEditing",
@@ -18828,6 +18953,9 @@
           "createdByYou": {
             "type": "boolean"
           },
+          "canRemove": {
+            "type": "boolean"
+          },
           "createdAt": {
             "type": "string",
             "format": "date-time",
@@ -19921,6 +20049,9 @@
           "createdByYou": {
             "type": "boolean"
           },
+          "canRemove": {
+            "type": "boolean"
+          },
           "createdAt": {
             "type": "string",
             "format": "date-time",
@@ -20616,6 +20747,9 @@
             ]
           },
           "createdByYou": {
+            "type": "boolean"
+          },
+          "canRemove": {
             "type": "boolean"
           },
           "createdAt": {
@@ -21326,6 +21460,126 @@
           "ok",
           "deleted"
         ]
+      },
+      "ExternalMcpConnectionRemovalRequestResponse": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "const": "confirmation_required"
+          },
+          "connection": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "url": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "name",
+              "url"
+            ]
+          },
+          "requiredBy": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExternalMcpConnectionRequiredBy"
+            }
+          },
+          "handoff": {
+            "type": "object",
+            "properties": {
+              "action": {
+                "type": "string",
+                "const": "open_link"
+              },
+              "url": {
+                "type": "string"
+              },
+              "instructions": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "action",
+              "url",
+              "instructions"
+            ]
+          }
+        },
+        "required": [
+          "status",
+          "connection",
+          "requiredBy",
+          "handoff"
+        ]
+      },
+      "ExternalMcpConnectionRemovalConflict": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string",
+            "enum": [
+              "connection_name_mismatch",
+              "connection_in_use"
+            ]
+          },
+          "message": {
+            "type": "string"
+          },
+          "connection": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "name"
+            ]
+          },
+          "requiredBy": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExternalMcpConnectionRequiredBy"
+            }
+          }
+        },
+        "required": [
+          "error",
+          "message",
+          "connection"
+        ]
+      },
+      "ExternalMcpConnectionRemovalRequestBody": {
+        "type": "object",
+        "properties": {
+          "expectedName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255,
+            "description": "The connection's exact name, as getMcpConnections lists it. Nothing is prepared when it does not match."
+          },
+          "detachFromPlugins": {
+            "description": "The user agreed it may be removed from plugins that need it. Send true only after telling the user which plugins use it.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "expectedName"
+        ],
+        "additionalProperties": false
       },
       "ExternalMcpConnectionCredentialPromptResponse": {
         "type": "object",
@@ -30336,6 +30590,63 @@
                             "overrideApplies"
                           ]
                         },
+                        "agentConnectionRemoval": {
+                          "type": "object",
+                          "properties": {
+                            "enabled": {
+                              "type": "boolean"
+                            },
+                            "source": {
+                              "type": "string",
+                              "enum": [
+                                "unavailable",
+                                "killed",
+                                "lock",
+                                "override",
+                                "member",
+                                "everyone"
+                              ]
+                            },
+                            "everyone": {
+                              "type": "boolean"
+                            },
+                            "killed": {
+                              "type": "boolean"
+                            },
+                            "lock": {
+                              "anyOf": [
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "override": {
+                              "anyOf": [
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "overrideApplies": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": [
+                            "enabled",
+                            "source",
+                            "everyone",
+                            "killed",
+                            "lock",
+                            "override",
+                            "overrideApplies"
+                          ]
+                        },
                         "managedDeployments": {
                           "type": "object",
                           "properties": {
@@ -30969,6 +31280,7 @@
                         "organizationGrants",
                         "connectionMcpServers",
                         "liveProviderSync",
+                        "agentConnectionRemoval",
                         "managedDeployments",
                         "workbotDocuments",
                         "workbotDocumentEditing",
@@ -31304,6 +31616,63 @@
                             "overrideApplies"
                           ]
                         },
+                        "agentConnectionRemoval": {
+                          "type": "object",
+                          "properties": {
+                            "enabled": {
+                              "type": "boolean"
+                            },
+                            "source": {
+                              "type": "string",
+                              "enum": [
+                                "unavailable",
+                                "killed",
+                                "lock",
+                                "override",
+                                "member",
+                                "everyone"
+                              ]
+                            },
+                            "everyone": {
+                              "type": "boolean"
+                            },
+                            "killed": {
+                              "type": "boolean"
+                            },
+                            "lock": {
+                              "anyOf": [
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "override": {
+                              "anyOf": [
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "overrideApplies": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": [
+                            "enabled",
+                            "source",
+                            "everyone",
+                            "killed",
+                            "lock",
+                            "override",
+                            "overrideApplies"
+                          ]
+                        },
                         "managedDeployments": {
                           "type": "object",
                           "properties": {
@@ -31937,6 +32306,7 @@
                         "organizationGrants",
                         "connectionMcpServers",
                         "liveProviderSync",
+                        "agentConnectionRemoval",
                         "managedDeployments",
                         "workbotDocuments",
                         "workbotDocumentEditing",
@@ -32040,6 +32410,16 @@
                         ]
                       },
                       "liveProviderSync": {
+                        "anyOf": [
+                          {
+                            "type": "boolean"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "agentConnectionRemoval": {
                         "anyOf": [
                           {
                             "type": "boolean"
@@ -34840,6 +35220,9 @@
                         "liveProviderSync": {
                           "type": "boolean"
                         },
+                        "agentConnectionRemoval": {
+                          "type": "boolean"
+                        },
                         "managedDeployments": {
                           "type": "boolean"
                         },
@@ -34885,6 +35268,7 @@
                         "organizationGrants",
                         "connectionMcpServers",
                         "liveProviderSync",
+                        "agentConnectionRemoval",
                         "managedDeployments",
                         "workbotDocuments",
                         "workbotDocumentEditing",
@@ -35130,6 +35514,63 @@
                             "overrideApplies"
                           ]
                         },
+                        "agentConnectionRemoval": {
+                          "type": "object",
+                          "properties": {
+                            "enabled": {
+                              "type": "boolean"
+                            },
+                            "source": {
+                              "type": "string",
+                              "enum": [
+                                "unavailable",
+                                "killed",
+                                "lock",
+                                "override",
+                                "member",
+                                "everyone"
+                              ]
+                            },
+                            "everyone": {
+                              "type": "boolean"
+                            },
+                            "killed": {
+                              "type": "boolean"
+                            },
+                            "lock": {
+                              "anyOf": [
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "override": {
+                              "anyOf": [
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "overrideApplies": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": [
+                            "enabled",
+                            "source",
+                            "everyone",
+                            "killed",
+                            "lock",
+                            "override",
+                            "overrideApplies"
+                          ]
+                        },
                         "managedDeployments": {
                           "type": "object",
                           "properties": {
@@ -35763,6 +36204,7 @@
                         "organizationGrants",
                         "connectionMcpServers",
                         "liveProviderSync",
+                        "agentConnectionRemoval",
                         "managedDeployments",
                         "workbotDocuments",
                         "workbotDocumentEditing",
@@ -35904,6 +36346,9 @@
                         "liveProviderSync": {
                           "type": "boolean"
                         },
+                        "agentConnectionRemoval": {
+                          "type": "boolean"
+                        },
                         "managedDeployments": {
                           "type": "boolean"
                         },
@@ -35949,6 +36394,7 @@
                         "organizationGrants",
                         "connectionMcpServers",
                         "liveProviderSync",
+                        "agentConnectionRemoval",
                         "managedDeployments",
                         "workbotDocuments",
                         "workbotDocumentEditing",
@@ -36194,6 +36640,63 @@
                             "overrideApplies"
                           ]
                         },
+                        "agentConnectionRemoval": {
+                          "type": "object",
+                          "properties": {
+                            "enabled": {
+                              "type": "boolean"
+                            },
+                            "source": {
+                              "type": "string",
+                              "enum": [
+                                "unavailable",
+                                "killed",
+                                "lock",
+                                "override",
+                                "member",
+                                "everyone"
+                              ]
+                            },
+                            "everyone": {
+                              "type": "boolean"
+                            },
+                            "killed": {
+                              "type": "boolean"
+                            },
+                            "lock": {
+                              "anyOf": [
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "override": {
+                              "anyOf": [
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "overrideApplies": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": [
+                            "enabled",
+                            "source",
+                            "everyone",
+                            "killed",
+                            "lock",
+                            "override",
+                            "overrideApplies"
+                          ]
+                        },
                         "managedDeployments": {
                           "type": "object",
                           "properties": {
@@ -36827,6 +37330,7 @@
                         "organizationGrants",
                         "connectionMcpServers",
                         "liveProviderSync",
+                        "agentConnectionRemoval",
                         "managedDeployments",
                         "workbotDocuments",
                         "workbotDocumentEditing",
@@ -94874,6 +95378,119 @@
                 "required": [
                   "access"
                 ]
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "denApiKey": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/v1/mcp-connections/{connectionId}/removal-request": {
+      "post": {
+        "operationId": "requestMcpConnectionRemoval",
+        "tags": [
+          "Capability Sources"
+        ],
+        "x-mcp": true,
+        "x-mcp-search-aliases": [
+          "delete connection",
+          "remove connection",
+          "remove connector",
+          "delete connector",
+          "delete MCP connection",
+          "remove MCP server"
+        ],
+        "summary": "Prepare removing an organization connection",
+        "description": "Prepares removing one organization connection (connector) from OpenWork and returns a link where the person confirms it. Nothing is removed by this call: the connection, who can use it, its stored accounts and OAuth app are deleted only when the person opens the link and confirms in OpenWork. It never deletes anything in the connected service. Only when the user explicitly asks to remove a connection: first list connections with getMcpConnections and pick the one whose name matches; if several could match, ask the user which one and do not guess. Send its exact name as expectedName. A connection that plugins need is refused unless detachFromPlugins is true, which you may send only after telling the user which plugins use it and they agree. Needs the Remove any connection permission, or having added the connection. Give the person handoff.url and handoff.instructions; afterwards, list connections with getMcpConnections to confirm it is gone.",
+        "responses": {
+          "200": {
+            "description": "The removal is ready for the person to confirm in OpenWork.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExternalMcpConnectionRemovalRequestResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvalidRequestError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The caller must be signed in.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnauthorizedError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller may not remove this connection.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown connection, or removing connections through agents is off for this organization.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExternalMcpConnectionNotFoundError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The name does not match this connection, or plugins need it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExternalMcpConnectionRemovalConflict"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "in": "path",
+            "name": "connectionId",
+            "schema": {
+              "format": "typeid",
+              "type": "string",
+              "minLength": 30,
+              "maxLength": 30
+            },
+            "required": true,
+            "description": "Den TypeID with 'emc_' prefix and a 26-character base32 suffix."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExternalMcpConnectionRemovalRequestBody"
               }
             }
           }
