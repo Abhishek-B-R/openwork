@@ -4807,6 +4807,7 @@
               "workbotWorkspaceAssistant",
               "workbotUsageRecovery",
               "automationCalendar",
+              "removeOpencodeZen",
               "engineV2ForceUpgrade",
               "computerUse",
               "browserDemonstrations",
@@ -5022,6 +5023,9 @@
                     "automationCalendar": {
                       "type": "boolean"
                     },
+                    "removeOpencodeZen": {
+                      "type": "boolean"
+                    },
                     "engineV2ForceUpgrade": {
                       "type": "boolean"
                     },
@@ -5065,6 +5069,7 @@
                     "workbotWorkspaceAssistant",
                     "workbotUsageRecovery",
                     "automationCalendar",
+                    "removeOpencodeZen",
                     "engineV2ForceUpgrade",
                     "computerUse",
                     "browserDemonstrations",
@@ -5706,6 +5711,63 @@
                         "overrideApplies"
                       ]
                     },
+                    "removeOpencodeZen": {
+                      "type": "object",
+                      "properties": {
+                        "enabled": {
+                          "type": "boolean"
+                        },
+                        "source": {
+                          "type": "string",
+                          "enum": [
+                            "unavailable",
+                            "killed",
+                            "lock",
+                            "override",
+                            "member",
+                            "everyone"
+                          ]
+                        },
+                        "everyone": {
+                          "type": "boolean"
+                        },
+                        "killed": {
+                          "type": "boolean"
+                        },
+                        "lock": {
+                          "anyOf": [
+                            {
+                              "type": "boolean"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "override": {
+                          "anyOf": [
+                            {
+                              "type": "boolean"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "overrideApplies": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "enabled",
+                        "source",
+                        "everyone",
+                        "killed",
+                        "lock",
+                        "override",
+                        "overrideApplies"
+                      ]
+                    },
                     "engineV2ForceUpgrade": {
                       "type": "object",
                       "properties": {
@@ -6175,6 +6237,7 @@
                     "workbotWorkspaceAssistant",
                     "workbotUsageRecovery",
                     "automationCalendar",
+                    "removeOpencodeZen",
                     "engineV2ForceUpgrade",
                     "computerUse",
                     "browserDemonstrations",
@@ -6585,6 +6648,9 @@
                     "automationCalendar": {
                       "type": "boolean"
                     },
+                    "removeOpencodeZen": {
+                      "type": "boolean"
+                    },
                     "engineV2ForceUpgrade": {
                       "type": "boolean"
                     },
@@ -6628,6 +6694,7 @@
                     "workbotWorkspaceAssistant",
                     "workbotUsageRecovery",
                     "automationCalendar",
+                    "removeOpencodeZen",
                     "engineV2ForceUpgrade",
                     "computerUse",
                     "browserDemonstrations",
@@ -7269,6 +7336,63 @@
                         "overrideApplies"
                       ]
                     },
+                    "removeOpencodeZen": {
+                      "type": "object",
+                      "properties": {
+                        "enabled": {
+                          "type": "boolean"
+                        },
+                        "source": {
+                          "type": "string",
+                          "enum": [
+                            "unavailable",
+                            "killed",
+                            "lock",
+                            "override",
+                            "member",
+                            "everyone"
+                          ]
+                        },
+                        "everyone": {
+                          "type": "boolean"
+                        },
+                        "killed": {
+                          "type": "boolean"
+                        },
+                        "lock": {
+                          "anyOf": [
+                            {
+                              "type": "boolean"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "override": {
+                          "anyOf": [
+                            {
+                              "type": "boolean"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "overrideApplies": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "enabled",
+                        "source",
+                        "everyone",
+                        "killed",
+                        "lock",
+                        "override",
+                        "overrideApplies"
+                      ]
+                    },
                     "engineV2ForceUpgrade": {
                       "type": "object",
                       "properties": {
@@ -7738,6 +7862,7 @@
                     "workbotWorkspaceAssistant",
                     "workbotUsageRecovery",
                     "automationCalendar",
+                    "removeOpencodeZen",
                     "engineV2ForceUpgrade",
                     "computerUse",
                     "browserDemonstrations",
@@ -8557,6 +8682,9 @@
             "type": "boolean"
           },
           "liveProviderSync": {
+            "type": "boolean"
+          },
+          "removeOpencodeZen": {
             "type": "boolean"
           },
           "onboardingPrompts": {
@@ -33364,6 +33492,63 @@
                             "overrideApplies"
                           ]
                         },
+                        "removeOpencodeZen": {
+                          "type": "object",
+                          "properties": {
+                            "enabled": {
+                              "type": "boolean"
+                            },
+                            "source": {
+                              "type": "string",
+                              "enum": [
+                                "unavailable",
+                                "killed",
+                                "lock",
+                                "override",
+                                "member",
+                                "everyone"
+                              ]
+                            },
+                            "everyone": {
+                              "type": "boolean"
+                            },
+                            "killed": {
+                              "type": "boolean"
+                            },
+                            "lock": {
+                              "anyOf": [
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "override": {
+                              "anyOf": [
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "overrideApplies": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": [
+                            "enabled",
+                            "source",
+                            "everyone",
+                            "killed",
+                            "lock",
+                            "override",
+                            "overrideApplies"
+                          ]
+                        },
                         "engineV2ForceUpgrade": {
                           "type": "object",
                           "properties": {
@@ -33833,6 +34018,7 @@
                         "workbotWorkspaceAssistant",
                         "workbotUsageRecovery",
                         "automationCalendar",
+                        "removeOpencodeZen",
                         "engineV2ForceUpgrade",
                         "computerUse",
                         "browserDemonstrations",
@@ -34564,6 +34750,63 @@
                             "overrideApplies"
                           ]
                         },
+                        "removeOpencodeZen": {
+                          "type": "object",
+                          "properties": {
+                            "enabled": {
+                              "type": "boolean"
+                            },
+                            "source": {
+                              "type": "string",
+                              "enum": [
+                                "unavailable",
+                                "killed",
+                                "lock",
+                                "override",
+                                "member",
+                                "everyone"
+                              ]
+                            },
+                            "everyone": {
+                              "type": "boolean"
+                            },
+                            "killed": {
+                              "type": "boolean"
+                            },
+                            "lock": {
+                              "anyOf": [
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "override": {
+                              "anyOf": [
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "overrideApplies": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": [
+                            "enabled",
+                            "source",
+                            "everyone",
+                            "killed",
+                            "lock",
+                            "override",
+                            "overrideApplies"
+                          ]
+                        },
                         "engineV2ForceUpgrade": {
                           "type": "object",
                           "properties": {
@@ -35033,6 +35276,7 @@
                         "workbotWorkspaceAssistant",
                         "workbotUsageRecovery",
                         "automationCalendar",
+                        "removeOpencodeZen",
                         "engineV2ForceUpgrade",
                         "computerUse",
                         "browserDemonstrations",
@@ -35203,6 +35447,16 @@
                         ]
                       },
                       "automationCalendar": {
+                        "anyOf": [
+                          {
+                            "type": "boolean"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "removeOpencodeZen": {
                         "anyOf": [
                           {
                             "type": "boolean"
@@ -38394,6 +38648,9 @@
                         "automationCalendar": {
                           "type": "boolean"
                         },
+                        "removeOpencodeZen": {
+                          "type": "boolean"
+                        },
                         "engineV2ForceUpgrade": {
                           "type": "boolean"
                         },
@@ -38437,6 +38694,7 @@
                         "workbotWorkspaceAssistant",
                         "workbotUsageRecovery",
                         "automationCalendar",
+                        "removeOpencodeZen",
                         "engineV2ForceUpgrade",
                         "computerUse",
                         "browserDemonstrations",
@@ -39078,6 +39336,63 @@
                             "overrideApplies"
                           ]
                         },
+                        "removeOpencodeZen": {
+                          "type": "object",
+                          "properties": {
+                            "enabled": {
+                              "type": "boolean"
+                            },
+                            "source": {
+                              "type": "string",
+                              "enum": [
+                                "unavailable",
+                                "killed",
+                                "lock",
+                                "override",
+                                "member",
+                                "everyone"
+                              ]
+                            },
+                            "everyone": {
+                              "type": "boolean"
+                            },
+                            "killed": {
+                              "type": "boolean"
+                            },
+                            "lock": {
+                              "anyOf": [
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "override": {
+                              "anyOf": [
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "overrideApplies": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": [
+                            "enabled",
+                            "source",
+                            "everyone",
+                            "killed",
+                            "lock",
+                            "override",
+                            "overrideApplies"
+                          ]
+                        },
                         "engineV2ForceUpgrade": {
                           "type": "object",
                           "properties": {
@@ -39547,6 +39862,7 @@
                         "workbotWorkspaceAssistant",
                         "workbotUsageRecovery",
                         "automationCalendar",
+                        "removeOpencodeZen",
                         "engineV2ForceUpgrade",
                         "computerUse",
                         "browserDemonstrations",
@@ -39706,6 +40022,9 @@
                         "automationCalendar": {
                           "type": "boolean"
                         },
+                        "removeOpencodeZen": {
+                          "type": "boolean"
+                        },
                         "engineV2ForceUpgrade": {
                           "type": "boolean"
                         },
@@ -39749,6 +40068,7 @@
                         "workbotWorkspaceAssistant",
                         "workbotUsageRecovery",
                         "automationCalendar",
+                        "removeOpencodeZen",
                         "engineV2ForceUpgrade",
                         "computerUse",
                         "browserDemonstrations",
@@ -40390,6 +40710,63 @@
                             "overrideApplies"
                           ]
                         },
+                        "removeOpencodeZen": {
+                          "type": "object",
+                          "properties": {
+                            "enabled": {
+                              "type": "boolean"
+                            },
+                            "source": {
+                              "type": "string",
+                              "enum": [
+                                "unavailable",
+                                "killed",
+                                "lock",
+                                "override",
+                                "member",
+                                "everyone"
+                              ]
+                            },
+                            "everyone": {
+                              "type": "boolean"
+                            },
+                            "killed": {
+                              "type": "boolean"
+                            },
+                            "lock": {
+                              "anyOf": [
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "override": {
+                              "anyOf": [
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "overrideApplies": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": [
+                            "enabled",
+                            "source",
+                            "everyone",
+                            "killed",
+                            "lock",
+                            "override",
+                            "overrideApplies"
+                          ]
+                        },
                         "engineV2ForceUpgrade": {
                           "type": "object",
                           "properties": {
@@ -40859,6 +41236,7 @@
                         "workbotWorkspaceAssistant",
                         "workbotUsageRecovery",
                         "automationCalendar",
+                        "removeOpencodeZen",
                         "engineV2ForceUpgrade",
                         "computerUse",
                         "browserDemonstrations",
