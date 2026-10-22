@@ -1181,7 +1181,6 @@ export type AdminFeature = {
     | "usageLimitUpgrade"
     | "automationCalendar"
     | "removeOpencodeZen"
-    | "engineV2ForceUpgrade"
     | "computerUse"
     | "browserDemonstrations"
     | "browserLiveView"
@@ -1241,7 +1240,6 @@ export type AdminOrganizationsPageResponse = {
       usageLimitUpgrade: boolean;
       automationCalendar: boolean;
       removeOpencodeZen: boolean;
-      engineV2ForceUpgrade: boolean;
       computerUse: boolean;
       browserDemonstrations: boolean;
       browserLiveView: boolean;
@@ -1378,15 +1376,6 @@ export type AdminOrganizationsPageResponse = {
         overrideApplies: boolean;
       };
       removeOpencodeZen: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "member" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      engineV2ForceUpgrade: {
         enabled: boolean;
         source: "unavailable" | "killed" | "lock" | "override" | "member" | "everyone";
         everyone: boolean;
@@ -1535,7 +1524,6 @@ export type AdminOverviewResponse = {
       usageLimitUpgrade: boolean;
       automationCalendar: boolean;
       removeOpencodeZen: boolean;
-      engineV2ForceUpgrade: boolean;
       computerUse: boolean;
       browserDemonstrations: boolean;
       browserLiveView: boolean;
@@ -1672,15 +1660,6 @@ export type AdminOverviewResponse = {
         overrideApplies: boolean;
       };
       removeOpencodeZen: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "member" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      engineV2ForceUpgrade: {
         enabled: boolean;
         source: "unavailable" | "killed" | "lock" | "override" | "member" | "everyone";
         everyone: boolean;
@@ -2505,10 +2484,16 @@ export type OrganizationContextResponse = {
     [key: string]: unknown;
   };
   /**
-   * Effective on/off for every OpenWork feature in this organization. Treat a missing key as off.
+   * Effective on/off for every OpenWork feature in this organization, plus fixed deprecated client compatibility values. Treat a missing key as off.
    */
   features: {
-    [key: string]: boolean;
+    /**
+     * Fixed compatibility value for published desktop clients. Automatic OpenCode v2 migration is always on; this is not a configurable feature.
+     *
+     * @deprecated
+     */
+    engineV2ForceUpgrade: true;
+    [key: string]: boolean | true;
   };
   /**
    * Whether this caller may open installation diagnostics: a self-hosted installation administrator (local allowlist), signed in or using an API key they own. Organization ownership and permissions never grant it. False on hosted deployments and when the lookup fails.
@@ -7539,7 +7524,13 @@ export type PublicFeatures = {
   version: 1;
   deployment: "cloud" | "self_hosted";
   features: {
-    [key: string]: boolean;
+    /**
+     * Fixed compatibility value for published desktop clients. Automatic OpenCode v2 migration is always on; this is not a configurable feature.
+     *
+     * @deprecated
+     */
+    engineV2ForceUpgrade: true;
+    [key: string]: boolean | true;
   };
 };
 
@@ -7970,15 +7961,6 @@ export type GetV1AdminOrganizationsByOrganizationIdMembersByMemberIdCapabilities
         override: boolean | null;
         overrideApplies: boolean;
       };
-      engineV2ForceUpgrade: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "member" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
       computerUse: {
         enabled: boolean;
         source: "unavailable" | "killed" | "lock" | "override" | "member" | "everyone";
@@ -8066,7 +8048,6 @@ export type PutV1AdminOrganizationsByOrganizationIdMembersByMemberIdCapabilities
       usageLimitUpgrade?: boolean | null;
       automationCalendar?: boolean | null;
       removeOpencodeZen?: boolean | null;
-      engineV2ForceUpgrade?: boolean | null;
       computerUse?: boolean | null;
       browserDemonstrations?: boolean | null;
       browserLiveView?: boolean | null;
@@ -8230,15 +8211,6 @@ export type PutV1AdminOrganizationsByOrganizationIdMembersByMemberIdCapabilities
         overrideApplies: boolean;
       };
       removeOpencodeZen: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "member" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      engineV2ForceUpgrade: {
         enabled: boolean;
         source: "unavailable" | "killed" | "lock" | "override" | "member" | "everyone";
         everyone: boolean;
@@ -9749,7 +9721,6 @@ export type GetV1AdminOrganizationsByOrganizationIdCapabilitiesResponses = {
       usageLimitUpgrade: boolean;
       automationCalendar: boolean;
       removeOpencodeZen: boolean;
-      engineV2ForceUpgrade: boolean;
       computerUse: boolean;
       browserDemonstrations: boolean;
       browserLiveView: boolean;
@@ -9886,15 +9857,6 @@ export type GetV1AdminOrganizationsByOrganizationIdCapabilitiesResponses = {
         overrideApplies: boolean;
       };
       removeOpencodeZen: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "member" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      engineV2ForceUpgrade: {
         enabled: boolean;
         source: "unavailable" | "killed" | "lock" | "override" | "member" | "everyone";
         everyone: boolean;
@@ -10031,7 +9993,6 @@ export type PutV1AdminOrganizationsByOrganizationIdCapabilitiesResponses = {
       usageLimitUpgrade: boolean;
       automationCalendar: boolean;
       removeOpencodeZen: boolean;
-      engineV2ForceUpgrade: boolean;
       computerUse: boolean;
       browserDemonstrations: boolean;
       browserLiveView: boolean;
@@ -10168,15 +10129,6 @@ export type PutV1AdminOrganizationsByOrganizationIdCapabilitiesResponses = {
         overrideApplies: boolean;
       };
       removeOpencodeZen: {
-        enabled: boolean;
-        source: "unavailable" | "killed" | "lock" | "override" | "member" | "everyone";
-        everyone: boolean;
-        killed: boolean;
-        lock: boolean | null;
-        override: boolean | null;
-        overrideApplies: boolean;
-      };
-      engineV2ForceUpgrade: {
         enabled: boolean;
         source: "unavailable" | "killed" | "lock" | "override" | "member" | "everyone";
         everyone: boolean;

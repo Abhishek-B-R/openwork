@@ -1307,7 +1307,6 @@ export class DenClient extends HeyApiClient {
         usageLimitUpgrade?: boolean | null;
         automationCalendar?: boolean | null;
         removeOpencodeZen?: boolean | null;
-        engineV2ForceUpgrade?: boolean | null;
         computerUse?: boolean | null;
         browserDemonstrations?: boolean | null;
         browserLiveView?: boolean | null;
