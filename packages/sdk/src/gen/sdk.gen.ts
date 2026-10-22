@@ -466,6 +466,8 @@ import type {
   GetV1MeInstallByPlatformResponses,
   GetV1MeInstallConfigErrors,
   GetV1MeInstallConfigResponses,
+  GetV1MeInvitationsErrors,
+  GetV1MeInvitationsResponses,
   GetV1MeLibraryErrors,
   GetV1MeLibraryResponses,
   GetV1MembersByMemberIdPermissionsErrors,
@@ -3140,6 +3142,18 @@ export class DenClient extends HeyApiClient {
   public getV1MeOrgs<ThrowOnError extends boolean = false>(options?: Options<never, ThrowOnError>) {
     return (options?.client ?? this.client).get<GetV1MeOrgsResponses, GetV1MeOrgsErrors, ThrowOnError>({
       url: "/v1/me/orgs",
+      ...options,
+    });
+  }
+
+  /**
+   * List current user's pending invitations
+   *
+   * Lists unexpired invitations sent to the signed-in person's verified email for organizations they have not joined yet. Always empty for an unverified email, whatever the deployment's verification setting. Accept one with POST /v1/orgs/invitations/accept.
+   */
+  public getV1MeInvitations<ThrowOnError extends boolean = false>(options?: Options<never, ThrowOnError>) {
+    return (options?.client ?? this.client).get<GetV1MeInvitationsResponses, GetV1MeInvitationsErrors, ThrowOnError>({
+      url: "/v1/me/invitations",
       ...options,
     });
   }
