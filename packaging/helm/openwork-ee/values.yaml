@@ -47,6 +47,8 @@ config:
     remoteComputers: ""           # default off · Use a Linux cloud computer with its browser and desktop in OpenWork Web, or connect a VM from Desktop. Configured and conversation-owned desktops open directly when enabled, including follow-ups and internal session renewal. Take over and Stop stay available.
     remoteSessionSubagents: ""    # default off · A task the agent starts on the cloud or another computer shows in the chat like a sub-agent: whether it is working, needs an answer or finished, and its conversation, which people can open, follow up on and stop.
     connectStandardTools: ""      # default off · Supported clients, including OpenWork Desktop, OpenCode and Claude Code, discover connected actions, Workflows and Apps as individual tools. Capability search uses MCP tool schemas with older fields kept for compatibility. Turning this off restores the previous search view and schemas.
+    teamPlan: ""                  # default off (cloud only) · Going past 5 people moves the workspace to the Team plan at $10 per person per month, and paying sets the plan.
+    selfServeEnterprise: ""       # default off (cloud only) · Owners can buy Enterprise by card at the planned per-person price.
   # END GENERATED features
   tenancy:
     mode: single_org

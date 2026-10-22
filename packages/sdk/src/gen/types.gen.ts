@@ -1187,7 +1187,9 @@ export type AdminFeature = {
     | "browserFloatingView"
     | "remoteComputers"
     | "remoteSessionSubagents"
-    | "connectStandardTools";
+    | "connectStandardTools"
+    | "teamPlan"
+    | "selfServeEnterprise";
   label: string;
   description: string;
   since: string;
@@ -1247,6 +1249,8 @@ export type AdminOrganizationsPageResponse = {
       remoteComputers: boolean;
       remoteSessionSubagents: boolean;
       connectStandardTools: boolean;
+      teamPlan: boolean;
+      selfServeEnterprise: boolean;
       /**
        * Compatibility field, always true. AI Gateway is available to every organization; deployment configuration and authorization still apply.
        *
@@ -1447,6 +1451,24 @@ export type AdminOrganizationsPageResponse = {
         override: boolean | null;
         overrideApplies: boolean;
       };
+      teamPlan: {
+        enabled: boolean;
+        source: "unavailable" | "killed" | "lock" | "override" | "member" | "everyone";
+        everyone: boolean;
+        killed: boolean;
+        lock: boolean | null;
+        override: boolean | null;
+        overrideApplies: boolean;
+      };
+      selfServeEnterprise: {
+        enabled: boolean;
+        source: "unavailable" | "killed" | "lock" | "override" | "member" | "everyone";
+        everyone: boolean;
+        killed: boolean;
+        lock: boolean | null;
+        override: boolean | null;
+        overrideApplies: boolean;
+      };
     };
     [key: string]: unknown;
   }>;
@@ -1531,6 +1553,8 @@ export type AdminOverviewResponse = {
       remoteComputers: boolean;
       remoteSessionSubagents: boolean;
       connectStandardTools: boolean;
+      teamPlan: boolean;
+      selfServeEnterprise: boolean;
       /**
        * Compatibility field, always true. AI Gateway is available to every organization; deployment configuration and authorization still apply.
        *
@@ -1723,6 +1747,24 @@ export type AdminOverviewResponse = {
         overrideApplies: boolean;
       };
       connectStandardTools: {
+        enabled: boolean;
+        source: "unavailable" | "killed" | "lock" | "override" | "member" | "everyone";
+        everyone: boolean;
+        killed: boolean;
+        lock: boolean | null;
+        override: boolean | null;
+        overrideApplies: boolean;
+      };
+      teamPlan: {
+        enabled: boolean;
+        source: "unavailable" | "killed" | "lock" | "override" | "member" | "everyone";
+        everyone: boolean;
+        killed: boolean;
+        lock: boolean | null;
+        override: boolean | null;
+        overrideApplies: boolean;
+      };
+      selfServeEnterprise: {
         enabled: boolean;
         source: "unavailable" | "killed" | "lock" | "override" | "member" | "everyone";
         everyone: boolean;
@@ -3102,6 +3144,10 @@ export type InferenceStatus = {
   proxyBaseUrl: string;
   upstreamProviderConfigured: boolean;
   subscribed?: boolean;
+  /**
+   * Whether this deployment sells OpenWork Models (Stripe key and price configured). False: there is no checkout; teams add their own providers instead.
+   */
+  billingConfigured?: boolean;
   buckets: Array<{
     windowType: "five_hour" | "weekly" | "monthly";
     windowStartAt: string;
@@ -3367,6 +3413,20 @@ export type InvitePaymentRequiredError = {
    * Open in a browser to start seat billing; an owner can finish it there, then retry the invitation.
    */
   billingUrl: string;
+  /**
+   * The Team plan with this person added: every person at the Team price. `available` is false when Team checkout is off for this organization or not sold on this deployment.
+   */
+  quote: {
+    plan: "team";
+    people: number;
+    joined: number;
+    invited: number;
+    unitAmount: number;
+    monthlyTotal: number;
+    currency: string;
+    interval: string;
+    available: boolean;
+  };
 };
 
 export type InviteEmailDomainNotAllowedError = {
@@ -8024,6 +8084,24 @@ export type GetV1AdminOrganizationsByOrganizationIdMembersByMemberIdCapabilities
         override: boolean | null;
         overrideApplies: boolean;
       };
+      teamPlan: {
+        enabled: boolean;
+        source: "unavailable" | "killed" | "lock" | "override" | "member" | "everyone";
+        everyone: boolean;
+        killed: boolean;
+        lock: boolean | null;
+        override: boolean | null;
+        overrideApplies: boolean;
+      };
+      selfServeEnterprise: {
+        enabled: boolean;
+        source: "unavailable" | "killed" | "lock" | "override" | "member" | "everyone";
+        everyone: boolean;
+        killed: boolean;
+        lock: boolean | null;
+        override: boolean | null;
+        overrideApplies: boolean;
+      };
     };
   };
 };
@@ -8055,6 +8133,8 @@ export type PutV1AdminOrganizationsByOrganizationIdMembersByMemberIdCapabilities
       remoteComputers?: boolean | null;
       remoteSessionSubagents?: boolean | null;
       connectStandardTools?: boolean | null;
+      teamPlan?: boolean | null;
+      selfServeEnterprise?: boolean | null;
     };
   };
   path: {
@@ -8274,6 +8354,24 @@ export type PutV1AdminOrganizationsByOrganizationIdMembersByMemberIdCapabilities
         overrideApplies: boolean;
       };
       connectStandardTools: {
+        enabled: boolean;
+        source: "unavailable" | "killed" | "lock" | "override" | "member" | "everyone";
+        everyone: boolean;
+        killed: boolean;
+        lock: boolean | null;
+        override: boolean | null;
+        overrideApplies: boolean;
+      };
+      teamPlan: {
+        enabled: boolean;
+        source: "unavailable" | "killed" | "lock" | "override" | "member" | "everyone";
+        everyone: boolean;
+        killed: boolean;
+        lock: boolean | null;
+        override: boolean | null;
+        overrideApplies: boolean;
+      };
+      selfServeEnterprise: {
         enabled: boolean;
         source: "unavailable" | "killed" | "lock" | "override" | "member" | "everyone";
         everyone: boolean;
@@ -9728,6 +9826,8 @@ export type GetV1AdminOrganizationsByOrganizationIdCapabilitiesResponses = {
       remoteComputers: boolean;
       remoteSessionSubagents: boolean;
       connectStandardTools: boolean;
+      teamPlan: boolean;
+      selfServeEnterprise: boolean;
       /**
        * Compatibility field, always true. AI Gateway is available to every organization; deployment configuration and authorization still apply.
        *
@@ -9920,6 +10020,24 @@ export type GetV1AdminOrganizationsByOrganizationIdCapabilitiesResponses = {
         overrideApplies: boolean;
       };
       connectStandardTools: {
+        enabled: boolean;
+        source: "unavailable" | "killed" | "lock" | "override" | "member" | "everyone";
+        everyone: boolean;
+        killed: boolean;
+        lock: boolean | null;
+        override: boolean | null;
+        overrideApplies: boolean;
+      };
+      teamPlan: {
+        enabled: boolean;
+        source: "unavailable" | "killed" | "lock" | "override" | "member" | "everyone";
+        everyone: boolean;
+        killed: boolean;
+        lock: boolean | null;
+        override: boolean | null;
+        overrideApplies: boolean;
+      };
+      selfServeEnterprise: {
         enabled: boolean;
         source: "unavailable" | "killed" | "lock" | "override" | "member" | "everyone";
         everyone: boolean;
@@ -10000,6 +10118,8 @@ export type PutV1AdminOrganizationsByOrganizationIdCapabilitiesResponses = {
       remoteComputers: boolean;
       remoteSessionSubagents: boolean;
       connectStandardTools: boolean;
+      teamPlan: boolean;
+      selfServeEnterprise: boolean;
       /**
        * Compatibility field, always true. AI Gateway is available to every organization; deployment configuration and authorization still apply.
        *
@@ -10192,6 +10312,24 @@ export type PutV1AdminOrganizationsByOrganizationIdCapabilitiesResponses = {
         overrideApplies: boolean;
       };
       connectStandardTools: {
+        enabled: boolean;
+        source: "unavailable" | "killed" | "lock" | "override" | "member" | "everyone";
+        everyone: boolean;
+        killed: boolean;
+        lock: boolean | null;
+        override: boolean | null;
+        overrideApplies: boolean;
+      };
+      teamPlan: {
+        enabled: boolean;
+        source: "unavailable" | "killed" | "lock" | "override" | "member" | "everyone";
+        everyone: boolean;
+        killed: boolean;
+        lock: boolean | null;
+        override: boolean | null;
+        overrideApplies: boolean;
+      };
+      selfServeEnterprise: {
         enabled: boolean;
         source: "unavailable" | "killed" | "lock" | "override" | "member" | "everyone";
         everyone: boolean;
