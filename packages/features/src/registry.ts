@@ -197,6 +197,13 @@ export const FEATURES = defineFeatures({
     deployments: everywhere,
     default: false,
   },
+  desktopSignInReturn: {
+    label: "Desktop: sign-in returns you to the same task",
+    description: "Signing in from a conversation keeps it and its draft on screen while the browser finishes, then returns to that same conversation with the draft and model intact.",
+    since: "2026-10",
+    deployments: everywhere,
+    default: false,
+  },
   activationChecklist: {
     label: "Get set up checklist",
     description: "After their first answer, people see a Get set up checklist in Desktop and Workbot: invite a teammate, use a skill, add a model provider, share one on AI Gateway and connect an app, each checked off once it works.",

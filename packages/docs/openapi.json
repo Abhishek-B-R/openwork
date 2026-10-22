@@ -4866,6 +4866,7 @@
               "browserFloatingView",
               "remoteComputers",
               "remoteSessionSubagents",
+              "desktopSignInReturn",
               "activationChecklist",
               "connectStandardTools",
               "teamPlan",
@@ -5104,6 +5105,9 @@
                     "remoteSessionSubagents": {
                       "type": "boolean"
                     },
+                    "desktopSignInReturn": {
+                      "type": "boolean"
+                    },
                     "activationChecklist": {
                       "type": "boolean"
                     },
@@ -5144,6 +5148,7 @@
                     "browserFloatingView",
                     "remoteComputers",
                     "remoteSessionSubagents",
+                    "desktopSignInReturn",
                     "activationChecklist",
                     "connectStandardTools",
                     "teamPlan",
@@ -6294,6 +6299,63 @@
                         "overrideApplies"
                       ]
                     },
+                    "desktopSignInReturn": {
+                      "type": "object",
+                      "properties": {
+                        "enabled": {
+                          "type": "boolean"
+                        },
+                        "source": {
+                          "type": "string",
+                          "enum": [
+                            "unavailable",
+                            "killed",
+                            "lock",
+                            "override",
+                            "member",
+                            "everyone"
+                          ]
+                        },
+                        "everyone": {
+                          "type": "boolean"
+                        },
+                        "killed": {
+                          "type": "boolean"
+                        },
+                        "lock": {
+                          "anyOf": [
+                            {
+                              "type": "boolean"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "override": {
+                          "anyOf": [
+                            {
+                              "type": "boolean"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "overrideApplies": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "enabled",
+                        "source",
+                        "everyone",
+                        "killed",
+                        "lock",
+                        "override",
+                        "overrideApplies"
+                      ]
+                    },
                     "activationChecklist": {
                       "type": "object",
                       "properties": {
@@ -6544,6 +6606,7 @@
                     "browserFloatingView",
                     "remoteComputers",
                     "remoteSessionSubagents",
+                    "desktopSignInReturn",
                     "activationChecklist",
                     "connectStandardTools",
                     "teamPlan",
@@ -6977,6 +7040,9 @@
                     "remoteSessionSubagents": {
                       "type": "boolean"
                     },
+                    "desktopSignInReturn": {
+                      "type": "boolean"
+                    },
                     "activationChecklist": {
                       "type": "boolean"
                     },
@@ -7017,6 +7083,7 @@
                     "browserFloatingView",
                     "remoteComputers",
                     "remoteSessionSubagents",
+                    "desktopSignInReturn",
                     "activationChecklist",
                     "connectStandardTools",
                     "teamPlan",
@@ -8167,6 +8234,63 @@
                         "overrideApplies"
                       ]
                     },
+                    "desktopSignInReturn": {
+                      "type": "object",
+                      "properties": {
+                        "enabled": {
+                          "type": "boolean"
+                        },
+                        "source": {
+                          "type": "string",
+                          "enum": [
+                            "unavailable",
+                            "killed",
+                            "lock",
+                            "override",
+                            "member",
+                            "everyone"
+                          ]
+                        },
+                        "everyone": {
+                          "type": "boolean"
+                        },
+                        "killed": {
+                          "type": "boolean"
+                        },
+                        "lock": {
+                          "anyOf": [
+                            {
+                              "type": "boolean"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "override": {
+                          "anyOf": [
+                            {
+                              "type": "boolean"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "overrideApplies": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "enabled",
+                        "source",
+                        "everyone",
+                        "killed",
+                        "lock",
+                        "override",
+                        "overrideApplies"
+                      ]
+                    },
                     "activationChecklist": {
                       "type": "object",
                       "properties": {
@@ -8417,6 +8541,7 @@
                     "browserFloatingView",
                     "remoteComputers",
                     "remoteSessionSubagents",
+                    "desktopSignInReturn",
                     "activationChecklist",
                     "connectStandardTools",
                     "teamPlan",
@@ -34867,6 +34992,63 @@
                             "overrideApplies"
                           ]
                         },
+                        "desktopSignInReturn": {
+                          "type": "object",
+                          "properties": {
+                            "enabled": {
+                              "type": "boolean"
+                            },
+                            "source": {
+                              "type": "string",
+                              "enum": [
+                                "unavailable",
+                                "killed",
+                                "lock",
+                                "override",
+                                "member",
+                                "everyone"
+                              ]
+                            },
+                            "everyone": {
+                              "type": "boolean"
+                            },
+                            "killed": {
+                              "type": "boolean"
+                            },
+                            "lock": {
+                              "anyOf": [
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "override": {
+                              "anyOf": [
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "overrideApplies": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": [
+                            "enabled",
+                            "source",
+                            "everyone",
+                            "killed",
+                            "lock",
+                            "override",
+                            "overrideApplies"
+                          ]
+                        },
                         "activationChecklist": {
                           "type": "object",
                           "properties": {
@@ -35117,6 +35299,7 @@
                         "browserFloatingView",
                         "remoteComputers",
                         "remoteSessionSubagents",
+                        "desktopSignInReturn",
                         "activationChecklist",
                         "connectStandardTools",
                         "teamPlan",
@@ -36357,6 +36540,63 @@
                             "overrideApplies"
                           ]
                         },
+                        "desktopSignInReturn": {
+                          "type": "object",
+                          "properties": {
+                            "enabled": {
+                              "type": "boolean"
+                            },
+                            "source": {
+                              "type": "string",
+                              "enum": [
+                                "unavailable",
+                                "killed",
+                                "lock",
+                                "override",
+                                "member",
+                                "everyone"
+                              ]
+                            },
+                            "everyone": {
+                              "type": "boolean"
+                            },
+                            "killed": {
+                              "type": "boolean"
+                            },
+                            "lock": {
+                              "anyOf": [
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "override": {
+                              "anyOf": [
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "overrideApplies": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": [
+                            "enabled",
+                            "source",
+                            "everyone",
+                            "killed",
+                            "lock",
+                            "override",
+                            "overrideApplies"
+                          ]
+                        },
                         "activationChecklist": {
                           "type": "object",
                           "properties": {
@@ -36607,6 +36847,7 @@
                         "browserFloatingView",
                         "remoteComputers",
                         "remoteSessionSubagents",
+                        "desktopSignInReturn",
                         "activationChecklist",
                         "connectStandardTools",
                         "teamPlan",
@@ -36863,6 +37104,16 @@
                         ]
                       },
                       "remoteSessionSubagents": {
+                        "anyOf": [
+                          {
+                            "type": "boolean"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "desktopSignInReturn": {
                         "anyOf": [
                           {
                             "type": "boolean"
@@ -40492,6 +40743,9 @@
                         "remoteSessionSubagents": {
                           "type": "boolean"
                         },
+                        "desktopSignInReturn": {
+                          "type": "boolean"
+                        },
                         "activationChecklist": {
                           "type": "boolean"
                         },
@@ -40532,6 +40786,7 @@
                         "browserFloatingView",
                         "remoteComputers",
                         "remoteSessionSubagents",
+                        "desktopSignInReturn",
                         "activationChecklist",
                         "connectStandardTools",
                         "teamPlan",
@@ -41682,6 +41937,63 @@
                             "overrideApplies"
                           ]
                         },
+                        "desktopSignInReturn": {
+                          "type": "object",
+                          "properties": {
+                            "enabled": {
+                              "type": "boolean"
+                            },
+                            "source": {
+                              "type": "string",
+                              "enum": [
+                                "unavailable",
+                                "killed",
+                                "lock",
+                                "override",
+                                "member",
+                                "everyone"
+                              ]
+                            },
+                            "everyone": {
+                              "type": "boolean"
+                            },
+                            "killed": {
+                              "type": "boolean"
+                            },
+                            "lock": {
+                              "anyOf": [
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "override": {
+                              "anyOf": [
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "overrideApplies": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": [
+                            "enabled",
+                            "source",
+                            "everyone",
+                            "killed",
+                            "lock",
+                            "override",
+                            "overrideApplies"
+                          ]
+                        },
                         "activationChecklist": {
                           "type": "object",
                           "properties": {
@@ -41932,6 +42244,7 @@
                         "browserFloatingView",
                         "remoteComputers",
                         "remoteSessionSubagents",
+                        "desktopSignInReturn",
                         "activationChecklist",
                         "connectStandardTools",
                         "teamPlan",
@@ -42114,6 +42427,9 @@
                         "remoteSessionSubagents": {
                           "type": "boolean"
                         },
+                        "desktopSignInReturn": {
+                          "type": "boolean"
+                        },
                         "activationChecklist": {
                           "type": "boolean"
                         },
@@ -42154,6 +42470,7 @@
                         "browserFloatingView",
                         "remoteComputers",
                         "remoteSessionSubagents",
+                        "desktopSignInReturn",
                         "activationChecklist",
                         "connectStandardTools",
                         "teamPlan",
@@ -43304,6 +43621,63 @@
                             "overrideApplies"
                           ]
                         },
+                        "desktopSignInReturn": {
+                          "type": "object",
+                          "properties": {
+                            "enabled": {
+                              "type": "boolean"
+                            },
+                            "source": {
+                              "type": "string",
+                              "enum": [
+                                "unavailable",
+                                "killed",
+                                "lock",
+                                "override",
+                                "member",
+                                "everyone"
+                              ]
+                            },
+                            "everyone": {
+                              "type": "boolean"
+                            },
+                            "killed": {
+                              "type": "boolean"
+                            },
+                            "lock": {
+                              "anyOf": [
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "override": {
+                              "anyOf": [
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "overrideApplies": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": [
+                            "enabled",
+                            "source",
+                            "everyone",
+                            "killed",
+                            "lock",
+                            "override",
+                            "overrideApplies"
+                          ]
+                        },
                         "activationChecklist": {
                           "type": "object",
                           "properties": {
@@ -43554,6 +43928,7 @@
                         "browserFloatingView",
                         "remoteComputers",
                         "remoteSessionSubagents",
+                        "desktopSignInReturn",
                         "activationChecklist",
                         "connectStandardTools",
                         "teamPlan",
