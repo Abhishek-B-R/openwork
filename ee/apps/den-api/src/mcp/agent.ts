@@ -198,8 +198,39 @@ const capabilityMatchOutputSchema = z.object({
   scriptPath: z.string().optional(),
 }).passthrough()
 
-export const SEARCH_CAPABILITIES_OUTPUT_SCHEMA = z.object({
+const legacyCapabilityMatchOutputSchema = z.object({
+  name: z.string(),
+  method: z.string(),
+  path: z.string(),
+  score: z.number(),
+  summary: z.string(),
+  pathParams: z.array(z.string()),
+  queryParams: z.array(z.string()),
+  hasBody: z.boolean(),
+  bodySchema: z.unknown().optional(),
+  querySchema: z.unknown().optional(),
+  outputSchema: z.unknown().optional(),
+  argumentsSchema: z.unknown().optional(),
+  schemaDigest: z.string().optional(),
+  invocation: z.object({ argumentsField: z.literal("body") }).optional(),
+  readOnly: z.boolean().optional(),
+  kind: z.string().optional(),
+  mcpApp: z.object({ resourceUri: z.string() }).optional(),
+  status: z.string().optional(),
+  hint: z.string().optional(),
+  connectionStatus: connectionStatusOutputSchema.optional(),
+  scriptPath: z.string().optional(),
+}).passthrough()
+
+export const MCP_TOOL_SEARCH_CAPABILITIES_OUTPUT_SCHEMA = z.object({
   matches: z.array(capabilityMatchOutputSchema),
+  connectionAction: connectionActionPayloadSchema.optional(),
+  connectorCatalog: connectorCatalogSchema.optional(),
+  hint: z.string().optional(),
+})
+
+export const SEARCH_CAPABILITIES_OUTPUT_SCHEMA = z.object({
+  matches: z.array(legacyCapabilityMatchOutputSchema),
   connectionAction: connectionActionPayloadSchema.optional(),
   connectorCatalog: connectorCatalogSchema.optional(),
   hint: z.string().optional(),
@@ -782,7 +813,7 @@ export function registerAgentMcpRoutes<T extends { Variables: RequestIdVariables
             limit: z.number().int().min(1).max(20).optional().describe("Result budget for the highest-ranking capability matches."),
             type: searchCapabilityTypeSchema.optional().describe("Source to search: API operations, platform-admin tools, connected MCPs, marketplace capabilities, or skills. connectors browses setup suggestions without probing tools; all combines accessible sources."),
           }),
-          outputSchema: SEARCH_CAPABILITIES_OUTPUT_SCHEMA,
+          outputSchema: toolShapes ? MCP_TOOL_SEARCH_CAPABILITIES_OUTPUT_SCHEMA : SEARCH_CAPABILITIES_OUTPUT_SCHEMA,
         },
         async ({ query, limit, type, intent }) => {
           if (type === "connectors") return connectorSetupToolResult()
