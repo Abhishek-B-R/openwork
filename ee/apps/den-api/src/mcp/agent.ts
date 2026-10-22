@@ -103,6 +103,8 @@ import {
 } from "./connect-mcp-server-index.js"
 import { registerAgentSkillTools } from "./skill-created-app.js"
 import { registerAgentSkillCatalogTools, standardSkillMarkdown, type RemoteSkillSource } from "./skill-tools.js"
+import { isSkillDocumentUri, readCachedSkill, rememberSkillRead, skillReadResponse } from "./skill-read-cache.js"
+import { cache } from "../cache.js"
 import {
   connectionActionSearchCard,
   connectionActionAppMeta,
@@ -237,14 +239,18 @@ export const SEARCH_CAPABILITIES_OUTPUT_SCHEMA = z.object({
 })
 
 async function mcpRequestInfo(request: Request): Promise<{
+  id: string | number | null
   method: string | null
   resourceUri: string | null
   generatedCatalog: boolean
   toolName: string | null
   clientInfo: ConnectClientInfo | null
 }> {
-  if (request.method.toUpperCase() !== "POST") return { method: null, resourceUri: null, generatedCatalog: false, toolName: null, clientInfo: null }
+  if (request.method.toUpperCase() !== "POST") return { id: null, method: null, resourceUri: null, generatedCatalog: false, toolName: null, clientInfo: null }
   const body: unknown = await request.clone().json().catch(() => null)
+  const id = typeof body === "object" && body !== null && "id" in body && (typeof body.id === "string" || typeof body.id === "number")
+    ? body.id
+    : null
   const method = typeof body === "object"
     && body !== null
     && "method" in body
@@ -256,7 +262,7 @@ async function mcpRequestInfo(request: Request): Promise<{
     : null
   const resourceUri = params && "uri" in params && typeof params.uri === "string" ? params.uri : null
   const toolName = method === "tools/call" && params && "name" in params && typeof params.name === "string" ? params.name : null
-  return { method, resourceUri, generatedCatalog: needsGeneratedArtifactCatalog(method, params), toolName, clientInfo: requestClientInfo(params) }
+  return { id, method, resourceUri, generatedCatalog: needsGeneratedArtifactCatalog(method, params), toolName, clientInfo: requestClientInfo(params) }
 }
 
 export const AGENT_SKILL_INDEX_URI = "skill://index.json"
@@ -313,6 +319,12 @@ export async function readRemoteSkillSource(input: {
   skill: RemoteSkillDescriptor
   organizationId: string
   member: Awaited<ReturnType<typeof resolveMcpMemberIdentity>>
+  /**
+   * Whether this read is a Library use. get_skill is the agent loading a skill
+   * to follow it; a skill:// resource read is how hosts fetch skills ahead of
+   * time (OpenWork prefetches every listed one), so it is not.
+   */
+  recordUse: boolean
 }): Promise<RemoteSkillSource> {
   const builtinResult = executeBuiltinSkillCapability(input.skill.capability)
   if (builtinResult) return { content: builtinResult.content, provenance: builtinResult.provenance }
@@ -323,8 +335,7 @@ export async function readRemoteSkillSource(input: {
     member: input.member,
     pluginId: marketplace.pluginId,
     configObjectId: marketplace.configObjectId,
-    // Served to the member's agent (skill:// resource or get_skill): one Library use.
-    usageSource: "agent",
+    ...(input.recordUse ? { usageSource: "agent" as const } : {}),
   })
   if (!marketplaceResult.ok || marketplaceResult.result.kind !== "skill") return null
   const result = marketplaceResult.result
@@ -413,6 +424,8 @@ export function registerAgentSkillResources(input: {
   member: Awaited<ReturnType<typeof resolveMcpMemberIdentity>>
   /** Resolved skills carry digests for native delivery. */
   resolveSkills?: () => Promise<ResolvedSkill[]>
+  /** Hears each SKILL.md served, so a repeat read can skip this request's setup (skill-read-cache.ts). */
+  onSkillRead?: (uri: string, text: string) => void
 }) {
   input.server.registerResource("agent-skills-index", AGENT_SKILL_INDEX_URI, {
     title: "Available Agent Skills",
@@ -435,6 +448,7 @@ export function registerAgentSkillResources(input: {
         skill,
         organizationId: input.organizationId,
         member: input.member,
+        recordUse: false,
       })
       if (!source) {
         throw new ProtocolError(ProtocolErrorCode.InvalidRequest, "Skill is no longer available")
@@ -442,11 +456,13 @@ export function registerAgentSkillResources(input: {
       if ("blocked" in source) {
         throw new ProtocolError(ProtocolErrorCode.InvalidRequest, source.blocked.message)
       }
+      const text = standardSkillMarkdown(skill, source.content)
+      input.onSkillRead?.(skill.location, text)
       return {
         contents: [{
           uri: skill.location,
           mimeType: "text/markdown",
-          text: standardSkillMarkdown(skill, source.content),
+          text,
         }],
       }
     })
@@ -507,9 +523,28 @@ export function registerAgentMcpRoutes<T extends { Variables: RequestIdVariables
       return preflightResponse
     }
 
+    const requestInfo = await mcpRequestInfo(c.req.raw)
+    const method = requestInfo.method
+    // The stateless transport only acknowledges this notification; it needs
+    // none of the member state below.
+    if (method === "notifications/initialized" && requestInfo.id === null) {
+      return new Response(null, { status: 202 })
+    }
+    const organizationId = normalizeDenTypeId("organization", principal.organizationId)
+    const skillReadUri = method === "resources/read" && requestInfo.id !== null && isSkillDocumentUri(requestInfo.resourceUri)
+      ? requestInfo.resourceUri
+      : null
+    const skillReadRevision = skillReadUri ? await cache.inventory.revision(organizationId) : null
+    const skillReadKey = skillReadUri && skillReadRevision
+      ? { organizationId, userId: principal.userId, uri: skillReadUri, revision: skillReadRevision }
+      : null
+    const cachedSkill = skillReadKey ? readCachedSkill(skillReadKey) : null
+    if (skillReadKey && cachedSkill !== null && requestInfo.id !== null) {
+      return skillReadResponse(requestInfo.id, skillReadKey.uri, cachedSkill)
+    }
+
     const finishIndexTiming = startMcpAppTiming("den.agent-index-read")
     const catalog = await getCatalog(app as unknown as Hono, c.env)
-    const organizationId = normalizeDenTypeId("organization", principal.organizationId)
     const organizationFeatures = await getOrganizationFeatures(organizationId, { userId: principal.userId })
     // External MCP connections are scoped to the calling MEMBER (grants +
     // per-member credentials), not just the org — resolve who this token's
@@ -522,8 +557,6 @@ export function registerAgentMcpRoutes<T extends { Variables: RequestIdVariables
     const connectMcpAppHostSupported = supportsConnectMcpAppHost(
       c.req.header(CONNECT_MCP_APP_HOST_CAPABILITY_HEADER),
     ) && principal.scopes.has(DEN_MCP_APP_HOST_SCOPE)
-    const requestInfo = await mcpRequestInfo(c.req.raw)
-    const method = requestInfo.method
     const toolView = connectToolView(requestInfo.clientInfo, {
       enabled: organizationFeatures.connectStandardTools,
       override: connectToolViewOverride(c.req.url),
@@ -762,6 +795,9 @@ export function registerAgentMcpRoutes<T extends { Variables: RequestIdVariables
         organizationId: principal.organizationId,
         member: memberIdentity,
         ...(nativeSkills ? { resolveSkills: loadResolvedSkills } : {}),
+        ...(skillReadKey ? { onSkillRead: (uri: string, text: string) => {
+          if (uri === skillReadKey.uri) rememberSkillRead(skillReadKey, text)
+        } } : {}),
       })
       if (appServersEnabled) registerAppStarterResources(server)
       if (env.automations.runtimeEnabled) {
@@ -888,6 +924,7 @@ export function registerAgentMcpRoutes<T extends { Variables: RequestIdVariables
         skill,
         organizationId: principal.organizationId,
         member: memberIdentity,
+        recordUse: true,
       }),
     })
 
