@@ -4851,6 +4851,7 @@
           "key": {
             "type": "string",
             "enum": [
+              "administratorRecovery",
               "nativeDictation",
               "organizationGrants",
               "connectionMcpServers",
@@ -5052,6 +5053,9 @@
                 "capabilities": {
                   "type": "object",
                   "properties": {
+                    "administratorRecovery": {
+                      "type": "boolean"
+                    },
                     "nativeDictation": {
                       "type": "boolean"
                     },
@@ -5141,6 +5145,7 @@
                     }
                   },
                   "required": [
+                    "administratorRecovery",
                     "nativeDictation",
                     "organizationGrants",
                     "connectionMcpServers",
@@ -5174,6 +5179,63 @@
                 "featureStates": {
                   "type": "object",
                   "properties": {
+                    "administratorRecovery": {
+                      "type": "object",
+                      "properties": {
+                        "enabled": {
+                          "type": "boolean"
+                        },
+                        "source": {
+                          "type": "string",
+                          "enum": [
+                            "unavailable",
+                            "killed",
+                            "lock",
+                            "override",
+                            "member",
+                            "everyone"
+                          ]
+                        },
+                        "everyone": {
+                          "type": "boolean"
+                        },
+                        "killed": {
+                          "type": "boolean"
+                        },
+                        "lock": {
+                          "anyOf": [
+                            {
+                              "type": "boolean"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "override": {
+                          "anyOf": [
+                            {
+                              "type": "boolean"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "overrideApplies": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "enabled",
+                        "source",
+                        "everyone",
+                        "killed",
+                        "lock",
+                        "override",
+                        "overrideApplies"
+                      ]
+                    },
                     "nativeDictation": {
                       "type": "object",
                       "properties": {
@@ -6715,6 +6777,7 @@
                     }
                   },
                   "required": [
+                    "administratorRecovery",
                     "nativeDictation",
                     "organizationGrants",
                     "connectionMcpServers",
@@ -7111,6 +7174,9 @@
                 "capabilities": {
                   "type": "object",
                   "properties": {
+                    "administratorRecovery": {
+                      "type": "boolean"
+                    },
                     "nativeDictation": {
                       "type": "boolean"
                     },
@@ -7200,6 +7266,7 @@
                     }
                   },
                   "required": [
+                    "administratorRecovery",
                     "nativeDictation",
                     "organizationGrants",
                     "connectionMcpServers",
@@ -7233,6 +7300,63 @@
                 "featureStates": {
                   "type": "object",
                   "properties": {
+                    "administratorRecovery": {
+                      "type": "object",
+                      "properties": {
+                        "enabled": {
+                          "type": "boolean"
+                        },
+                        "source": {
+                          "type": "string",
+                          "enum": [
+                            "unavailable",
+                            "killed",
+                            "lock",
+                            "override",
+                            "member",
+                            "everyone"
+                          ]
+                        },
+                        "everyone": {
+                          "type": "boolean"
+                        },
+                        "killed": {
+                          "type": "boolean"
+                        },
+                        "lock": {
+                          "anyOf": [
+                            {
+                              "type": "boolean"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "override": {
+                          "anyOf": [
+                            {
+                              "type": "boolean"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "overrideApplies": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "enabled",
+                        "source",
+                        "everyone",
+                        "killed",
+                        "lock",
+                        "override",
+                        "overrideApplies"
+                      ]
+                    },
                     "nativeDictation": {
                       "type": "object",
                       "properties": {
@@ -8774,6 +8898,7 @@
                     }
                   },
                   "required": [
+                    "administratorRecovery",
                     "nativeDictation",
                     "organizationGrants",
                     "connectionMcpServers",
@@ -34272,6 +34397,63 @@
                     "featureStates": {
                       "type": "object",
                       "properties": {
+                        "administratorRecovery": {
+                          "type": "object",
+                          "properties": {
+                            "enabled": {
+                              "type": "boolean"
+                            },
+                            "source": {
+                              "type": "string",
+                              "enum": [
+                                "unavailable",
+                                "killed",
+                                "lock",
+                                "override",
+                                "member",
+                                "everyone"
+                              ]
+                            },
+                            "everyone": {
+                              "type": "boolean"
+                            },
+                            "killed": {
+                              "type": "boolean"
+                            },
+                            "lock": {
+                              "anyOf": [
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "override": {
+                              "anyOf": [
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "overrideApplies": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": [
+                            "enabled",
+                            "source",
+                            "everyone",
+                            "killed",
+                            "lock",
+                            "override",
+                            "overrideApplies"
+                          ]
+                        },
                         "nativeDictation": {
                           "type": "object",
                           "properties": {
@@ -35813,6 +35995,7 @@
                         }
                       },
                       "required": [
+                        "administratorRecovery",
                         "nativeDictation",
                         "organizationGrants",
                         "connectionMcpServers",
@@ -35936,6 +36119,63 @@
                     "featureStates": {
                       "type": "object",
                       "properties": {
+                        "administratorRecovery": {
+                          "type": "object",
+                          "properties": {
+                            "enabled": {
+                              "type": "boolean"
+                            },
+                            "source": {
+                              "type": "string",
+                              "enum": [
+                                "unavailable",
+                                "killed",
+                                "lock",
+                                "override",
+                                "member",
+                                "everyone"
+                              ]
+                            },
+                            "everyone": {
+                              "type": "boolean"
+                            },
+                            "killed": {
+                              "type": "boolean"
+                            },
+                            "lock": {
+                              "anyOf": [
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "override": {
+                              "anyOf": [
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "overrideApplies": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": [
+                            "enabled",
+                            "source",
+                            "everyone",
+                            "killed",
+                            "lock",
+                            "override",
+                            "overrideApplies"
+                          ]
+                        },
                         "nativeDictation": {
                           "type": "object",
                           "properties": {
@@ -37477,6 +37717,7 @@
                         }
                       },
                       "required": [
+                        "administratorRecovery",
                         "nativeDictation",
                         "organizationGrants",
                         "connectionMcpServers",
@@ -37565,6 +37806,16 @@
                   "capabilities": {
                     "type": "object",
                     "properties": {
+                      "administratorRecovery": {
+                        "anyOf": [
+                          {
+                            "type": "boolean"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
                       "nativeDictation": {
                         "anyOf": [
                           {
@@ -41405,6 +41656,9 @@
                     "capabilities": {
                       "type": "object",
                       "properties": {
+                        "administratorRecovery": {
+                          "type": "boolean"
+                        },
                         "nativeDictation": {
                           "type": "boolean"
                         },
@@ -41494,6 +41748,7 @@
                         }
                       },
                       "required": [
+                        "administratorRecovery",
                         "nativeDictation",
                         "organizationGrants",
                         "connectionMcpServers",
@@ -41527,6 +41782,63 @@
                     "featureStates": {
                       "type": "object",
                       "properties": {
+                        "administratorRecovery": {
+                          "type": "object",
+                          "properties": {
+                            "enabled": {
+                              "type": "boolean"
+                            },
+                            "source": {
+                              "type": "string",
+                              "enum": [
+                                "unavailable",
+                                "killed",
+                                "lock",
+                                "override",
+                                "member",
+                                "everyone"
+                              ]
+                            },
+                            "everyone": {
+                              "type": "boolean"
+                            },
+                            "killed": {
+                              "type": "boolean"
+                            },
+                            "lock": {
+                              "anyOf": [
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "override": {
+                              "anyOf": [
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "overrideApplies": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": [
+                            "enabled",
+                            "source",
+                            "everyone",
+                            "killed",
+                            "lock",
+                            "override",
+                            "overrideApplies"
+                          ]
+                        },
                         "nativeDictation": {
                           "type": "object",
                           "properties": {
@@ -43068,6 +43380,7 @@
                         }
                       },
                       "required": [
+                        "administratorRecovery",
                         "nativeDictation",
                         "organizationGrants",
                         "connectionMcpServers",
@@ -43213,6 +43526,9 @@
                     "capabilities": {
                       "type": "object",
                       "properties": {
+                        "administratorRecovery": {
+                          "type": "boolean"
+                        },
                         "nativeDictation": {
                           "type": "boolean"
                         },
@@ -43302,6 +43618,7 @@
                         }
                       },
                       "required": [
+                        "administratorRecovery",
                         "nativeDictation",
                         "organizationGrants",
                         "connectionMcpServers",
@@ -43335,6 +43652,63 @@
                     "featureStates": {
                       "type": "object",
                       "properties": {
+                        "administratorRecovery": {
+                          "type": "object",
+                          "properties": {
+                            "enabled": {
+                              "type": "boolean"
+                            },
+                            "source": {
+                              "type": "string",
+                              "enum": [
+                                "unavailable",
+                                "killed",
+                                "lock",
+                                "override",
+                                "member",
+                                "everyone"
+                              ]
+                            },
+                            "everyone": {
+                              "type": "boolean"
+                            },
+                            "killed": {
+                              "type": "boolean"
+                            },
+                            "lock": {
+                              "anyOf": [
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "override": {
+                              "anyOf": [
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "overrideApplies": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": [
+                            "enabled",
+                            "source",
+                            "everyone",
+                            "killed",
+                            "lock",
+                            "override",
+                            "overrideApplies"
+                          ]
+                        },
                         "nativeDictation": {
                           "type": "object",
                           "properties": {
@@ -44876,6 +45250,7 @@
                         }
                       },
                       "required": [
+                        "administratorRecovery",
                         "nativeDictation",
                         "organizationGrants",
                         "connectionMcpServers",

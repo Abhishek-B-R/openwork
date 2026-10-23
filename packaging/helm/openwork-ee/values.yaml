@@ -26,6 +26,7 @@ config:
   #   "false" off for everyone; /admin shows "Set by deployment config"
   # The /admin kill switch still turns a feature off, even when locked on.
   features:
+    administratorRecovery: ""     # default off · Run a one-time, operator-selected Admin-team permission repair at deployment; disabling stops future repairs, not existing grants.
     nativeDictation: ""           # default off · Dictate editable prompts in OpenWork and Workbot using native desktop dictation or live browser speech recognition.
     organizationGrants: ""        # default off · Platform admins control complimentary access and grant organizations extra or unlimited Free Auto usage, with optional expiration.
     connectionMcpServers: ""      # default off · Members can add one connected service, such as Gmail or Linear, to an agent like Claude Code as its own MCP server that lists only that service's tools.
@@ -54,6 +55,23 @@ config:
     selfServeEnterprise: ""       # default off (cloud only) · Owners can buy Enterprise by card at the planned per-person price.
     orgPrompts: ""                # default off · Admins write a system prompt for everyone and for each team on the team's Prompts tab. Desktops add the prompts that apply to a member to every agent's instructions: Everyone's first, then each team's by team name. Turning this off stops desktops adding them at their next sync; saved prompts are kept.
   # END GENERATED features
+  administratorRecovery:
+    # Processed only with config.features.administratorRecovery on. Flag off is a
+    # silent recovery no-op; normal database upgrades remain unchanged.
+    # Flag on defaults to read-only check. Use apply only for the chosen team;
+    # the normal application/database upgrade must already have completed.
+    mode: check
+    # Optional active roster count. Mismatch refuses before any recovery writes.
+    # Count does not detect a same-size swap; exact roster binding is still pending.
+    expectedMembers: null
+    # Organization ID or exact slug. May be empty only when exactly one org exists.
+    organization: ""
+    # Existing designated non-SCIM Admin team ID or exact name. Check prints its ID;
+    # pin that ID for apply, because names can be renamed. No roster fingerprint yet.
+    team: ""
+    # Alternative batch/legacy form: organization ID or slug -> team ID or exact name.
+    # Use this map OR organization/team above, never both. Apply needs the feature on.
+    teams: {}
   tenancy:
     mode: single_org
     singleOrgName: OpenWork
@@ -388,6 +406,12 @@ migrations:
   # lack the database name needed for the committed-migration phase).
   enabled: true
   hook: true
+  # Recovery uses this normal policy in both Secret modes; no retention override.
+  # Capture the result DURING the upgrade in a second terminal as the Job appears:
+  # kubectl --namespace my-openwork get jobs -w
+  # kubectl --namespace my-openwork logs -f job/<name-ending-in-migrate> > recovery.log
+  # Keep recovery.log privately. With this default policy, a refused/failed Job
+  # stays available with its log until the next upgrade.
   hookDeletePolicy: before-hook-creation,hook-succeeded
   writersStoppedFor0097: false
   backoffLimit: 2
