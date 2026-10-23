@@ -1192,7 +1192,8 @@ export type AdminFeature = {
     | "activationChecklist"
     | "connectStandardTools"
     | "teamPlan"
-    | "selfServeEnterprise";
+    | "selfServeEnterprise"
+    | "orgPrompts";
   label: string;
   description: string;
   since: string;
@@ -1257,6 +1258,7 @@ export type AdminOrganizationsPageResponse = {
       connectStandardTools: boolean;
       teamPlan: boolean;
       selfServeEnterprise: boolean;
+      orgPrompts: boolean;
       /**
        * Compatibility field, always true. AI Gateway is available to every organization; deployment configuration and authorization still apply.
        *
@@ -1502,6 +1504,15 @@ export type AdminOrganizationsPageResponse = {
         override: boolean | null;
         overrideApplies: boolean;
       };
+      orgPrompts: {
+        enabled: boolean;
+        source: "unavailable" | "killed" | "lock" | "override" | "member" | "everyone";
+        everyone: boolean;
+        killed: boolean;
+        lock: boolean | null;
+        override: boolean | null;
+        overrideApplies: boolean;
+      };
     };
     [key: string]: unknown;
   }>;
@@ -1591,6 +1602,7 @@ export type AdminOverviewResponse = {
       connectStandardTools: boolean;
       teamPlan: boolean;
       selfServeEnterprise: boolean;
+      orgPrompts: boolean;
       /**
        * Compatibility field, always true. AI Gateway is available to every organization; deployment configuration and authorization still apply.
        *
@@ -1836,6 +1848,15 @@ export type AdminOverviewResponse = {
         override: boolean | null;
         overrideApplies: boolean;
       };
+      orgPrompts: {
+        enabled: boolean;
+        source: "unavailable" | "killed" | "lock" | "override" | "member" | "everyone";
+        everyone: boolean;
+        killed: boolean;
+        lock: boolean | null;
+        override: boolean | null;
+        overrideApplies: boolean;
+      };
     };
     [key: string]: unknown;
   }>;
@@ -2015,6 +2036,17 @@ export type UpdateCurrentUserProfileResponse = {
   user: {
     [key: string]: unknown;
   };
+};
+
+export type MemberPrompt = {
+  id: string;
+  source: "organization" | "team" | "member";
+  teamName?: string;
+  content: string;
+};
+
+export type MemberPrompts = {
+  prompts: Array<MemberPrompt>;
 };
 
 export type DenDesktopAgentPermissions = {
@@ -2558,6 +2590,8 @@ export type OrganizationContextResponse = {
       | "egress_diagnostics.manage"
       | "desktop_policies.view"
       | "desktop_policies.manage"
+      | "prompts.view"
+      | "prompts.manage"
       | "deployments.view"
       | "deployments.manage"
       | "billing.view"
@@ -7606,6 +7640,36 @@ export type DefaultModelWrite = {
   model: DefaultModelChoice | null;
 };
 
+export type OrgPromptAssignment = {
+  everyone: boolean;
+  teamIds: Array<string>;
+  memberIds: Array<string>;
+};
+
+export type OrgPrompt = {
+  id: string;
+  name: string;
+  content: string;
+  assignment: OrgPromptAssignment;
+  updatedAt: string;
+};
+
+export type OrgPromptTeam = {
+  teamId: string;
+  name: string;
+  prompt: OrgPrompt | null;
+};
+
+export type OrgPromptSettings = {
+  everyone: OrgPrompt | null;
+  teams: Array<OrgPromptTeam>;
+  canEdit: boolean;
+};
+
+export type OrgPromptWrite = {
+  content: string;
+};
+
 export type WorkbotSession = {
   user: {
     id: string;
@@ -8208,6 +8272,15 @@ export type GetV1AdminOrganizationsByOrganizationIdMembersByMemberIdCapabilities
         override: boolean | null;
         overrideApplies: boolean;
       };
+      orgPrompts: {
+        enabled: boolean;
+        source: "unavailable" | "killed" | "lock" | "override" | "member" | "everyone";
+        everyone: boolean;
+        killed: boolean;
+        lock: boolean | null;
+        override: boolean | null;
+        overrideApplies: boolean;
+      };
     };
   };
 };
@@ -8244,6 +8317,7 @@ export type PutV1AdminOrganizationsByOrganizationIdMembersByMemberIdCapabilities
       connectStandardTools?: boolean | null;
       teamPlan?: boolean | null;
       selfServeEnterprise?: boolean | null;
+      orgPrompts?: boolean | null;
     };
   };
   path: {
@@ -8508,6 +8582,15 @@ export type PutV1AdminOrganizationsByOrganizationIdMembersByMemberIdCapabilities
         overrideApplies: boolean;
       };
       selfServeEnterprise: {
+        enabled: boolean;
+        source: "unavailable" | "killed" | "lock" | "override" | "member" | "everyone";
+        everyone: boolean;
+        killed: boolean;
+        lock: boolean | null;
+        override: boolean | null;
+        overrideApplies: boolean;
+      };
+      orgPrompts: {
         enabled: boolean;
         source: "unavailable" | "killed" | "lock" | "override" | "member" | "everyone";
         everyone: boolean;
@@ -9967,6 +10050,7 @@ export type GetV1AdminOrganizationsByOrganizationIdCapabilitiesResponses = {
       connectStandardTools: boolean;
       teamPlan: boolean;
       selfServeEnterprise: boolean;
+      orgPrompts: boolean;
       /**
        * Compatibility field, always true. AI Gateway is available to every organization; deployment configuration and authorization still apply.
        *
@@ -10204,6 +10288,15 @@ export type GetV1AdminOrganizationsByOrganizationIdCapabilitiesResponses = {
         overrideApplies: boolean;
       };
       selfServeEnterprise: {
+        enabled: boolean;
+        source: "unavailable" | "killed" | "lock" | "override" | "member" | "everyone";
+        everyone: boolean;
+        killed: boolean;
+        lock: boolean | null;
+        override: boolean | null;
+        overrideApplies: boolean;
+      };
+      orgPrompts: {
         enabled: boolean;
         source: "unavailable" | "killed" | "lock" | "override" | "member" | "everyone";
         everyone: boolean;
@@ -10289,6 +10382,7 @@ export type PutV1AdminOrganizationsByOrganizationIdCapabilitiesResponses = {
       connectStandardTools: boolean;
       teamPlan: boolean;
       selfServeEnterprise: boolean;
+      orgPrompts: boolean;
       /**
        * Compatibility field, always true. AI Gateway is available to every organization; deployment configuration and authorization still apply.
        *
@@ -10526,6 +10620,15 @@ export type PutV1AdminOrganizationsByOrganizationIdCapabilitiesResponses = {
         overrideApplies: boolean;
       };
       selfServeEnterprise: {
+        enabled: boolean;
+        source: "unavailable" | "killed" | "lock" | "override" | "member" | "everyone";
+        everyone: boolean;
+        killed: boolean;
+        lock: boolean | null;
+        override: boolean | null;
+        overrideApplies: boolean;
+      };
+      orgPrompts: {
         enabled: boolean;
         source: "unavailable" | "killed" | "lock" | "override" | "member" | "everyone";
         everyone: boolean;
@@ -12219,6 +12322,35 @@ export type PatchV1MeProfileResponses = {
 };
 
 export type PatchV1MeProfileResponse = PatchV1MeProfileResponses[keyof PatchV1MeProfileResponses];
+
+export type GetV1MePromptsData = {
+  body?: never;
+  path?: never;
+  query?: never;
+  url: "/v1/me/prompts";
+};
+
+export type GetV1MePromptsErrors = {
+  /**
+   * The caller must be signed in to read their prompts.
+   */
+  401: UnauthorizedError;
+  /**
+   * Prompts is off for the organization.
+   */
+  404: NotFoundError;
+};
+
+export type GetV1MePromptsError = GetV1MePromptsErrors[keyof GetV1MePromptsErrors];
+
+export type GetV1MePromptsResponses = {
+  /**
+   * Current user prompts returned successfully.
+   */
+  200: MemberPrompts;
+};
+
+export type GetV1MePromptsResponse = GetV1MePromptsResponses[keyof GetV1MePromptsResponses];
 
 export type GetV1MeDesktopConfigData = {
   body?: never;
@@ -36305,6 +36437,194 @@ export type PutV1OrgDefaultModelTeamsByTeamIdResponses = {
 
 export type PutV1OrgDefaultModelTeamsByTeamIdResponse =
   PutV1OrgDefaultModelTeamsByTeamIdResponses[keyof PutV1OrgDefaultModelTeamsByTeamIdResponses];
+
+export type GetV1OrgPromptsData = {
+  body?: never;
+  path?: never;
+  query?: never;
+  url: "/v1/org/prompts";
+};
+
+export type GetV1OrgPromptsErrors = {
+  /**
+   * Authentication required.
+   */
+  401: UnauthorizedError;
+  /**
+   * The caller lacks the View prompts permission.
+   */
+  403: ForbiddenError;
+  /**
+   * The organization or team was not found, or Prompts is off for the organization.
+   */
+  404: NotFoundError;
+};
+
+export type GetV1OrgPromptsError = GetV1OrgPromptsErrors[keyof GetV1OrgPromptsErrors];
+
+export type GetV1OrgPromptsResponses = {
+  /**
+   * Prompts returned.
+   */
+  200: OrgPromptSettings;
+};
+
+export type GetV1OrgPromptsResponse = GetV1OrgPromptsResponses[keyof GetV1OrgPromptsResponses];
+
+export type DeleteV1OrgPromptsEveryoneData = {
+  body?: never;
+  path?: never;
+  query?: never;
+  url: "/v1/org/prompts/everyone";
+};
+
+export type DeleteV1OrgPromptsEveryoneErrors = {
+  /**
+   * Authentication required.
+   */
+  401: UnauthorizedError;
+  /**
+   * The caller lacks the Manage prompts permission or needs to sign in again.
+   */
+  403: ForbiddenError;
+  /**
+   * The organization or team was not found, or Prompts is off for the organization.
+   */
+  404: NotFoundError;
+};
+
+export type DeleteV1OrgPromptsEveryoneError = DeleteV1OrgPromptsEveryoneErrors[keyof DeleteV1OrgPromptsEveryoneErrors];
+
+export type DeleteV1OrgPromptsEveryoneResponses = {
+  /**
+   * Prompt removed; the remaining prompts are returned.
+   */
+  200: OrgPromptSettings;
+};
+
+export type DeleteV1OrgPromptsEveryoneResponse =
+  DeleteV1OrgPromptsEveryoneResponses[keyof DeleteV1OrgPromptsEveryoneResponses];
+
+export type PutV1OrgPromptsEveryoneData = {
+  body: OrgPromptWrite;
+  path?: never;
+  query?: never;
+  url: "/v1/org/prompts/everyone";
+};
+
+export type PutV1OrgPromptsEveryoneErrors = {
+  /**
+   * The prompt was empty, too long, or the request was invalid.
+   */
+  400: InvalidRequestError;
+  /**
+   * Authentication required.
+   */
+  401: UnauthorizedError;
+  /**
+   * The caller lacks the Manage prompts permission or needs to sign in again.
+   */
+  403: ForbiddenError;
+  /**
+   * The organization or team was not found, or Prompts is off for the organization.
+   */
+  404: NotFoundError;
+};
+
+export type PutV1OrgPromptsEveryoneError = PutV1OrgPromptsEveryoneErrors[keyof PutV1OrgPromptsEveryoneErrors];
+
+export type PutV1OrgPromptsEveryoneResponses = {
+  /**
+   * Prompts saved.
+   */
+  200: OrgPromptSettings;
+};
+
+export type PutV1OrgPromptsEveryoneResponse = PutV1OrgPromptsEveryoneResponses[keyof PutV1OrgPromptsEveryoneResponses];
+
+export type DeleteV1OrgPromptsTeamsByTeamIdData = {
+  body?: never;
+  path: {
+    /**
+     * Den TypeID with 'tem_' prefix and a 26-character base32 suffix.
+     */
+    teamId: string;
+  };
+  query?: never;
+  url: "/v1/org/prompts/teams/{teamId}";
+};
+
+export type DeleteV1OrgPromptsTeamsByTeamIdErrors = {
+  /**
+   * Authentication required.
+   */
+  401: UnauthorizedError;
+  /**
+   * The caller lacks the Manage prompts permission or needs to sign in again.
+   */
+  403: ForbiddenError;
+  /**
+   * The organization or team was not found, or Prompts is off for the organization.
+   */
+  404: NotFoundError;
+};
+
+export type DeleteV1OrgPromptsTeamsByTeamIdError =
+  DeleteV1OrgPromptsTeamsByTeamIdErrors[keyof DeleteV1OrgPromptsTeamsByTeamIdErrors];
+
+export type DeleteV1OrgPromptsTeamsByTeamIdResponses = {
+  /**
+   * Prompt removed; the remaining prompts are returned.
+   */
+  200: OrgPromptSettings;
+};
+
+export type DeleteV1OrgPromptsTeamsByTeamIdResponse =
+  DeleteV1OrgPromptsTeamsByTeamIdResponses[keyof DeleteV1OrgPromptsTeamsByTeamIdResponses];
+
+export type PutV1OrgPromptsTeamsByTeamIdData = {
+  body: OrgPromptWrite;
+  path: {
+    /**
+     * Den TypeID with 'tem_' prefix and a 26-character base32 suffix.
+     */
+    teamId: string;
+  };
+  query?: never;
+  url: "/v1/org/prompts/teams/{teamId}";
+};
+
+export type PutV1OrgPromptsTeamsByTeamIdErrors = {
+  /**
+   * The prompt was empty, too long, or the request was invalid.
+   */
+  400: InvalidRequestError;
+  /**
+   * Authentication required.
+   */
+  401: UnauthorizedError;
+  /**
+   * The caller lacks the Manage prompts permission or needs to sign in again.
+   */
+  403: ForbiddenError;
+  /**
+   * The organization or team was not found, or Prompts is off for the organization.
+   */
+  404: NotFoundError;
+};
+
+export type PutV1OrgPromptsTeamsByTeamIdError =
+  PutV1OrgPromptsTeamsByTeamIdErrors[keyof PutV1OrgPromptsTeamsByTeamIdErrors];
+
+export type PutV1OrgPromptsTeamsByTeamIdResponses = {
+  /**
+   * Prompts saved.
+   */
+  200: OrgPromptSettings;
+};
+
+export type PutV1OrgPromptsTeamsByTeamIdResponse =
+  PutV1OrgPromptsTeamsByTeamIdResponses[keyof PutV1OrgPromptsTeamsByTeamIdResponses];
 
 export type GetV1McpConnectionsByConnectionIdSlackAssistantData = {
   body?: never;
