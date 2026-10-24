@@ -15,7 +15,7 @@ const verify = (userId: string) => client.execute("UPDATE user SET email_verifie
 
 const admin = await den.signUp("Platform Admin", `platform-admin+${den.stamp}@example.test`)
 const create = (body: Record<string, unknown>) => den.request(admin.token, "POST", "/v1/admin/sandbox-orgs", {
-  body: { name: "Trial sandbox", connectorBaseUrl: "http://127.0.0.1:9/", days: 14, memberLimit: 3, allowedEmailDomains: [], extraFreeAutoUsd: null, ...body },
+  body: { name: "Trial sandbox", connectorBaseUrl: "http://127.0.0.1:9/", days: 14, memberLimit: 3, allowedEmailDomains: [], extraFreeAutoUsd: null, joinRole: "member", ...body },
 })
 const tokenOf = (sandbox: unknown) => text(new URL(text(field(sandbox, "joinLink"), "join link")).searchParams.get("token"), "join token")
 const join = (token: string, joinToken: string) => den.request(token, "POST", "/v1/sandbox-join", { body: { token: joinToken } })
@@ -117,6 +117,50 @@ test("people joining at the same moment cannot take more seats than the sandbox 
   assert.ok(results.filter((result) => result.status !== 200).every((result) => field(result.body, "error") === "sandbox_full"))
   const listed = list(field((await den.request(admin.token, "GET", "/v1/admin/sandbox-orgs")).body, "sandboxes"))
   assert.equal(listed.find((entry) => entry.id === field(sandbox, "id"))?.memberCount, 3)
+})
+
+test("sandboxes make people who join admins by default", async () => {
+  const created = await den.request(admin.token, "POST", "/v1/admin/sandbox-orgs", { body: { name: "Default role sandbox", connectorBaseUrl: null, days: 7, memberLimit: 5, allowedEmailDomains: [], extraFreeAutoUsd: null } })
+  const sandbox = field(created.body, "sandbox")
+  assert.equal(field(sandbox, "joinRole"), "admin", summary(created))
+  const orgId = text(field(sandbox, "organizationId"), "organization id")
+  const person = await den.signUp("Default Admin Joiner")
+  assert.equal((await join(person.token, tokenOf(sandbox))).status, 200)
+  assert.equal(field((await den.request(person.token, "GET", "/v1/org", { orgId })).body, "currentMember", "role"), "admin")
+})
+
+test("switching a sandbox to admins promotes everyone who already joined; switching back to members demotes nobody", async () => {
+  const sandbox = field((await create({ memberLimit: 10 })).body, "sandbox")
+  const id = text(field(sandbox, "id"), "sandbox id"), orgId = text(field(sandbox, "organizationId"), "organization id")
+  const early = await den.signUp("Early Member Joiner")
+  assert.equal((await join(early.token, tokenOf(sandbox))).status, 200)
+  assert.equal(field((await den.request(early.token, "GET", "/v1/org", { orgId })).body, "currentMember", "role"), "member")
+  const promoted = await den.request(admin.token, "POST", `/v1/admin/sandbox-orgs/${id}/join-role`, { body: { joinRole: "admin" } })
+  assert.equal(field(promoted.body, "sandbox", "joinRole"), "admin", summary(promoted))
+  assert.equal(field((await den.request(early.token, "GET", "/v1/org", { orgId })).body, "currentMember", "role"), "admin", "people who already joined become admins")
+})
+
+test("an admin sandbox makes people who join admins; changing it later never changes people who already joined", async () => {
+  const sandbox = field((await create({ joinRole: "admin", memberLimit: 10 })).body, "sandbox")
+  assert.equal(field(sandbox, "joinRole"), "admin")
+  const id = text(field(sandbox, "id"), "sandbox id"), orgId = text(field(sandbox, "organizationId"), "organization id")
+  const joinToken = tokenOf(sandbox)
+  assert.equal(field((await den.request(null, "GET", `/v1/sandbox-join/preview?token=${joinToken}`)).body, "joinRole"), "admin")
+
+  const ada = await den.signUp("Ada Admin Joiner")
+  assert.equal((await join(ada.token, joinToken)).status, 200)
+  const adaContext = await den.request(ada.token, "GET", "/v1/org", { orgId })
+  assert.equal(field(adaContext.body, "currentMember", "role"), "admin", summary(adaContext))
+  const permissions = field(adaContext.body, "currentMember", "permissions")
+  assert.ok(Array.isArray(permissions) && permissions.includes("connections.manage"), "admins can manage the sandbox's connectors")
+
+  const switched = await den.request(admin.token, "POST", `/v1/admin/sandbox-orgs/${id}/join-role`, { body: { joinRole: "member" } })
+  assert.equal(field(switched.body, "sandbox", "joinRole"), "member", summary(switched))
+  const mo = await den.signUp("Mo Member Joiner")
+  assert.equal((await join(mo.token, joinToken)).status, 200)
+  assert.equal(field((await den.request(mo.token, "GET", "/v1/org", { orgId })).body, "currentMember", "role"), "member")
+  assert.equal(field((await den.request(ada.token, "GET", "/v1/org", { orgId })).body, "currentMember", "role"), "admin", "Ada keeps her role")
+  assert.equal((await den.request(ada.token, "POST", `/v1/admin/sandbox-orgs/${id}/join-role`, { body: { joinRole: "admin" } })).status, 403, "a sandbox admin is not a platform admin")
 })
 
 test("the kill switch stops join links everywhere without deleting sandboxes", async () => {
