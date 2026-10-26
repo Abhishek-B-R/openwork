@@ -2,6 +2,7 @@ import { z } from "zod";
 import { registerCloudSkillDiscovery, type CloudSkillContext } from "./openwork-cloud-skills-v2.js";
 import { server as browserTools } from "./openwork-chrome-devtools.js";
 import { server as computerTools } from "./openwork-computer-use.js";
+import { addProviderSafeTool } from "./provider-safe-tool-schema.js";
 
 const browserResult = z.object({
   content: z.array(z.union([z.object({ type: z.literal("text"), text: z.string() }),
@@ -33,7 +34,7 @@ export default {
     const browserDefinitions = browser ? { tool: { ...(await browserTools()).tool, ...(await computerTools()).tool } } : undefined;
     const registration = await context.tool.transform(editor => {
       for (const name of ["openwork_context", "openwork_query", "openwork_execute"]) {
-        editor.add({
+        addProviderSafeTool(editor, {
           name,
           description: name === "openwork_context"
             ? "Read OpenWork app context and available affordances. Use this to discover session.search and session.read for other conversations and the session.group commands for sidebar groups."
@@ -56,7 +57,7 @@ export default {
           },
         });
       }
-      editor.add({
+      addProviderSafeTool(editor, {
         name: "openwork_drive_upload",
         description: "Upload one workspace file to the member's Google Drive through OpenWork Cloud, outside model context. Use this when the user asks to put a local file in Drive; it does not need a separate Google sign-in. Bytes, basename and MIME type are preserved without Office conversion. path is workspace-relative or an absolute path under an authorized workspace root. folderId selects a Drive parent folder; connectionId (google-workspace or emc_...) selects a Google account and never falls back to another. The person approves each upload in the chat first; if they decline, do not upload it another way. Returns the Drive file id. Never retry an unconfirmed upload automatically.",
         input: { type: "object", properties: {
@@ -78,7 +79,7 @@ export default {
         },
       });
       if (browser && browserDefinitions) for (const [name, definition] of Object.entries(browserDefinitions.tool)) {
-        editor.add({
+        addProviderSafeTool(editor, {
           name, description: definition.description,
           input: z.toJSONSchema(z.object(definition.args)),
           options: { codemode: false },
