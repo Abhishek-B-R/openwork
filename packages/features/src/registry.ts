@@ -410,6 +410,17 @@ export const FEATURES = defineFeatures({
     deployments: ["cloud"],
     default: false,
   },
+  gatewayProviderAuthErrors: {
+    label: "AI Gateway: rejected provider credentials in chat",
+    description: "When a provider rejects your organization's AI Gateway credential, the chat says which provider rejected it and asks you to contact your administrator, with a request ID for support, instead of sending you to your own model settings.",
+    category: "models",
+    added: "2026-10-26",
+    since: "2026-10",
+    author: "benjaminshafii",
+    docs: "docs/features/gateway-provider-auth-errors/README.md",
+    deployments: everywhere,
+    default: false,
+  },
   providerCredentialStatus: {
     label: "Desktop: honest AI provider key status",
     description: "AI Providers says \"Not checked yet\" for a key that has not answered a chat, and \"Key not accepted\" with Replace key (or ask your admin, for organization providers) after the provider rejects it, instead of always \"Ready to use\".",
