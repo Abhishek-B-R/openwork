@@ -80,13 +80,11 @@ final class MacInput {
     }
     func execute(_ action: Action, app: AppIdentity, target: WindowTarget, lease: ObservationLease,
                  access: MacAccessibility, records: [ElementRecord], focus: ElementRecord?, pointerTarget: AXUIElement?,
-                 check: () throws -> Void, checkWindow: () throws -> Void,
+                 check: () throws -> Void, checkWindow: () throws -> Void, background: Bool = false,
                  feedback send: @escaping (InputFeedback) -> Void = { _ in }) async throws -> String {
         feedback = DispatchFeedback(action: action.name, frame: lease.frame, send: send)
         gesture = Int64(UInt32.random(in: 1...UInt32.max))
-        if routes[app.pid] == nil {
-            routes[app.pid] = PointerRoute.classify(bundleID: app.bundleID, info: app.app.bundleURL.flatMap { Bundle(url: $0)?.infoDictionary } ?? [:])
-        }
+        _ = route(for: app)
         var finished = false
         defer {
             if !finished { releaseAll() }
@@ -126,7 +124,7 @@ final class MacInput {
                 path = "waited"
             case .move(let point):
                 let screen = try lease.screenPoint(point)
-                try access.checkHit(screen, target: target, app: app, expected: pointerTarget)
+                try access.checkHit(screen, target: target, app: app, expected: pointerTarget, background: background)
                 // Hover menus and tracking areas respond to the pointer arriving, not appearing.
                 var steps = [screen]
                 if let last = lastPointer, last.pid == app.pid, last.windowID == target.id, lease.frame.contains(last.point) {
@@ -140,14 +138,15 @@ final class MacInput {
                 report(.move, point: screen, force: true)
             case .click(let point, let count, let flags):
                 let screen = try lease.screenPoint(point)
-                let hit = try access.checkHit(screen, target: target, app: app, expected: pointerTarget)
+                let hit = try access.checkHit(screen, target: target, app: app, expected: pointerTarget, background: background)
                 try modifiers(flags, pid: app.pid, check: check)
                 try await InputDispatch.press(clicks: count, check: check, validate: {
                     try checkWindow()
-                    try access.checkHit(screen, target: target, app: app, expected: hit)
+                    try access.checkHit(screen, target: target, app: app, expected: hit, background: background)
                 }, move: {
                     try self.mouse(.mouseMoved, screen, app.pid, 0, target.id, lease.frame, flags, check: check)
                 }, down: { click in
+                    if click == 1, background { try self.primeUserActivation(app.pid, target.id, lease.frame, check: check) }
                     try self.mouse(.leftMouseDown, screen, app.pid, click, target.id, lease.frame, flags, check: check)
                 }, up: { click in
                     try self.mouse(.leftMouseUp, screen, app.pid, click, target.id, lease.frame, flags)
@@ -155,7 +154,7 @@ final class MacInput {
                 releaseModifiers()
             case .scroll(let point, let dx, let dy):
                 let screen = try lease.screenPoint(point)
-                try access.checkHit(screen, target: target, app: app, expected: pointerTarget)
+                try access.checkHit(screen, target: target, app: app, expected: pointerTarget, background: background)
                 // Views scroll what is under the pointer: put it there, then scroll in steps.
                 try mouse(.mouseMoved, screen, app.pid, 0, target.id, lease.frame, check: check)
                 for (index, step) in PointerMotion.scrollSteps(dx: dx, dy: dy).enumerated() {
@@ -165,7 +164,7 @@ final class MacInput {
                 }
                 report(.dispatched, point: screen)
             case .key(let key, let flags):
-                try access.checkFocus(focus, target: target, app: app, requireField: ["backspace", "delete"].contains(key))
+                try access.checkFocus(focus, target: target, app: app, requireField: ["backspace", "delete"].contains(key), requireFront: !background)
                 let code = try keyCode(key, flags: flags)
                 try modifiers(flags, pid: app.pid, check: check)
                 try keyboard(code, flags: flags, text: nil, pid: app.pid, check: check)
@@ -173,7 +172,7 @@ final class MacInput {
             case .type(let text):
                 try await InputDispatch.type(text, check: check, validate: {
                     try checkWindow()
-                    try access.checkFocus(focus, target: target, app: app, requireField: true)
+                    try access.checkFocus(focus, target: target, app: app, requireField: true, requireFront: !background)
                 }, send: { character in
                     // Line breaks and tabs stay text: as real Return or Tab keys they could
                     // submit or move focus mid-text, which only a separate key action may do.
@@ -182,7 +181,7 @@ final class MacInput {
             case .drag(let points):
                 let points = try points.map(lease.screenPoint)
                 for point in points {
-                    try check(); try access.checkHit(point, target: target, app: app)
+                    try check(); try access.checkHit(point, target: target, app: app, background: background)
                     await Task.yield()
                 }
                 guard let first = points.first else { throw UseError("invalid_arguments", "Drag path is empty.") }
@@ -191,9 +190,9 @@ final class MacInput {
                 try await InputDispatch.drag(from: first, through: PointerMotion.path(points), check: check, validate: { point in
                     try checkWindow()
                     if point == first {
-                        try access.checkHit(point, target: target, app: app, expected: pointerTarget)
+                        try access.checkHit(point, target: target, app: app, expected: pointerTarget, background: background)
                     } else if points.contains(point) {
-                        try access.checkHit(point, target: target, app: app)
+                        try access.checkHit(point, target: target, app: app, background: background)
                     }
                 }, move: { point in
                     try self.mouse(.mouseMoved, point, app.pid, 0, target.id, lease.frame, check: check)
@@ -213,6 +212,20 @@ final class MacInput {
             throw InputFailure(cause: cause, mayHaveActed: feedback?.didDispatch == true)
         }
     }
+    func route(for app: AppIdentity) -> PointerRoute {
+        if let route = routes[app.pid] { return route }
+        let route = PointerRoute.classify(bundleID: app.bundleID, info: app.app.bundleURL.flatMap { Bundle(url: $0)?.infoDictionary } ?? [:])
+        routes[app.pid] = route
+        return route
+    }
+    /// Chromium acts on a background click only after a recent user gesture. A
+    /// press outside every window advances that gate and is itself discarded.
+    private func primeUserActivation(_ pid: pid_t, _ windowID: CGWindowID, _ frame: CGRect, check: () throws -> Void) throws {
+        guard routes[pid] == .skyLight else { return }
+        let outside = CGPoint(x: -1, y: -1)
+        try mouse(.leftMouseDown, outside, pid, 1, windowID, frame, check: check, quiet: true)
+        try mouse(.leftMouseUp, outside, pid, 1, windowID, frame, quiet: true)
+    }
     private func post(_ event: CGEvent, _ pid: pid_t, pointer: Bool = false) {
         event.setIntegerValueField(.eventSourceUnixProcessID, value: Int64(ProcessInfo.processInfo.processIdentifier))
         event.setIntegerValueField(.eventTargetUnixProcessID, value: Int64(pid))
@@ -222,7 +235,8 @@ final class MacInput {
             event.postToPid(pid)
         }
     }
-    private func mouse(_ type: CGEventType, _ point: CGPoint, _ pid: pid_t, _ count: Int, _ windowID: CGWindowID, _ frame: CGRect, _ flags: CGEventFlags = [], check: () throws -> Void = {}) throws {
+    /// `quiet` posts the event without tracking or showing it, for presses no person should see.
+    private func mouse(_ type: CGEventType, _ point: CGPoint, _ pid: pid_t, _ count: Int, _ windowID: CGWindowID, _ frame: CGRect, _ flags: CGEventFlags = [], check: () throws -> Void = {}, quiet: Bool = false) throws {
         guard let setWindowLocation = Self.setWindowLocation else {
             throw UseError("unsupported_pointer_input", "This macOS version does not support scoped pointer input. Use accessible app controls instead.", next: "human_takeover")
         }
@@ -262,6 +276,7 @@ final class MacInput {
         try verifyTargeted(event, windowID: windowID, local: location)
         if type != .leftMouseUp { try Task.checkCancellation(); try check() }
         post(event, pid, pointer: true)
+        guard !quiet else { return }
         lastPointer = (pid, windowID, point)
         if type == .leftMouseDown || type == .leftMouseDragged { heldPointer = (pid, point, windowID, frame, flags) }
         if type == .leftMouseUp { heldPointer = nil }
