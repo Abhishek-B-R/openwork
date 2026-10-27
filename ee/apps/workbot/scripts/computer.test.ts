@@ -8,6 +8,7 @@ import { loadConfig } from "../src/server/config.js"
 import { registerWorkbotRoutes } from "../src/server/routes.js"
 import type { AppEnv, Member } from "../src/server/auth.js"
 import { addressFor, translateKey } from "../../../packages/workbot-ui/src/screencast.js"
+import { computerWork } from "../../../packages/workbot-ui/src/computer-work.js"
 
 const config = loadConfig({ WORKBOT_PUBLIC_URL: "http://localhost:3020", WORKBOT_DEN_API_URL: "http://localhost:8790", WORKBOT_RUNNER_URL: "http://runner", WORKBOT_RUNNER_TOKEN: "r".repeat(32), WORKBOT_SESSION_SECRET: "s".repeat(32) })
 const member = (id: string, computer = true, browser = computer): Member => ({
@@ -304,6 +305,45 @@ test("the browser and the native desktop are separate rollouts", async t => {
   calls.length = 0
   assert.equal((await open("computer")).status, 200)
   assert.deepEqual(calls.find(call => call.method === "PUT")?.body, { computer: true, desktop: true, desktopViews: ["computer"] })
+})
+
+test("the screen's live view stays up while Workbot works on it, not once it turns to the background", () => {
+  const step = (extra: { surface?: "browser"; background?: true }, status: "running" | "done" = "done") =>
+    ({ label: "step", icon: "computer" as const, status, app: null, startedAt: 1, finishedAt: null, updates: [], ...extra })
+  const browsed = [{ kind: "text" as const, text: "Checking listings." }, { kind: "steps" as const, steps: [step({ surface: "browser" })] }, { kind: "text" as const, text: "The browser isn't responding, so I'll pull them another way." }]
+  // Saying what it is doing between browser steps keeps the browser's live view up below its words.
+  const narrating = computerWork(browsed, { working: true, starting: null, lastIsLive: false })
+  assert.deepEqual([narrating.watch, [...narrating.live], narrating.trailing], ["browser", ["browser"], ["browser"]])
+  // Commands in the background: only their card is live, and the browser card goes back to where it was used.
+  const starting = computerWork(browsed, { working: true, starting: { on: "computer", since: 2, background: true }, lastIsLive: false })
+  assert.deepEqual([starting.watch, [...starting.live], starting.trailing, starting.placed.get(1)], [null, ["background"], ["background"], ["browser"]])
+  const running = computerWork([...browsed, { kind: "steps", steps: [step({ background: true }, "running")] }], { working: true, starting: null, lastIsLive: true })
+  assert.deepEqual([running.watch, [...running.live], running.placed.get(1)], [null, ["background"], ["browser"]])
+  // Still no screen while it says what the background work found.
+  const after = computerWork([...browsed, { kind: "steps", steps: [step({ background: true })] }, { kind: "text", text: "Found twelve." }], { working: true, starting: null, lastIsLive: false })
+  assert.deepEqual([after.watch, after.live.size], [null, 0])
+  // Back on the screen, its live view returns below Workbot's latest words.
+  const back = computerWork([...browsed, { kind: "steps", steps: [step({ background: true })] }], { working: true, starting: { on: "computer", since: 3 }, lastIsLive: false })
+  assert.deepEqual([back.watch, back.trailing], ["browser", ["browser"]])
+})
+
+test("the screen is in the chat only while Workbot chooses to show it", () => {
+  const step = (extra: { surface?: "browser"; background?: true; shown?: boolean }) =>
+    ({ label: "step", icon: "computer" as const, status: "done" as const, app: null, startedAt: 1, finishedAt: null, updates: [], ...extra })
+  const work = (...steps: Array<Parameters<typeof step>[0]>) => computerWork(steps.map((extra) => ({ kind: "steps" as const, steps: [step(extra)] })), { working: true, starting: null, lastIsLive: false })
+  // A lookup in the browser is work on the screen, not something to watch.
+  const lookup = work({ surface: "browser" })
+  assert.deepEqual([lookup.watch, lookup.shown], ["browser", null])
+  // Shown on purpose, it stays shown for the rest of the reply, also across steps that don't repeat it.
+  assert.equal(work({ surface: "browser", shown: true }, { surface: "browser" }).shown, "browser")
+  assert.equal(work({ surface: "browser", shown: true }, { surface: "browser", shown: false }).shown, null)
+  // Never while it works in the background, and again once it is back on that screen.
+  assert.equal(work({ shown: true }, { background: true }).shown, null)
+  assert.equal(work({ shown: true }, { background: true }, {}).shown, "computer")
+  // Showing one screen doesn't show the other.
+  assert.equal(work({ surface: "browser", shown: true }, {}).shown, null)
+  // Not after the reply.
+  assert.equal(computerWork([{ kind: "steps", steps: [step({ surface: "browser", shown: true })] }], { working: false, starting: null, lastIsLive: false }).shown, null)
 })
 
 test("the address bar opens web addresses and searches everything else", () => {

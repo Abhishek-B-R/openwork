@@ -30,6 +30,7 @@ import {
 } from "./data";
 import { AppMark, AttachButton, FileBadge, FilesButton, FilesPanel, ImageThumb, isImage, kindLabel, SentAttachments, UploadTray, useFileDrop, type Upload } from "./files";
 import { createComposerState, type ComposerState, type Pending } from "./composer-state";
+import { computerWork, type ComputerSurface } from "./computer-work";
 import { initials } from "./format";
 import { documentLinks, WorkbotMarkdown } from "./markdown";
 import { OpenFileContext } from "./open-file";
@@ -1517,58 +1518,8 @@ function StepsSegment({ steps, live }: { steps: WorkbotStep[]; live: boolean }) 
   );
 }
 
-/** Where on its computer Workbot works: its browser, its screen, or commands in the background with nothing to watch. */
-type ComputerSurface = "browser" | "computer" | "background";
-
-function surfaceOf(step: WorkbotStep): ComputerSurface {
-  return step.surface === "browser" ? "browser" : step.background ? "background" : "computer";
-}
-
 /** The other way of working, offered on a live card: one tap sends it as a follow-up. */
 type SwitchTo = { label: string; text: string; send(text: string): void };
-
-/**
- * Workbot's computer work in one reply, as one card per kind of work (its browser, its screen, its background
- * commands), however often it stops to say what it is doing. While it works, the cards it is using go below its latest
- * words: the one it is on now, and the screen it was last on, whose live view stays up for the rest of the reply.
- * The others stay where that work last happened.
- */
-function computerWork(parts: WorkbotPart[], { working, starting, lastIsLive }: { working: boolean; starting: LiveText["working"] | null; lastIsLive: boolean }) {
-  const cards = new Map<ComputerSurface, { steps: WorkbotStep[]; last: number }>();
-  let screen: ComputerSurface | null = null;
-  let current: ComputerSurface | null = null;
-  for (const [index, part] of parts.entries()) {
-    if (part.kind !== "steps") continue;
-    for (const step of part.steps) {
-      if (step.icon !== "computer") continue;
-      const surface = surfaceOf(step);
-      const card = cards.get(surface) ?? { steps: [], last: index };
-      card.steps.push(step);
-      card.last = index;
-      cards.set(surface, card);
-      if (surface !== "background") screen = surface;
-      if (lastIsLive && index === parts.length - 1) current = surface;
-    }
-  }
-  if (working && starting) {
-    // A step starting before it is stored: commands in the background, or the screen it was last on.
-    const surface: ComputerSurface = starting.background ? "background" : screen ?? "computer";
-    if (!cards.has(surface)) {
-      cards.set(surface, { steps: [{ label: "Using my computer", icon: "computer", status: "running", app: null, startedAt: null, finishedAt: null, updates: [], ...(starting.background ? { background: true as const } : {}) }], last: parts.length });
-    }
-    current = surface;
-    if (surface !== "background") screen = surface;
-  }
-  const watch = working ? screen : null;
-  const live = new Set<ComputerSurface>();
-  if (working && current) live.add(current);
-  if (watch) live.add(watch);
-  const placed = new Map<number, ComputerSurface[]>();
-  for (const [surface, card] of cards) if (!live.has(surface)) placed.set(card.last, [...(placed.get(card.last) ?? []), surface]);
-  // Below its latest words: background work first, then the screen it is watched on.
-  const trailing = [...live].sort((a, b) => Number(a === watch) - Number(b === watch));
-  return { cards, live, watch, placed, trailing };
-}
 
 /** Opens the full view of Workbot's browser or computer, without reloading Workbot. */
 function openSurface(surface: Exclude<ComputerSurface, "background">) {
@@ -1577,13 +1528,13 @@ function openSurface(surface: Exclude<ComputerSurface, "background">) {
 }
 
 /**
- * Work in Workbot's browser or on the rest of its computer, as one card: what it is doing now in its own words, and
- * while it works on a screen a small live view of it (when the computer is on for the person). Commands in the
- * background (running Blender from the command line) have no screen to watch, so their card never connects one. The
- * browser card links the pages it opened.
+ * Work in Workbot's browser or on the rest of its computer, as one card: what it is doing now in its own words, and a
+ * live view of its screen only while Workbot is showing it to the person (when the computer is on for them). Other
+ * work, on the screen or in the background, is its progress notes alone. The browser card links the pages it opened.
  */
-function SurfaceCard({ surface, steps, live, others, switchTo = null }: { surface: ComputerSurface; steps: WorkbotStep[]; live: boolean; others: UsedApp[]; switchTo?: SwitchTo | null }) {
-  const [asked, setAsked] = useState(false);
+function SurfaceCard({ surface, steps, live, showing, others, switchTo = null }: { surface: ComputerSurface; steps: WorkbotStep[]; live: boolean; showing: boolean; others: UsedApp[]; switchTo?: SwitchTo | null }) {
+  // The switch just tapped, until Workbot takes it up and the card offers the other one.
+  const [asked, setAsked] = useState<string | null>(null);
   const updates = steps.flatMap((step) => step.updates);
   const latest = updates.at(-1) ?? null;
   const update = useHeld(latest, latest ?? "", UPDATE_HOLD_MS);
@@ -1608,15 +1559,15 @@ function SurfaceCard({ surface, steps, live, others, switchTo = null }: { surfac
       action={<AppLogos apps={others} />}
       footer={
         <>
-          {live && watchable && surface !== "background" ? <div className="px-2.5"><LiveGlimpse view={surface} onOpen={() => openSurface(surface)} /></div> : null}
-          {live && watchable && switchTo && !asked ? (
+          {showing && watchable && surface !== "background" ? <div className="px-2.5"><LiveGlimpse view={surface} onOpen={() => openSurface(surface)} /></div> : null}
+          {live && watchable && switchTo && asked !== switchTo.label ? (
             <div className="flex px-2.5 pb-2.5 pt-2" data-workbot-computer-switch>
               <button
                 type="button"
-                onClick={() => { setAsked(true); switchTo.send(switchTo.text); }}
+                onClick={() => { setAsked(switchTo.label); switchTo.send(switchTo.text); }}
                 className="inline-flex h-7 items-center gap-1.5 rounded-full bg-[var(--wb-surface)] px-2.5 text-[12px] text-[var(--wb-text)] shadow-[0_0_0_1px_var(--wb-ring)] transition-shadow duration-150 hover:shadow-[0_0_0_1px_var(--wb-disabled)] focus-visible:outline-none focus-visible:shadow-[var(--wb-focus)]"
               >
-                {surface === "background" ? <Monitor size={12} aria-hidden className="shrink-0 text-[var(--wb-muted)]" /> : null}
+                {showing ? null : <Monitor size={12} aria-hidden className="shrink-0 text-[var(--wb-muted)]" />}
                 {switchTo.label}
               </button>
             </div>
@@ -1707,7 +1658,7 @@ function useSettled(flag: boolean, ms: number) {
 
 /** One thing a turn shows: a model call's words (one bubble each), work in apps between them, or a computer card. */
 type TurnItem = { kind: "text"; key: string; text: string } | { kind: "steps"; key: string; steps: WorkbotStep[]; live: boolean }
-  | { kind: "card"; key: string; surface: ComputerSurface; steps: WorkbotStep[]; live: boolean; others: UsedApp[]; switchTo: SwitchTo | null };
+  | { kind: "card"; key: string; surface: ComputerSurface; steps: WorkbotStep[]; live: boolean; showing: boolean; others: UsedApp[]; switchTo: SwitchTo | null };
 
 function TurnView(props: {
   canChange: boolean;
@@ -1743,11 +1694,12 @@ function TurnView(props: {
   const work = computerWork(parts, { working, starting, lastIsLive });
   const card = (surface: ComputerSurface, others: UsedApp[] = []): TurnItem => {
     const isLive = work.live.has(surface);
+    const showing = surface === work.shown;
+    // The live card offers the other way: Carry on without me while Workbot shows its screen, Show me otherwise.
     const switchTo = !isLive || !switchMode ? null
-      : surface === work.watch ? { label: "Carry on without me", text: "Carry on without me in the background; no need to show me.", send: switchMode }
-      : surface === "background" && work.watch === null ? { label: "Show me", text: "Show me what you're doing on screen.", send: switchMode }
-      : null;
-    return { kind: "card", key: `card-${surface}`, surface, steps: work.cards.get(surface)?.steps ?? [], live: isLive, others, switchTo };
+      : showing ? { label: "Carry on without me", text: "Carry on without me in the background; no need to show me.", send: switchMode }
+      : { label: "Show me", text: "Show me what you're doing on screen.", send: switchMode };
+    return { kind: "card", key: `card-${surface}`, surface, steps: work.cards.get(surface)?.steps ?? [], live: isLive, showing, others, switchTo };
   };
   const items: TurnItem[] = [];
   parts.forEach((part, index) => {
@@ -1812,7 +1764,7 @@ function TurnView(props: {
             </AssistantBubble>
           ) : item.kind === "card" ? (
             <div key={item.key} className="py-1 pl-1">
-              <SurfaceCard surface={item.surface} steps={item.steps} live={item.live} others={item.others} switchTo={item.switchTo} />
+              <SurfaceCard surface={item.surface} steps={item.steps} live={item.live} showing={item.showing} others={item.others} switchTo={item.switchTo} />
             </div>
           ) : (
             <StepsSegment key={item.key} steps={item.steps} live={item.live} />
