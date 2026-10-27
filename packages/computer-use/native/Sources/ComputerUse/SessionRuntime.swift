@@ -80,7 +80,6 @@ final class SessionRuntime {
             guard let mode = AccessMode(rawValue: try a.string("mode")) else { throw UseError("invalid_arguments", "mode must be observe, assist, or control.") }
             let purpose = try a.string("purpose", max: 500)
             try access.requirePermissions()
-            let reservation = try ControlLease()
             let identity = try await AppIdentity.open(appID, pid: pid)
             var windows = try await access.windows(identity)
             if windows.isEmpty {
@@ -101,12 +100,15 @@ final class SessionRuntime {
             guard let target = windows.first(where: { Int($0.id) == targetID }) else { throw UseError("window_unavailable", "The resolved window closed.", next: "open_session") }
             try Task.checkCancellation()
             _ = try access.validate(target, app: identity)
+            let reservation = try ControlLease(pid: identity.pid, window: target.id)
             let id = UUID().uuidString.lowercased()
             session = Session(id: id, app: identity, target: target, mode: mode, started: now, lastUsed: now, purpose: purpose)
             lease = reservation
             controls.show(app: identity, target: target, mode: mode, purpose: purpose)
             if mode == .control, let current = session {
                 // Initial focus is technical startup, never a human pause/Continue flow.
+                let focus = try await FocusLease.acquire(check: { try self.checkActive(current) })
+                defer { focus.release() }
                 try await takeGap(current)
                 do { try await takeFront(current) }
                 catch let error as UseError where error.code == SharedDesktop.interrupted.code {
@@ -289,6 +291,9 @@ final class SessionRuntime {
         let current = try current(id)
         session?.needsRefresh = true
         controls.update("Refreshing the selected window before continuing…", paused: false)
+        // A control observation shows the window in front, as input will see it.
+        let focus = current.mode == .control ? try await FocusLease.acquire(check: { try self.checkActive(current) }) : nil
+        defer { focus?.release() }
         var otherWindowFocused = false
         var returns = 0
         // Something else in front is the person or another app, not a takeover:
@@ -454,6 +459,9 @@ final class SessionRuntime {
             session?.receipts.removeValue(forKey: oldest); session?.receiptInputs.removeValue(forKey: oldest)
         }
         guard let observation = current.observation else { throw UseError("observation_required", "Observe this window before acting. Each observation authorizes one act call.", next: "observe") }
+        // Held through the settle wait, so no other agent's window comes forward mid-batch.
+        let focusLease = current.mode == .control ? try await FocusLease.acquire(check: { try self.checkActive(current) }) : nil
+        defer { focusLease?.release() }
         // The person may be using another app meanwhile; bring the selected window back
         // for this step instead of pausing when they switched away. A click or key of
         // theirs from here on stops the step and leaves the computer to them.
@@ -702,6 +710,9 @@ final class SessionRuntime {
     private func giveBack() {
         handBackTimer?.invalidate(); handBackTimer = nil
         guard !busy, let current = session, !current.paused else { return }
+        // Another agent bringing its window forward keeps the front, and hands it back itself.
+        guard let focus = FocusLease.attempt() else { handBack.forget(); return }
+        defer { focus.release() }
         // Any click or key since the front was taken, even one that might be the
         // agent's own, means the person may be working in the agent's window.
         let latest = Self.interruptions.map { lastPersonInput($0) }.max() ?? -.infinity
@@ -737,6 +748,12 @@ final class SessionRuntime {
         defer { if resumingSessionID == current.id { resumingSessionID = nil } }
         do {
             // Only the person's explicit Continue can resume a human pause.
+            let focus = current.mode == .control ? try await FocusLease.acquire(check: {
+                guard self.session?.id == current.id, self.session?.generation == current.generation else {
+                    throw UseError("session_changed", "Control changed before Continue.", next: "observe")
+                }
+            }) : nil
+            defer { focus?.release() }
             try await focusTarget(current)
             guard session?.id == current.id, session?.generation == current.generation else { return }
             _ = try access.validate(current.target, app: current.app, requireFrontmost: current.mode == .control)
