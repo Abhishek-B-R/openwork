@@ -10,7 +10,7 @@ import { requireFeature } from "../../features.js"
 import { cloudTransportRoute, jsonValidator, orgMemberRoute, paramValidator, queryValidator } from "../../middleware/index.js"
 import { invalidRequestSchema, jsonResponse, unauthorizedSchema } from "../../openapi.js"
 import { getValidAccessToken } from "../../capability-sources/generic-oauth.js"
-import { MICROSOFT_MAIL_ATTACHMENT_MAX_BYTES, MicrosoftGraphClient } from "../../capability-sources/microsoft-graph.js"
+import { DEFAULT_GRAPH_BASE_URL, MICROSOFT_MAIL_ATTACHMENT_MAX_BYTES, MicrosoftGraphClient } from "../../capability-sources/microsoft-graph.js"
 import { getOrgOAuthClient } from "../../capability-sources/oauth-credentials.js"
 import { listNativeProviderUsableEntries, nativeProviderConnectionPolicyError, resolveDefaultNativeProviderCredentialId, type NativeProviderPolicyError } from "../../capability-sources/native-provider-connections.js"
 import { clientSelectedFeatures, getNativeOAuthProvider, providerScopesSatisfy } from "../../capability-sources/provider-registry.js"
@@ -19,6 +19,7 @@ import { INTERNAL_CAPABILITY_CONNECTOR_HEADER, readInternalCapabilityConnectorId
 import type { OrgRouteVariables } from "./shared.js"
 import { driveIdSchema, driveItemNameSchema, driveItemSchema, graphError, graphErrorStatus, graphItemIdSchema, needsConnectionSchema, upstreamErrorSchema, type Microsoft365Access, type Microsoft365Identity } from "./microsoft-365-shared.js"
 import { registerMicrosoftDriveFileRoutes, type MicrosoftDriveFileRouteOptions } from "./microsoft-drive-files.js"
+import { registerMicrosoftDocumentRoutes } from "./microsoft-documents.js"
 
 const FILE_WRITE_FEATURES: readonly string[] = ["filesWrite", "filesFull"]
 
@@ -455,6 +456,7 @@ export function registerMicrosoft365Routes<T extends { Variables: OrgRouteVariab
   options: Microsoft365RouteOptions = {},
 ) {
   app.use("/v1/capabilities/microsoft-365/*", contextStorage())
+  app.use("/v1/documents/microsoft-365/*", contextStorage())
   const resolveAccessToken = options.resolveAccessToken ?? defaultAccessTokenResolver
   const orgMemberRouteMiddleware = options.memberRoute ?? orgMemberRoute()
   const boundedMutationBody = bodyLimit({
@@ -502,6 +504,25 @@ export function registerMicrosoft365Routes<T extends { Variables: OrgRouteVariab
     memberRoute: orgMemberRouteMiddleware,
     transportRoute: options.transportRoute,
     transportReadRoute: options.transportReadRoute,
+  })
+
+  // Documents reads need any OneDrive permission and saving a write permission; other
+  // people's drives and SharePoint follow the same all-files rule as the file routes.
+  registerMicrosoftDocumentRoutes(app, {
+    memberRoute: orgMemberRouteMiddleware,
+    graphBaseUrl: options.graphBaseUrl ?? env.microsoftGraphBaseUrl ?? DEFAULT_GRAPH_BASE_URL,
+    fetch: options.fetch ?? fetch,
+    async access(c) {
+      const payload = c.get("organizationContext")
+      if (!payload) return { ok: false, reply: c.json({ error: "unauthorized", message: "Sign in to your workspace." }, 401) }
+      const token = await resolveAccessToken({ organizationId: payload.organization.id, orgMembershipId: payload.currentMember.id })
+      if (token.kind === "microsoft_graph_error") return { ok: false, reply: c.json({ error: token.kind, message: token.message }, 502) }
+      if (token.kind === "needs_connection" || token.kind === "policy_blocked") return { ok: false, reply: c.json({ error: token.kind, message: token.message }, token.kind === "policy_blocked" ? 403 : 409) }
+      const read = ["filesRead", "filesWrite", "filesReadAll", "filesFull"]
+      if (!featureEnabled(token, read)) return { ok: false, reply: c.json({ error: "needs_connection", message: disabledFeatureMessage("OneDrive access") }, 409) }
+      if (!featureGranted(token, read)) return { ok: false, reply: c.json({ error: "needs_connection", message: missingPermissionMessage("OneDrive read") }, 409) }
+      return { ok: true, accessToken: token.accessToken, canWrite: featureGranted(token, FILE_WRITE_FEATURES), otherDrives: { read: !ownDriveOnly(token, false), write: !ownDriveOnly(token, true) } }
+    },
   })
 
   app.post(
