@@ -80,7 +80,7 @@ function deadline(ms) {
  * @typedef {{ isError?: boolean, content: Array<{ type: string, text?: string, data?: string, mimeType?: string }> }} ComputerResult
  * @typedef {{ sessionId?: string }} ChatInput
  * @typedef {{ ok?: boolean, error?: { code: string, message: string }, mayHaveActed?: boolean, [key: string]: unknown }} ScriptResult
- * @typedef {{ id: string, reason: "setup" | "script", computer: string, placement: "local" | "remote", detail?: string, appId?: string, purpose?: string, script?: { app: string, code: string } }} ComputerRequest
+ * @typedef {{ id: string, reason: "setup" | "script" | "files", computer: string, placement: "local" | "remote", detail?: string, appId?: string, purpose?: string, script?: { app: string, code: string }, files?: { app: string, names: string[] } }} ComputerRequest
  * @typedef {{ targets?: Record<string, string>, computer?: string }} SavedChoices
  * @typedef {{
  *   callTool: (name: string, args: Record<string, unknown>, options?: { signal?: AbortSignal, timeoutMs?: number }) => Promise<ComputerResult>,
@@ -233,8 +233,35 @@ export function createComputerControl({ adapters, runProgram, runScript, onTimin
    */
   function approveScript(grant, app, code, signal) {
     const target = targetFor(grant);
+    return approve(grant, { id: randomUUID(), reason: /** @type {const} */ ("script"), computer: target.label, placement: target.placement, script: { app, code } }, signal);
+  }
+  /**
+   * Shows which files an app or page is about to receive and waits for Send, Always
+   * allow in this chat, or Don't send. Files leave this computer only on that answer.
+   * @param {{ app: string, names: string[] }} files
+   * @returns {Promise<"allow" | "always" | "dismiss" | "aborted" | "timeout" | "busy" | "too_many">}
+   */
+  async function approveFiles(grant, files, signal) {
+    // The card lists every file exactly; anything it could not show is never approved.
+    if (files.names.length > 20 || files.names.some((name) => typeof name !== "string" || !name || name.length > 1024)) return "too_many";
+    // The recipient is the approval's key: refused when too long to show, never shortened.
+    const app = String(files.app);
+    if (!app || app.length > 200) return "too_many";
+    // "Always" covers only the recipient it was given for, and only handing over files.
+    if (files.names.length && grant.filesAlwaysFor?.has(app)) return "always";
+    if (scriptRequests.has(grant.sessionId)) return "busy";
+    const target = targetFor(grant);
+    const names = [...files.names];
+    const answer = await approve(grant, { id: randomUUID(), reason: /** @type {const} */ ("files"), computer: target.label, placement: target.placement,
+      files: { app, names } }, signal);
+    // Allowing a panel to be browsed lists no files, so it never becomes a standing approval.
+    if (answer === "always" && !names.length) return "allow";
+    if (answer === "always") (grant.filesAlwaysFor ??= new Set()).add(app);
+    return answer;
+  }
+  /** One in-chat approval at a time per chat; answered through answerRequest. */
+  function approve(grant, request, signal) {
     return new Promise((resolve) => {
-      const request = { id: randomUUID(), reason: /** @type {const} */ ("script"), computer: target.label, placement: target.placement, script: { app, code } };
       let timer;
       const stop = () => pending.settle("aborted");
       const pending = { request, settle: (answer) => {
@@ -1124,7 +1151,7 @@ export function createComputerControl({ adapters, runProgram, runScript, onTimin
       if (pending) {
         // A script runs only on the person's answer to the exact request they saw.
         if (typeof id !== "string" || id !== pending.request.id) throw new Error("This script request changed. Review the current one.");
-        if (!["allow", "always", "dismiss"].includes(answer)) throw new Error("Choose Run, Always run or Don't run.");
+        if (!["allow", "always", "dismiss"].includes(answer)) throw new Error("Choose allow, always allow or don't allow.");
         pending.settle(answer);
         return view(grant);
       }
@@ -1158,6 +1185,17 @@ export function createComputerControl({ adapters, runProgram, runScript, onTimin
      * @param {ChatInput & { app?: string, code?: string, timeoutMs?: number }} input
      * @returns {Promise<ScriptResult>}
      */
+    /**
+     * The built-in browser is about to give a page these files: ask the person in
+     * the chat first, as for a native file panel. Resolves whether they allowed it.
+     * @param {ChatInput & { app?: string, files?: string[] }} input
+     */
+    async approveFiles({ sessionId, app, files } = {}, { signal = new AbortController().signal } = {}) {
+      if (!featureEnabled || closed || resetting || !Array.isArray(files) || !files.length) return false;
+      const grant = await grantFor(sessionId);
+      if (!grant.enabled) return false;
+      return ["allow", "always"].includes(await approveFiles(grant, { app: String(app ?? "a website"), names: files }, signal));
+    },
     async script(input, { signal = new AbortController().signal } = {}) {
       if (!featureEnabled || closed || resetting || !runScript) return { ok: false, error: { code: "computer_unavailable", message: "App scripting is not available in this OpenWork app." } };
       if (!input || !SCRIPT_APPS.includes(input.app) || typeof input.code !== "string" || !input.code.trim() || input.code.length > 32_000
@@ -1269,7 +1307,34 @@ export function createComputerControl({ adapters, runProgram, runScript, onTimin
         // The operation budget starts once the person has answered.
         limit = deadline(operationMs);
         const started = now();
-        const result = await run(call, signal, limit);
+        let result = await run(call, signal, limit);
+        const asked = stateOf(result);
+        // The helper stopped before a file panel: before showing its contents, and before
+        // handing over a selection. The person answers in the chat; the approval sent back
+        // is bound to exactly what they saw, and the helper checks it again.
+        const panel = name === "computer_observe" && asked?.code === "file_panel_approval_required";
+        const handover = name === "computer_act" && asked?.code === "files_approval_required";
+        if ((panel || handover) && asked.dispatched === false) {
+          const names = handover && Array.isArray(asked.files) ? asked.files : [];
+          const answer = handover && !names.length ? "unreadable"
+            : await approveFiles(grant, { app: typeof asked.app === "string" ? asked.app : "the app", names }, signal);
+          if (!["allow", "always"].includes(answer)) {
+            result = failure(panel ? "file_panel_declined" : "files_declined", answer === "dismiss"
+              ? panel ? "The person chose not to let the agent look through their files. Cancel the panel or ask what to choose." : "The person chose not to hand these files to the app. Nothing was sent; cancel the panel or ask what to choose."
+              : answer === "too_many" ? "More files are selected than one approval can show. Select at most 20. Nothing was sent."
+              : answer === "unreadable" ? "The panel's selection could not be read, so it cannot be approved. Type the file's path in the panel, or ask the person to choose it. Nothing was sent."
+              : "The files were not approved in time, or computer use stopped. Nothing was sent.");
+          } else {
+            // Same call and revision: a Stop during the question still cancels it.
+            limit.dispose(); limit = deadline(operationMs);
+            // Bound to what the person answered for: this panel's window, or exactly these names.
+            if (panel && !Number.isSafeInteger(asked.panel_id)) result = failure("file_panel_declined", "The panel could not be identified, so it was not opened to the agent.");
+            else {
+              call.args = { ...call.args, ...(panel ? { file_panel_access: asked.panel_id } : { file_approval: names }) };
+              result = await run(call, signal, limit);
+            }
+          }
+        }
         recordStep(grant, name, started);
         if (result.isError && stateOf(result)?.code === "permissions_required" && targetFor(grant).placement === "local") return await recoverPermissions(grant, name, args, signal);
         return deliverResult(call, result);

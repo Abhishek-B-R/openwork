@@ -1,6 +1,8 @@
 // Embedded browser panel: tab state, BrowserView lifecycle, native context menus,
 // proxy configuration, and browser IPC registrations. Extracted from
 // main.mjs as a factory so the main process only owns window creation.
+import { constants as fsConstants } from "node:fs";
+import { access, lstat, realpath } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -48,7 +50,8 @@ const BROWSER_SECURITY_PREFERENCES = Object.freeze({
   webviewTag: false,
 });
 
-export function createBrowserPanel({ getWindow, remoteDebugPort, onDeepLink, checkPolicy, readWebsiteRules, websiteRulesWereInForce = false, onWebsiteRulesInForce, showNativeContextMenu, closeNativeContextMenu }) {
+export function createBrowserPanel({ getWindow, remoteDebugPort, onDeepLink, checkPolicy, readWebsiteRules, websiteRulesWereInForce = false, onWebsiteRulesInForce, showNativeContextMenu, closeNativeContextMenu,
+  approveFiles = async () => false }) {
   // The member's agent permission rules for websites, from their desktop
   // config. They apply to every page, frame and request the built-in browser
   // makes, whoever opens it, as the engines apply them to the agent's web fetches.
@@ -903,6 +906,17 @@ export function createBrowserPanel({ getWindow, remoteDebugPort, onDeepLink, che
     allowed: browserTaskAllowed,
     openTab: openBrowserTab,
     navigate: (tab, url) => tab.view.webContents.loadURL(url),
+    // Pages get files through the intercepted chooser, never the system picker. Run only
+    // after the person approved these exact paths: each must be its own real path (no link
+    // anywhere in it) to a readable regular file, so what is attached is what they saw.
+    checkFiles: async (paths) => {
+      for (const file of paths) {
+        if (await realpath(file) !== file) throw new Error("not_the_real_path");
+        if (!(await lstat(file)).isFile()) throw new Error("not_a_file");
+        await access(file, fsConstants.R_OK);
+      }
+    },
+    approveFiles,
     changed: (tabId, activity) => {
       const tab = getBrowserTab(tabId);
       if (!tab) return;

@@ -751,3 +751,129 @@ test("background stays off on a computer that is not parallel", async (t) => {
   assert.equal(payload(await f.control.execute({ sessionId: "chat", name: "computer_open", args: { app_id: "editor", mode: "control", purpose: "Edit" } })).ok, true);
   assert.deepEqual(connected, [{ background: false }]);
 });
+
+/** A native helper in a file panel: it asks before showing the panel, and confirms only the exact approved names. */
+function filePanelFixture({ files = ["launch.mp4"], browsing = false } = {}) {
+  const seen = [];
+  let allowed = !browsing;
+  const f = fixture({ seen, toolResult: (name) => {
+    const args = seen.at(-1).args;
+    // The first look is the one opening the session makes; the panel opens after it.
+    const looks = seen.filter((call) => call.name === "computer_observe").length;
+    if (name === "computer_observe" && !allowed && looks > 1) {
+      if (args.file_panel_access !== 31) return text({ ok: false, code: "file_panel_approval_required", app: "Safari", panel_id: 31, dispatched: false, next: "observe" });
+      allowed = true;
+    }
+    if (name !== "computer_act") return undefined;
+    return JSON.stringify(args.file_approval) === JSON.stringify(files) ? text({ ok: true, status: "dispatched" })
+      : text({ ok: false, code: "files_approval_required", files, app: "Safari", dispatched: false, next: "observe" });
+  } });
+  const acts = () => seen.filter((call) => call.name === "computer_act").map((call) => call.args.file_approval ?? null);
+  return { ...f, acts };
+}
+const confirmPanel = (control) => control.execute({ sessionId: "chat", name: "computer_act", args: { observation_id: "observation", action: { type: "press", ref: "e1" } } });
+async function answerFiles(f, answer) {
+  const listing = () => f.requests.filter((request) => request?.reason === "files" && request.files.names.length).at(-1);
+  const before = listing();
+  for (let waited = 0; listing() === before && waited < 2_000; waited += 5) await new Promise((resolve) => setTimeout(resolve, 5));
+  const request = listing();
+  assert.deepEqual(request.files, { app: "Safari", names: ["launch.mp4"] });
+  await f.control.answerRequest({ sessionId: "chat", answer, id: request.id });
+}
+
+test("confirming a file panel asks the person, then sends the press with their approval", async (t) => {
+  const f = filePanelFixture(); t.after(() => f.control.reset(true));
+  await f.control.setFeatureEnabled(true);
+  await f.control.execute({ sessionId: "chat", name: "computer_open", args: { app_id: "editor", mode: "control", purpose: "Upload" } });
+  const pending = confirmPanel(f.control);
+  await answerFiles(f, "allow");
+  assert.equal(payload(await pending).status, "dispatched");
+  assert.deepEqual(f.acts(), [null, ["launch.mp4"]], "the second native act carries exactly the approved names");
+});
+
+test("declined files are never handed over", async (t) => {
+  const f = filePanelFixture(); t.after(() => f.control.reset(true));
+  await f.control.setFeatureEnabled(true);
+  await f.control.execute({ sessionId: "chat", name: "computer_open", args: { app_id: "editor", mode: "control", purpose: "Upload" } });
+  const pending = confirmPanel(f.control);
+  await answerFiles(f, "dismiss");
+  assert.equal(payload(await pending).code, "files_declined");
+  assert.deepEqual(f.acts(), [null]);
+});
+
+test("always allowing files in a chat stops asking there", async (t) => {
+  const f = filePanelFixture(); t.after(() => f.control.reset(true));
+  await f.control.setFeatureEnabled(true);
+  await f.control.execute({ sessionId: "chat", name: "computer_open", args: { app_id: "editor", mode: "control", purpose: "Upload" } });
+  const first = confirmPanel(f.control);
+  await answerFiles(f, "always");
+  await first;
+  const asked = f.requests.filter((request) => request?.reason === "files").length;
+  assert.equal(payload(await confirmPanel(f.control)).status, "dispatched");
+  assert.equal(f.requests.filter((request) => request?.reason === "files").length, asked);
+  // Another recipient is asked again: "always" covered only Safari.
+  const other = f.control.approveFiles({ sessionId: "chat", app: "example.com", files: ["/tmp/a.txt"] });
+  for (let waited = 0; f.requests.filter((request) => request?.reason === "files").length === asked && waited < 2_000; waited += 5) await new Promise((resolve) => setTimeout(resolve, 5));
+  const card = f.requests.filter((request) => request?.reason === "files").at(-1);
+  assert.equal(card.files.app, "example.com");
+  await f.control.answerRequest({ sessionId: "chat", answer: "dismiss", id: card.id });
+  assert.equal(await other, false);
+});
+
+test("allowing a file panel to be browsed never becomes a standing approval", async (t) => {
+  const f = filePanelFixture({ browsing: true }); t.after(() => f.control.reset(true));
+  await f.control.setFeatureEnabled(true);
+  await f.control.execute({ sessionId: "chat", name: "computer_open", args: { app_id: "editor", mode: "control", purpose: "Upload" } });
+  const look = f.control.execute({ sessionId: "chat", name: "computer_observe", args: {} });
+  for (let waited = 0; !f.requests.some((request) => request?.reason === "files") && waited < 2_000; waited += 5) await new Promise((resolve) => setTimeout(resolve, 5));
+  await f.control.answerRequest({ sessionId: "chat", answer: "always", id: f.requests.find((request) => request?.reason === "files").id });
+  await look;
+  const before = f.requests.filter((request) => request?.reason === "files").length;
+  const press = confirmPanel(f.control);
+  await answerFiles(f, "allow");
+  assert.equal(payload(await press).status, "dispatched");
+  assert.ok(f.requests.filter((request) => request?.reason === "files").length > before, "handing over files was still asked about");
+});
+
+test("a file panel's contents reach the agent only after the person allows it", async (t) => {
+  const f = filePanelFixture({ browsing: true }); t.after(() => f.control.reset(true));
+  await f.control.setFeatureEnabled(true);
+  await f.control.execute({ sessionId: "chat", name: "computer_open", args: { app_id: "editor", mode: "control", purpose: "Upload" } });
+  const look = f.control.execute({ sessionId: "chat", name: "computer_observe", args: {} });
+  for (let waited = 0; !f.requests.some((request) => request?.reason === "files") && waited < 2_000; waited += 5) await new Promise((resolve) => setTimeout(resolve, 5));
+  const request = f.requests.find((request) => request?.reason === "files");
+  assert.deepEqual(request.files, { app: "Safari", names: [] }, "browsing is asked about with no files yet");
+  await f.control.answerRequest({ sessionId: "chat", answer: "dismiss", id: request.id });
+  assert.equal(payload(await look).code, "file_panel_declined");
+});
+
+test("a selection longer than one card can show is never approved", async (t) => {
+  const many = Array.from({ length: 21 }, (_, index) => `clip-${index}.mp4`);
+  const f = filePanelFixture({ files: many }); t.after(() => f.control.reset(true));
+  await f.control.setFeatureEnabled(true);
+  await f.control.execute({ sessionId: "chat", name: "computer_open", args: { app_id: "editor", mode: "control", purpose: "Upload" } });
+  assert.equal(payload(await confirmPanel(f.control)).code, "files_declined");
+  assert.ok(!f.requests.some((request) => request?.reason === "files"), "the person is not shown a partial list");
+  assert.equal(await f.control.approveFiles({ sessionId: "chat", app: "example.com", files: many }), false);
+});
+
+test("a recipient too long to show is refused, never shortened into another's approval", async (t) => {
+  const f = filePanelFixture(); t.after(() => f.control.reset(true));
+  await f.control.setFeatureEnabled(true);
+  await f.control.execute({ sessionId: "chat", name: "computer_open", args: { app_id: "editor", mode: "control", purpose: "Upload" } });
+  assert.equal(await f.control.approveFiles({ sessionId: "chat", app: `${"a".repeat(200)}.example.com`, files: ["/tmp/a.txt"] }), false);
+  assert.ok(!f.requests.some((request) => request?.reason === "files"));
+});
+
+test("same-named selected files are each shown and each approved", async (t) => {
+  const f = filePanelFixture({ files: ["clip.mp4", "clip.mp4"] }); t.after(() => f.control.reset(true));
+  await f.control.setFeatureEnabled(true);
+  await f.control.execute({ sessionId: "chat", name: "computer_open", args: { app_id: "editor", mode: "control", purpose: "Upload" } });
+  const press = confirmPanel(f.control);
+  for (let waited = 0; !f.requests.some((request) => request?.reason === "files") && waited < 2_000; waited += 5) await new Promise((resolve) => setTimeout(resolve, 5));
+  const card = f.requests.find((request) => request?.reason === "files");
+  assert.deepEqual(card.files.names, ["clip.mp4", "clip.mp4"]);
+  await f.control.answerRequest({ sessionId: "chat", answer: "allow", id: card.id });
+  assert.equal(payload(await press).status, "dispatched");
+  assert.deepEqual(f.acts().at(-1), ["clip.mp4", "clip.mp4"]);
+});
