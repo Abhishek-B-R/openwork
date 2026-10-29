@@ -32,6 +32,8 @@ import { composeNativeSessionHistory } from "@/app/lib/opencode-session-native";
 import { prefetchOpeningSessionHistory, sessionHistoryIdentity, sessionHistoryRuntimeOwner, useSessionHistoryRuntimeOwners } from "@/react-app/domains/session/surface/session-history";
 import { sendSessionCommand, sessionWorkHeld } from "@/app/lib/opencode-interruption";
 import { useSessionManagementStore as sessionManagementStore } from "@/react-app/domains/session/sidebar/session-management-store";
+import { settleWorkspaceIds, useSessionSettleState } from "@/react-app/domains/session/sidebar/session-settle";
+import { getDisplaySessionTitle } from "@/app/lib/session-title";
 import { getSessionDescendantIds } from "@/react-app/domains/session/sidebar/utils";
 import { buildOpenworkWorkspaceBaseUrl } from "@/app/lib/openwork-server";
 import {
@@ -937,6 +939,23 @@ export function SessionRoute() {
     return { statusById, labelById, sourceById };
   }, [attentionLocale, remoteAttentionKey, selectWorkspaceAttention, sessionActivityByWorkspaceId, sessionWaitingByWorkspaceId, sessionChildIdsByWorkspaceId, workspaceSessionGroups]);
   const sidebarSessionStatusById = sidebarSessionAttention.statusById;
+  // Settling ships for OpenCode v2 only; v1 workspaces keep today's sidebar.
+  const settleWorkspaceIdSet = useMemo(
+    () => settleWorkspaceIds(workspaces, (workspace) => endpointForSessionWorkspace(workspace)?.opencodeBaseUrl),
+    [endpointForSessionWorkspace, workspaces],
+  );
+  const selectedSidebarSession = useMemo(() => {
+    if (!selectedWorkspaceId || !selectedSessionId) return null;
+    return workspaceSessionGroups.find((group) => group.workspace.id === selectedWorkspaceId)
+      ?.sessions.find((session) => session?.id === selectedSessionId) ?? null;
+  }, [selectedSessionId, selectedWorkspaceId, workspaceSessionGroups]);
+  // Sidebar row, palette, header button and Cmd/Ctrl+Shift+E all run this one toggle.
+  const currentSessionSettle = useSessionSettleState(
+    selectedSidebarSession,
+    selectedSessionId ? sidebarSessionStatusById[selectedSessionId] : undefined,
+    getDisplaySessionTitle(selectedSidebarSession?.title),
+    settleWorkspaceIdSet.has(selectedWorkspaceId),
+  );
 
   const sidebarActiveWorkspaceId = useMemo(() => {
     const sessionId = selectedSessionId?.trim() ?? "";
@@ -2984,6 +3003,7 @@ export function SessionRoute() {
     onCycleFavoriteModel: cycleFavoriteModel,
     onCycleModelSource: () => { cycleFavoriteModel(true); },
     onToggleFastMode: toggleFastMode,
+    onToggleSettleSession: currentSessionSettle.toggle,
   });
   useReactRenderWatchdog("SessionRoute", {
     selectedSessionId,
@@ -3352,6 +3372,22 @@ export function SessionRoute() {
         sessionManagementStore.getState().togglePin(selectedSessionId);
       },
     }];
+    if (currentSessionSettle.settled || currentSessionSettle.canSettle) {
+      items.push({
+        id: "session.settle.toggle",
+        title: currentSessionSettle.settled
+          ? t("session_management.unsettle_session")
+          : t("session_management.settle_session"),
+        detail: currentSessionForGroupMove.title,
+        meta: "Session",
+        keywords: ["settle", "un-settle", "unsettle", "done", "finished", "clear", "tidy", "sidebar"],
+        group: "actions",
+        action: () => {
+          setCommandPaletteOpen(false);
+          currentSessionSettle.toggle();
+        },
+      });
+    }
     if (opencodeClient) {
       items.push({
         id: "session.rename",
@@ -3367,7 +3403,7 @@ export function SessionRoute() {
       });
     }
     return items;
-  }, [currentSessionForGroupMove, currentSessionPinned, opencodeClient, selectedSessionId, selectedWorkspaceId]);
+  }, [currentSessionForGroupMove, currentSessionPinned, currentSessionSettle, opencodeClient, selectedSessionId, selectedWorkspaceId]);
 
   // An empty composer has a group too: the one its new task will be created in.
   // The focused unsent side chat wins over the main empty composer.
@@ -3858,6 +3894,7 @@ export function SessionRoute() {
       />
     ) : null}
     <SessionPage
+      currentSessionSettle={currentSessionSettle}
       sessionReferenceInventories={sessionReferenceInventories}
       createWorkspaceSessionMetadataCallbacks={createWorkspaceSessionMetadataCallbacks}
       isSessionReferenceCurrent={isSessionReferenceCurrent}
@@ -4004,6 +4041,7 @@ export function SessionRoute() {
         selectedSessionId,
         developerMode: false,
         sessionStatusById: sidebarSessionStatusById,
+        settleWorkspaceIds: settleWorkspaceIdSet,
         sessionAttentionLabelById: sidebarSessionAttention.labelById,
         sessionAttentionSourceById: sidebarSessionAttention.sourceById,
         connectingWorkspaceId: null,
