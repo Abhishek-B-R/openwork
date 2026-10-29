@@ -86,6 +86,15 @@ export type FeatureDefinition = {
    * `pnpm features:check` asks for a decision six months after `since`.
    */
   permanent?: boolean
+  /**
+   * The feature works in the background (a schedule, a calendar, an agent's
+   * checks, messages sent by runs), so no request shows whether it ran or
+   * worked. /admin › Features reads its outcomes from the store that already
+   * holds them: den-api registers exactly one reader for each feature that
+   * sets this (ee/apps/den-api/src/feature-outcomes/readers.ts), and its
+   * typecheck fails without one.
+   */
+  outcomes?: true
 }
 
 function defineFeatures<const T extends Record<string, FeatureDefinition>>(features: T): T {
@@ -234,6 +243,7 @@ export const FEATURES = defineFeatures({
     docs: "docs/features/slack-send-as-bot/README.md",
     deployments: everywhere,
     default: false,
+    outcomes: true,
   },
   liveProviderSync: {
     label: "Live provider sync",
@@ -297,6 +307,7 @@ export const FEATURES = defineFeatures({
     docs: "docs/features/workbot-proactive/README.md",
     deployments: everywhere,
     default: false,
+    outcomes: true,
   },
   workbotAgentHealthView: {
     label: "Workbot: Your agent health in Manage › Workbot",
@@ -360,6 +371,7 @@ export const FEATURES = defineFeatures({
     docs: "docs/features/automation-interval-schedules/README.md",
     deployments: everywhere,
     default: false,
+    outcomes: true,
   },
   automationCalendarTriggers: {
     label: "Automations: before or after meetings",
@@ -371,6 +383,7 @@ export const FEATURES = defineFeatures({
     docs: "docs/features/automation-calendar-triggers/README.md",
     deployments: everywhere,
     default: false,
+    outcomes: true,
   },
   computerUse: {
     label: "Computer use",
@@ -614,6 +627,9 @@ export const FEATURES = defineFeatures({
 })
 
 export type FeatureKey = keyof typeof FEATURES
+
+/** Features whose outcomes /admin › Features reads (`outcomes: true`). */
+export type OutcomeFeatureKey = { [K in FeatureKey]: (typeof FEATURES)[K] extends { outcomes: true } ? K : never }[FeatureKey]
 
 export type FeatureMap = Record<FeatureKey, boolean>
 
